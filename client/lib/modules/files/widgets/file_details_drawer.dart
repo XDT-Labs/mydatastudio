@@ -107,7 +107,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
     // Text content for TXT, HTML, XML, Markdown
     final ext = p.extension(file.path).toLowerCase();
-    final textExts = ['.txt', '.html', '.xml', '.md', '.markdown', '.json', '.yaml', '.yml', '.dart', '.py', '.js', '.css'];
+    final textExts = ['.txt', '.html', '.xml', '.xsl', '.xslt', '.md', '.markdown', '.json', '.yaml', '.yml', '.dart', '.py', '.js', '.css'];
     if (file.contentType.startsWith('text/') || textExts.contains(ext)) {
       setState(() => _loadingText = true);
       try {
@@ -225,7 +225,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
     if (asset is File) {
       final ext = p.extension(asset.path).toLowerCase();
-      final textExts = ['.txt', '.html', '.xml', '.md', '.markdown', '.json', '.yaml', '.yml', '.dart', '.py', '.js', '.css'];
+      final textExts = ['.txt', '.html', '.xml', '.xsl', '.xslt', '.md', '.markdown', '.json', '.yaml', '.yml', '.dart', '.py', '.js', '.css'];
       
       if (asset.contentType == FilesConstants.mimeTypeImage) {
         preview = _buildImagePreview(asset);
@@ -633,7 +633,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     if (ext == '.md' || ext == '.markdown') {
       return MarkdownBody(data: content);
     }
-    if (ext == '.xml') {
+    if (ext == '.xml' || ext == '.xsl' || ext == '.xslt') {
       return Text(_tidyXml(content), style: const TextStyle(fontFamily: 'Courier', fontSize: 12));
     }
     return Text(content, style: const TextStyle(fontFamily: 'Courier', fontSize: 12));
