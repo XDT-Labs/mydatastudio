@@ -22,15 +22,20 @@ class GetFileAndFoldersService
     FileDesktopRepository fileRepo = FileDesktopRepository(db!);
     FolderDesktopRepository folderRepo = FolderDesktopRepository(db);
 
+    String path = command.path;
+    if (path.length > 1 && path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+
     // Skip scanner if it's just a refresh-only request
     if (!command.refreshOnly) {
       await ScannerManager.getInstance()
           .getScanner(command.collection)
-          ?.start(command.collection, command.path, false, false);
+          ?.start(command.collection, path, false, false);
     }
 
-    List<FileAsset> files = await fileRepo.getByParentPath(command.path);
-    List<FileAsset> folders = await folderRepo.getByParentPath(command.path);
+    List<FileAsset> files = await fileRepo.getByParentPath(path);
+    List<FileAsset> folders = await folderRepo.getByParentPath(path);
 
     List<FileAsset> assets = [...files, ...folders];
 

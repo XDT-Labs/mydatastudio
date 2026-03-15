@@ -35,70 +35,67 @@ class _FileTable extends State<FileTable> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Expanded(
-      flex: 1,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final totalWidth = constraints.maxWidth;
-          
-          // Define fixed widths for other columns + spacers
-          const checkboxWidth = 48.0; 
-          const typeWidth = 80.0;
-          const sizeWidth = 80.0;
-          const dateWidth = 140.0;
-          const actionsWidth = 130.0; 
-          const spacing = 20.0;
-          const margin = 24.0; // 12 on each side
-          
-          // Total width occupied by other columns and spacing
-          final fixedWidths = checkboxWidth + typeWidth + sizeWidth + dateWidth + actionsWidth + (4 * spacing) + margin;
-          
-          // Remaining space for Name column
-          final nameWidth = max(200.0, totalWidth - fixedWidths);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalWidth = constraints.maxWidth;
+        
+        // Define fixed widths for other columns + spacers
+        const checkboxWidth = 48.0; 
+        const typeWidth = 80.0;
+        const sizeWidth = 80.0;
+        const dateWidth = 140.0;
+        const actionsWidth = 130.0; 
+        const spacing = 20.0;
+        const margin = 24.0; // 12 on each side
+        
+        // Total width occupied by other columns and spacing
+        final fixedWidths = checkboxWidth + typeWidth + sizeWidth + dateWidth + actionsWidth + (4 * spacing) + margin;
+        
+        // Remaining space for Name column
+        final nameWidth = max(200.0, totalWidth - fixedWidths);
 
-          List<DataColumn> columns = getColumns(context);
-          List<DataRow> rows = getRows(context, widget.data, nameWidth);
+        List<DataColumn> columns = getColumns(context);
+        List<DataRow> rows = getRows(context, widget.data, nameWidth);
 
-          return Container(
-            constraints: const BoxConstraints.expand(),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.vertical,
-              child: DataTable(
-                columnSpacing: spacing,
-                horizontalMargin: 12,
-                showCheckboxColumn: true,
-                columns: columns,
-                rows: rows,
-                sortColumnIndex: sortColumnIndex,
-                sortAscending: sortAsc,
-                onSelectAll: (bool? selected) {
-                  if (selected != null) {
-                    setState(() {
-                      if (selected) {
-                        selectedRows = widget.data.map((f) => f.path).toList();
-                      } else {
-                        selectedRows.clear();
-                      }
-                    });
-                    _notifySelectionChanged(context);
-                  }
-                },
-                dataTextStyle: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w200,
-                  fontSize: 15,
-                  color: Colors.black87,
-                ),
-                headingTextStyle: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight:
-                      FontWeight.w200, // Keep headers slightly bolder than data
-                  fontSize: 15,
-                  color: Colors.black87,
-                ),
+        return Container(
+          constraints: const BoxConstraints.expand(),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.vertical,
+            child: DataTable(
+              columnSpacing: spacing,
+              horizontalMargin: 12,
+              showCheckboxColumn: true,
+              columns: columns,
+              rows: rows,
+              sortColumnIndex: sortColumnIndex,
+              sortAscending: sortAsc,
+              onSelectAll: (bool? selected) {
+                if (selected != null) {
+                  setState(() {
+                    if (selected) {
+                      selectedRows = widget.data.map((f) => f.path).toList();
+                    } else {
+                      selectedRows.clear();
+                    }
+                  });
+                  _notifySelectionChanged(context);
+                }
+              },
+              dataTextStyle: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w200,
+                fontSize: 15,
+                color: Colors.black87,
+              ),
+              headingTextStyle: theme.textTheme.titleSmall?.copyWith(
+                fontWeight:
+                    FontWeight.w200, // Keep headers slightly bolder than data
+                fontSize: 15,
+                color: Colors.black87,
               ),
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -315,25 +312,8 @@ class _FileTable extends State<FileTable> {
               const DataCell(Text('')),
               const DataCell(Text('')),
               const DataCell(Text('')),
-              DataCell(
-                ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 130,
-                  ),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.info_outline),
-                        tooltip: 'Details',
-                        onPressed: () {
-                          FileSelectedNotification(f).dispatch(context);
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+              const DataCell(Text('')),
+],
             onSelectChanged: (bool? e) {
               setState(() {
                 if (e != null && e) {

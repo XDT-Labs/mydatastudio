@@ -22,11 +22,13 @@ class FileDetailsDrawer extends StatefulWidget {
     required this.asset,
     required this.width,
     required this.onClose,
+    this.onExpand,
   });
 
   final FileAsset asset;
   final double width;
   final VoidCallback onClose;
+  final VoidCallback? onExpand;
 
   @override
   State<FileDetailsDrawer> createState() => _FileDetailsDrawerState();
@@ -45,6 +47,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   bool _isEditing = false;
   final TextEditingController _editController = TextEditingController();
   three.ThreeJS? _threeJs;
+  three.OrbitControls? _orbitControls;
   bool _loadingStl = false;
 
   @override
@@ -65,6 +68,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       _textContent = null;
       _isEditing = false;
       _editController.clear();
+      _orbitControls?.deactivate();
+      _orbitControls?.dispose();
+      _orbitControls = null;
       _threeJs?.dispose();
       _threeJs = null;
       _loadMetadata();
@@ -75,6 +81,8 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   void dispose() {
     _pdfController?.dispose();
     _editController.dispose();
+    _orbitControls?.deactivate();
+    _orbitControls?.dispose();
     _threeJs?.dispose();
     super.dispose();
   }
@@ -173,7 +181,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     final isImage =
         widget.asset is File &&
         (widget.asset as File).contentType == FilesConstants.mimeTypeImage;
-    final tabCount = isImage ? 3 : 2;
+    final tabCount = isImage ? 3 : 1;
 
     return Container(
       decoration: BoxDecoration(
@@ -206,6 +214,21 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   ),
                 ),
+                if (widget.onExpand != null)
+                  IconButton(
+                    icon: Icon(
+                      widget.width >= 700.0
+                          ? Icons.close_fullscreen
+                          : Icons.open_in_full,
+                      size: 16,
+                    ),
+                    tooltip: widget.width >= 700.0
+                        ? 'Restore Width'
+                        : 'Maximize Width',
+                    onPressed: widget.onExpand,
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
+                  ),
                 IconButton(
                   icon: const Icon(Icons.close, size: 18),
                   tooltip: 'Close',
@@ -521,11 +544,31 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       camera.lookAt(three.Vector3(0, 0, 0));
       camera.updateProjectionMatrix();
 
-      // IMPORTANT: Use addAnimationEvent for per-frame updates.
-      // Do NOT use postProcessor — it replaces the renderer.render() call
-      // entirely, which causes a black screen.
-      _threeJs!.addAnimationEvent((dt) {
-        mesh.rotation.y += 0.5 * dt; // dt-based rotation for consistent speed
+      // ── Orbit Controls ─────────────────────────────────────────
+      // OrbitControls handles: left-drag → rotate, scroll → zoom,
+      // right-drag / shift+drag → pan.
+      // We also enable built-in autoRotate so the model spins on load;
+      // OrbitControls automatically pauses autoRotate while the user
+      // is actively dragging (state != OrbitState.none).
+      final controls = three.OrbitControls(camera, _threeJs!.globalKey);
+      controls.enableDamping = true;  // smooth inertia on release
+      controls.dampingFactor = 0.08;
+      controls.autoRotate = true;
+      controls.autoRotateSpeed = 2.0; // degrees/sec-ish
+      controls.enableZoom = true;
+      controls.zoomSpeed = 1.2;
+      controls.enableRotate = true;
+      controls.rotateSpeed = 0.8;
+      controls.enablePan = false; // keep it simple for a preview
+      controls.minDistance = maxDim * 0.5;
+      controls.maxDistance = maxDim * 8.0;
+      controls.update();
+      _orbitControls = controls;
+
+      // Tell the ThreeJS to call controls.update() every frame so that
+      // damping and autoRotate work correctly.
+      _threeJs!.addAnimationEvent((_) {
+        controls.update();
       });
     } catch (e) {
       debugPrint('Error loading STL: $e');
@@ -590,7 +633,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       children: [
         TabBar(
           tabs: [
-            const Tab(text: 'GPS'),
+            if (showExif) const Tab(text: 'GPS'),
             if (showExif) const Tab(text: 'EXIF'),
             const Tab(text: 'SIMILAR'),
           ],
@@ -605,7 +648,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
           height: 350,
           child: TabBarView(
             children: [
-              _buildGpsTab(),
+              if (showExif) _buildGpsTab(),
               if (showExif) _buildExifTab(),
               _buildSimilarFilesTab(),
             ],

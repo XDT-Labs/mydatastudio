@@ -178,14 +178,16 @@ class _RxFilesPage extends State<RxFilesPage> {
                   child: Stack(
                     children: [
                       NotificationListener<FiledNotification>(
-                        child:
-                            Column(children: [FileTable(data: filesAndFolders)]),
+                        child: FileTable(data: filesAndFolders),
                         onNotification: (FiledNotification n) {
                           if (n is PathChangedNotification) {
                             if (n.asset.path != collection?.path) {
                               //make sure path changed before triggering reload
-                              path = n.asset.path;
-                              selectedItems = []; // reset selection on path change
+                              setState(() {
+                                path = n.asset.path;
+                                selectedItems = []; // reset selection on path change
+                                selectedAsset = null; // close drawer when drilling into folder
+                              });
                               _filesAndFoldersService!.invoke(
                                 GetFileAndFoldersServiceCommand(
                                   collection!,
@@ -280,6 +282,9 @@ class _RxFilesPage extends State<RxFilesPage> {
                       asset: selectedAsset!,
                       width: _drawerWidth,
                       onClose: () => setState(() => selectedAsset = null),
+                      onExpand: () => setState(() {
+                        _drawerWidth = _drawerWidth >= 700.0 ? 300.0 : 700.0;
+                      }),
                     ),
                   ),
                 ],
@@ -312,9 +317,12 @@ class _RxFilesPage extends State<RxFilesPage> {
           onTap: () {
             //return null, to unselect a collection and have app go back to pick collection (home) page
             //return dummy FileCollection
-            path = collection.path;
+            setState(() {
+              path = collection.path;
+              selectedAsset = null;
+            });
             _filesAndFoldersService!.invoke(
-              GetFileAndFoldersServiceCommand(collection, path),
+              GetFileAndFoldersServiceCommand(collection, path!),
             );
           },
         ),
@@ -322,9 +330,12 @@ class _RxFilesPage extends State<RxFilesPage> {
           content: Text(collection.name),
           onTap: () {
             //go back to root of collection
-            path = collection.path;
+            setState(() {
+              path = collection.path;
+              selectedAsset = null;
+            });
             _filesAndFoldersService!.invoke(
-              GetFileAndFoldersServiceCommand(collection, path),
+              GetFileAndFoldersServiceCommand(collection, path!),
             );
           },
         ),
@@ -335,9 +346,12 @@ class _RxFilesPage extends State<RxFilesPage> {
             content: Text(e),
             onTap: () {
               //drill into sub folder path
-              path = p;
+              setState(() {
+                path = p;
+                selectedAsset = null;
+              });
               _filesAndFoldersService!.invoke(
-                GetFileAndFoldersServiceCommand(collection, path),
+                GetFileAndFoldersServiceCommand(collection, path!),
               );
             },
           );

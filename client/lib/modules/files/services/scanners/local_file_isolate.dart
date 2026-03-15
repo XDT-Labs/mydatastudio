@@ -78,16 +78,9 @@ class LocalFileIsolateWorker{
   SendPort? loggerPort;
   AppLogger? logger;
 
-  final hiddenFolderRegex = RegExp(
-    r'/[.].*/?',
-    multiLine: false,
-    caseSensitive: true,
-    unicode: true,
-  );
-
   // TODO: add this list to a global config / UI page
   final skipFolderRegex = RegExp(
-    r'/(go|node_modules|Pods|\.git)+/?',
+    r'/(go|node_modules|Pods|\.git)(/|$)',
     multiLine: false,
     caseSensitive: true,
     unicode: true,
@@ -105,6 +98,10 @@ class LocalFileIsolateWorker{
     logger = AppLogger(loggerPort);
 
     String path = args['path'];
+    // Normalize path: Remove trailing slash if it exists (unless it's just '/')
+    if (path.length > 1 && path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
     bool recursive = args['recursive'];
     String collectionId = args['collectionId'];
 
@@ -152,7 +149,14 @@ class LocalFileIsolateWorker{
     var dir = io.Directory(path);
     logger.s('Scanning ${dir.path}');
 
-    var dirList = dir.listSync(recursive: false, followLinks: false);
+    var dirList = [];
+    try {
+      dirList = dir.listSync(recursive: false, followLinks: false);
+      logger.i('Found ${dirList.length} items in ${dir.path}');
+    } catch (e) {
+      logger.e('Failed to list directory ${dir.path}: $e');
+      return 0;
+    }
 
     for (var asset in dirList) {
       if (asset is io.File) {
@@ -160,6 +164,7 @@ class LocalFileIsolateWorker{
         //save file
         File? file = _validateFile(collectionId, asset, scanStartTime);
         if( file != null ) {
+          logger.i('Found file: ${file.path}');
           fileBatch.add(file);
           if (fileBatch.length >= 100) {
             dbWriterPort.send({
@@ -175,6 +180,7 @@ class LocalFileIsolateWorker{
         //save directory
         Folder? folder = _validateFolder(collectionId, asset, scanStartTime);
         if( folder != null ) {
+          logger.i('Found folder: ${folder.path}');
           dbWriterPort.send({
             'type': 'folder',
             'folder': folder
@@ -184,7 +190,7 @@ class LocalFileIsolateWorker{
             if (recursive) {
               int fileCount = await _scanDir(
                 collectionId,
-                asset.path,
+                folder.path, // Use normalized path
                 recursive,
                 scanStartTime,
                 fileBatch,
@@ -220,20 +226,27 @@ class LocalFileIsolateWorker{
     io.Directory dir_,
     DateTime scanStartTime,
   ) {
+    String path = dir_.path;
+    if (path.length > 1 && path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    String name = p.basename(path);
+
     //skip any hidden or system folders
-    bool hidden = hiddenFolderRegex.hasMatch(dir_.path);
-    bool skipFolder = skipFolderRegex.hasMatch(dir_.path);
+    bool hidden = name.startsWith('.');
+    bool skipFolder = skipFolderRegex.hasMatch('/$name/');
+    
     if( hidden || skipFolder ){
+      logger?.i('Skipping folder (hidden=$hidden, skipFolder=$skipFolder): $path');
       return null;
     }
 
-    String name = p.basename(dir_.path);
-    String parentPath = p.dirname(dir_.path);
+    String parentPath = p.dirname(path);
 
     return Folder(
-        id: '$collectionId_:${dir_.path}',
+        id: '$collectionId_:$path',
         name: name,
-        path: dir_.path,
+        path: path,
         parent: parentPath,
         dateCreated: DateTime.now(),
         dateLastModified: DateTime.now(),
@@ -249,10 +262,24 @@ class LocalFileIsolateWorker{
     io.File file_,
     DateTime scanStartTime,
   ) {
-    //skip any fines in a hidden or system folder
-    bool hidden = hiddenFolderRegex.hasMatch(file_.path);
-    bool skipFolder = skipFolderRegex.hasMatch(file_.path);
+    String path = file_.path;
+    if (path.length > 1 && path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    String name = p.basename(path);
+
+    //skip any files in a hidden or system folder
+    bool hidden = name.startsWith('.');
+    // We don't usually skip files based on skipFolderRegex, but the original code did.
+    // However, it checked the full path. Let's keep it checking the full path but more safely,
+    // or just check the parent's skip status.
+    // The original code was: bool skipFolder = skipFolderRegex.hasMatch(file_.path);
+    // If a parent folder was skipped, this file wouldn't even be reached in _scanDir.
+    // So checking it here might be redundant if it's about folder names.
+    bool skipFolder = skipFolderRegex.hasMatch(file_.path); 
+
     if( hidden || skipFolder ){
+      logger?.i('Skipping file (hidden=$hidden, skipFolder=$skipFolder): $path');
       return null;
     }
 
@@ -260,14 +287,13 @@ class LocalFileIsolateWorker{
     //Check if it exists, skip it if it does
     DateTime lmDate = file_.lastModifiedSync();
     //todo: add date check to if statement
-    String name = p.basename(file_.path);
-    String parentPath = p.dirname(file_.path);
+    String parentPath = p.dirname(path);
 
     return File(
-      id: '$collectionId_:${file_.path}',
+      id: '$collectionId_:$path',
       collectionId: collectionId_,
       name: name,
-      path: file_.path,
+      path: path,
       parent: parentPath,
       dateCreated: lmDate,
       dateLastModified: lmDate,

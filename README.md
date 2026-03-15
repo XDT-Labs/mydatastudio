@@ -54,57 +54,87 @@ The database is a SQLite database.
 
 ```mermaid
 erDiagram
-    collections ||--o{ items : "contains"
-    items ||--o{ item_metadata : "has"
-    items ||--o{ item_tags : "has"
-    items ||--o{ item_links : "has"
-    items ||--o{ item_media : "has"
-    item_media ||--o{ item_media_metadata : "has"
-    item_media ||--o{ item_media_tags : "has"
-    item_media ||--o{ item_media_links : "has"
-    item_media ||--o{ item_media_media : "has"
-    item_media_media ||--o{ item_media_media_metadata : "has"
-    item_media_media ||--o{ item_media_media_tags : "has"
-    item_media_media ||--o{ item_media_media_links : "has"
-    item_media_media ||--o{ item_media_media_media : "has"
-    item_media_media_media ||--o{ item_media_media_media_metadata : "has"
-    item_media_media_media ||--o{ item_media_media_media_tags : "has"
-    item_media_media_media ||--o{ item_media_media_media_links : "has"
-    item_media_media_media ||--o{ item_media_media_media_media : "has"
-    item_media_media_media_media ||--o{ item_media_media_media_media_metadata : "has"
-    item_media_media_media_media ||--o{ item_media_media_media_media_tags : "has"
-    item_media_media_media_media ||--o{ item_media_media_media_media_links : "has"
-    item_media_media_media_media ||--o{ item_media_media_media_media_media : "has"
-    item_media_media_media_media_media ||--o{ item_media_media_media_media_media_metadata : "has"
-    item_media_media_media_media_media ||--o{ item_media_media_media_media_media_tags : "has"
-    item_media_media_media_media_media ||--o{ item_media_media_media_media_media_links : "has"
-    item_media_media_media_media_media ||--o{ item_media_media_media_media_media_media : "has"
-    item_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_metadata : "has"
-    item_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_tags : "has"
-    item_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_links : "has"
-    item_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media : "has"
-    item_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_metadata : "has"
-    item_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_tags : "has"
-    item_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_links : "has"
-    item_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media : "has"
-    item_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_metadata : "has"
-    item_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_tags : "has"
-    item_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_links : "has"
-    item_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media : "has"
-    item_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_metadata : "has"
-    item_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_tags : "has"
-    item_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_links : "has"
-    item_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media : "has"
-    item_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_metadata : "has"
-    item_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_tags : "has"
-    item_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_links : "has"
-    item_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_media : "has"
-    item_media_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_media_metadata : "has"
-    item_media_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_media_tags : "has"
-    item_media_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_media_links : "has"
-    item_media_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_media_media : "has"
-    item_media_media_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_media_media_metadata : "has"
-    item_media_media_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_media_media_tags : "has"
-    item_media_media_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_media_media_links : "has"
-    item_media_media_media_media_media_media_media_media_media_media_media_media ||--o{ item_media_media_media_media_media_media_media_media_media_media_media_media_media : "has"
-    item_media_media_media_media_media_media_media_media_media_media_media_media_media ||--o{ item_
+    App {
+        string id PK
+        string name
+        string slug
+        string group
+        int order
+        int icon
+        string route
+    }
+    AppUser {
+        string id PK
+        string name
+        string email
+        string password
+        string localStoragePath
+    }
+    Collection {
+        string id PK
+        string name
+        string path
+        string type
+        string scanner
+        string scanStatus
+        string oauthService
+        string accessToken
+        string refreshToken
+        string idToken
+        string userId
+        datetime expiration
+        datetime lastScanDate
+        boolean needsReAuth
+    }
+    Email {
+        string id PK
+        string collectionId FK
+        datetime date
+        string from
+        string_array to
+        string_array cc
+        string subject
+        string snippet
+        string htmlBody
+        string plainBody
+        string_array labels
+        string headers
+        boolean isDeleted
+    }
+    File {
+        string id PK
+        string name
+        string path
+        string parent
+        datetime dateCreated
+        datetime dateLastModified
+        datetime lastScannedDate
+        string collectionId FK
+        string contentType
+        int size
+        boolean isDeleted
+        string thumbnail
+        real latitude
+        real longitude
+    }
+    Folder {
+        string id PK
+        string name
+        string path
+        string parent
+        datetime dateCreated
+        datetime dateLastModified
+        datetime lastScannedDate
+        string collectionId FK
+    }
+    Album {
+        string id PK
+        string name
+    }
+
+    Collection ||--o{ Email : "contains"
+    Collection ||--o{ File : "contains"
+    Collection ||--o{ Folder : "contains"
+    Folder ||--o{ File : "contains (parent)"
+    Folder ||--o{ Folder : "contains (parent)"
+```
