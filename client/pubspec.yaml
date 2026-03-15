@@ -92,6 +92,8 @@ dependencies:
   genui: ^0.7.0
   speech_to_text: ^7.0.0
   pdfx: ^2.6.0
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
 
 
 

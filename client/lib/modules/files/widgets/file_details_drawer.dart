@@ -9,15 +9,19 @@ import 'package:mydatatools/modules/files/files_constants.dart';
 import 'package:moment_dart/moment_dart.dart';
 import 'package:pdfx/pdfx.dart';
 import 'package:path/path.dart' as p;
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 class FileDetailsDrawer extends StatefulWidget {
   const FileDetailsDrawer({
     super.key,
     required this.asset,
+    required this.width,
     required this.onClose,
   });
 
   final FileAsset asset;
+  final double width;
   final VoidCallback onClose;
 
   @override
@@ -135,23 +139,27 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
           // ─── Scrollable content ──────────────────────────────
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildPreviewSection(),
-                  const SizedBox(height: 16),
-                  if (widget.asset is File) ...[
-                    _buildFileMetadataSection(widget.asset as File),
+            child: DefaultTabController(
+              length: 3,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildPreviewSection(),
                     const SizedBox(height: 16),
-                    _buildExifSection(),
-                    const SizedBox(height: 16),
-                    _buildGpsSection(),
-                  ] else ...[
-                    _buildFolderMetadataSection(),
+                    if (widget.asset is File) ...[
+                      _buildFileMetadataSection(widget.asset as File),
+                      const SizedBox(height: 16),
+                      // _buildExifSection(), // Moved to tabs
+                      // const SizedBox(height: 16),
+                      // _buildGpsSection(),  // Moved to tabs
+                      _buildTabbedMetadataSection(),
+                    ] else ...[
+                      _buildFolderMetadataSection(),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
@@ -179,10 +187,16 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       );
     }
 
+    // Proportional height: 200 at width 300, 500 at width 700?
+    // Let's use a simpler linear scale or aspect ratio.
+    // If width is 300, height is 200. Aspect ratio = 3/2 = 1.5.
+    // height = width / 1.5
+    final height = (widget.width / 1.5).clamp(200.0, 500.0);
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        height: 200,
+        height: height,
         width: double.infinity,
         color: Colors.grey.shade100,
         child: preview,
@@ -213,7 +227,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
           children: [
             // ─── PDF viewer ──────────────────────────────────
             SizedBox(
-              height: 300,
+              height: (widget.width / 1.5).clamp(200.0, 500.0),
               child: _pdfController == null
                   ? const Center(child: CircularProgressIndicator())
                   : PdfView(
@@ -320,11 +334,112 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     );
   }
 
-  // ─── EXIF ─────────────────────────────────────────────────────
-  Widget _buildExifSection() {
-    if (widget.asset is! File) return const SizedBox.shrink();
+  Widget _buildTabbedMetadataSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const TabBar(
+          tabs: [
+            Tab(text: 'GPS'),
+            Tab(text: 'EXIF'),
+            Tab(text: 'SIMILAR'),
+          ],
+          labelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+          indicatorSize: TabBarIndicatorSize.tab,
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 350,
+          child: TabBarView(
+            children: [
+              _buildGpsTab(),
+              _buildExifTab(),
+              _buildSimilarFilesTab(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGpsTab() {
+    if (widget.asset is! File) return const Center(child: Text('Not a file'));
     final file = widget.asset as File;
-    if (file.contentType != FilesConstants.mimeTypeImage) return const SizedBox.shrink();
+
+    final hasDbLocation = file.latitude != null && file.longitude != null;
+    final hasExifLocation = _exifData != null &&
+        _exifData!.containsKey('GPS GPSLatitude') &&
+        _exifData!.containsKey('GPS GPSLongitude');
+
+    if (!hasDbLocation && !hasExifLocation) {
+      return const Center(
+        child: Text('No GPS data found.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+      );
+    }
+
+    double? lat = file.latitude;
+    double? lng = file.longitude;
+
+    if (lat == null && hasExifLocation) {
+      lat = _parseExifCoordinate(
+        _exifData!['GPS GPSLatitude']!,
+        _exifData!['GPS GPSLatitudeRef']?.printable ?? 'N',
+      );
+      lng = _parseExifCoordinate(
+        _exifData!['GPS GPSLongitude']!,
+        _exifData!['GPS GPSLongitudeRef']?.printable ?? 'E',
+      );
+    }
+
+    if (lat == null || lng == null) {
+      return const Center(
+        child: Text('Invalid GPS data.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _infoRow('Latitude', lat.toStringAsFixed(6)),
+        _infoRow('Longitude', lng.toStringAsFixed(6)),
+        const SizedBox(height: 12),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: FlutterMap(
+              options: MapOptions(
+                initialCenter: LatLng(lat, lng),
+                initialZoom: 13,
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.mydatatools.app',
+                ),
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: LatLng(lat, lng),
+                      width: 40,
+                      height: 40,
+                      child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildExifTab() {
+    if (widget.asset is! File) return const Center(child: Text('Not a file'));
+    final file = widget.asset as File;
+    if (file.contentType != FilesConstants.mimeTypeImage) {
+      return const Center(child: Text('Not an image', style: TextStyle(color: Colors.grey, fontSize: 12)));
+    }
 
     if (_loadingExif) {
       return const Center(child: CircularProgressIndicator());
@@ -348,71 +463,29 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                 ))
             .toList();
 
-    return _buildSection(
-      title: 'EXIF Data',
-      icon: Icons.camera_alt_outlined,
-      children: rows.isEmpty
-          ? [const Text('No EXIF data available.', style: TextStyle(color: Colors.grey, fontSize: 12))]
-          : rows,
+    if (rows.isEmpty) {
+      return const Center(
+        child: Text('No EXIF data available.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+      );
+    }
+
+    return SingleChildScrollView(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows),
     );
   }
 
-  // ─── GPS ──────────────────────────────────────────────────────
-  Widget _buildGpsSection() {
-    if (widget.asset is! File) return const SizedBox.shrink();
-    final file = widget.asset as File;
-
-    final hasDbLocation = file.latitude != null && file.longitude != null;
-    final hasExifLocation = _exifData != null &&
-        _exifData!.containsKey('GPS GPSLatitude') &&
-        _exifData!.containsKey('GPS GPSLongitude');
-
-    if (!hasDbLocation && !hasExifLocation) {
-      if (file.contentType != FilesConstants.mimeTypeImage) return const SizedBox.shrink();
-      return _buildSection(
-        title: 'GPS Location',
-        icon: Icons.location_on_outlined,
-        children: [const Text('No GPS data found.', style: TextStyle(color: Colors.grey, fontSize: 12))],
-      );
-    }
-
-    double? lat = file.latitude;
-    double? lng = file.longitude;
-
-    if (lat == null && hasExifLocation) {
-      lat = _parseExifCoordinate(
-        _exifData!['GPS GPSLatitude']!,
-        _exifData!['GPS GPSLatitudeRef']?.printable ?? 'N',
-      );
-      lng = _parseExifCoordinate(
-        _exifData!['GPS GPSLongitude']!,
-        _exifData!['GPS GPSLongitudeRef']?.printable ?? 'E',
-      );
-    }
-
-    return _buildSection(
-      title: 'GPS Location',
-      icon: Icons.location_on_outlined,
-      children: [
-        if (lat != null) _infoRow('Latitude', lat.toStringAsFixed(6)),
-        if (lng != null) _infoRow('Longitude', lng.toStringAsFixed(6)),
-        if (lat != null && lng != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.map_outlined, size: 14),
-              label: const Text('View on Map', style: TextStyle(fontSize: 12)),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: () {
-                // TODO: open map with lat/lng
-              },
-            ),
-          ),
-      ],
+  Widget _buildSimilarFilesTab() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.auto_awesome, size: 48, color: Colors.blueAccent),
+          SizedBox(height: 12),
+          Text('Similar Files', style: TextStyle(fontWeight: FontWeight.bold)),
+          SizedBox(height: 4),
+          Text('Coming Soon', style: TextStyle(color: Colors.grey, fontSize: 12)),
+        ],
+      ),
     );
   }
 

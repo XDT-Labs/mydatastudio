@@ -278,6 +278,7 @@ class _RxFilesPage extends State<RxFilesPage> {
                     width: _drawerWidth,
                     child: FileDetailsDrawer(
                       asset: selectedAsset!,
+                      width: _drawerWidth,
                       onClose: () => setState(() => selectedAsset = null),
                     ),
                   ),
