@@ -35,46 +35,69 @@ class _FileTable extends State<FileTable> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    List<DataColumn> columns = getColumns(context);
-    List<DataRow> rows = getRows(context, widget.data);
-
     return Expanded(
       flex: 1,
-      child: Container(
-        constraints: const BoxConstraints.expand(),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.vertical,
-          child: DataTable(
-            columns: columns,
-            rows: rows,
-            sortColumnIndex: sortColumnIndex,
-            sortAscending: sortAsc,
-            showCheckboxColumn: true,
-            onSelectAll: (bool? selected) {
-              if (selected != null) {
-                setState(() {
-                  if (selected) {
-                    selectedRows = widget.data.map((f) => f.path).toList();
-                  } else {
-                    selectedRows.clear();
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final totalWidth = constraints.maxWidth;
+          
+          // Define fixed widths for other columns + spacers
+          const checkboxWidth = 48.0; 
+          const typeWidth = 80.0;
+          const sizeWidth = 80.0;
+          const dateWidth = 140.0;
+          const actionsWidth = 130.0; 
+          const spacing = 20.0;
+          const margin = 24.0; // 12 on each side
+          
+          // Total width occupied by other columns and spacing
+          final fixedWidths = checkboxWidth + typeWidth + sizeWidth + dateWidth + actionsWidth + (4 * spacing) + margin;
+          
+          // Remaining space for Name column
+          final nameWidth = max(200.0, totalWidth - fixedWidths);
+
+          List<DataColumn> columns = getColumns(context);
+          List<DataRow> rows = getRows(context, widget.data, nameWidth);
+
+          return Container(
+            constraints: const BoxConstraints.expand(),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.vertical,
+              child: DataTable(
+                columnSpacing: spacing,
+                horizontalMargin: 12,
+                showCheckboxColumn: true,
+                columns: columns,
+                rows: rows,
+                sortColumnIndex: sortColumnIndex,
+                sortAscending: sortAsc,
+                onSelectAll: (bool? selected) {
+                  if (selected != null) {
+                    setState(() {
+                      if (selected) {
+                        selectedRows = widget.data.map((f) => f.path).toList();
+                      } else {
+                        selectedRows.clear();
+                      }
+                    });
+                    _notifySelectionChanged(context);
                   }
-                });
-                _notifySelectionChanged(context);
-              }
-            },
-            dataTextStyle: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w200,
-              fontSize: 15,
-              color: Colors.black87,
+                },
+                dataTextStyle: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w200,
+                  fontSize: 15,
+                  color: Colors.black87,
+                ),
+                headingTextStyle: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight:
+                      FontWeight.w200, // Keep headers slightly bolder than data
+                  fontSize: 15,
+                  color: Colors.black87,
+                ),
+              ),
             ),
-            headingTextStyle: theme.textTheme.titleSmall?.copyWith(
-              fontWeight:
-                  FontWeight.w200, // Keep headers slightly bolder than data
-              fontSize: 15,
-              color: Colors.black87,
-            ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -82,10 +105,7 @@ class _FileTable extends State<FileTable> {
   List<DataColumn> getColumns(BuildContext context) {
     return <DataColumn>[
       DataColumn(
-        label: const Expanded(
-          flex: 2,
-          child: Text('Name', style: TextStyle(fontWeight: FontWeight.bold)),
-        ),
+        label: const Text('Name', style: TextStyle(fontWeight: FontWeight.bold)),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
           sortColumn = 'name';
@@ -95,10 +115,7 @@ class _FileTable extends State<FileTable> {
       ),
       DataColumn(
         numeric: true,
-        label: const Expanded(
-          flex: 1,
-          child: Text('Type', style: TextStyle(fontWeight: FontWeight.normal)),
-        ),
+        label: const Text('Type', style: TextStyle(fontWeight: FontWeight.normal)),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
           sortColumn = 'contentType';
@@ -108,10 +125,7 @@ class _FileTable extends State<FileTable> {
       ),
       DataColumn(
         numeric: true,
-        label: const Expanded(
-          flex: 1,
-          child: Text('Size', style: TextStyle(fontWeight: FontWeight.normal)),
-        ),
+        label: const Text('Size', style: TextStyle(fontWeight: FontWeight.normal)),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
           sortColumn = 'size';
@@ -120,14 +134,11 @@ class _FileTable extends State<FileTable> {
         },
       ),
       DataColumn(
-        label: const Expanded(
-          flex: 1,
-          child: Text(
-            'Date\nCreated',
-            maxLines: 2,
-            softWrap: true,
-            style: TextStyle(fontWeight: FontWeight.normal),
-          ),
+        label: const Text(
+          'Date\nCreated',
+          maxLines: 2,
+          softWrap: true,
+          style: TextStyle(fontWeight: FontWeight.normal),
         ),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
@@ -147,8 +158,7 @@ class _FileTable extends State<FileTable> {
     ];
   }
 
-  List<DataRow> getRows(BuildContext context, List<FileAsset> assets) {
-    //DateFormat df = DateFormat('yyyy-MM-dd HH:mm');
+  List<DataRow> getRows(BuildContext context, List<FileAsset> assets, double nameWidth) {
     List<DataRow> rows = [];
 
     //Create a row for every item returns from DB
@@ -167,9 +177,9 @@ class _FileTable extends State<FileTable> {
             cells: [
               DataCell(
                 ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    minWidth: 200,
-                  ), //SET max width
+                  constraints: BoxConstraints(
+                    maxWidth: nameWidth,
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
@@ -190,19 +200,19 @@ class _FileTable extends State<FileTable> {
               DataCell(
                 ConstrainedBox(
                   constraints: const BoxConstraints(
-                    maxWidth: 100,
-                  ), //SET max width
+                    maxWidth: 80,
+                  ),
                   child: Text(
                     f.contentType.split("/").last,
-                    overflow: TextOverflow.clip,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ),
               DataCell(
                 ConstrainedBox(
                   constraints: const BoxConstraints(
-                    maxWidth: 150,
-                  ), //SET max width
+                    maxWidth: 80,
+                  ),
                   child: Text(
                     _formatBytes(f.size),
                     overflow: TextOverflow.ellipsis,
@@ -213,8 +223,8 @@ class _FileTable extends State<FileTable> {
               DataCell(
                 ConstrainedBox(
                   constraints: const BoxConstraints(
-                    maxWidth: 250,
-                  ), //SET max width
+                    maxWidth: 140,
+                  ),
                   child: Tooltip(
                     message: f.dateCreated.toLocal().toString(),
                     child: Text(
@@ -232,25 +242,27 @@ class _FileTable extends State<FileTable> {
               DataCell(
                 ConstrainedBox(
                   constraints: const BoxConstraints(
-                    maxWidth: 150,
-                  ), //SET max width
+                    maxWidth: 130,
+                  ),
                   child: Row(
                     children: [
                       IconButton(
+                        icon: const Icon(Icons.info_outline),
+                        tooltip: 'Details',
+                        onPressed: () {
+                          FileSelectedNotification(f).dispatch(context);
+                        },
+                      ),
+                      IconButton(
                         icon: const Icon(Icons.open_in_new),
+                        tooltip: 'Open',
                         onPressed: () async {
-                          //download
-                          ///io.File file = await dataProvider.fileService.fileRepository.downloadFile(f);
-                          //show message
-                          //var msg = ScaffoldMessenger.of(context);
-                          //msg.showSnackBar(SnackBar(content: Text('File download to: ${file.path}')));
-                          //then open
-                          // TODO: trigger open in default app
                           await OpenFilex.open(f.path);
                         },
                       ),
                       IconButton(
                         icon: const Icon(Icons.delete),
+                        tooltip: 'Delete',
                         onPressed: () => _showDeleteConfirmationDialog(context, f),
                       ),
                     ],
@@ -271,20 +283,20 @@ class _FileTable extends State<FileTable> {
           ),
         );
       } else {
-        //Folder Row (mostly empty cells)
+        //Folder Row
         rows.add(
           DataRow(
             selected: selectedRows.contains(f.path),
             cells: [
               DataCell(
                 ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    minWidth: 300,
-                  ), //SET max width
+                  constraints: BoxConstraints(
+                    maxWidth: nameWidth,
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
-                      const Icon(Icons.folder),
+                      const Icon(Icons.folder, color: Colors.amber),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(f.name, overflow: TextOverflow.ellipsis),
@@ -303,7 +315,24 @@ class _FileTable extends State<FileTable> {
               const DataCell(Text('')),
               const DataCell(Text('')),
               const DataCell(Text('')),
-              const DataCell(Text('')),
+              DataCell(
+                ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: 130,
+                  ),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.info_outline),
+                        tooltip: 'Details',
+                        onPressed: () {
+                          FileSelectedNotification(f).dispatch(context);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
             onSelectChanged: (bool? e) {
               setState(() {

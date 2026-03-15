@@ -11,6 +11,8 @@ import 'package:pdfx/pdfx.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:xml/xml.dart';
 
 class FileDetailsDrawer extends StatefulWidget {
   const FileDetailsDrawer({
@@ -36,6 +38,11 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   int _pdfCurrentPage = 1;
   int _pdfTotalPages = 0;
 
+  String? _textContent;
+  bool _loadingText = false;
+  bool _isEditing = false;
+  final TextEditingController _editController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -51,6 +58,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       _pdfCurrentPage = 1;
       _pdfTotalPages = 0;
       _exifData = null;
+      _textContent = null;
+      _isEditing = false;
+      _editController.clear();
       _loadMetadata();
     }
   }
@@ -58,6 +68,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   @override
   void dispose() {
     _pdfController?.dispose();
+    _editController.dispose();
     super.dispose();
   }
 
@@ -93,11 +104,53 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         }
       } catch (_) {}
     }
+
+    // Text content for TXT, HTML, XML, Markdown
+    final ext = p.extension(file.path).toLowerCase();
+    final textExts = ['.txt', '.html', '.xml', '.md', '.markdown', '.json', '.yaml', '.yml', '.dart', '.py', '.js', '.css'];
+    if (file.contentType.startsWith('text/') || textExts.contains(ext)) {
+      setState(() => _loadingText = true);
+      try {
+        final ioFile = io.File(file.path);
+        if (await ioFile.exists()) {
+          final content = await ioFile.readAsString();
+          if (mounted) setState(() => _textContent = content);
+        }
+      } catch (_) {}
+      if (mounted) setState(() => _loadingText = false);
+    }
+  }
+
+  Future<void> _saveContent() async {
+    if (widget.asset is! File) return;
+    final file = widget.asset as File;
+    try {
+      final ioFile = io.File(file.path);
+      await ioFile.writeAsString(_editController.text);
+      if (mounted) {
+        setState(() {
+          _textContent = _editController.text;
+          _isEditing = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('File saved successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving file: $e')),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isImage = widget.asset is File && (widget.asset as File).contentType == FilesConstants.mimeTypeImage;
+    final tabCount = isImage ? 3 : 2;
+
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
@@ -140,7 +193,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
           // ─── Scrollable content ──────────────────────────────
           Expanded(
             child: DefaultTabController(
-              length: 3,
+              length: tabCount,
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(12),
                 child: Column(
@@ -151,10 +204,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                     if (widget.asset is File) ...[
                       _buildFileMetadataSection(widget.asset as File),
                       const SizedBox(height: 16),
-                      // _buildExifSection(), // Moved to tabs
-                      // const SizedBox(height: 16),
-                      // _buildGpsSection(),  // Moved to tabs
-                      _buildTabbedMetadataSection(),
+                      _buildTabbedMetadataSection(isImage),
                     ] else ...[
                       _buildFolderMetadataSection(),
                     ],
@@ -174,10 +224,15 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     Widget preview;
 
     if (asset is File) {
+      final ext = p.extension(asset.path).toLowerCase();
+      final textExts = ['.txt', '.html', '.xml', '.md', '.markdown', '.json', '.yaml', '.yml', '.dart', '.py', '.js', '.css'];
+      
       if (asset.contentType == FilesConstants.mimeTypeImage) {
         preview = _buildImagePreview(asset);
       } else if (asset.contentType == FilesConstants.mimeTypePdf) {
         return _buildPdfPreviewWithControls();
+      } else if (textExts.contains(ext) || asset.contentType.startsWith('text/')) {
+        return _buildTextBasedPreview(asset, ext);
       } else {
         preview = _buildGenericIcon(asset.contentType);
       }
@@ -288,10 +343,15 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
   Widget _buildGenericIcon(String contentType) {
     IconData icon = Icons.file_present;
-    if (contentType == FilesConstants.mimeTypePdf) icon = Icons.picture_as_pdf;
-    else if (contentType.startsWith('video/')) icon = Icons.video_file;
-    else if (contentType.startsWith('audio/')) icon = Icons.audio_file;
-    else if (contentType.startsWith('text/')) icon = Icons.text_snippet;
+    if (contentType == FilesConstants.mimeTypePdf) {
+      icon = Icons.picture_as_pdf;
+    } else if (contentType.startsWith('video/')) {
+      icon = Icons.video_file;
+    } else if (contentType.startsWith('audio/')) {
+      icon = Icons.audio_file;
+    } else if (contentType.startsWith('text/')) {
+      icon = Icons.text_snippet;
+    }
     return Center(
       child: Icon(icon, size: 80, color: Colors.grey.shade400),
     );
@@ -334,17 +394,17 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     );
   }
 
-  Widget _buildTabbedMetadataSection() {
+  Widget _buildTabbedMetadataSection(bool showExif) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const TabBar(
+        TabBar(
           tabs: [
-            Tab(text: 'GPS'),
-            Tab(text: 'EXIF'),
-            Tab(text: 'SIMILAR'),
+            const Tab(text: 'GPS'),
+            if (showExif) const Tab(text: 'EXIF'),
+            const Tab(text: 'SIMILAR'),
           ],
-          labelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+          labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
           indicatorSize: TabBarIndicatorSize.tab,
         ),
         const SizedBox(height: 12),
@@ -353,7 +413,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
           child: TabBarView(
             children: [
               _buildGpsTab(),
-              _buildExifTab(),
+              if (showExif) _buildExifTab(),
               _buildSimilarFilesTab(),
             ],
           ),
@@ -487,6 +547,105 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         ],
       ),
     );
+  }
+
+  // ─── Text/Markdown/Code Previews ────────────────────────────────
+  Widget _buildTextBasedPreview(File file, String ext) {
+    if (_loadingText) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_textContent == null) {
+      return _buildGenericIcon(file.contentType);
+    }
+
+    final isMarkdown = ext == '.md' || ext == '.markdown';
+    final height = (widget.width / 1.5).clamp(200.0, 500.0);
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        height: height,
+        width: double.infinity,
+        color: Colors.white,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Toolbar
+            Container(
+              height: 32,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              color: Colors.grey.shade100,
+              child: Row(
+                children: [
+                  Text(ext.toUpperCase().replaceFirst('.', ''), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const Spacer(),
+                  if (isMarkdown && !_isEditing)
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _isEditing = true;
+                          _editController.text = _textContent!;
+                        });
+                      },
+                      icon: const Icon(Icons.edit, size: 14),
+                      label: const Text('Edit', style: TextStyle(fontSize: 11)),
+                      style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 24)),
+                    ),
+                  if (_isEditing) ...[
+                    TextButton(
+                      onPressed: () => setState(() => _isEditing = false),
+                      child: const Text('Cancel', style: TextStyle(fontSize: 11, color: Colors.red)),
+                    ),
+                    const SizedBox(width: 4),
+                    TextButton(
+                      onPressed: _saveContent,
+                      child: const Text('Save', style: TextStyle(fontSize: 11, color: Colors.green)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            // Content
+            Expanded(
+              child: _isEditing 
+                ? TextField(
+                    controller: _editController,
+                    maxLines: null,
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.all(12),
+                    ),
+                    style: const TextStyle(fontFamily: 'Courier', fontSize: 13),
+                  )
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.all(12),
+                    child: _renderTextContent(ext),
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _renderTextContent(String ext) {
+    final content = _textContent!;
+    if (ext == '.md' || ext == '.markdown') {
+      return MarkdownBody(data: content);
+    }
+    if (ext == '.xml') {
+      return Text(_tidyXml(content), style: const TextStyle(fontFamily: 'Courier', fontSize: 12));
+    }
+    return Text(content, style: const TextStyle(fontFamily: 'Courier', fontSize: 12));
+  }
+
+  String _tidyXml(String xmlString) {
+    try {
+      final document = XmlDocument.parse(xmlString);
+      return document.toXmlString(pretty: true, indent: '  ');
+    } catch (_) {
+      return xmlString; // Return as is if it fails to parse
+    }
   }
 
   // ─── Shared helpers ───────────────────────────────────────────
