@@ -96,6 +96,8 @@ dependencies:
   latlong2: ^0.9.1
   flutter_markdown: ^0.7.7+1
   xml: ^6.6.1
+  three_js: ^0.2.7
+  three_js_simple_loaders: ^0.2.2
 
 
 

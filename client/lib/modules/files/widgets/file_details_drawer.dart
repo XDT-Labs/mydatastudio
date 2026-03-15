@@ -13,6 +13,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:xml/xml.dart';
+import 'package:three_js/three_js.dart' as three;
+import 'package:three_js_simple_loaders/three_js_simple_loaders.dart';
 
 class FileDetailsDrawer extends StatefulWidget {
   const FileDetailsDrawer({
@@ -42,6 +44,8 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   bool _loadingText = false;
   bool _isEditing = false;
   final TextEditingController _editController = TextEditingController();
+  three.ThreeJS? _threeJs;
+  bool _loadingStl = false;
 
   @override
   void initState() {
@@ -61,6 +65,8 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       _textContent = null;
       _isEditing = false;
       _editController.clear();
+      _threeJs?.dispose();
+      _threeJs = null;
       _loadMetadata();
     }
   }
@@ -69,6 +75,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   void dispose() {
     _pdfController?.dispose();
     _editController.dispose();
+    _threeJs?.dispose();
     super.dispose();
   }
 
@@ -107,7 +114,22 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
     // Text content for TXT, HTML, XML, Markdown
     final ext = p.extension(file.path).toLowerCase();
-    final textExts = ['.txt', '.html', '.xml', '.xsl', '.xslt', '.md', '.markdown', '.json', '.yaml', '.yml', '.dart', '.py', '.js', '.css'];
+    final textExts = [
+      '.txt',
+      '.html',
+      '.xml',
+      '.xsl',
+      '.xslt',
+      '.md',
+      '.markdown',
+      '.json',
+      '.yaml',
+      '.yml',
+      '.dart',
+      '.py',
+      '.js',
+      '.css',
+    ];
     if (file.contentType.startsWith('text/') || textExts.contains(ext)) {
       setState(() => _loadingText = true);
       try {
@@ -138,9 +160,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving file: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error saving file: $e')));
       }
     }
   }
@@ -148,22 +170,27 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isImage = widget.asset is File && (widget.asset as File).contentType == FilesConstants.mimeTypeImage;
+    final isImage =
+        widget.asset is File &&
+        (widget.asset as File).contentType == FilesConstants.mimeTypeImage;
     final tabCount = isImage ? 3 : 2;
 
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        border: Border(
-          left: BorderSide(color: Colors.grey.shade300, width: 1),
-        ),
+        border: Border(left: BorderSide(color: Colors.grey.shade300, width: 1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ─── Header ─────────────────────────────────────────
           Container(
-            padding: const EdgeInsets.only(left: 12, right: 4, top: 4, bottom: 4),
+            padding: const EdgeInsets.only(
+              left: 12,
+              right: 4,
+              top: 4,
+              bottom: 4,
+            ),
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(color: Colors.grey.shade200, width: 1),
@@ -225,14 +252,32 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
     if (asset is File) {
       final ext = p.extension(asset.path).toLowerCase();
-      final textExts = ['.txt', '.html', '.xml', '.xsl', '.xslt', '.md', '.markdown', '.json', '.yaml', '.yml', '.dart', '.py', '.js', '.css'];
-      
+      final textExts = [
+        '.txt',
+        '.html',
+        '.xml',
+        '.xsl',
+        '.xslt',
+        '.md',
+        '.markdown',
+        '.json',
+        '.yaml',
+        '.yml',
+        '.dart',
+        '.py',
+        '.js',
+        '.css',
+      ];
+
       if (asset.contentType == FilesConstants.mimeTypeImage) {
         preview = _buildImagePreview(asset);
       } else if (asset.contentType == FilesConstants.mimeTypePdf) {
         return _buildPdfPreviewWithControls();
-      } else if (textExts.contains(ext) || asset.contentType.startsWith('text/')) {
+      } else if (textExts.contains(ext) ||
+          asset.contentType.startsWith('text/')) {
         return _buildTextBasedPreview(asset, ext);
+      } else if (ext == '.stl') {
+        return _buildStlPreview(asset);
       } else {
         preview = _buildGenericIcon(asset.contentType);
       }
@@ -283,15 +328,16 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
             // ─── PDF viewer ──────────────────────────────────
             SizedBox(
               height: (widget.width / 1.5).clamp(200.0, 500.0),
-              child: _pdfController == null
-                  ? const Center(child: CircularProgressIndicator())
-                  : PdfView(
-                      controller: _pdfController!,
-                      scrollDirection: Axis.horizontal,
-                      onPageChanged: (page) {
-                        if (mounted) setState(() => _pdfCurrentPage = page);
-                      },
-                    ),
+              child:
+                  _pdfController == null
+                      ? const Center(child: CircularProgressIndicator())
+                      : PdfView(
+                        controller: _pdfController!,
+                        scrollDirection: Axis.horizontal,
+                        onPageChanged: (page) {
+                          if (mounted) setState(() => _pdfCurrentPage = page);
+                        },
+                      ),
             ),
 
             // ─── Page navigation bar ─────────────────────────
@@ -307,12 +353,13 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                       iconSize: 20,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
-                      onPressed: _pdfCurrentPage > 1
-                          ? () => _pdfController?.previousPage(
+                      onPressed:
+                          _pdfCurrentPage > 1
+                              ? () => _pdfController?.previousPage(
                                 duration: const Duration(milliseconds: 300),
                                 curve: Curves.easeInOut,
                               )
-                          : null,
+                              : null,
                     ),
                     const SizedBox(width: 8),
                     Text(
@@ -325,12 +372,13 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                       iconSize: 20,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
-                      onPressed: _pdfCurrentPage < _pdfTotalPages
-                          ? () => _pdfController?.nextPage(
+                      onPressed:
+                          _pdfCurrentPage < _pdfTotalPages
+                              ? () => _pdfController?.nextPage(
                                 duration: const Duration(milliseconds: 300),
                                 curve: Curves.easeInOut,
                               )
-                          : null,
+                              : null,
                     ),
                   ],
                 ),
@@ -351,10 +399,140 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       icon = Icons.audio_file;
     } else if (contentType.startsWith('text/')) {
       icon = Icons.text_snippet;
+    } else if (p.extension(widget.asset.path).toLowerCase() == '.stl') {
+      icon = Icons.view_in_ar;
     }
-    return Center(
-      child: Icon(icon, size: 80, color: Colors.grey.shade400),
+    return Center(child: Icon(icon, size: 80, color: Colors.grey.shade400));
+  }
+
+  // ─── STL Preview (3D) ──────────────────────────────────────────
+  Widget _buildStlPreview(File file) {
+    final height = (widget.width / 1.5).clamp(200.0, 500.0);
+
+    if (_threeJs == null) {
+      _threeJs = three.ThreeJS(
+        onSetupComplete: () {
+          if (mounted) setState(() {});
+        },
+        setup: () => _initStlScene(file.path),
+      );
+    }
+
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.grey[900], // Deep gray Flutter background
+        border: Border.all(color: Colors.blue.withOpacity(0.5)),
+      ),
+      child: Stack(
+        children: [
+          // Use a UniqueKey based on the file path to force a fresh widget state whenever the file changes
+          KeyedSubtree(key: ValueKey(file.path), child: _threeJs!.build()),
+          if (_loadingStl) const Center(child: CircularProgressIndicator()),
+          if (_stlError != null)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Text(
+                  _stlError!,
+                  style: const TextStyle(color: Colors.red, fontSize: 12),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
+  }
+
+  String? _stlError;
+
+  Future<void> _initStlScene(String filePath) async {
+    if (_threeJs == null) return;
+
+    // Camera must be assigned before scene per the three_js pattern
+    _threeJs!.camera = three.PerspectiveCamera(
+      45,
+      _threeJs!.width / _threeJs!.height,
+      0.1,
+      2000,
+    );
+    _threeJs!.scene = three.Scene();
+
+    if (mounted) {
+      setState(() {
+        _loadingStl = true;
+        _stlError = null;
+      });
+    }
+
+    try {
+      final scene = _threeJs!.scene;
+      final camera = _threeJs!.camera as three.PerspectiveCamera;
+
+      // Dark background
+      scene.background = three.Color.fromHex32(0x222222);
+
+      // Ambient light for base illumination
+      final ambientLight = three.AmbientLight(0xffffff, 0.8);
+      scene.add(ambientLight);
+
+      // Attach a point light to the camera so it always illuminates the model
+      // regardless of camera orientation — this is the standard three_js pattern.
+      final pointLight = three.PointLight(0xffffff, 1.2);
+      camera.add(pointLight);
+      scene.add(camera); // camera must be in the scene for its children to render
+
+      // Extra directional light from above for shape definition
+      final dirLight = three.DirectionalLight(0xffffff, 0.6);
+      dirLight.position.setValues(1, 2, 1);
+      scene.add(dirLight);
+
+      final loader = STLLoader();
+
+      // Load from local file
+      final file = io.File(filePath);
+      if (!await file.exists()) {
+        throw 'File does not exist: $filePath';
+      }
+
+      final mesh = await loader.fromFile(file);
+      final geometry = mesh.geometry!;
+
+      final material = three.MeshPhongMaterial({
+        three.MaterialProperty.color: three.Color.fromHex32(0x3366ff),
+        three.MaterialProperty.specular: three.Color.fromHex32(0x444444),
+        three.MaterialProperty.shininess: 80,
+      });
+
+      mesh.material = material;
+      geometry.computeBoundingBox();
+      geometry.center();
+
+      scene.add(mesh);
+
+      // Fit camera to the model's bounding box
+      final boundingBox = geometry.boundingBox!;
+      final size = three.Vector3();
+      boundingBox.getSize(size);
+      final maxDim = [size.x, size.y, size.z].reduce((a, b) => a > b ? a : b);
+
+      camera.position.setValues(0, maxDim * 0.5, maxDim * 2.5);
+      camera.lookAt(three.Vector3(0, 0, 0));
+      camera.updateProjectionMatrix();
+
+      // IMPORTANT: Use addAnimationEvent for per-frame updates.
+      // Do NOT use postProcessor — it replaces the renderer.render() call
+      // entirely, which causes a black screen.
+      _threeJs!.addAnimationEvent((dt) {
+        mesh.rotation.y += 0.5 * dt; // dt-based rotation for consistent speed
+      });
+    } catch (e) {
+      debugPrint('Error loading STL: $e');
+      if (mounted) setState(() => _stlError = e.toString());
+    } finally {
+      if (mounted) setState(() => _loadingStl = false);
+    }
   }
 
   // ─── File Metadata ────────────────────────────────────────────
@@ -375,9 +553,21 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         _infoRow('Name', file.name),
         _infoRow('Type', file.contentType),
         _infoRow('Size', _formatBytes(file.size)),
-        _infoRow('Ext', p.extension(file.name).replaceFirst('.', '').toUpperCase()),
-        _infoRow('Created', moment.fromNowPrecise(form: Abbreviation.full, includeWeeks: true)),
-        _infoRow('Modified', modifiedMoment.fromNowPrecise(form: Abbreviation.full, includeWeeks: true)),
+        _infoRow(
+          'Ext',
+          p.extension(file.name).replaceFirst('.', '').toUpperCase(),
+        ),
+        _infoRow(
+          'Created',
+          moment.fromNowPrecise(form: Abbreviation.full, includeWeeks: true),
+        ),
+        _infoRow(
+          'Modified',
+          modifiedMoment.fromNowPrecise(
+            form: Abbreviation.full,
+            includeWeeks: true,
+          ),
+        ),
         _infoRowSelectable('Path', file.path),
       ],
     );
@@ -404,7 +594,10 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
             if (showExif) const Tab(text: 'EXIF'),
             const Tab(text: 'SIMILAR'),
           ],
-          labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+          labelStyle: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+          ),
           indicatorSize: TabBarIndicatorSize.tab,
         ),
         const SizedBox(height: 12),
@@ -427,13 +620,17 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     final file = widget.asset as File;
 
     final hasDbLocation = file.latitude != null && file.longitude != null;
-    final hasExifLocation = _exifData != null &&
+    final hasExifLocation =
+        _exifData != null &&
         _exifData!.containsKey('GPS GPSLatitude') &&
         _exifData!.containsKey('GPS GPSLongitude');
 
     if (!hasDbLocation && !hasExifLocation) {
       return const Center(
-        child: Text('No GPS data found.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+        child: Text(
+          'No GPS data found.',
+          style: TextStyle(color: Colors.grey, fontSize: 12),
+        ),
       );
     }
 
@@ -453,7 +650,10 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
     if (lat == null || lng == null) {
       return const Center(
-        child: Text('Invalid GPS data.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+        child: Text(
+          'Invalid GPS data.',
+          style: TextStyle(color: Colors.grey, fontSize: 12),
+        ),
       );
     }
 
@@ -482,7 +682,11 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                       point: LatLng(lat, lng),
                       width: 40,
                       height: 40,
-                      child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                      child: const Icon(
+                        Icons.location_on,
+                        color: Colors.red,
+                        size: 40,
+                      ),
                     ),
                   ],
                 ),
@@ -498,7 +702,12 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     if (widget.asset is! File) return const Center(child: Text('Not a file'));
     final file = widget.asset as File;
     if (file.contentType != FilesConstants.mimeTypeImage) {
-      return const Center(child: Text('Not an image', style: TextStyle(color: Colors.grey, fontSize: 12)));
+      return const Center(
+        child: Text(
+          'Not an image',
+          style: TextStyle(color: Colors.grey, fontSize: 12),
+        ),
+      );
     }
 
     if (_loadingExif) {
@@ -507,30 +716,49 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
     final data = _exifData;
     final interestingKeys = [
-      'Image Make', 'Image Model', 'EXIF ExposureTime', 'EXIF FNumber',
-      'EXIF ISOSpeedRatings', 'EXIF DateTimeOriginal', 'EXIF LensModel',
-      'EXIF FocalLength', 'EXIF Flash', 'Image Orientation',
-      'EXIF ExifImageWidth', 'EXIF ExifImageLength',
+      'Image Make',
+      'Image Model',
+      'EXIF ExposureTime',
+      'EXIF FNumber',
+      'EXIF ISOSpeedRatings',
+      'EXIF DateTimeOriginal',
+      'EXIF LensModel',
+      'EXIF FocalLength',
+      'EXIF Flash',
+      'Image Orientation',
+      'EXIF ExifImageWidth',
+      'EXIF ExifImageLength',
     ];
 
-    final rows = (data == null || data.isEmpty)
-        ? <Widget>[]
-        : interestingKeys
-            .where((k) => data.containsKey(k) && data[k]!.printable.isNotEmpty)
-            .map((k) => _infoRow(
-                  k.replaceFirst('EXIF ', '').replaceFirst('Image ', ''),
-                  data[k]!.printable,
-                ))
-            .toList();
+    final rows =
+        (data == null || data.isEmpty)
+            ? <Widget>[]
+            : interestingKeys
+                .where(
+                  (k) => data.containsKey(k) && data[k]!.printable.isNotEmpty,
+                )
+                .map(
+                  (k) => _infoRow(
+                    k.replaceFirst('EXIF ', '').replaceFirst('Image ', ''),
+                    data[k]!.printable,
+                  ),
+                )
+                .toList();
 
     if (rows.isEmpty) {
       return const Center(
-        child: Text('No EXIF data available.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+        child: Text(
+          'No EXIF data available.',
+          style: TextStyle(color: Colors.grey, fontSize: 12),
+        ),
       );
     }
 
     return SingleChildScrollView(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: rows,
+      ),
     );
   }
 
@@ -543,7 +771,10 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
           SizedBox(height: 12),
           Text('Similar Files', style: TextStyle(fontWeight: FontWeight.bold)),
           SizedBox(height: 4),
-          Text('Coming Soon', style: TextStyle(color: Colors.grey, fontSize: 12)),
+          Text(
+            'Coming Soon',
+            style: TextStyle(color: Colors.grey, fontSize: 12),
+          ),
         ],
       ),
     );
@@ -577,7 +808,14 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
               color: Colors.grey.shade100,
               child: Row(
                 children: [
-                  Text(ext.toUpperCase().replaceFirst('.', ''), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  Text(
+                    ext.toUpperCase().replaceFirst('.', ''),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
+                    ),
+                  ),
                   const Spacer(),
                   if (isMarkdown && !_isEditing)
                     TextButton.icon(
@@ -589,17 +827,26 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                       },
                       icon: const Icon(Icons.edit, size: 14),
                       label: const Text('Edit', style: TextStyle(fontSize: 11)),
-                      style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 24)),
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(50, 24),
+                      ),
                     ),
                   if (_isEditing) ...[
                     TextButton(
                       onPressed: () => setState(() => _isEditing = false),
-                      child: const Text('Cancel', style: TextStyle(fontSize: 11, color: Colors.red)),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(fontSize: 11, color: Colors.red),
+                      ),
                     ),
                     const SizedBox(width: 4),
                     TextButton(
                       onPressed: _saveContent,
-                      child: const Text('Save', style: TextStyle(fontSize: 11, color: Colors.green)),
+                      child: const Text(
+                        'Save',
+                        style: TextStyle(fontSize: 11, color: Colors.green),
+                      ),
                     ),
                   ],
                 ],
@@ -607,20 +854,24 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
             ),
             // Content
             Expanded(
-              child: _isEditing 
-                ? TextField(
-                    controller: _editController,
-                    maxLines: null,
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.all(12),
-                    ),
-                    style: const TextStyle(fontFamily: 'Courier', fontSize: 13),
-                  )
-                : SingleChildScrollView(
-                    padding: const EdgeInsets.all(12),
-                    child: _renderTextContent(ext),
-                  ),
+              child:
+                  _isEditing
+                      ? TextField(
+                        controller: _editController,
+                        maxLines: null,
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.all(12),
+                        ),
+                        style: const TextStyle(
+                          fontFamily: 'Courier',
+                          fontSize: 13,
+                        ),
+                      )
+                      : SingleChildScrollView(
+                        padding: const EdgeInsets.all(12),
+                        child: _renderTextContent(ext),
+                      ),
             ),
           ],
         ),
@@ -634,9 +885,15 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       return MarkdownBody(data: content);
     }
     if (ext == '.xml' || ext == '.xsl' || ext == '.xslt') {
-      return Text(_tidyXml(content), style: const TextStyle(fontFamily: 'Courier', fontSize: 12));
+      return Text(
+        _tidyXml(content),
+        style: const TextStyle(fontFamily: 'Courier', fontSize: 12),
+      );
     }
-    return Text(content, style: const TextStyle(fontFamily: 'Courier', fontSize: 12));
+    return Text(
+      content,
+      style: const TextStyle(fontFamily: 'Courier', fontSize: 12),
+    );
   }
 
   String _tidyXml(String xmlString) {
@@ -663,7 +920,12 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
             const SizedBox(width: 4),
             Text(
               title.toUpperCase(),
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey.shade600, letterSpacing: 1.1),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                color: Colors.grey.shade600,
+                letterSpacing: 1.1,
+              ),
             ),
           ],
         ),
@@ -676,7 +938,10 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
             borderRadius: BorderRadius.circular(6),
             border: Border.all(color: Colors.grey.shade200),
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: children,
+          ),
         ),
       ],
     );
@@ -690,10 +955,22 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         children: [
           SizedBox(
             width: 70,
-            child: Text(label, style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.w500)),
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.grey,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
           Expanded(
-            child: Text(value, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis, maxLines: 2),
+            child: Text(
+              value,
+              style: const TextStyle(fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
           ),
         ],
       ),
@@ -706,9 +983,19 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.w500)),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.grey,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
           const SizedBox(height: 2),
-          SelectableText(value, style: const TextStyle(fontSize: 11, color: Colors.black54)),
+          SelectableText(
+            value,
+            style: const TextStyle(fontSize: 11, color: Colors.black54),
+          ),
         ],
       ),
     );
