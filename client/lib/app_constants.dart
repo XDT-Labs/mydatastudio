@@ -15,7 +15,12 @@ class AppConstants {
   static const String securePublicKey = "public-key";
   static const String secureStorageLocation = "storage-location";
 
-  /// Scanner props
+  /// Scanner type constants — used in [Collection.scanner] and [FileSourceRegistry].
   static const String scannerEmailGmail = "email.gmail";
+
+  // File source scanners
   static const String scannerFileLocal = "file.local";
+  static const String scannerFileGDrive = "file.gdrive";
+  static const String scannerFileDropbox = "file.dropbox";   // future
+  static const String scannerFileOneDrive = "file.onedrive"; // future
 }

@@ -32,7 +32,7 @@ MyData/Tools started with one idea - we need a way to keep a local copy of our o
 
 3. Run the app:
    ```bash
-   flutter run
+    flutter run --dart-define-from-file=config/secrets.json
    ```
 
 ## License

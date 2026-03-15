@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:isolate';
 
+import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatatools/modules/files/services/scanners/google_file_scanner.dart';
 import 'package:mydatatools/modules/files/services/scanners/local_file_isolate.dart';
-
 import 'package:mydatatools/scanners/collection_scanner.dart';
 
 class ScannerManager {
@@ -80,26 +81,40 @@ class ScannerManager {
   }
 
   void _registerSingleScanner(Collection c) async {
-    //go up 2 folders from db folder
-    /** TODO: implement this with sqlite */
-    //String? dir = MainApp.appDataDirectory.value;
-
     switch (c.scanner) {
-      case "file.local":
+      case AppConstants.scannerFileLocal:
         logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
         SendPort? writerPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner s = LocalFileIsolate(
+        CollectionScanner localScanner = LocalFileIsolate(
           null,
           writerPort,
-        ); // todo: pass in dedicated db write thread
-        scanners.putIfAbsent(c.id, () => s);
+        );
+        scanners.putIfAbsent(c.id, () => localScanner);
         break;
-      case "email.gmail":
+
+      case AppConstants.scannerFileGDrive:
+        logger.i("Registering GDrive scanner for ${c.name} (ID: ${c.id})");
+        SendPort driveWriterPort = await DatabaseManager.instance.writerPort;
+        CollectionScanner cloudScanner = CloudFileIsolate(
+          null, // Central logger port not used yet
+          driveWriterPort,
+        );
+        scanners[c.id] = cloudScanner;
+        
+        logger.i("Starting initial scan for ${c.name}...");
+        // Kick off the initial scan immediately
+        cloudScanner.start(c, c.path, true, false).then((val) {
+          logger.i("Initial scan request completed with return code: $val");
+        }).catchError((e) {
+          logger.e("Initial scan request failed", error: e);
+        });
+        break;
+
+      case AppConstants.scannerEmailGmail:
         logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-        //CollectionScanner s = GmailScanner(database.config.path, c, fileDir.path);
-        //s.start(c, c.path, true, false);
-        //scanners.putIfAbsent(c.id, () => s);
+        // Gmail scanner registration handled elsewhere
         break;
+
       default:
         logger.w("Scanner type '${c.scanner}' not recognized.");
         break;

@@ -59,18 +59,36 @@ class ConcisePrinter extends LogPrinter {
 class AppLogger extends Logger {
   SendPort? sendPort;
 
-  AppLogger(SendPort? sendPort_, {LogFilter? filter}) : super(printer: ConcisePrinter(), filter: filter) {
-    sendPort = sendPort_;
+  AppLogger(this.sendPort, {LogFilter? filter})
+      : super(printer: ConcisePrinter(), filter: filter);
+
+  @override
+  void log(Level level, dynamic message, {
+    DateTime? time,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    if (sendPort != null) {
+      // If we are in an isolate, send a message back to the main isolate
+      sendPort!.send({
+        'type': 'log',
+        'level': level.name,
+        'message': message.toString(),
+        'error': error?.toString(),
+        'stackTrace': stackTrace?.toString(),
+      });
+    }
+    super.log(level, message, time: time, error: error, stackTrace: stackTrace);
   }
 
   static PublishSubject<String> statusSubject = PublishSubject<String>();
 
-  void s(dynamic message) async {
-    //If we are in an Isolate we'll send the message out over the port and let the parent log it.
+  /// Sends a status message. If in an isolate, uses the sendPort.
+  void s(dynamic message) {
     if (sendPort != null) {
-      sendPort!.send(message);
+      sendPort!.send({'type': 'status', 'message': message.toString()});
     } else {
-      statusSubject.add(message);
+      statusSubject.add(message.toString());
     }
   }
 }

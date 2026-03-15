@@ -13,12 +13,15 @@ import 'package:mydatatools/modules/files/services/repositories/file_repository.
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/repositories/user_repository.dart';
 import 'package:mydatatools/services/get_user_service.dart';
+import 'package:logger/logger.dart';
+import 'package:mydatatools/app_logger.dart';
 
 class DbIsolateWriterClient {
   Isolate? _isolate;
   SendPort? _sendPort;
   SendPort? _writerPort;
   ReceivePort? _receivePort;
+  final AppLogger _localLogger = AppLogger(null);
 
   SendPort? getSendPort() {
     return _writerPort;
@@ -38,6 +41,7 @@ class DbIsolateWriterClient {
     Map<String, dynamic> cfg = {
       'token': token,
       'replyTo': _receivePort!.sendPort,
+      'loggerPort': _receivePort!.sendPort, // Send logs back through our own ReceivePort
       'path': storagePath,
       'name': dbName,
       'useMemoryDb': useMemoryDb,
@@ -55,6 +59,35 @@ class DbIsolateWriterClient {
         _writerPort = data;
         if (!completer.isCompleted) {
           completer.complete();
+        }
+      } else if (data is Map) {
+        final type = data['type'];
+        final msg = data['message'];
+
+        if (type == 'log') {
+          final level = data['level'] as String;
+          switch (level) {
+            case 'info':
+              _localLogger.i('[DbWriter] $msg');
+              break;
+            case 'error':
+              _localLogger.e(
+                '[DbWriter] $msg',
+                error: data['error'],
+                stackTrace: data['stackTrace'],
+              );
+              break;
+            case 'warning':
+              _localLogger.w('[DbWriter] $msg');
+              break;
+            case 'debug':
+              _localLogger.d('[DbWriter] $msg');
+              break;
+            default:
+              _localLogger.i('[DbWriter] $msg');
+          }
+        } else if (type == 'status') {
+          _localLogger.s(msg);
         }
       }
     });
@@ -108,6 +141,10 @@ class DbIsolateWriterClient {
     // Send control port back to the spawner
     initialReplyTo.send(port.sendPort);
 
+    // Set log level inside the isolate
+    Logger.level = Level.debug;
+    final AppLogger logger = AppLogger(cfg['loggerPort'] as SendPort?);
+
     // create the AppDatabase inside the isolate
     AppDatabase db = AppDatabase(null, path, name, useMemoryDb);
 
@@ -155,11 +192,11 @@ class DbIsolateWriterClient {
             replyTo?.send({'status': 'ok', 'id': v?.id});
           });
         } else {
-          print("Unknown message type: ${data['type']}");
+          logger.w("Unknown message type: ${data['type']}");
           replyTo?.send({'error': 'Unknown message type: ${data['type']}'});
         }
-      } catch (e) {
-        print("Error in DbIsolateWriter: $e");
+      } catch (e, stack) {
+        logger.e("Error in DbIsolateWriter: $e", error: e, stackTrace: stack);
         replyTo?.send({'error': e.toString()});
       }
     }

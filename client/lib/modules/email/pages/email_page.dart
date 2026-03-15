@@ -171,33 +171,37 @@ class _EmailPage extends State<EmailPage> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          NotificationListener<EmailSortChangedNotification>(
-            child:
-                (emailLayout == 'vertical')
-                    ? Column(
-                      children: [
-                        EmailTable(count: count, emails: emails),
-                        (selectedEmail != null)
-                            ? EmailDetails(email: selectedEmail!)
-                            : const SizedBox(width: 0, height: 0),
-                      ],
-                    )
-                    : Row(
-                      children: [
-                        EmailTable(count: count, emails: emails),
-                        (selectedEmail != null)
-                            ? EmailDetails(email: selectedEmail!)
-                            : const SizedBox(width: 0, height: 0),
-                      ],
-                    ),
-            onNotification: (EmailSortChangedNotification n) {
-              sortColumn = n.sortColumn;
-              sortAsc = n.sortAsc;
-              _emailService!.invoke(
-                EmailServiceCommand(collection!, sortColumn, sortAsc),
-              );
-              return true;
-            },
+          Expanded(
+            child: NotificationListener<EmailSortChangedNotification>(
+              child:
+                  (emailLayout == 'vertical')
+                      ? Column(
+                        children: [
+                          Expanded(
+                            child: EmailTable(count: count, emails: emails),
+                          ),
+                          if (selectedEmail != null)
+                            EmailDetails(email: selectedEmail!),
+                        ],
+                      )
+                      : Row(
+                        children: [
+                          Expanded(
+                            child: EmailTable(count: count, emails: emails),
+                          ),
+                          if (selectedEmail != null)
+                            EmailDetails(email: selectedEmail!),
+                        ],
+                      ),
+              onNotification: (EmailSortChangedNotification n) {
+                sortColumn = n.sortColumn;
+                sortAsc = n.sortAsc;
+                _emailService!.invoke(
+                  EmailServiceCommand(collection!, sortColumn, sortAsc),
+                );
+                return true;
+              },
+            ),
           ),
         ],
       ),

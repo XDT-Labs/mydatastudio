@@ -49,7 +49,6 @@ class PythonManager {
 
     final supportDir = await getApplicationSupportDirectory();
     _pythonDir = p.join(supportDir.path, "aichat");
-    _pythonDir = p.join(supportDir.path, "aichat");
 
     // Check for existing PID file and kill previous process if it exists
     final pidFile = File(p.join(_pythonDir!, 'aichat.pid'));
@@ -69,7 +68,6 @@ class PythonManager {
       }
     }
 
-    logger.d('[python] Starting AI Chat service in `$_pythonDir`');
     logger.d('[python] Starting AI Chat service in `$_pythonDir`');
 
     String executableName = 'aichat';

@@ -53,6 +53,15 @@ class CollectionRepository {
   }
 
   ///
+  /// Update an existing collection (used for re-auth token refresh)
+  Future<Collection?> updateCollection(Collection val) async {
+    AppDatabase? db = DatabaseManager.instance.database;
+
+    await db?.update(db.collections).replace(val);
+    return Future(() => val);
+  }
+
+  ///
   /// Update the scan date for services that check external systems on a schedule, such as email
   void updateLastScanDate(Collection collection, DateTime? value) async {
     AppDatabase? db = DatabaseManager.instance.database;

@@ -1,3 +1,11 @@
 {
-    "java.compile.nullAnalysis.mode": "automatic"
+    "java.compile.nullAnalysis.mode": "automatic",
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "driver": "SQLite",
+            "name": "local db",
+            "database": "/Users/mikenimer/Library/Application Support/mydata.tools/data/mydata.db"
+        }
+    ]
 }

@@ -8,6 +8,7 @@ import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/database_manager.dart';
+import 'package:mydatatools/app_constants.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -58,6 +59,28 @@ class _FileDrawer extends State<FileDrawer> {
     _collectionsServiceSub?.cancel();
     _selectedCollectionSub?.cancel();
     super.dispose();
+  }
+
+  String _getDisplayName(Collection c) {
+    if (c.scanner == AppConstants.scannerFileGDrive) {
+      final parts = c.name.split(' (');
+      if (parts.length > 1) {
+        return parts[0];
+      }
+    }
+    return c.name;
+  }
+
+  String? _getSubtitle(Collection c) {
+    if (c.scanner == AppConstants.scannerFileGDrive) {
+      final parts = c.name.split(' (');
+      if (parts.length > 1) {
+        return '(${parts[1]}';
+      }
+    } else if (c.scanner == AppConstants.scannerFileLocal) {
+      return 'Local files';
+    }
+    return null;
   }
 
   @override
@@ -119,28 +142,38 @@ class _FileDrawer extends State<FileDrawer> {
                   return const SizedBox.shrink();
                 },
               ),
-              SizedBox(
-                height: filesC.length * 50,
+              Expanded(
                 child: ListView.builder(
                   shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
                   itemCount: filesC.length,
                   itemBuilder: (context, index) {
                     final isSelected = collection?.id == filesC[index].id;
+                    final subTitle = _getSubtitle(filesC[index]);
+                    
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2.0),
                       child: ListTile(
+                        dense: subTitle != null, // Make it a bit more compact if there is a subtitle
                         selected: isSelected,
                         selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.3),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
                         title: Text(
-                          filesC[index].name,
+                          _getDisplayName(filesC[index]),
                           style: TextStyle(
                             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                           ),
                         ),
+                        subtitle: subTitle != null 
+                          ? Text(
+                              subTitle,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: Colors.grey,
+                                fontSize: 11, // Even smaller as requested
+                              ),
+                            ) 
+                          : null,
                         trailing: PopupMenuButton<String>(
                           icon: const Icon(Icons.more_vert),
                           onSelected: (String value) {

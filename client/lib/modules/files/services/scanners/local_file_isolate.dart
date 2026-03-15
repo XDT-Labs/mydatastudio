@@ -9,6 +9,7 @@ import 'package:mydatatools/modules/files/files_constants.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 import 'package:path/path.dart' as p;
+import 'package:logger/logger.dart';
 
 
 class LocalFileIsolate extends CollectionScanner {
@@ -43,13 +44,29 @@ class LocalFileIsolate extends CollectionScanner {
     isolate!.addOnExitListener(p.sendPort);
 
     await for (var message in p) {
+      if (message == null) {
+        // Isolate exited
+        break;
+      }
       if (message is SendPort) {
-        // connected
+        // connected (heartbeat or discovery)
         logger?.s(message);
-      } else if (message == null) {
-        //logger.i("Scan Complete");
-        isScanning.add(false);
-        return Future(() => -1);
+      } else if (message is Map) {
+        final type = message['type'];
+        final msg = message['message'];
+        
+        if (type == 'log') {
+          final level = message['level'] as String;
+          switch (level) {
+            case 'info': logger?.i('[LocalScan] $msg'); break;
+            case 'error': logger?.e('[LocalScan] $msg', error: message['error'], stackTrace: message['stackTrace']); break;
+            case 'warning': logger?.w('[LocalScan] $msg'); break;
+            case 'debug': logger?.d('[LocalScan] $msg'); break;
+            default: logger?.i('[LocalScan] $msg');
+          }
+        } else if (type == 'status') {
+          logger?.s(msg);
+        }
       }
     }
 
@@ -94,7 +111,7 @@ class LocalFileIsolateWorker{
 
   // start scanning
   void _scan(Map<String, dynamic> args) async {
-    //print(args);
+    Logger.level = Level.debug;
     logger = AppLogger(loggerPort);
 
     String path = args['path'];
