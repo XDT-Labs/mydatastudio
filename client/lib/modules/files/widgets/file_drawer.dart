@@ -63,31 +63,89 @@ class _FileDrawer extends State<FileDrawer> {
     if (c.scanner == AppConstants.scannerFileGDrive) {
       final parts = c.name.split(' (');
       if (parts.length > 1) {
-        return parts[0];
+        // Extract the email inside the parentheses
+        return parts[1].replaceAll(')', '');
       }
     }
     return c.name;
   }
 
   String? _getSubtitle(Collection c) {
-    if (c.scanner == AppConstants.scannerFileGDrive) {
-      final parts = c.name.split(' (');
-      if (parts.length > 1) {
-        return '(${parts[1]}';
-      }
-    } else if (c.scanner == AppConstants.scannerFileLocal) {
-      return 'Local files';
-    }
+    // Removed subtitles for Local and Google Drive as requested
     return null;
+  }
+
+  String _getGroupName(Collection c) {
+    switch (c.scanner) {
+      case AppConstants.scannerFileLocal:
+        return 'Local';
+      case AppConstants.scannerFileGDrive:
+        return 'Google Drive';
+      case AppConstants.scannerFileDropbox:
+        return 'Dropbox';
+      case AppConstants.scannerFileOneDrive:
+        return 'OneDrive';
+      default:
+        return 'Other';
+    }
+  }
+
+  int _getGroupOrder(String scanner) {
+    switch (scanner) {
+      case AppConstants.scannerFileLocal:
+        return 0;
+      case AppConstants.scannerFileGDrive:
+        return 1;
+      case AppConstants.scannerFileDropbox:
+        return 2;
+      case AppConstants.scannerFileOneDrive:
+        return 3;
+      default:
+        return 4;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    //split into two set so we can show them in groups in the list
-    List<Collection> filesC =
-        collections.where((element) => element.type == 'file').toList();
+    // 1. Filter
+    final List<Collection> filesC = collections.where((element) => element.type == 'file').toList();
+
+    // 2. Grouping
+    final Map<String, List<Collection>> grouped = {};
+    for (var c in filesC) {
+      final groupName = _getGroupName(c);
+      grouped.putIfAbsent(groupName, () => []).add(c);
+    }
+
+    // 3. Sort groups by their defined order
+    final sortedGroupNames = grouped.keys.toList()
+      ..sort((a, b) {
+        final orderA = _getGroupOrder(grouped[a]!.first.scanner);
+        final orderB = _getGroupOrder(grouped[b]!.first.scanner);
+        return orderA.compareTo(orderB);
+      });
+
+    // 4. Flatten into a list with headers for the ListView
+    final List<dynamic> flatList = [];
+    for (final groupName in sortedGroupNames) {
+      flatList.add(groupName); // Add the group header
+      
+      final groupItems = grouped[groupName]!;
+      // Sort within the group alphabetically by display name
+      groupItems.sort((a, b) {
+        final nameA = _getDisplayName(a).toLowerCase();
+        final nameB = _getDisplayName(b).toLowerCase();
+        int cmp = nameA.compareTo(nameB);
+        if (cmp == 0) {
+          // If display names are identical, fall back to the full name
+          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        }
+        return cmp;
+      });
+      flatList.addAll(groupItems);
+    }
 
     return SizedBox.expand(
       child: Container(
@@ -142,23 +200,43 @@ class _FileDrawer extends State<FileDrawer> {
               ),
               Expanded(
                 child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: filesC.length,
+                  padding: EdgeInsets.zero,
+                  itemCount: flatList.length,
                   itemBuilder: (context, index) {
-                    final isSelected = collection?.id == filesC[index].id;
-                    final subTitle = _getSubtitle(filesC[index]);
+                    final item = flatList[index];
+
+                    if (item is String) {
+                      // Render Group Header
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 16, 8, 4),
+                        child: Text(
+                          item.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.primary.withOpacity(0.8),
+                            letterSpacing: 1.0,
+                          ),
+                        ),
+                      );
+                    }
+
+                    // Render Collection Tile
+                    final col = item as Collection;
+                    final isSelected = collection?.id == col.id;
+                    final subTitle = _getSubtitle(col);
                     
                     return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2.0),
+                      padding: const EdgeInsets.symmetric(vertical: 1.0),
                       child: ListTile(
-                        dense: subTitle != null, // Make it a bit more compact if there is a subtitle
+                        dense: subTitle != null,
                         selected: isSelected,
                         selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.3),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
                         title: Text(
-                          _getDisplayName(filesC[index]),
+                          _getDisplayName(col),
                           style: TextStyle(
                             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                           ),
@@ -168,7 +246,7 @@ class _FileDrawer extends State<FileDrawer> {
                               subTitle,
                               style: theme.textTheme.labelSmall?.copyWith(
                                 color: Colors.grey,
-                                fontSize: 11, // Even smaller as requested
+                                fontSize: 11,
                               ),
                             ) 
                           : null,
@@ -177,10 +255,10 @@ class _FileDrawer extends State<FileDrawer> {
                           onSelected: (String value) {
                             if (value == 'sync') {
                               ScannerManager.getInstance()
-                                  .getScanner(filesC[index])
+                                  .getScanner(col)
                                   ?.start(
-                                    filesC[index],
-                                    filesC[index].path,
+                                    col,
+                                    col.path,
                                     true,
                                     true,
                                   );
@@ -193,7 +271,7 @@ class _FileDrawer extends State<FileDrawer> {
                             } else if (value == 'delete') {
                               _showDeleteConfirmationDialog(
                                 context,
-                                filesC[index],
+                                col,
                               );
                             }
                           },
@@ -215,9 +293,8 @@ class _FileDrawer extends State<FileDrawer> {
                               ],
                         ),
                         onTap: () {
-                          //update before redirection
-                          RxFilesPage.selectedCollection.add(filesC[index]);
-                          RxFilesPage.selectedPath.add(filesC[index].path);
+                          RxFilesPage.selectedCollection.add(col);
+                          RxFilesPage.selectedPath.add(col.path);
                           GoRouter.of(context).go('/files');
                         },
                       ),
