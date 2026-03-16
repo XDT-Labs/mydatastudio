@@ -63,6 +63,8 @@ class _FileTable extends State<FileTable> {
           child: SingleChildScrollView(
             scrollDirection: Axis.vertical,
             child: DataTable(
+              dataRowMaxHeight: 72,
+              dataRowMinHeight: 72,
               columnSpacing: spacing,
               horizontalMargin: 12,
               showCheckboxColumn: true,
@@ -182,7 +184,13 @@ class _FileTable extends State<FileTable> {
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
                       (f.thumbnail == null && !isImage)
-                          ? Icon(getIconForMimeType(f.contentType))
+                          ? SizedBox(
+                              width: 100,
+                              height: 64,
+                              child: Center(
+                                child: Icon(getIconForMimeType(f.contentType)),
+                              ),
+                            )
                           : getImageComponent(f),
                       const SizedBox(width: 8),
                       Expanded(
@@ -300,7 +308,13 @@ class _FileTable extends State<FileTable> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
-                      const Icon(Icons.folder, color: Colors.amber),
+                      const SizedBox(
+                        width: 100,
+                        height: 64,
+                        child: Center(
+                          child: Icon(Icons.folder, color: Colors.amber),
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(f.name, overflow: TextOverflow.ellipsis),
@@ -412,39 +426,41 @@ class _FileTable extends State<FileTable> {
 
   Widget getImageComponent(File file) {
     try {
+      final ImageProvider provider;
       if (file.thumbnail != null) {
-        return Padding(
-          padding: const EdgeInsets.all(4),
-          child: Image(
-            image: ResizeImage(
-              file.thumbnail!.startsWith('http')
-                  ? NetworkImage(file.thumbnail!)
-                  : MemoryImage(base64Decode(file.thumbnail!)) as ImageProvider,
-              width: 100,
-              height: 64,
-            ),
-            errorBuilder: (context, error, stackTrace) => 
-               Icon(getIconForMimeType(file.contentType)),
-          ),
-        );
+        provider = file.thumbnail!.startsWith('http')
+            ? NetworkImage(file.thumbnail!)
+            : MemoryImage(base64Decode(file.thumbnail!));
       } else {
-        return Padding(
-          padding: const EdgeInsets.all(4),
-          child: Image(
-            image: ResizeImage(
-              FileImage(io.File(file.path)),
-              width: 100,
-              height: 64,
-            ),
-            errorBuilder: (context, error, stackTrace) => 
-               Icon(getIconForMimeType(file.contentType)),
-          ),
-        );
+        provider = FileImage(io.File(file.path));
       }
+
+      return SizedBox(
+        width: 100,
+        height: 64,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Image(
+              image: ResizeImage(
+                provider,
+                height: 64,
+              ),
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) =>
+                  Icon(getIconForMimeType(file.contentType)),
+            ),
+          ),
+        ),
+      );
     } catch (err) {
       //do nothing, return placeholder
     }
-    return const Placeholder();
+    return const SizedBox(
+      width: 100,
+      height: 64,
+      child: Center(child: Icon(Icons.broken_image)),
+    );
   }
 
   IconData? getIconForMimeType(String contentType) {
