@@ -50,7 +50,7 @@ class FolderDesktopRepository {
     return Future(() => null);
   }
 
-  Future<void> deleteMissing(String collectionId, String scannedPath, DateTime scanStartTime, {bool recursive = true}) async {
+  Future<void> deleteMissing(String collectionId, String scannedPath, DateTime scanStartTime, {bool recursive = true, bool isCloud = false, bool isFullScan = false}) async {
     String searchPath = scannedPath;
     if (!searchPath.endsWith('/')) {
       searchPath += '/';
@@ -59,7 +59,9 @@ class FolderDesktopRepository {
     await (db.delete(db.folders)
           ..where((t) =>
               t.collectionId.equals(collectionId) &
-              (recursive ? (t.parent.equals(scannedPath) | t.parent.like('$searchPath%')) : t.parent.equals(scannedPath)) &
+              (isCloud 
+                  ? (recursive && isFullScan ? const drift.Constant(true) : t.parent.equals(scannedPath))
+                  : (recursive ? (t.parent.equals(scannedPath) | t.parent.like('$searchPath%')) : t.parent.equals(scannedPath))) &
               (t.lastScannedDate.isNull() | t.lastScannedDate.isSmallerThanValue(scanStartTime))))
         .go();
   }

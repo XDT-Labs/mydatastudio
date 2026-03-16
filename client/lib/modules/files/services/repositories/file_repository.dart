@@ -50,7 +50,7 @@ class FileDesktopRepository {
     return Future(() => null);
   }
 
-  Future<void> markMissingAsDeleted(String collectionId, String scannedPath, DateTime scanStartTime, {bool recursive = true}) async {
+  Future<void> markMissingAsDeleted(String collectionId, String scannedPath, DateTime scanStartTime, {bool recursive = true, bool isCloud = false, bool isFullScan = false}) async {
     String searchPath = scannedPath;
     if (!searchPath.endsWith('/')) {
       searchPath += '/';
@@ -59,7 +59,9 @@ class FileDesktopRepository {
     await (db.update(db.files)
           ..where((t) =>
               t.collectionId.equals(collectionId) &
-              (recursive ? (t.parent.equals(scannedPath) | t.parent.like('$searchPath%')) : t.parent.equals(scannedPath)) &
+              (isCloud 
+                  ? (recursive && isFullScan ? const drift.Constant(true) : t.parent.equals(scannedPath))
+                  : (recursive ? (t.parent.equals(scannedPath) | t.parent.like('$searchPath%')) : t.parent.equals(scannedPath))) &
               (t.lastScannedDate.isNull() | t.lastScannedDate.isSmallerThanValue(scanStartTime))))
         .write(const FilesCompanion(isDeleted: drift.Value(true)));
   }
@@ -87,15 +89,28 @@ class FileDesktopRepository {
 
     // 2. Perform a lightweight targeted update just for the lastScannedDate and isDeleted on existing files
     if (existingIds.isNotEmpty) {
-      // Use the max scan date from the batch (they should generally all be the same scan run anyway)
-      DateTime? scanDate = fileList.firstWhere((f) => existingIds.contains(f.id)).lastScannedDate;
-      if (scanDate != null) {
-        await (db.update(db.files)..where((t) => t.id.isIn(existingIds)))
-            .write(FilesCompanion(
-              lastScannedDate: drift.Value(scanDate),
-              isDeleted: drift.Value(false),
-            ));
-      }
+      await db.batch((batch) {
+        for (final file in fileList) {
+          if (existingIds.contains(file.id)) {
+            batch.update(
+              db.files,
+              FilesCompanion(
+                name: drift.Value(file.name),
+                path: drift.Value(file.path),
+                parent: drift.Value(file.parent),
+                dateLastModified: drift.Value(file.dateLastModified),
+                lastScannedDate: drift.Value(file.lastScannedDate),
+                size: drift.Value(file.size),
+                contentType: drift.Value(file.contentType),
+                thumbnail: drift.Value(file.thumbnail),
+                downloadUrl: drift.Value(file.downloadUrl),
+                isDeleted: const drift.Value(false),
+              ),
+              where: (t) => t.id.equals(file.id),
+            );
+          }
+        }
+      });
     }
   }
 

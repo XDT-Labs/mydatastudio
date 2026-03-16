@@ -11,7 +11,6 @@ import 'package:mydatatools/oauth/google_auth_client.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 import 'package:logger/logger.dart';
 
-
 /// Scanner lifecycle manager for cloud-based file sources (Google Drive, etc.).
 ///
 /// Extends [CollectionScanner] — the same base used by [LocalFileIsolate] —
@@ -61,6 +60,7 @@ class CloudFileIsolate extends CollectionScanner {
       'collectionName': collection.name,
       // The root folder ID to start scanning from (e.g. 'root' or a specific folder ID)
       'rootFolderId': path ?? collection.path,
+      'isFullScan': path == null || path == collection.path,
       'recursive': recursive,
       // Raw token strings — the worker re-creates the API client inside the isolate
       'providerKey': collection.scanner,
@@ -86,16 +86,32 @@ class CloudFileIsolate extends CollectionScanner {
       if (message is Map) {
         final type = message['type'];
         final msg = message['message'];
-        
+
         if (type == 'log') {
           // Re-log in main isolate
           final level = message['level'] as String;
           switch (level) {
-            case 'info': _logger?.i('[$debugName] $msg'); break;
-            case 'error': _logger?.e('[$debugName] $msg', error: message['error'], stackTrace: message['stackTrace']); break;
-            case 'warning': _logger?.w('[$debugName] $msg'); break;
-            case 'debug': _logger?.d('[$debugName] $msg'); break;
-            default: _logger?.i('[$debugName] $msg');
+            case 'info':
+              _logger?.i('[$debugName] $msg');
+              break;
+            case 'error':
+              _logger?.e(
+                '[$debugName] $msg',
+                error: message['error'],
+                stackTrace: message['stackTrace'],
+              );
+              break;
+            case 'warning':
+              _logger?.w('[$debugName] $msg');
+              break;
+            case 'debug':
+              _logger?.d('[$debugName] $msg');
+              break;
+            case 'status':
+              _logger?.s('[$debugName] $msg');
+              break;
+            default:
+              _logger?.i('[$debugName] $msg');
           }
         } else if (type == 'status') {
           _logger?.s(msg);
@@ -136,7 +152,7 @@ class CloudFileIsolateWorker {
     try {
       // Set log level inside the isolate
       Logger.level = Level.debug;
-      
+
       final token = args['token'] as RootIsolateToken;
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
 
@@ -165,6 +181,7 @@ class CloudFileIsolateWorker {
     final collectionId = args['collectionId'] as String;
     final collectionName = args['collectionName'] as String;
     final rootFolderId = args['rootFolderId'] as String? ?? 'root';
+    final isFullScan = args['isFullScan'] as bool? ?? false;
     final recursive = args['recursive'] as bool? ?? true;
     final accessToken = args['accessToken'] as String?;
     final refreshToken = args['refreshToken'] as String?;
@@ -189,7 +206,8 @@ class CloudFileIsolateWorker {
     String validToken = safeAccessToken;
     final now = DateTime.now().toUtc();
     final nearExpiry =
-        expiry == null || now.isAfter(expiry.subtract(const Duration(minutes: 5)));
+        expiry == null ||
+        now.isAfter(expiry.subtract(const Duration(minutes: 5)));
 
     if (nearExpiry) {
       try {
@@ -240,12 +258,16 @@ class CloudFileIsolateWorker {
         'path': rootFolderId,
         'scanStartTime': scanStartTime,
         'recursive': recursive,
+        'isCloud': true,
+        'isFullScan': isFullScan,
         'replyTo': syncPort.sendPort,
       });
       await syncPort.first;
       syncPort.close();
     } catch (e, stack) {
-      logger.e('CloudFileIsolate: scan error for "$collectionName": $e\n$stack');
+      logger.e(
+        'CloudFileIsolate: scan error for "$collectionName": $e\n$stack',
+      );
     }
 
     Isolate.exit(args['port'] as SendPort, 0);
@@ -268,7 +290,10 @@ class CloudFileIsolateWorker {
     String? pageToken;
 
     do {
-      logger.d('CloudFileIsolate: Fetching page of files for parent "$parentId" (pageToken: $pageToken)');
+      logger.d(
+        'CloudFileIsolate: Fetching page of files for parent "$parentId" (pageToken: $pageToken)',
+      );
+
       final response = await driveApi.files.list(
         q: "'$parentId' in parents and trashed = false",
         $fields:
@@ -279,13 +304,14 @@ class CloudFileIsolateWorker {
       );
 
       final files = response.files ?? [];
-      logger.d('CloudFileIsolate: Received ${files.length} items from Drive API');
+      logger.d(
+        'CloudFileIsolate: Received ${files.length} items from Drive API',
+      );
 
       for (final f in files) {
         if (f.id == null) continue;
 
-        final isFolder =
-            f.mimeType == 'application/vnd.google-apps.folder';
+        final isFolder = f.mimeType == 'application/vnd.google-apps.folder';
 
         if (isFolder) {
           // Persist folder first so the UI can show the tree
@@ -300,6 +326,7 @@ class CloudFileIsolateWorker {
             logger.i('Found Drive folder: ${f.name} (${f.id})');
 
             if (recursive) {
+              logger.s('Google Drive: $folder.name');
               count += await _scanFolder(
                 driveApi: driveApi,
                 collectionId: collectionId,
@@ -323,7 +350,9 @@ class CloudFileIsolateWorker {
             fileBatch.add(file);
 
             if (fileBatch.length >= 100) {
-              logger.d('CloudFileIsolate: Sending batch of ${fileBatch.length} files to DB writer');
+              logger.d(
+                'CloudFileIsolate: Sending batch of ${fileBatch.length} files to DB writer',
+              );
               dbWriterPort.send({
                 'type': 'batch_file',
                 'files': List<File>.from(fileBatch),
@@ -339,7 +368,9 @@ class CloudFileIsolateWorker {
 
     // Flush any remaining files when returning from the top-level call
     if (currentBatch == null && fileBatch.isNotEmpty) {
-      logger.d('CloudFileIsolate: Sending final batch of ${fileBatch.length} files to DB writer');
+      logger.d(
+        'CloudFileIsolate: Sending final batch of ${fileBatch.length} files to DB writer',
+      );
       dbWriterPort.send({
         'type': 'batch_file',
         'files': List<File>.from(fileBatch),

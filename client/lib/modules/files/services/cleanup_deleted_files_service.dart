@@ -9,8 +9,10 @@ class CleanupDeletedFilesServiceCommand {
   final DateTime scanStartTime;
   final AppDatabase database;
   final bool recursive;
+  final bool isCloud;
+  final bool isFullScan;
 
-  CleanupDeletedFilesServiceCommand(this.collectionId, this.path, this.scanStartTime, this.database, {this.recursive = true});
+  CleanupDeletedFilesServiceCommand(this.collectionId, this.path, this.scanStartTime, this.database, {this.recursive = true, this.isCloud = false, this.isFullScan = false});
 }
 
 class CleanupDeletedFilesService {
@@ -25,8 +27,8 @@ class CleanupDeletedFilesService {
       FileDesktopRepository fileRepo = FileDesktopRepository(command.database);
       FolderDesktopRepository folderRepo = FolderDesktopRepository(command.database);
 
-      await fileRepo.markMissingAsDeleted(command.collectionId, command.path, command.scanStartTime, recursive: command.recursive);
-      await folderRepo.deleteMissing(command.collectionId, command.path, command.scanStartTime, recursive: command.recursive);
+      await fileRepo.markMissingAsDeleted(command.collectionId, command.path, command.scanStartTime, recursive: command.recursive, isCloud: command.isCloud, isFullScan: command.isFullScan);
+      await folderRepo.deleteMissing(command.collectionId, command.path, command.scanStartTime, recursive: command.recursive, isCloud: command.isCloud, isFullScan: command.isFullScan);
       
       return 0;
     } catch (e) {

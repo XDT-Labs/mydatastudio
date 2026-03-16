@@ -179,6 +179,8 @@ class DbIsolateWriterClient {
               time,
               db,
               recursive: data['recursive'] ?? true,
+              isCloud: data['isCloud'] ?? false,
+              isFullScan: data['isFullScan'] ?? false,
             ),
           );
           replyTo?.send({'status': 'ok'});
