@@ -662,14 +662,14 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
   // ─── File Metadata ────────────────────────────────────────────
   Widget _buildFileMetadataSection(File file) {
-    final moment = Moment.fromMillisecondsSinceEpoch(
-      file.dateCreated.millisecondsSinceEpoch,
-      isUtc: true,
-    );
-    final modifiedMoment = Moment.fromMillisecondsSinceEpoch(
-      file.dateLastModified.millisecondsSinceEpoch,
-      isUtc: true,
-    );
+    // Convert to local time for consistent comparison with 'now'
+    final createdDateTime = file.dateCreated.toLocal();
+    final modifiedDateTime = file.dateLastModified.toLocal();
+
+    final createdMoment = createdDateTime.toMoment();
+    final modifiedMoment = modifiedDateTime.toMoment();
+
+    final fullDateFormat = 'MMMM Do, YYYY [at] h:mm:ss A';
 
     return _buildSection(
       title: 'File Info',
@@ -683,15 +683,14 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
           p.extension(file.name).replaceFirst('.', '').toUpperCase(),
         ),
         _infoRow(
-          'Created',
-          moment.fromNowPrecise(form: Abbreviation.full, includeWeeks: true),
+          file.path.startsWith('gdrive://') ? 'Uploaded' : 'Created',
+          createdMoment.fromNow(),
+          tooltip: createdMoment.format(fullDateFormat),
         ),
         _infoRow(
           'Modified',
-          modifiedMoment.fromNowPrecise(
-            form: Abbreviation.full,
-            includeWeeks: true,
-          ),
+          modifiedMoment.fromNow(),
+          tooltip: modifiedMoment.format(fullDateFormat),
         ),
         _infoRowSelectable('Path', file.path),
         if (file.downloadUrl != null)
@@ -1074,7 +1073,21 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     );
   }
 
-  Widget _infoRow(String label, String value) {
+  Widget _infoRow(String label, String value, {String? tooltip}) {
+    Widget valueWidget = Text(
+      value,
+      style: const TextStyle(fontSize: 12),
+      overflow: TextOverflow.ellipsis,
+      maxLines: 2,
+    );
+
+    if (tooltip != null) {
+      valueWidget = Tooltip(
+        message: tooltip,
+        child: valueWidget,
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
@@ -1091,14 +1104,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
               ),
             ),
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 12),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 2,
-            ),
-          ),
+          Expanded(child: valueWidget),
         ],
       ),
     );
