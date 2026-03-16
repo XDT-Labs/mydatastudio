@@ -1,3 +1,4 @@
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/modules/files/pages/rx_files_page.dart';
@@ -229,9 +230,6 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
 
   // Google brand colours
   static const Color _googleBlue = Color(0xFF4285F4);
-  static const Color _googleRed = Color(0xFFDB4437);
-  static const Color _googleYellow = Color(0xFFF4B400);
-  static const Color _googleGreen = Color(0xFF0F9D58);
 
   Future<void> _connectGoogleDrive() async {
     setState(() {
@@ -545,19 +543,12 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
     );
   }
 
-  /// Four-coloured Google Drive triangle logo built from widgets — no image file needed.
+  /// Google logo from FontAwesome.
   Widget _buildDriveLogo() {
-    return SizedBox(
-      width: 72,
-      height: 72,
-      child: CustomPaint(
-        painter: _DriveLogoPainter(
-          blue: _googleBlue,
-          red: _googleRed,
-          yellow: _googleYellow,
-          green: _googleGreen,
-        ),
-      ),
+    return const FaIcon(
+      FontAwesomeIcons.googleDrive,
+      size: 72,
+      color: _googleBlue,
     );
   }
 
@@ -589,120 +580,14 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
     );
   }
 
-  /// A minimal Google 'G' built from a coloured circle + clipped letters (no asset required).
+  /// A Google 'G' from FontAwesome.
   Widget _buildGoogleG() {
-    return SizedBox(
-      width: 20,
-      height: 20,
-      child: CustomPaint(painter: _GoogleGPainter()),
+    return const FaIcon(
+      FontAwesomeIcons.google,
+      size: 18,
+      color: _googleBlue,
     );
   }
 }
 
-// =============================================================================
-// Custom painters
-// =============================================================================
 
-/// Paints a simplified Google Drive triangle logo using the four brand colours.
-class _DriveLogoPainter extends CustomPainter {
-  final Color blue;
-  final Color red;
-  final Color yellow;
-  final Color green;
-
-  const _DriveLogoPainter({
-    required this.blue,
-    required this.red,
-    required this.yellow,
-    required this.green,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-
-    // Drive logo: three triangles arranged in a Y shape
-    // Bottom-left (green)
-    _drawTriangle(canvas, Paint()..color = green, [
-      Offset(0, h),
-      Offset(w / 2, h * 0.2),
-      Offset(w / 4, h),
-    ]);
-    // Bottom-right (yellow)
-    _drawTriangle(canvas, Paint()..color = yellow, [
-      Offset(w * 0.75, h),
-      Offset(w / 2, h * 0.2),
-      Offset(w, h),
-    ]);
-    // Top (blue)
-    _drawTriangle(canvas, Paint()..color = blue, [
-      Offset(w / 4, h * 0.95),
-      Offset(w / 2, h * 0.2),
-      Offset(w * 0.75, h * 0.95),
-    ]);
-    // Centre overlap (red hint)
-    _drawTriangle(canvas, Paint()..color = red.withOpacity(0.25), [
-      Offset(w * 0.375, h * 0.6),
-      Offset(w / 2, h * 0.2),
-      Offset(w * 0.625, h * 0.6),
-    ]);
-  }
-
-  void _drawTriangle(Canvas canvas, Paint paint, List<Offset> points) {
-    final path = Path()
-      ..moveTo(points[0].dx, points[0].dy)
-      ..lineTo(points[1].dx, points[1].dy)
-      ..lineTo(points[2].dx, points[2].dy)
-      ..close();
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-/// Paints the Google multicolour 'G' lettermark.
-class _GoogleGPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final r = size.width / 2;
-    final center = Offset(r, r);
-
-    // Draw four coloured quadrant arcs
-    final colors = [
-      const Color(0xFF4285F4), // blue  — top-right
-      const Color(0xFFDB4437), // red   — bottom-right
-      const Color(0xFFFBBC04), // yellow — bottom-left
-      const Color(0xFF34A853), // green  — top-left
-    ];
-
-    for (var i = 0; i < 4; i++) {
-      final paint = Paint()
-        ..color = colors[i]
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = size.width * 0.28
-        ..strokeCap = StrokeCap.butt;
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: r * 0.72),
-        (i * 90 - 90) * (3.14159 / 180),
-        90 * (3.14159 / 180),
-        false,
-        paint,
-      );
-    }
-    // The horizontal bar of the G — a white rect to clear arc
-    canvas.drawRect(
-      Rect.fromLTWH(r, r * 0.68, r, r * 0.32),
-      Paint()..color = Colors.white,
-    );
-    // Blue bar
-    canvas.drawRect(
-      Rect.fromLTWH(r, r * 0.8, r * 0.92, r * 0.2),
-      Paint()..color = colors[0],
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
