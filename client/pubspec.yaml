@@ -98,6 +98,9 @@ dependencies:
   xml: ^6.6.1
   three_js: ^0.2.7
   three_js_simple_loaders: ^0.2.2
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.7
 
 
 

@@ -38,6 +38,13 @@ class RxFilesPage extends StatefulWidget {
   State<RxFilesPage> createState() => _RxFilesPage();
 }
 
+/// A single entry in the folder navigation trail.
+class _BreadcrumbEntry {
+  final String name;
+  final String path;
+  const _BreadcrumbEntry({required this.name, required this.path});
+}
+
 class _RxFilesPage extends State<RxFilesPage> {
   AppLogger logger = AppLogger(null);
   GetFileAndFoldersService? _filesAndFoldersService;
@@ -50,6 +57,8 @@ class _RxFilesPage extends State<RxFilesPage> {
   List<Collection> collections = [];
   Collection? collection;
   String? path;
+  /// Navigation trail — empty means we are at the collection root.
+  List<_BreadcrumbEntry> _breadcrumbTrail = [];
   String sortColumn = "name";
   bool sortAsc = true;
   List<FileAsset> selectedItems = [];
@@ -90,6 +99,7 @@ class _RxFilesPage extends State<RxFilesPage> {
       setState(() {
         collection = value;
         path = value?.path;
+        _breadcrumbTrail = []; // reset trail on collection change
         selectedItems = []; // reset selection on collection change
         selectedAsset = null; // close details drawer on collection change
       });
@@ -187,6 +197,14 @@ class _RxFilesPage extends State<RxFilesPage> {
                               //make sure path changed before triggering reload
                               setState(() {
                                 path = n.asset.path;
+                                // Push this folder onto the breadcrumb trail
+                                _breadcrumbTrail = [
+                                  ..._breadcrumbTrail,
+                                  _BreadcrumbEntry(
+                                    name: n.asset.name,
+                                    path: n.asset.path,
+                                  ),
+                                ];
                                 selectedItems = []; // reset selection on path change
                                 selectedAsset = null; // close drawer when drilling into folder
                               });
@@ -299,61 +317,50 @@ class _RxFilesPage extends State<RxFilesPage> {
   }
 
   BreadCrumb getBreadcrumb(Collection collection, String path) {
-    List<String> pathParts = path.split(":").last.split('/');
-    List<String> collectionParts = collection.path.split('/');
-    List<String> parts = [];
-    for (var i = 0; i < pathParts.length; ++i) {
-      var p = pathParts[i];
-      var cp = (collectionParts.length > i) ? collectionParts[i] : "";
-      if (p != cp) {
-        parts.add(pathParts[i]);
-      }
-    }
-
-    List<String> workingPath = [];
-
     return BreadCrumb(
       items: <BreadCrumbItem>[
         BreadCrumbItem(
           content: const Icon(Icons.home, color: Colors.black),
           onTap: () {
-            //return null, to unselect a collection and have app go back to pick collection (home) page
-            //return dummy FileCollection
             setState(() {
-              path = collection.path;
+              this.path = collection.path;
+              _breadcrumbTrail = [];
               selectedAsset = null;
             });
             _filesAndFoldersService!.invoke(
-              GetFileAndFoldersServiceCommand(collection, path!),
+              GetFileAndFoldersServiceCommand(collection, collection.path),
             );
           },
         ),
         BreadCrumbItem(
           content: Text(collection.name),
           onTap: () {
-            //go back to root of collection
+            // Go back to root of collection
             setState(() {
-              path = collection.path;
+              this.path = collection.path;
+              _breadcrumbTrail = [];
               selectedAsset = null;
             });
             _filesAndFoldersService!.invoke(
-              GetFileAndFoldersServiceCommand(collection, path!),
+              GetFileAndFoldersServiceCommand(collection, collection.path),
             );
           },
         ),
-        ...parts.where((e) => e != '').map((e) {
-          workingPath.add(e);
-          String p = '${collection.path}/${workingPath.join("/")}';
+        // One item per folder the user has drilled into
+        ..._breadcrumbTrail.asMap().entries.map((entry) {
+          final index = entry.key;
+          final crumb = entry.value;
           return BreadCrumbItem(
-            content: Text(e),
+            content: Text(crumb.name),
             onTap: () {
-              //drill into sub folder path
+              // Navigate to this level and trim everything after it
               setState(() {
-                path = p;
+                this.path = crumb.path;
+                _breadcrumbTrail = _breadcrumbTrail.sublist(0, index + 1);
                 selectedAsset = null;
               });
               _filesAndFoldersService!.invoke(
-                GetFileAndFoldersServiceCommand(collection, path!),
+                GetFileAndFoldersServiceCommand(collection, crumb.path),
               );
             },
           );

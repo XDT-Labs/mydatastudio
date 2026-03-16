@@ -21,6 +21,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:three_js/three_js.dart' as three;
 import 'package:three_js_simple_loaders/three_js_simple_loaders.dart';
+import 'package:mydatatools/modules/files/widgets/video_file_preview.dart';
 
 class FileDetailsDrawer extends StatefulWidget {
   const FileDetailsDrawer({
@@ -368,9 +369,24 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   }
 
   // ─── Preview ──────────────────────────────────────────────────
+  /// Shared preview height: scales with sidebar width, min 200px, max 500px.
+  double get _previewHeight => (widget.width / 1.5).clamp(200.0, 500.0);
+
+  /// Wraps any [child] in the standard sized+clipped preview container.
+  Widget _previewContainer({required Widget child, Color? background}) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        height: _previewHeight,
+        width: double.infinity,
+        color: background ?? Colors.grey.shade100,
+        child: child,
+      ),
+    );
+  }
+
   Widget _buildPreviewSection() {
     final asset = widget.asset;
-    Widget preview;
 
     if (asset is File) {
       final ext = p.extension(asset.name).toLowerCase();
@@ -395,42 +411,26 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         return _buildPdfPreviewWithControls();
       } else if (ext == '.stl') {
         return _buildStlPreview(asset);
+      } else if (asset.contentType.startsWith('video/') ||
+          ['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm'].contains(ext)) {
+        return _buildVideoPreview(asset);
       } else if (textExts.contains(ext) ||
           asset.contentType.startsWith('text/')) {
         return _buildTextBasedPreview(asset, ext);
       } else if (_isImage(asset) || asset.path.startsWith('gdrive://')) {
-        preview = _buildImagePreview(asset);
+        return _previewContainer(child: _buildImagePreview(asset));
       } else {
-        preview = _buildGenericIcon(asset.contentType);
+        return _previewContainer(child: _buildGenericIcon(asset.contentType));
       }
     } else if (asset is Folder) {
-      if (asset.thumbnail != null) {
-        preview = _buildThumbnailWidget(asset.thumbnail!);
-      } else {
-        preview = const Center(
-          child: Icon(Icons.folder, size: 80, color: Colors.amber),
-        );
-      }
-    } else {
-      preview = const Center(
-        child: Icon(Icons.folder, size: 80, color: Colors.amber),
-      );
+      final child = asset.thumbnail != null
+          ? _buildThumbnailWidget(asset.thumbnail!)
+          : const Center(child: Icon(Icons.folder, size: 80, color: Colors.amber));
+      return _previewContainer(child: child);
     }
 
-    // Proportional height: 200 at width 300, 500 at width 700?
-    // Let's use a simpler linear scale or aspect ratio.
-    // If width is 300, height is 200. Aspect ratio = 3/2 = 1.5.
-    // height = width / 1.5
-    final height = (widget.width / 1.5).clamp(200.0, 500.0);
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        height: height,
-        width: double.infinity,
-        color: Colors.grey.shade100,
-        child: preview,
-      ),
+    return _previewContainer(
+      child: const Center(child: Icon(Icons.folder, size: 80, color: Colors.amber)),
     );
   }
 
@@ -445,6 +445,18 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       }
     } catch (_) {}
     return _buildGenericIcon(file.contentType);
+  }
+  
+  Widget _buildVideoPreview(File file) {
+    return _previewContainer(
+      background: Colors.grey.shade900,
+      child: VideoFilePreview(
+        path: file.path,
+        height: _previewHeight,
+        isGDrive: file.path.startsWith('gdrive://'),
+        onDownloadGDrive: () => _getGDriveFileBytes(file),
+      ),
+    );
   }
 
   Widget _buildThumbnailWidget(String thumbnail) {
@@ -475,7 +487,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
           children: [
             // ─── PDF viewer ──────────────────────────────────
             SizedBox(
-              height: (widget.width / 1.5).clamp(200.0, 500.0),
+              height: _previewHeight,
               child: _pdfError != null
                   ? Center(
                       child: Padding(
@@ -572,8 +584,6 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
   // ─── STL Preview (3D) ──────────────────────────────────────────
   Widget _buildStlPreview(File file) {
-    final height = (widget.width / 1.5).clamp(200.0, 500.0);
-
     if (_threeJs == null) {
       _threeJs = three.ThreeJS(
         onSetupComplete: () {
@@ -584,10 +594,10 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     }
 
     return Container(
-      height: height,
+      height: _previewHeight,
       decoration: BoxDecoration(
-        color: Colors.grey[900], // Deep gray Flutter background
-        border: Border.all(color: Colors.blue.withOpacity(0.5)),
+        color: Colors.grey[900],
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.5)),
       ),
       child: Stack(
         children: [

@@ -19,6 +19,7 @@ import 'package:rxdart/rxdart.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:password_dart/password_dart.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:media_kit/media_kit.dart';
 
 /// The main() function is the starting point of the application. It first ensures that the Flutter binding is initialized.
 /// Then, it checks if the platform is Windows, Linux or macOS. If it is, it gets the current screen and sets the window title, minimum size and maximum size.
@@ -26,6 +27,7 @@ import 'package:window_manager/window_manager.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   // Must add this line.
   await windowManager.ensureInitialized();
 
