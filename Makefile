@@ -22,6 +22,10 @@ APP_ZIP_NAME = aichat-macos.zip
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = bartowski/google_gemma-3-4b-it-GGUF
 HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
+HF_EMBEDDING_REPO=mys/ggml_CLIP-ViT-B-32-laion2B-s34B-b79K
+HF_EMBEDDING_DIR=$(PYTHON_DIR)/models/clip
+HF_EMBEDDING_FILE=CLIP-ViT-B-32-laion2B-s34B-b79K_ggml-model-q8_0.gguf
+HF_EMBEDDING_OUT=$(PYTHON_DIR)/models/$(HF_EMBEDDING_FILE)
 
 # Flutter Config
 FLUTTER_DIR = client
@@ -29,7 +33,7 @@ FLUTTER_DIR = client
 # --- Targets ---
 
 .PHONY: all
-all: models build-python build-client
+all: models build-python local-install-python build-client
 
 # Project Initialization
 .PHONY: init
@@ -42,9 +46,20 @@ init:
 # 1. Download GGUF Models
 .PHONY: models
 models:
-	@echo "--- 📥 Downloading GGUF models ---"
+	@echo "--- 📥 Checking/Downloading GGUF models ---"
 	@mkdir -p $(PYTHON_DIR)/models
-	hf download $(HF_MODEL) $(HF_FILE) --local-dir $(PYTHON_DIR)/models
+	@if [ ! -f $(PYTHON_DIR)/models/$(HF_FILE) ]; then \
+		echo "Downloading $(HF_FILE)..."; \
+		hf download $(HF_MODEL) $(HF_FILE) --local-dir $(PYTHON_DIR)/models; \
+	else \
+		echo "$(HF_FILE) already exists, skipping download."; \
+	fi
+	@if [ ! -f $(HF_EMBEDDING_OUT) ]; then \
+		echo "Downloading CLIP GGUF model..."; \
+		hf download $(HF_EMBEDDING_REPO) $(HF_EMBEDDING_FILE) --local-dir $(PYTHON_DIR)/models; \
+	else \
+		echo "CLIP GGUF model already exists, skipping download."; \
+	fi
 
 
 # 2. Build Python Service
@@ -65,7 +80,7 @@ build-client:
 	@echo "--- 🚀 Building Flutter Desktop client (macOS) ---"
 	@cd $(FLUTTER_DIR) && \
 		flutter pub get && \
-		flutter build macos --release
+		flutter build macos --release --no-tree-shake-icons
 	@echo "--- ✅ Flutter build complete ---"
 
 # Local Install (Testing)
