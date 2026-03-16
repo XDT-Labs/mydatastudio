@@ -272,7 +272,7 @@ class CloudFileIsolateWorker {
       final response = await driveApi.files.list(
         q: "'$parentId' in parents and trashed = false",
         $fields:
-            'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, parents)',
+            'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, parents, thumbnailLink, webContentLink)',
         pageToken: pageToken,
         pageSize: 200,
         orderBy: 'folder, name',
@@ -374,6 +374,8 @@ class CloudFileIsolateWorker {
       dateLastModified: driveFile.modifiedTime ?? scanStartTime,
       lastScannedDate: scanStartTime,
       collectionId: collectionId,
+      thumbnail: driveFile.thumbnailLink,
+      downloadUrl: driveFile.webContentLink,
     );
   }
 
@@ -403,6 +405,8 @@ class CloudFileIsolateWorker {
       isDeleted: false,
       size: size,
       contentType: driveFile.mimeType ?? 'application/octet-stream',
+      thumbnail: driveFile.thumbnailLink,
+      downloadUrl: driveFile.webContentLink,
     );
   }
 }

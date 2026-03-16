@@ -19,6 +19,8 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:io' as io;
 import 'package:path/path.dart' as p;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:mydatatools/file_sources/google_drive/google_drive_auth_service.dart';
 import 'package:flutter_breadcrumb/flutter_breadcrumb.dart';
 import 'package:rxdart/rxdart.dart';
 
@@ -487,11 +489,29 @@ class _RxFilesPage extends State<RxFilesPage> {
     for (var item in selectedItems) {
       if (item is File) {
         try {
-          final sourceFile = io.File(item.path);
-          final fileName = p.basename(item.path);
+          final fileName = item.name;
           final destinationPath = p.join(selectedDirectory, fileName);
-          await sourceFile.copy(destinationPath);
-          copiedCount++;
+
+          if (item.path.startsWith('gdrive://')) {
+            if (item.downloadUrl != null && collection != null) {
+              final token =
+                  await GoogleDriveAuthService.getValidAccessToken(collection!);
+              final response = await http.get(
+                Uri.parse(item.downloadUrl!),
+                headers: {'Authorization': 'Bearer $token'},
+              );
+              if (response.statusCode == 200) {
+                await io.File(destinationPath).writeAsBytes(response.bodyBytes);
+                copiedCount++;
+              } else {
+                throw Exception('Download failed: ${response.statusCode}');
+              }
+            }
+          } else {
+            final sourceFile = io.File(item.path);
+            await sourceFile.copy(destinationPath);
+            copiedCount++;
+          }
         } catch (e) {
           logger.e("Error copying ${item.path}: $e");
           errorCount++;

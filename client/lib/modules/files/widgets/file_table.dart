@@ -16,6 +16,7 @@ import 'package:moment_dart/moment_dart.dart';
 import 'package:mydatatools/modules/files/services/delete_file_service.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class FileTable extends StatefulWidget {
   const FileTable({super.key, required this.data});
@@ -180,9 +181,9 @@ class _FileTable extends State<FileTable> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
-                      !isImage
+                      (f.thumbnail == null && !isImage)
                           ? Icon(getIconForMimeType(f.contentType))
-                          : getImageComponent(isImage, f),
+                          : getImageComponent(f),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(f.name, overflow: TextOverflow.ellipsis),
@@ -254,7 +255,13 @@ class _FileTable extends State<FileTable> {
                         icon: const Icon(Icons.open_in_new),
                         tooltip: 'Open',
                         onPressed: () async {
-                          await OpenFilex.open(f.path);
+                          if (f.path.startsWith('gdrive://')) {
+                            final id = f.path.substring(9);
+                            final url = 'https://drive.google.com/file/d/$id/view';
+                            await launchUrl(Uri.parse(url));
+                          } else {
+                            await OpenFilex.open(f.path);
+                          }
                         },
                       ),
                       IconButton(
@@ -403,35 +410,39 @@ class _FileTable extends State<FileTable> {
     }
   }
 
-  Widget getImageComponent(bool isImage, File file) {
-    if (isImage) {
-      try {
-        if (file.thumbnail != null) {
-          return Padding(
-            padding: const EdgeInsets.all(4),
-            child: Image(
-              image: ResizeImage(
-                MemoryImage(base64Decode(file.thumbnail!)),
-                width: 100,
-                height: 64,
-              ),
+  Widget getImageComponent(File file) {
+    try {
+      if (file.thumbnail != null) {
+        return Padding(
+          padding: const EdgeInsets.all(4),
+          child: Image(
+            image: ResizeImage(
+              file.thumbnail!.startsWith('http')
+                  ? NetworkImage(file.thumbnail!)
+                  : MemoryImage(base64Decode(file.thumbnail!)) as ImageProvider,
+              width: 100,
+              height: 64,
             ),
-          );
-        } else {
-          return Padding(
-            padding: const EdgeInsets.all(4),
-            child: Image(
-              image: ResizeImage(
-                FileImage(io.File(file.path)),
-                width: 100,
-                height: 64,
-              ),
+            errorBuilder: (context, error, stackTrace) => 
+               Icon(getIconForMimeType(file.contentType)),
+          ),
+        );
+      } else {
+        return Padding(
+          padding: const EdgeInsets.all(4),
+          child: Image(
+            image: ResizeImage(
+              FileImage(io.File(file.path)),
+              width: 100,
+              height: 64,
             ),
-          );
-        }
-      } catch (err) {
-        //do nothing, return placeholder
+            errorBuilder: (context, error, stackTrace) => 
+               Icon(getIconForMimeType(file.contentType)),
+          ),
+        );
       }
+    } catch (err) {
+      //do nothing, return placeholder
     }
     return const Placeholder();
   }

@@ -187,7 +187,7 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration {
@@ -200,12 +200,19 @@ class AppDatabase extends _$AppDatabase {
       },
       onUpgrade: (Migrator m, int from, int to) async {
         if (from < 2) {
-          logger.i("Upgrade to v2: Adding last_scanned_date to Files and Folders");
+          logger.i(
+            "Upgrade to v2: Adding last_scanned_date to Files and Folders",
+          );
           await m.addColumn(files, files.lastScannedDate);
           await m.addColumn(folders, folders.lastScannedDate);
         }
         if (from < 3) {
-          print("Upgrade tables to v3");
+          logger.i(
+            "Upgrade to v3: Adding download_url to Files and Folders, thumbnail to Folders",
+          );
+          await m.addColumn(files, files.downloadUrl);
+          await m.addColumn(folders, folders.thumbnail);
+          await m.addColumn(folders, folders.downloadUrl);
         }
         //continue
       },

@@ -23,6 +23,7 @@ class Files extends Table {
   IntColumn get size => integer()();
   BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
   TextColumn get thumbnail => text().nullable()();
+  TextColumn get downloadUrl => text().nullable()();
   RealColumn get latitude => real().nullable()();
   RealColumn get longitude => real().nullable()();
 
@@ -51,6 +52,7 @@ class File implements FileAsset, Insertable<File> {
   int size;
   bool isDeleted;
   String? thumbnail;
+  String? downloadUrl;
   double? latitude;
   double? longitude;
 
@@ -67,6 +69,7 @@ class File implements FileAsset, Insertable<File> {
     required this.size,
     required this.isDeleted,
     this.thumbnail,
+    this.downloadUrl,
     this.latitude,
     this.longitude,
   });
@@ -84,6 +87,7 @@ class File implements FileAsset, Insertable<File> {
     required this.size,
     required this.isDeleted,
     this.thumbnail,
+    this.downloadUrl,
     this.latitude,
     this.longitude,
   });
@@ -103,6 +107,7 @@ class File implements FileAsset, Insertable<File> {
       size: Value(size),
       isDeleted: Value(isDeleted),
       thumbnail: Value(thumbnail),
+      downloadUrl: Value(downloadUrl),
       latitude: Value(latitude),
       longitude: Value(longitude),
     ).toColumns(nullToAbsent);

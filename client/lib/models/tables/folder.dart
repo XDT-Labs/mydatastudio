@@ -16,6 +16,8 @@ class Folders extends Table {
   DateTimeColumn get dateCreated => dateTime()();
   DateTimeColumn get dateLastModified => dateTime()();
   DateTimeColumn get lastScannedDate => dateTime().nullable()();
+  TextColumn get thumbnail => text().nullable()();
+  TextColumn get downloadUrl => text().nullable()();
   TextColumn get collectionId => text()();
 
   @override
@@ -39,6 +41,8 @@ class Folder implements FileAsset, Insertable<Folder> {
   DateTime? lastScannedDate;
   @override
   String collectionId;
+  String? thumbnail;
+  String? downloadUrl;
 
   Folder({
     required this.id,
@@ -49,6 +53,8 @@ class Folder implements FileAsset, Insertable<Folder> {
     required this.dateLastModified,
     this.lastScannedDate,
     required this.collectionId,
+    this.thumbnail,
+    this.downloadUrl,
   });
 
   Folder.fromDb({
@@ -60,6 +66,8 @@ class Folder implements FileAsset, Insertable<Folder> {
     required this.dateLastModified,
     this.lastScannedDate,
     required this.collectionId,
+    this.thumbnail,
+    this.downloadUrl,
   });
 
   @override
@@ -73,6 +81,8 @@ class Folder implements FileAsset, Insertable<Folder> {
       dateLastModified: Value(dateLastModified),
       lastScannedDate: Value(lastScannedDate),
       collectionId: Value(collectionId),
+      thumbnail: Value(thumbnail),
+      downloadUrl: Value(downloadUrl),
     ).toColumns(nullToAbsent);
   }
 }

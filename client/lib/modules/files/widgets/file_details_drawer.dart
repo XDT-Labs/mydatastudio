@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:io' as io;
 
 import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
 import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatatools/models/tables/folder.dart';
 import 'package:mydatatools/models/tables/file_asset.dart';
 import 'package:mydatatools/modules/files/files_constants.dart';
 import 'package:moment_dart/moment_dart.dart';
@@ -13,6 +15,10 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:xml/xml.dart';
+import 'package:mydatatools/file_sources/google_drive/google_drive_auth_service.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:three_js/three_js.dart' as three;
 import 'package:three_js_simple_loaders/three_js_simple_loaders.dart';
 
@@ -107,17 +113,30 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     // PDF controller
     if (file.contentType == FilesConstants.mimeTypePdf) {
       try {
-        final doc = await PdfDocument.openFile(file.path);
-        final pages = doc.pagesCount;
-        final controller = PdfController(document: Future.value(doc));
-        if (mounted) {
-          setState(() {
-            _pdfController = controller;
-            _pdfTotalPages = pages;
-            _pdfCurrentPage = 1;
-          });
+        PdfDocument? doc;
+        if (file.path.startsWith('gdrive://')) {
+          final bytes = await _getGDriveFileBytes(file);
+          if (bytes != null) {
+            doc = await PdfDocument.openData(Uint8List.fromList(bytes));
+          }
+        } else {
+          doc = await PdfDocument.openFile(file.path);
         }
-      } catch (_) {}
+
+        if (doc != null) {
+          final pages = doc.pagesCount;
+          final controller = PdfController(document: Future.value(doc));
+          if (mounted) {
+            setState(() {
+              _pdfController = controller;
+              _pdfTotalPages = pages;
+              _pdfCurrentPage = 1;
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint('Error loading PDF: $e');
+      }
     }
 
     // Text content for TXT, HTML, XML, Markdown
@@ -141,14 +160,44 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     if (file.contentType.startsWith('text/') || textExts.contains(ext)) {
       setState(() => _loadingText = true);
       try {
-        final ioFile = io.File(file.path);
-        if (await ioFile.exists()) {
-          final content = await ioFile.readAsString();
-          if (mounted) setState(() => _textContent = content);
+        if (file.path.startsWith('gdrive://')) {
+          final bytes = await _getGDriveFileBytes(file);
+          if (bytes != null) {
+            final content = utf8.decode(bytes);
+            if (mounted) setState(() => _textContent = content);
+          }
+        } else {
+          final ioFile = io.File(file.path);
+          if (await ioFile.exists()) {
+            final content = await ioFile.readAsString();
+            if (mounted) setState(() => _textContent = content);
+          }
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error loading text content: $e');
+      }
       if (mounted) setState(() => _loadingText = false);
     }
+  }
+
+  Future<List<int>?> _getGDriveFileBytes(File file) async {
+    if (file.downloadUrl == null) return null;
+    try {
+      final collection =
+          await CollectionRepository().collectionById(file.collectionId);
+      if (collection == null) return null;
+      final token = await GoogleDriveAuthService.getValidAccessToken(collection);
+      final response = await http.get(
+        Uri.parse(file.downloadUrl!),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (response.statusCode == 200) {
+        return response.bodyBytes;
+      }
+    } catch (e) {
+      debugPrint('Error downloading GDrive file for preview: $e');
+    }
+    return null;
   }
 
   Future<void> _saveContent() async {
@@ -292,17 +341,26 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         '.css',
       ];
 
-      if (asset.contentType == FilesConstants.mimeTypeImage) {
-        preview = _buildImagePreview(asset);
-      } else if (asset.contentType == FilesConstants.mimeTypePdf) {
+      if (asset.contentType == FilesConstants.mimeTypePdf) {
         return _buildPdfPreviewWithControls();
+      } else if (ext == '.stl') {
+        return _buildStlPreview(asset);
       } else if (textExts.contains(ext) ||
           asset.contentType.startsWith('text/')) {
         return _buildTextBasedPreview(asset, ext);
-      } else if (ext == '.stl') {
-        return _buildStlPreview(asset);
+      } else if (asset.contentType == FilesConstants.mimeTypeImage ||
+          asset.path.startsWith('gdrive://')) {
+        preview = _buildImagePreview(asset);
       } else {
         preview = _buildGenericIcon(asset.contentType);
+      }
+    } else if (asset is Folder) {
+      if (asset.thumbnail != null) {
+        preview = _buildThumbnailWidget(asset.thumbnail!);
+      } else {
+        preview = const Center(
+          child: Icon(Icons.folder, size: 80, color: Colors.amber),
+        );
       }
     } else {
       preview = const Center(
@@ -330,7 +388,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   Widget _buildImagePreview(File file) {
     try {
       if (file.thumbnail != null) {
-        return Image.memory(base64Decode(file.thumbnail!), fit: BoxFit.contain);
+        return _buildThumbnailWidget(file.thumbnail!);
       }
       final ioFile = io.File(file.path);
       if (ioFile.existsSync()) {
@@ -338,6 +396,19 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       }
     } catch (_) {}
     return _buildGenericIcon(file.contentType);
+  }
+
+  Widget _buildThumbnailWidget(String thumbnail) {
+    if (thumbnail.startsWith('http')) {
+      return Image.network(
+        thumbnail,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) => const Center(
+          child: Icon(Icons.broken_image_outlined, size: 40, color: Colors.grey),
+        ),
+      );
+    }
+    return Image.memory(base64Decode(thumbnail), fit: BoxFit.contain);
   }
 
   Widget _buildPdfPreviewWithControls() {
@@ -512,14 +583,25 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       scene.add(dirLight);
 
       final loader = STLLoader();
+      three.Mesh? mesh;
 
-      // Load from local file
-      final file = io.File(filePath);
-      if (!await file.exists()) {
-        throw 'File does not exist: $filePath';
+      if (filePath.startsWith('gdrive://')) {
+        final bytes = await _getGDriveFileBytes(widget.asset as File);
+        if (bytes != null) {
+          final tempDir = await getTemporaryDirectory();
+          final tempFile = io.File(p.join(tempDir.path, 'temp_preview.stl'));
+          await tempFile.writeAsBytes(bytes);
+          mesh = await loader.fromFile(tempFile);
+        }
+      } else {
+        final file = io.File(filePath);
+        if (!await file.exists()) {
+          throw 'File does not exist: $filePath';
+        }
+        mesh = await loader.fromFile(file);
       }
 
-      final mesh = await loader.fromFile(file);
+      if (mesh == null) throw 'Could not load STL mesh';
       final geometry = mesh.geometry!;
 
       final material = three.MeshPhongMaterial({
@@ -612,6 +694,8 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
           ),
         ),
         _infoRowSelectable('Path', file.path),
+        if (file.downloadUrl != null)
+          _infoRowSelectable('Download URL', file.downloadUrl!),
       ],
     );
   }
@@ -860,7 +944,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                     ),
                   ),
                   const Spacer(),
-                  if (isMarkdown && !_isEditing)
+                  if (isMarkdown && !_isEditing && !file.path.startsWith('gdrive://'))
                     TextButton.icon(
                       onPressed: () {
                         setState(() {

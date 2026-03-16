@@ -1798,6 +1798,17 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _downloadUrlMeta = const VerificationMeta(
+    'downloadUrl',
+  );
+  @override
+  late final GeneratedColumn<String> downloadUrl = GeneratedColumn<String>(
+    'download_url',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _latitudeMeta = const VerificationMeta(
     'latitude',
   );
@@ -1834,6 +1845,7 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
     size,
     isDeleted,
     thumbnail,
+    downloadUrl,
     latitude,
     longitude,
   ];
@@ -1951,6 +1963,15 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
         thumbnail.isAcceptableOrUnknown(data['thumbnail']!, _thumbnailMeta),
       );
     }
+    if (data.containsKey('download_url')) {
+      context.handle(
+        _downloadUrlMeta,
+        downloadUrl.isAcceptableOrUnknown(
+          data['download_url']!,
+          _downloadUrlMeta,
+        ),
+      );
+    }
     if (data.containsKey('latitude')) {
       context.handle(
         _latitudeMeta,
@@ -2030,6 +2051,10 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
         DriftSqlType.string,
         data['${effectivePrefix}thumbnail'],
       ),
+      downloadUrl: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}download_url'],
+      ),
       latitude: attachedDatabase.typeMapping.read(
         DriftSqlType.double,
         data['${effectivePrefix}latitude'],
@@ -2060,6 +2085,7 @@ class FilesCompanion extends UpdateCompanion<File> {
   final Value<int> size;
   final Value<bool> isDeleted;
   final Value<String?> thumbnail;
+  final Value<String?> downloadUrl;
   final Value<double?> latitude;
   final Value<double?> longitude;
   final Value<int> rowid;
@@ -2076,6 +2102,7 @@ class FilesCompanion extends UpdateCompanion<File> {
     this.size = const Value.absent(),
     this.isDeleted = const Value.absent(),
     this.thumbnail = const Value.absent(),
+    this.downloadUrl = const Value.absent(),
     this.latitude = const Value.absent(),
     this.longitude = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -2093,6 +2120,7 @@ class FilesCompanion extends UpdateCompanion<File> {
     required int size,
     this.isDeleted = const Value.absent(),
     this.thumbnail = const Value.absent(),
+    this.downloadUrl = const Value.absent(),
     this.latitude = const Value.absent(),
     this.longitude = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -2118,6 +2146,7 @@ class FilesCompanion extends UpdateCompanion<File> {
     Expression<int>? size,
     Expression<bool>? isDeleted,
     Expression<String>? thumbnail,
+    Expression<String>? downloadUrl,
     Expression<double>? latitude,
     Expression<double>? longitude,
     Expression<int>? rowid,
@@ -2135,6 +2164,7 @@ class FilesCompanion extends UpdateCompanion<File> {
       if (size != null) 'size': size,
       if (isDeleted != null) 'is_deleted': isDeleted,
       if (thumbnail != null) 'thumbnail': thumbnail,
+      if (downloadUrl != null) 'download_url': downloadUrl,
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
       if (rowid != null) 'rowid': rowid,
@@ -2154,6 +2184,7 @@ class FilesCompanion extends UpdateCompanion<File> {
     Value<int>? size,
     Value<bool>? isDeleted,
     Value<String?>? thumbnail,
+    Value<String?>? downloadUrl,
     Value<double?>? latitude,
     Value<double?>? longitude,
     Value<int>? rowid,
@@ -2171,6 +2202,7 @@ class FilesCompanion extends UpdateCompanion<File> {
       size: size ?? this.size,
       isDeleted: isDeleted ?? this.isDeleted,
       thumbnail: thumbnail ?? this.thumbnail,
+      downloadUrl: downloadUrl ?? this.downloadUrl,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       rowid: rowid ?? this.rowid,
@@ -2216,6 +2248,9 @@ class FilesCompanion extends UpdateCompanion<File> {
     if (thumbnail.present) {
       map['thumbnail'] = Variable<String>(thumbnail.value);
     }
+    if (downloadUrl.present) {
+      map['download_url'] = Variable<String>(downloadUrl.value);
+    }
     if (latitude.present) {
       map['latitude'] = Variable<double>(latitude.value);
     }
@@ -2243,6 +2278,7 @@ class FilesCompanion extends UpdateCompanion<File> {
           ..write('size: $size, ')
           ..write('isDeleted: $isDeleted, ')
           ..write('thumbnail: $thumbnail, ')
+          ..write('downloadUrl: $downloadUrl, ')
           ..write('latitude: $latitude, ')
           ..write('longitude: $longitude, ')
           ..write('rowid: $rowid')
@@ -2327,6 +2363,28 @@ class $FoldersTable extends Folders with TableInfo<$FoldersTable, Folder> {
         type: DriftSqlType.dateTime,
         requiredDuringInsert: false,
       );
+  static const VerificationMeta _thumbnailMeta = const VerificationMeta(
+    'thumbnail',
+  );
+  @override
+  late final GeneratedColumn<String> thumbnail = GeneratedColumn<String>(
+    'thumbnail',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _downloadUrlMeta = const VerificationMeta(
+    'downloadUrl',
+  );
+  @override
+  late final GeneratedColumn<String> downloadUrl = GeneratedColumn<String>(
+    'download_url',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _collectionIdMeta = const VerificationMeta(
     'collectionId',
   );
@@ -2347,6 +2405,8 @@ class $FoldersTable extends Folders with TableInfo<$FoldersTable, Folder> {
     dateCreated,
     dateLastModified,
     lastScannedDate,
+    thumbnail,
+    downloadUrl,
     collectionId,
   ];
   @override
@@ -2421,6 +2481,21 @@ class $FoldersTable extends Folders with TableInfo<$FoldersTable, Folder> {
         ),
       );
     }
+    if (data.containsKey('thumbnail')) {
+      context.handle(
+        _thumbnailMeta,
+        thumbnail.isAcceptableOrUnknown(data['thumbnail']!, _thumbnailMeta),
+      );
+    }
+    if (data.containsKey('download_url')) {
+      context.handle(
+        _downloadUrlMeta,
+        downloadUrl.isAcceptableOrUnknown(
+          data['download_url']!,
+          _downloadUrlMeta,
+        ),
+      );
+    }
     if (data.containsKey('collection_id')) {
       context.handle(
         _collectionIdMeta,
@@ -2480,6 +2555,14 @@ class $FoldersTable extends Folders with TableInfo<$FoldersTable, Folder> {
             DriftSqlType.string,
             data['${effectivePrefix}collection_id'],
           )!,
+      thumbnail: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}thumbnail'],
+      ),
+      downloadUrl: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}download_url'],
+      ),
     );
   }
 
@@ -2497,6 +2580,8 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
   final Value<DateTime> dateCreated;
   final Value<DateTime> dateLastModified;
   final Value<DateTime?> lastScannedDate;
+  final Value<String?> thumbnail;
+  final Value<String?> downloadUrl;
   final Value<String> collectionId;
   final Value<int> rowid;
   const FoldersCompanion({
@@ -2507,6 +2592,8 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
     this.dateCreated = const Value.absent(),
     this.dateLastModified = const Value.absent(),
     this.lastScannedDate = const Value.absent(),
+    this.thumbnail = const Value.absent(),
+    this.downloadUrl = const Value.absent(),
     this.collectionId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -2518,6 +2605,8 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
     required DateTime dateCreated,
     required DateTime dateLastModified,
     this.lastScannedDate = const Value.absent(),
+    this.thumbnail = const Value.absent(),
+    this.downloadUrl = const Value.absent(),
     required String collectionId,
     this.rowid = const Value.absent(),
   }) : id = Value(id),
@@ -2535,6 +2624,8 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
     Expression<DateTime>? dateCreated,
     Expression<DateTime>? dateLastModified,
     Expression<DateTime>? lastScannedDate,
+    Expression<String>? thumbnail,
+    Expression<String>? downloadUrl,
     Expression<String>? collectionId,
     Expression<int>? rowid,
   }) {
@@ -2546,6 +2637,8 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
       if (dateCreated != null) 'date_created': dateCreated,
       if (dateLastModified != null) 'date_last_modified': dateLastModified,
       if (lastScannedDate != null) 'last_scanned_date': lastScannedDate,
+      if (thumbnail != null) 'thumbnail': thumbnail,
+      if (downloadUrl != null) 'download_url': downloadUrl,
       if (collectionId != null) 'collection_id': collectionId,
       if (rowid != null) 'rowid': rowid,
     });
@@ -2559,6 +2652,8 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
     Value<DateTime>? dateCreated,
     Value<DateTime>? dateLastModified,
     Value<DateTime?>? lastScannedDate,
+    Value<String?>? thumbnail,
+    Value<String?>? downloadUrl,
     Value<String>? collectionId,
     Value<int>? rowid,
   }) {
@@ -2570,6 +2665,8 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
       dateCreated: dateCreated ?? this.dateCreated,
       dateLastModified: dateLastModified ?? this.dateLastModified,
       lastScannedDate: lastScannedDate ?? this.lastScannedDate,
+      thumbnail: thumbnail ?? this.thumbnail,
+      downloadUrl: downloadUrl ?? this.downloadUrl,
       collectionId: collectionId ?? this.collectionId,
       rowid: rowid ?? this.rowid,
     );
@@ -2599,6 +2696,12 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
     if (lastScannedDate.present) {
       map['last_scanned_date'] = Variable<DateTime>(lastScannedDate.value);
     }
+    if (thumbnail.present) {
+      map['thumbnail'] = Variable<String>(thumbnail.value);
+    }
+    if (downloadUrl.present) {
+      map['download_url'] = Variable<String>(downloadUrl.value);
+    }
     if (collectionId.present) {
       map['collection_id'] = Variable<String>(collectionId.value);
     }
@@ -2618,6 +2721,8 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
           ..write('dateCreated: $dateCreated, ')
           ..write('dateLastModified: $dateLastModified, ')
           ..write('lastScannedDate: $lastScannedDate, ')
+          ..write('thumbnail: $thumbnail, ')
+          ..write('downloadUrl: $downloadUrl, ')
           ..write('collectionId: $collectionId, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -4068,6 +4173,7 @@ typedef $$FilesTableCreateCompanionBuilder =
       required int size,
       Value<bool> isDeleted,
       Value<String?> thumbnail,
+      Value<String?> downloadUrl,
       Value<double?> latitude,
       Value<double?> longitude,
       Value<int> rowid,
@@ -4086,6 +4192,7 @@ typedef $$FilesTableUpdateCompanionBuilder =
       Value<int> size,
       Value<bool> isDeleted,
       Value<String?> thumbnail,
+      Value<String?> downloadUrl,
       Value<double?> latitude,
       Value<double?> longitude,
       Value<int> rowid,
@@ -4156,6 +4263,11 @@ class $$FilesTableFilterComposer extends Composer<_$AppDatabase, $FilesTable> {
 
   ColumnFilters<String> get thumbnail => $composableBuilder(
     column: $table.thumbnail,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4239,6 +4351,11 @@ class $$FilesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<double> get latitude => $composableBuilder(
     column: $table.latitude,
     builder: (column) => ColumnOrderings(column),
@@ -4305,6 +4422,11 @@ class $$FilesTableAnnotationComposer
   GeneratedColumn<String> get thumbnail =>
       $composableBuilder(column: $table.thumbnail, builder: (column) => column);
 
+  GeneratedColumn<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<double> get latitude =>
       $composableBuilder(column: $table.latitude, builder: (column) => column);
 
@@ -4352,6 +4474,7 @@ class $$FilesTableTableManager
                 Value<int> size = const Value.absent(),
                 Value<bool> isDeleted = const Value.absent(),
                 Value<String?> thumbnail = const Value.absent(),
+                Value<String?> downloadUrl = const Value.absent(),
                 Value<double?> latitude = const Value.absent(),
                 Value<double?> longitude = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -4368,6 +4491,7 @@ class $$FilesTableTableManager
                 size: size,
                 isDeleted: isDeleted,
                 thumbnail: thumbnail,
+                downloadUrl: downloadUrl,
                 latitude: latitude,
                 longitude: longitude,
                 rowid: rowid,
@@ -4386,6 +4510,7 @@ class $$FilesTableTableManager
                 required int size,
                 Value<bool> isDeleted = const Value.absent(),
                 Value<String?> thumbnail = const Value.absent(),
+                Value<String?> downloadUrl = const Value.absent(),
                 Value<double?> latitude = const Value.absent(),
                 Value<double?> longitude = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -4402,6 +4527,7 @@ class $$FilesTableTableManager
                 size: size,
                 isDeleted: isDeleted,
                 thumbnail: thumbnail,
+                downloadUrl: downloadUrl,
                 latitude: latitude,
                 longitude: longitude,
                 rowid: rowid,
@@ -4444,6 +4570,8 @@ typedef $$FoldersTableCreateCompanionBuilder =
       required DateTime dateCreated,
       required DateTime dateLastModified,
       Value<DateTime?> lastScannedDate,
+      Value<String?> thumbnail,
+      Value<String?> downloadUrl,
       required String collectionId,
       Value<int> rowid,
     });
@@ -4456,6 +4584,8 @@ typedef $$FoldersTableUpdateCompanionBuilder =
       Value<DateTime> dateCreated,
       Value<DateTime> dateLastModified,
       Value<DateTime?> lastScannedDate,
+      Value<String?> thumbnail,
+      Value<String?> downloadUrl,
       Value<String> collectionId,
       Value<int> rowid,
     });
@@ -4501,6 +4631,16 @@ class $$FoldersTableFilterComposer
 
   ColumnFilters<DateTime> get lastScannedDate => $composableBuilder(
     column: $table.lastScannedDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get thumbnail => $composableBuilder(
+    column: $table.thumbnail,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4554,6 +4694,16 @@ class $$FoldersTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get thumbnail => $composableBuilder(
+    column: $table.thumbnail,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get collectionId => $composableBuilder(
     column: $table.collectionId,
     builder: (column) => ColumnOrderings(column),
@@ -4593,6 +4743,14 @@ class $$FoldersTableAnnotationComposer
 
   GeneratedColumn<DateTime> get lastScannedDate => $composableBuilder(
     column: $table.lastScannedDate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get thumbnail =>
+      $composableBuilder(column: $table.thumbnail, builder: (column) => column);
+
+  GeneratedColumn<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
     builder: (column) => column,
   );
 
@@ -4637,6 +4795,8 @@ class $$FoldersTableTableManager
                 Value<DateTime> dateCreated = const Value.absent(),
                 Value<DateTime> dateLastModified = const Value.absent(),
                 Value<DateTime?> lastScannedDate = const Value.absent(),
+                Value<String?> thumbnail = const Value.absent(),
+                Value<String?> downloadUrl = const Value.absent(),
                 Value<String> collectionId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => FoldersCompanion(
@@ -4647,6 +4807,8 @@ class $$FoldersTableTableManager
                 dateCreated: dateCreated,
                 dateLastModified: dateLastModified,
                 lastScannedDate: lastScannedDate,
+                thumbnail: thumbnail,
+                downloadUrl: downloadUrl,
                 collectionId: collectionId,
                 rowid: rowid,
               ),
@@ -4659,6 +4821,8 @@ class $$FoldersTableTableManager
                 required DateTime dateCreated,
                 required DateTime dateLastModified,
                 Value<DateTime?> lastScannedDate = const Value.absent(),
+                Value<String?> thumbnail = const Value.absent(),
+                Value<String?> downloadUrl = const Value.absent(),
                 required String collectionId,
                 Value<int> rowid = const Value.absent(),
               }) => FoldersCompanion.insert(
@@ -4669,6 +4833,8 @@ class $$FoldersTableTableManager
                 dateCreated: dateCreated,
                 dateLastModified: dateLastModified,
                 lastScannedDate: lastScannedDate,
+                thumbnail: thumbnail,
+                downloadUrl: downloadUrl,
                 collectionId: collectionId,
                 rowid: rowid,
               ),
