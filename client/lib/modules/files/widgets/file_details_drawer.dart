@@ -55,6 +55,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   three.ThreeJS? _threeJs;
   three.OrbitControls? _orbitControls;
   bool _loadingStl = false;
+  String? _stlError;
 
   @override
   void initState() {
@@ -98,7 +99,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     final file = widget.asset as File;
 
     // EXIF for images
-    if (file.contentType == FilesConstants.mimeTypeImage) {
+    if (_isImage(file)) {
       setState(() => _loadingExif = true);
       try {
         final ioFile = io.File(file.path);
@@ -110,14 +111,25 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       if (mounted) setState(() => _loadingExif = false);
     }
 
+    if (mounted) {
+      setState(() {
+        _pdfController?.dispose();
+        _pdfController = null;
+        _pdfTotalPages = 0;
+        _pdfCurrentPage = 1;
+      });
+    }
+
     // PDF controller
-    if (file.contentType == FilesConstants.mimeTypePdf) {
+    if (_isPdf(file)) {
       try {
         PdfDocument? doc;
         if (file.path.startsWith('gdrive://')) {
           final bytes = await _getGDriveFileBytes(file);
           if (bytes != null) {
-            doc = await PdfDocument.openData(Uint8List.fromList(bytes));
+            final uint8bytes =
+                bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+            doc = await PdfDocument.openData(uint8bytes);
           }
         } else {
           doc = await PdfDocument.openFile(file.path);
@@ -140,7 +152,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     }
 
     // Text content for TXT, HTML, XML, Markdown
-    final ext = p.extension(file.path).toLowerCase();
+    final ext = p.extension(file.name).toLowerCase();
     final textExts = [
       '.txt',
       '.html',
@@ -183,16 +195,32 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   Future<List<int>?> _getGDriveFileBytes(File file) async {
     if (file.downloadUrl == null) return null;
     try {
-      final collection =
-          await CollectionRepository().collectionById(file.collectionId);
+      final collection = await CollectionRepository().collectionById(
+        file.collectionId,
+      );
       if (collection == null) return null;
-      final token = await GoogleDriveAuthService.getValidAccessToken(collection);
+      final token = await GoogleDriveAuthService.getValidAccessToken(
+        collection,
+      );
+      final uri = Uri.parse(file.downloadUrl!);
+      final queryParams = Map<String, String>.from(uri.queryParameters);
+      queryParams.remove('authuser');
+      final cleanUri = uri.replace(queryParameters: queryParams);
+
       final response = await http.get(
-        Uri.parse(file.downloadUrl!),
+        cleanUri,
         headers: {'Authorization': 'Bearer $token'},
       );
       if (response.statusCode == 200) {
-        return response.bodyBytes;
+        final bytes = response.bodyBytes;
+        debugPrint(
+          'Downloaded GDrive file: ${file.name}, length: ${bytes.length}, type: ${bytes.runtimeType}',
+        );
+        return bytes;
+      } else {
+        debugPrint(
+          'GDrive download failed: ${response.statusCode}, ${response.body}',
+        );
       }
     } catch (e) {
       debugPrint('Error downloading GDrive file for preview: $e');
@@ -227,9 +255,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isImage =
-        widget.asset is File &&
-        (widget.asset as File).contentType == FilesConstants.mimeTypeImage;
+    final isImage = widget.asset is File && _isImage(widget.asset as File);
     final tabCount = isImage ? 3 : 1;
 
     return Container(
@@ -271,9 +297,10 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                           : Icons.open_in_full,
                       size: 16,
                     ),
-                    tooltip: widget.width >= 700.0
-                        ? 'Restore Width'
-                        : 'Maximize Width',
+                    tooltip:
+                        widget.width >= 700.0
+                            ? 'Restore Width'
+                            : 'Maximize Width',
                     onPressed: widget.onExpand,
                     padding: const EdgeInsets.all(4),
                     constraints: const BoxConstraints(),
@@ -323,7 +350,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     Widget preview;
 
     if (asset is File) {
-      final ext = p.extension(asset.path).toLowerCase();
+      final ext = p.extension(asset.name).toLowerCase();
       final textExts = [
         '.txt',
         '.html',
@@ -341,15 +368,14 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         '.css',
       ];
 
-      if (asset.contentType == FilesConstants.mimeTypePdf) {
+      if (_isPdf(asset)) {
         return _buildPdfPreviewWithControls();
       } else if (ext == '.stl') {
         return _buildStlPreview(asset);
       } else if (textExts.contains(ext) ||
           asset.contentType.startsWith('text/')) {
         return _buildTextBasedPreview(asset, ext);
-      } else if (asset.contentType == FilesConstants.mimeTypeImage ||
-          asset.path.startsWith('gdrive://')) {
+      } else if (_isImage(asset) || asset.path.startsWith('gdrive://')) {
         preview = _buildImagePreview(asset);
       } else {
         preview = _buildGenericIcon(asset.contentType);
@@ -403,9 +429,14 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       return Image.network(
         thumbnail,
         fit: BoxFit.contain,
-        errorBuilder: (context, error, stackTrace) => const Center(
-          child: Icon(Icons.broken_image_outlined, size: 40, color: Colors.grey),
-        ),
+        errorBuilder:
+            (context, error, stackTrace) => const Center(
+              child: Icon(
+                Icons.broken_image_outlined,
+                size: 40,
+                color: Colors.grey,
+              ),
+            ),
       );
     }
     return Image.memory(base64Decode(thumbnail), fit: BoxFit.contain);
@@ -485,7 +516,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
   Widget _buildGenericIcon(String contentType) {
     IconData icon = Icons.file_present;
-    if (contentType == FilesConstants.mimeTypePdf) {
+    if (widget.asset is File && _isPdf(widget.asset as File)) {
       icon = Icons.picture_as_pdf;
     } else if (contentType.startsWith('video/')) {
       icon = Icons.video_file;
@@ -493,7 +524,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       icon = Icons.audio_file;
     } else if (contentType.startsWith('text/')) {
       icon = Icons.text_snippet;
-    } else if (p.extension(widget.asset.path).toLowerCase() == '.stl') {
+    } else if (p.extension(widget.asset.name).toLowerCase() == '.stl') {
       icon = Icons.view_in_ar;
     }
     return Center(child: Icon(icon, size: 80, color: Colors.grey.shade400));
@@ -539,8 +570,6 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     );
   }
 
-  String? _stlError;
-
   Future<void> _initStlScene(String filePath) async {
     if (_threeJs == null) return;
 
@@ -575,7 +604,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       // regardless of camera orientation — this is the standard three_js pattern.
       final pointLight = three.PointLight(0xffffff, 1.2);
       camera.add(pointLight);
-      scene.add(camera); // camera must be in the scene for its children to render
+      scene.add(
+        camera,
+      ); // camera must be in the scene for its children to render
 
       // Extra directional light from above for shape definition
       final dirLight = three.DirectionalLight(0xffffff, 0.6);
@@ -633,7 +664,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       // OrbitControls automatically pauses autoRotate while the user
       // is actively dragging (state != OrbitState.none).
       final controls = three.OrbitControls(camera, _threeJs!.globalKey);
-      controls.enableDamping = true;  // smooth inertia on release
+      controls.enableDamping = true; // smooth inertia on release
       controls.dampingFactor = 0.08;
       controls.autoRotate = true;
       controls.autoRotateSpeed = 2.0; // degrees/sec-ish
@@ -827,7 +858,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   Widget _buildExifTab() {
     if (widget.asset is! File) return const Center(child: Text('Not a file'));
     final file = widget.asset as File;
-    if (file.contentType != FilesConstants.mimeTypeImage) {
+    if (!_isImage(file)) {
       return const Center(
         child: Text(
           'Not an image',
@@ -943,7 +974,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                     ),
                   ),
                   const Spacer(),
-                  if (isMarkdown && !_isEditing && !file.path.startsWith('gdrive://'))
+                  if (isMarkdown &&
+                      !_isEditing &&
+                      !file.path.startsWith('gdrive://'))
                     TextButton.icon(
                       onPressed: () {
                         setState(() {
@@ -1082,10 +1115,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     );
 
     if (tooltip != null) {
-      valueWidget = Tooltip(
-        message: tooltip,
-        child: valueWidget,
-      );
+      valueWidget = Tooltip(message: tooltip, child: valueWidget);
     }
 
     return Padding(
@@ -1158,5 +1188,28 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       i++;
     }
     return '${size.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} ${suffixes[i]}';
+  }
+
+  bool _isImage(File file) {
+    if (file.contentType == FilesConstants.mimeTypeImage) return true;
+    if (file.contentType.startsWith('image/')) return true;
+    final ext = p.extension(file.name).toLowerCase();
+    return [
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.webp',
+      '.bmp',
+      '.tif',
+      '.psd',
+    ].contains(ext);
+  }
+
+  bool _isPdf(File file) {
+    if (file.contentType == FilesConstants.mimeTypePdf) return true;
+    if (file.contentType == 'application/x-pdf') return true;
+    final ext = p.extension(file.name).toLowerCase();
+    return ext == '.pdf';
   }
 }

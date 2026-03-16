@@ -496,8 +496,13 @@ class _RxFilesPage extends State<RxFilesPage> {
             if (item.downloadUrl != null && collection != null) {
               final token =
                   await GoogleDriveAuthService.getValidAccessToken(collection!);
+              final uri = Uri.parse(item.downloadUrl!);
+              final queryParams = Map<String, String>.from(uri.queryParameters);
+              queryParams.remove('authuser');
+              final cleanUri = uri.replace(queryParameters: queryParams);
+
               final response = await http.get(
-                Uri.parse(item.downloadUrl!),
+                cleanUri,
                 headers: {'Authorization': 'Bearer $token'},
               );
               if (response.statusCode == 200) {
