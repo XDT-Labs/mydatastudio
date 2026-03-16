@@ -6,7 +6,13 @@ Google Gemini API models. It provides the core functionality for both
 chat and embedding models.
 """
 import os
-from typing import Any, List
+import torch
+from PIL import Image
+import base64
+import io
+from typing import Any, List, Optional
+from transformers import AutoModel, AutoProcessor
+from qwen_vl_utils import process_vision_info
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.llms import LlamaCpp
@@ -84,28 +90,18 @@ def load_local_model(model_name: str, model_path: str) -> LlamaCpp:
     return llm
 
 
-def load_embedding_model(model_id: str, filename: str, local_dir: str) -> LlamaCpp:
+def load_embedding_model(model_id: str, filename: str, local_dir: str) -> Any:
     """
-    Load a model specifically configured for embedding generation using LlamaCpp.
-    
-    Downloads (if needed) and loads a GGUF model that can generate text embeddings.
-    
-    Args:
-        model_id (str): HuggingFace model identifier.
-        filename (str): The specific GGUF file name
-        local_dir (str): Path to the directory for storing/checking model files
-        
-    Returns:
-        tuple[LlamaCpp, None]: LlamaCpp object initialized with embedding capabilities and a None placeholder for processor.
-        
-    Raises:
-        Exception: If model download or loading fails.
-
-    Example:
-        >>> embed_model, _ = load_embedding_model("bartowski/gemma", "gemma-embedding.gguf", "./models")
+    Load an embedding model, choosing between LlamaCpp (GGUF) and Transformers.
     """
-    print(f"[EMBEDDING] Attempting to load embedding model: {model_id}/{filename}")
+    print(f"[EMBEDDING] Attempting to load embedding model: {model_id}")
     
+    # Check if it's the Qwen-VL Transformers model
+    if "Qwen3-VL-Embedding" in model_id:
+        return load_transformers_embedding_model(model_id, local_dir)
+    
+    # Default to LlamaCpp for GGUF models
+    from .utils import download_gguf_model_if_needed
     model_path = download_gguf_model_if_needed(model_id, filename, local_dir)
     
     print(f"[EMBEDDING] Initializing LlamaCpp for embeddings from {model_path}...")
@@ -117,45 +113,119 @@ def load_embedding_model(model_id: str, filename: str, local_dir: str) -> LlamaC
         verbose=False,
     )
     
-    print(f"[EMBEDDING] Embedding model {model_id} loaded successfully.")
-    return llm, None  # Returning None for processor as LlamaCpp doesn't use one in the same way
+    print(f"[EMBEDDING] GGUF Embedding model loaded successfully.")
+    return llm, None
+
+
+def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
+    """
+    Load a Qwen-VL Embedding model using Transformers.
+    """
+    print(f"[EMBEDDING] Loading Transformers model: {model_id} from {local_dir}")
+    
+    device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[EMBEDDING] Using device: {device}")
+    
+    # The Makefile downloads the full repo into models/<org>/<model_name>/
+    # so local_dir is already the parent, just use it directly.
+    model_path = local_dir
+    if not os.path.isdir(model_path):
+        # Fallback to model_id for HF Hub auto-download
+        model_path = model_id
+
+    print(f"[EMBEDDING] Loading from {model_path}...")
+    model = AutoModel.from_pretrained(
+        model_path, 
+        trust_remote_code=True,
+        dtype=torch.float16 if device != "cpu" else torch.float32
+    ).to(device)
+    
+    processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+    
+    print(f"[EMBEDDING] Transformers model {model_id} loaded successfully.")
+    return model, processor
+
+
+def generate_embedding(
+    model: Any, 
+    processor: Any, 
+    text: Optional[str] = None, 
+    image_base64: Optional[str] = None
+) -> List[float]:
+    """
+    Universal embedding generator that handles both LlamaCpp and Transformers.
+    """
+    if hasattr(model, 'client') and hasattr(model.client, 'embed'):
+        # LlamaCpp path (Text only)
+        if image_base64:
+            raise ValueError("LlamaCpp does not support image embeddings in this implementation.")
+        return generate_text_embedding(text, model, processor)
+    
+    # Transformers path
+    return generate_transformers_multimodal_embedding(model, processor, text, image_base64)
+
+
+def generate_transformers_multimodal_embedding(
+    model: Any, 
+    processor: Any, 
+    text: Optional[str] = None, 
+    image_base64: Optional[str] = None
+) -> List[float]:
+    """
+    Generate embeddings using Qwen-VL Transformers model.
+    """
+    device = next(model.parameters()).device
+    
+    content = []
+    if image_base64:
+        # Normalize base64 to data URI or just use bytes
+        if not image_base64.startswith("data:image"):
+            image_base64 = f"data:image/jpeg;base64,{image_base64}"
+        content.append({"type": "image", "image": image_base64})
+    
+    if text:
+        content.append({"type": "text", "text": text})
+    
+    messages = [{"role": "user", "content": content}]
+    
+    # Prepare inputs using Qwen-VL utilities and processor
+    image_inputs, video_inputs = process_vision_info(messages)
+    
+    # Use chat template to ensure multimodal tokens (<|image_pad|>, etc.) are correctly inserted
+    prompt = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    
+    inputs = processor(
+        text=[prompt],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt"
+    ).to(device)
+    
+    with torch.no_grad():
+        outputs = model(**inputs)
+        # Last Token Pooling ([EOS]) as per research
+        # Qwen3-VL-Embedding returns the embedding in the last hidden state of the [EOS] token
+        embeddings = outputs.last_hidden_state[:, -1, :]
+        # Normalize the embedding
+        embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+        
+    return embeddings[0].tolist()
 
 
 def generate_text_embedding(text: str, model: Any, processor: Any) -> List[float]:
     """
     Generate embeddings for text input using a loaded model.
-    
-    Processes text through the LlamaCpp model to extract high-dimensional vector
-    representations.
-    
-    Args:
-        text (str): Input text to generate embeddings for
-        model (Any): Loaded language model with embedding capabilities (LlamaCpp)
-        processor (Any): Not used for LlamaCpp
-        
-    Returns:
-        List[float]: A list of float values representing the text embedding.
-        
-    Raises:
-        ValueError: If the provided model instance lacks embedding capabilities.
-
-    Example:
-        >>> embed_model, processor = load_embedding_model("repo", "filename", "./models")
-        >>> vector = generate_text_embedding("Some text", embed_model, processor)
-        >>> print(len(vector))
     """
-    from langchain_community.embeddings import LlamaCppEmbeddings
     # If using LlamaCpp directly (from LangChain's LLM), we can use the underlying client
     if hasattr(model, 'client') and hasattr(model.client, 'embed'):
         result = model.client.embed(text)
-        # Handle different return formats from llama-cpp-python versions
         if isinstance(result, list) and len(result) > 0:
             if isinstance(result[0], list):
                 return result[0]
-            elif hasattr(result[0], 'embedding'): # Check for Embedding output object
+            elif hasattr(result[0], 'embedding'):
                 return result[0].embedding
         return result
     else:
-        # Fallback if the underlying method isn't available easily
         raise ValueError("Provided model does not support LlamaCpp embedding generation correctly")
 

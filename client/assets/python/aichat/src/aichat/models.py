@@ -103,7 +103,7 @@ class EmbeddingRequest(BaseModel):
     )
     image_base64: Optional[str] = Field(
         None, 
-        description="Base64-encoded image data (PNG, JPEG, etc.). NOTE: LlamaCpp does not natively support mmproj image embeddings out of the box with the basic LangChain wrapper without specific builds. Proceed with caution."
+        description="Base64-encoded image data (PNG, JPEG, etc.). Supported via Transformers (Qwen-VL)."
     )
     model_name: str = Field(
         default=DEFAULT_LOCAL_MODEL,

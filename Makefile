@@ -22,10 +22,8 @@ APP_ZIP_NAME = aichat-macos.zip
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = bartowski/google_gemma-3-4b-it-GGUF
 HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
-HF_EMBEDDING_REPO=mys/ggml_CLIP-ViT-B-32-laion2B-s34B-b79K
-HF_EMBEDDING_DIR=$(PYTHON_DIR)/models/clip
-HF_EMBEDDING_FILE=CLIP-ViT-B-32-laion2B-s34B-b79K_ggml-model-q8_0.gguf
-HF_EMBEDDING_OUT=$(PYTHON_DIR)/models/$(HF_EMBEDDING_FILE)
+HF_EMBEDDING_MODEL = Qwen/Qwen3-VL-Embedding-2B
+HF_EMBEDDING_DIR = $(PYTHON_DIR)/models/$(HF_EMBEDDING_MODEL)
 
 # Flutter Config
 FLUTTER_DIR = client
@@ -54,11 +52,11 @@ models:
 	else \
 		echo "$(HF_FILE) already exists, skipping download."; \
 	fi
-	@if [ ! -f $(HF_EMBEDDING_OUT) ]; then \
-		echo "Downloading CLIP GGUF model..."; \
-		hf download $(HF_EMBEDDING_REPO) $(HF_EMBEDDING_FILE) --local-dir $(PYTHON_DIR)/models; \
+	@if [ ! -d $(HF_EMBEDDING_DIR) ]; then \
+		echo "Downloading Qwen-VL embedding model (Transformers)..."; \
+		hf download $(HF_EMBEDDING_MODEL) --local-dir $(HF_EMBEDDING_DIR); \
 	else \
-		echo "CLIP GGUF model already exists, skipping download."; \
+		echo "Qwen-VL embedding model already exists, skipping download."; \
 	fi
 
 

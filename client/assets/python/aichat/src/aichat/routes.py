@@ -13,7 +13,7 @@ from .models import ChatRequest, StartSessionRequest, EmbeddingRequest
 from .model_manager import (
     load_local_model,
     load_embedding_model,
-    generate_text_embedding,
+    generate_embedding as gen_emb_fn,
     load_gemini_model
 )
 from .utils import get_local_path, find_local_model, download_gguf_model
@@ -294,12 +294,7 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
             detail="Either 'text' or 'image_base64' must be provided."
         )
     
-    if request.text and request.image_base64:
-        raise HTTPException(
-            status_code=400,
-            detail="Please provide either 'text' or 'image_base64', not both."
-        )
-    
+
     # Load embedding model if not already loaded
     async with embedding_lock:
         embedding_model, embedding_processor = get_embedding_model()
@@ -322,14 +317,23 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
     try:
         embedding_model, embedding_processor = get_embedding_model()
         
-        if request.text:
-            # Generate text embedding
-            embedding = generate_text_embedding(request.text, embedding_model, embedding_processor)
-            input_type = "text"
-            input_content = request.text
-        else:
-            # Generate image embedding
-            raise HTTPException(status_code=400, detail="Image embedding is not natively supported by LlamaCpp without experimental mmproj builds. Please use text embeddings or configure a multimodal huggingface model.")
+        # Use the universal generate_embedding function from model_manager
+        try:
+            embedding = gen_emb_fn(
+                model=embedding_model,
+                processor=embedding_processor,
+                text=request.text,
+                image_base64=request.image_base64
+            )
+            if request.text and request.image_base64:
+                input_type = "multimodal"
+            elif request.text:
+                input_type = "text"
+            else:
+                input_type = "image"
+            input_content = request.text if request.text else f"base64_image({len(request.image_base64)})"
+        except ValueError as ve:
+             raise HTTPException(status_code=400, detail=str(ve))
             
         return {
             "embedding": embedding,
