@@ -17,10 +17,10 @@ class FileDesktopRepository {
     return Future(() => file);
   }
 
-  Future<List<File>> getByParentPath(String path) async {
+  Future<List<File>> getByParentPath(String collectionId, String path) async {
     List<File> files =
         await (db.select(db.files)
-          ..where((t) => t.parent.equals(path) & t.isDeleted.equals(false))).get();
+          ..where((t) => t.collectionId.equals(collectionId) & t.parent.equals(path) & t.isDeleted.equals(false))).get();
 
     return Future(() => files);
   }

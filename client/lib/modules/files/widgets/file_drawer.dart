@@ -2,8 +2,6 @@ import 'dart:async';
 
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/modules/files/pages/rx_files_page.dart';
-import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
-import 'package:mydatatools/modules/files/services/repositories/folder_repository.dart';
 import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
@@ -260,15 +258,7 @@ class _FileDrawer extends State<FileDrawer> {
 
                 final db = DatabaseManager.instance.database;
                 if (db != null) {
-                  // Delete all files and folders first
-                  await FileDesktopRepository(
-                    db,
-                  ).deleteAllByCollectionId(collection.id);
-                  await FolderDesktopRepository(
-                    db,
-                  ).deleteAllByCollectionId(collection.id);
-
-                  // Delete the collection
+                  // Delete the collection and all related metadata (files, folders, etc.)
                   await CollectionRepository().deleteCollection(collection.id);
 
                   // Reload collections list

@@ -57,6 +57,7 @@ class _RxFilesPage extends State<RxFilesPage> {
   List<Collection> collections = [];
   Collection? collection;
   String? path;
+
   /// Navigation trail — empty means we are at the collection root.
   List<_BreadcrumbEntry> _breadcrumbTrail = [];
   String sortColumn = "name";
@@ -151,11 +152,6 @@ class _RxFilesPage extends State<RxFilesPage> {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.download, color: Colors.black, weight: 200),
-            tooltip: 'Download File(s)',
-            onPressed: selectedItems.isEmpty ? null : () => _downloadSelectedFiles(context),
-          ),
-          IconButton(
             // TODO: disable is no files are checked
             icon: const Icon(Icons.refresh, color: Colors.black, weight: 100),
             tooltip: 'Refresh',
@@ -166,15 +162,35 @@ class _RxFilesPage extends State<RxFilesPage> {
               if (collection != null) {
                 logger.s("refresh file list");
                 _filesAndFoldersService!.invoke(
-                  GetFileAndFoldersServiceCommand(collection!, path ?? collection!.path),
+                  GetFileAndFoldersServiceCommand(
+                    collection!,
+                    path ?? collection!.path,
+                  ),
                 );
               }
             },
           ),
+          const VerticalDivider(
+            color: Colors.grey,
+            thickness: 1,
+            indent: 10,
+            endIndent: 10,
+          ),
+          IconButton(
+            icon: const Icon(Icons.download, color: Colors.black, weight: 200),
+            tooltip: 'Download File(s)',
+            onPressed:
+                selectedItems.isEmpty
+                    ? null
+                    : () => _downloadSelectedFiles(context),
+          ),
           IconButton(
             icon: const Icon(Icons.delete, color: Colors.black, weight: 300),
             tooltip: 'Delete File(s)',
-            onPressed: selectedItems.isEmpty ? null : () => _showBulkDeleteConfirmationDialog(context),
+            onPressed:
+                selectedItems.isEmpty
+                    ? null
+                    : () => _showBulkDeleteConfirmationDialog(context),
           ),
         ],
       ),
@@ -205,8 +221,10 @@ class _RxFilesPage extends State<RxFilesPage> {
                                     path: n.asset.path,
                                   ),
                                 ];
-                                selectedItems = []; // reset selection on path change
-                                selectedAsset = null; // close drawer when drilling into folder
+                                selectedItems =
+                                    []; // reset selection on path change
+                                selectedAsset =
+                                    null; // close drawer when drilling into folder
                               });
                               _filesAndFoldersService!.invoke(
                                 GetFileAndFoldersServiceCommand(
@@ -271,7 +289,7 @@ class _RxFilesPage extends State<RxFilesPage> {
                     ],
                   ),
                 ),
-                if (selectedAsset != null) ...[  
+                if (selectedAsset != null) ...[
                   // ─── Drag handle ───────────────────────────
                   MouseRegion(
                     cursor: SystemMouseCursors.resizeColumn,
@@ -302,9 +320,11 @@ class _RxFilesPage extends State<RxFilesPage> {
                       asset: selectedAsset!,
                       width: _drawerWidth,
                       onClose: () => setState(() => selectedAsset = null),
-                      onExpand: () => setState(() {
-                        _drawerWidth = _drawerWidth >= 700.0 ? 300.0 : 700.0;
-                      }),
+                      onExpand:
+                          () => setState(() {
+                            _drawerWidth =
+                                _drawerWidth >= 700.0 ? 300.0 : 700.0;
+                          }),
                     ),
                   ),
                 ],
@@ -418,9 +438,14 @@ class _RxFilesPage extends State<RxFilesPage> {
           content: SingleChildScrollView(
             child: ListBody(
               children: <Widget>[
-                Text('Are you sure you want to delete ${selectedItems.length} items?'),
+                Text(
+                  'Are you sure you want to delete ${selectedItems.length} items?',
+                ),
                 const SizedBox(height: 8),
-                const Text('This will permanently remove these files from your computer and the database.', style: TextStyle(color: Colors.red)),
+                const Text(
+                  'This will permanently remove these files from your computer and the database.',
+                  style: TextStyle(color: Colors.red),
+                ),
               ],
             ),
           ),
@@ -456,7 +481,9 @@ class _RxFilesPage extends State<RxFilesPage> {
           }
           final db = DatabaseManager.instance.database;
           if (db != null) {
-            await DeleteFileService.instance.invoke(DeleteFileServiceCommand(item, db));
+            await DeleteFileService.instance.invoke(
+              DeleteFileServiceCommand(item, db),
+            );
           }
           deletedCount++;
         } catch (e) {
@@ -480,7 +507,11 @@ class _RxFilesPage extends State<RxFilesPage> {
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Deleted $deletedCount files${errorCount > 0 ? ' ($errorCount errors)' : ''}')),
+        SnackBar(
+          content: Text(
+            'Deleted $deletedCount files${errorCount > 0 ? ' ($errorCount errors)' : ''}',
+          ),
+        ),
       );
     }
   }
@@ -501,8 +532,9 @@ class _RxFilesPage extends State<RxFilesPage> {
 
           if (item.path.startsWith('gdrive://')) {
             if (item.downloadUrl != null && collection != null) {
-              final token =
-                  await GoogleDriveAuthService.getValidAccessToken(collection!);
+              final token = await GoogleDriveAuthService.getValidAccessToken(
+                collection!,
+              );
               final uri = Uri.parse(item.downloadUrl!);
               final queryParams = Map<String, String>.from(uri.queryParameters);
               queryParams.remove('authuser');
@@ -533,7 +565,11 @@ class _RxFilesPage extends State<RxFilesPage> {
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Copied $copiedCount files to $selectedDirectory${errorCount > 0 ? ' ($errorCount errors)' : ''}')),
+        SnackBar(
+          content: Text(
+            'Copied $copiedCount files to $selectedDirectory${errorCount > 0 ? ' ($errorCount errors)' : ''}',
+          ),
+        ),
       );
     }
   }

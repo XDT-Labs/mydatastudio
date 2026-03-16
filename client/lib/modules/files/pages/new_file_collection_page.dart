@@ -543,12 +543,11 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
     );
   }
 
-  /// Google logo from FontAwesome.
+  /// Google Drive logo from assets.
   Widget _buildDriveLogo() {
-    return const FaIcon(
-      FontAwesomeIcons.googleDrive,
-      size: 72,
-      color: _googleBlue,
+    return Image.asset(
+      'assets/images/google-drive.png',
+      height: 72,
     );
   }
 

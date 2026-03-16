@@ -73,7 +73,19 @@ class CollectionRepository {
   Future<void> deleteCollection(String id) async {
     AppDatabase? db = DatabaseManager.instance.database;
     if (db != null) {
-      await (db.delete(db.collections)..where((t) => t.id.equals(id))).go();
+      await db.transaction(() async {
+        // 1. Delete all files linked to this collection
+        await (db.delete(db.files)..where((t) => t.collectionId.equals(id))).go();
+
+        // 2. Delete all folders linked to this collection
+        await (db.delete(db.folders)..where((t) => t.collectionId.equals(id))).go();
+
+        // 3. Delete all emails linked to this collection
+        await (db.delete(db.emails)..where((t) => t.collectionId.equals(id))).go();
+
+        // 4. Finally delete the collection itself
+        await (db.delete(db.collections)..where((t) => t.id.equals(id))).go();
+      });
     }
   }
 }

@@ -53,9 +53,21 @@ class ScannerManager {
     collectionWatch.listen((changes) {
       logger.d('Value from controller: $changes');
 
+      // Check for new collections to add
       for (var c in changes) {
         if (getScanner(c) == null) {
           _registerSingleScanner(c);
+        }
+      }
+
+      // Check for deleted collections to remove
+      final currentIds = changes.map((c) => c.id).toSet();
+      final scannerIds = scanners.keys.toList();
+      for (final id in scannerIds) {
+        if (!currentIds.contains(id)) {
+          logger.i("Removing scanner for deleted collection: $id");
+          scanners[id]?.stop();
+          scanners.remove(id);
         }
       }
     });

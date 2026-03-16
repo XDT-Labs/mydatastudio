@@ -34,8 +34,8 @@ class GetFileAndFoldersService
           ?.start(command.collection, path, false, false);
     }
 
-    List<FileAsset> files = await fileRepo.getByParentPath(path);
-    List<FileAsset> folders = await folderRepo.getByParentPath(path);
+    List<FileAsset> files = await fileRepo.getByParentPath(command.collection.id, path);
+    List<FileAsset> folders = await folderRepo.getByParentPath(command.collection.id, path);
 
     List<FileAsset> assets = [...files, ...folders];
 
