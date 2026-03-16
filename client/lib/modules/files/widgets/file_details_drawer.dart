@@ -47,6 +47,8 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   PdfController? _pdfController;
   int _pdfCurrentPage = 1;
   int _pdfTotalPages = 0;
+  bool _loadingPdf = false;
+  String? _pdfError;
 
   String? _textContent;
   bool _loadingText = false;
@@ -117,22 +119,31 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         _pdfController = null;
         _pdfTotalPages = 0;
         _pdfCurrentPage = 1;
+        _loadingPdf = false;
+        _pdfError = null;
       });
     }
 
     // PDF controller
     if (_isPdf(file)) {
+      if (mounted) setState(() => _loadingPdf = true);
       try {
         PdfDocument? doc;
         if (file.path.startsWith('gdrive://')) {
           final bytes = await _getGDriveFileBytes(file);
           if (bytes != null) {
-            final uint8bytes =
-                bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+            final uint8bytes = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
             doc = await PdfDocument.openData(uint8bytes);
+          } else {
+            throw 'Failed to download PDF bytes from Google Drive';
           }
         } else {
-          doc = await PdfDocument.openFile(file.path);
+          final ioFile = io.File(file.path);
+          if (await ioFile.exists()) {
+            doc = await PdfDocument.openFile(file.path);
+          } else {
+            throw 'Local PDF file not found: ${file.path}';
+          }
         }
 
         if (doc != null) {
@@ -148,6 +159,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         }
       } catch (e) {
         debugPrint('Error loading PDF: $e');
+        if (mounted) setState(() => _pdfError = e.toString());
+      } finally {
+        if (mounted) setState(() => _loadingPdf = false);
       }
     }
 
@@ -193,7 +207,6 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   }
 
   Future<List<int>?> _getGDriveFileBytes(File file) async {
-    if (file.downloadUrl == null) return null;
     try {
       final collection = await CollectionRepository().collectionById(
         file.collectionId,
@@ -202,13 +215,23 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       final token = await GoogleDriveAuthService.getValidAccessToken(
         collection,
       );
-      final uri = Uri.parse(file.downloadUrl!);
-      final queryParams = Map<String, String>.from(uri.queryParameters);
-      queryParams.remove('authuser');
-      final cleanUri = uri.replace(queryParameters: queryParams);
+
+      Uri uri;
+      // Prefer direct API media download URL if it's a gdrive:// path
+      if (file.path.startsWith('gdrive://')) {
+        final fileId = file.path.replaceFirst('gdrive://', '');
+        uri = Uri.parse('https://www.googleapis.com/drive/v3/files/$fileId?alt=media');
+      } else if (file.downloadUrl != null) {
+        uri = Uri.parse(file.downloadUrl!);
+        final queryParams = Map<String, String>.from(uri.queryParameters);
+        queryParams.remove('authuser');
+        uri = uri.replace(queryParameters: queryParams);
+      } else {
+        return null;
+      }
 
       final response = await http.get(
-        cleanUri,
+        uri,
         headers: {'Authorization': 'Bearer $token'},
       );
       if (response.statusCode == 200) {
@@ -453,16 +476,33 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
             // ─── PDF viewer ──────────────────────────────────
             SizedBox(
               height: (widget.width / 1.5).clamp(200.0, 500.0),
-              child:
-                  _pdfController == null
+              child: _pdfError != null
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.error_outline, color: Colors.red, size: 32),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Error loading PDF: $_pdfError',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 12, color: Colors.red),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : (_loadingPdf || _pdfController == null)
                       ? const Center(child: CircularProgressIndicator())
                       : PdfView(
-                        controller: _pdfController!,
-                        scrollDirection: Axis.horizontal,
-                        onPageChanged: (page) {
-                          if (mounted) setState(() => _pdfCurrentPage = page);
-                        },
-                      ),
+                          controller: _pdfController!,
+                          scrollDirection: Axis.horizontal,
+                          onPageChanged: (page) {
+                            if (mounted) setState(() => _pdfCurrentPage = page);
+                          },
+                        ),
             ),
 
             // ─── Page navigation bar ─────────────────────────
