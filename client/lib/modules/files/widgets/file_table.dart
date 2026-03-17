@@ -63,8 +63,9 @@ class _FileTable extends State<FileTable> {
           child: SingleChildScrollView(
             scrollDirection: Axis.vertical,
             child: DataTable(
-              dataRowMaxHeight: 56,
-              dataRowMinHeight: 56,
+              dataRowMaxHeight: 40,
+              dataRowMinHeight: 40,
+              headingRowHeight: 40,
               columnSpacing: spacing,
               horizontalMargin: 12,
               showCheckboxColumn: true,
@@ -440,7 +441,7 @@ class _FileTable extends State<FileTable> {
         height: 32,
         child: Center(
           child: Padding(
-            padding: const EdgeInsets.all(4),
+            padding: const EdgeInsets.all(2),
             child: Image(
               image: ResizeImage(
                 provider,
