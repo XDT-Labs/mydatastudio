@@ -2873,6 +2873,249 @@ class AlbumsCompanion extends UpdateCompanion<Album> {
   }
 }
 
+class $FilesEmbeddingsTable extends FilesEmbeddings
+    with TableInfo<$FilesEmbeddingsTable, FilesEmbedding> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $FilesEmbeddingsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _fileIdMeta = const VerificationMeta('fileId');
+  @override
+  late final GeneratedColumn<String> fileId = GeneratedColumn<String>(
+    'file_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  late final GeneratedColumnWithTypeConverter<List<double>?, Uint8List>
+  qwen3_8bEmbedding = GeneratedColumn<Uint8List>(
+    'qwen3_8b_embedding',
+    aliasedName,
+    true,
+    type: DriftSqlType.blob,
+    requiredDuringInsert: false,
+  ).withConverter<List<double>?>(
+    $FilesEmbeddingsTable.$converterqwen3_8bEmbeddingn,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [fileId, qwen3_8bEmbedding];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'files_embeddings';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<FilesEmbedding> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('file_id')) {
+      context.handle(
+        _fileIdMeta,
+        fileId.isAcceptableOrUnknown(data['file_id']!, _fileIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_fileIdMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {fileId};
+  @override
+  FilesEmbedding map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return FilesEmbedding(
+      fileId:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.string,
+            data['${effectivePrefix}file_id'],
+          )!,
+      qwen3_8bEmbedding: $FilesEmbeddingsTable.$converterqwen3_8bEmbeddingn
+          .fromSql(
+            attachedDatabase.typeMapping.read(
+              DriftSqlType.blob,
+              data['${effectivePrefix}qwen3_8b_embedding'],
+            ),
+          ),
+    );
+  }
+
+  @override
+  $FilesEmbeddingsTable createAlias(String alias) {
+    return $FilesEmbeddingsTable(attachedDatabase, alias);
+  }
+
+  static TypeConverter<List<double>, Uint8List> $converterqwen3_8bEmbedding =
+      const FloatListConverter();
+  static TypeConverter<List<double>?, Uint8List?> $converterqwen3_8bEmbeddingn =
+      NullAwareTypeConverter.wrap($converterqwen3_8bEmbedding);
+}
+
+class FilesEmbedding extends DataClass implements Insertable<FilesEmbedding> {
+  /// Primary key — matches the corresponding [Files.id].
+  final String fileId;
+
+  /// 2048-dimensional embedding from Qwen3-Embedding-8B (or Qwen3-VL variant).
+  /// Stored as a raw Float32 BLOB via [FloatListConverter].
+  final List<double>? qwen3_8bEmbedding;
+  const FilesEmbedding({required this.fileId, this.qwen3_8bEmbedding});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['file_id'] = Variable<String>(fileId);
+    if (!nullToAbsent || qwen3_8bEmbedding != null) {
+      map['qwen3_8b_embedding'] = Variable<Uint8List>(
+        $FilesEmbeddingsTable.$converterqwen3_8bEmbeddingn.toSql(
+          qwen3_8bEmbedding,
+        ),
+      );
+    }
+    return map;
+  }
+
+  FilesEmbeddingsCompanion toCompanion(bool nullToAbsent) {
+    return FilesEmbeddingsCompanion(
+      fileId: Value(fileId),
+      qwen3_8bEmbedding:
+          qwen3_8bEmbedding == null && nullToAbsent
+              ? const Value.absent()
+              : Value(qwen3_8bEmbedding),
+    );
+  }
+
+  factory FilesEmbedding.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return FilesEmbedding(
+      fileId: serializer.fromJson<String>(json['fileId']),
+      qwen3_8bEmbedding: serializer.fromJson<List<double>?>(
+        json['qwen3_8bEmbedding'],
+      ),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'fileId': serializer.toJson<String>(fileId),
+      'qwen3_8bEmbedding': serializer.toJson<List<double>?>(qwen3_8bEmbedding),
+    };
+  }
+
+  FilesEmbedding copyWith({
+    String? fileId,
+    Value<List<double>?> qwen3_8bEmbedding = const Value.absent(),
+  }) => FilesEmbedding(
+    fileId: fileId ?? this.fileId,
+    qwen3_8bEmbedding:
+        qwen3_8bEmbedding.present
+            ? qwen3_8bEmbedding.value
+            : this.qwen3_8bEmbedding,
+  );
+  FilesEmbedding copyWithCompanion(FilesEmbeddingsCompanion data) {
+    return FilesEmbedding(
+      fileId: data.fileId.present ? data.fileId.value : this.fileId,
+      qwen3_8bEmbedding:
+          data.qwen3_8bEmbedding.present
+              ? data.qwen3_8bEmbedding.value
+              : this.qwen3_8bEmbedding,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FilesEmbedding(')
+          ..write('fileId: $fileId, ')
+          ..write('qwen3_8bEmbedding: $qwen3_8bEmbedding')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(fileId, qwen3_8bEmbedding);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is FilesEmbedding &&
+          other.fileId == this.fileId &&
+          other.qwen3_8bEmbedding == this.qwen3_8bEmbedding);
+}
+
+class FilesEmbeddingsCompanion extends UpdateCompanion<FilesEmbedding> {
+  final Value<String> fileId;
+  final Value<List<double>?> qwen3_8bEmbedding;
+  final Value<int> rowid;
+  const FilesEmbeddingsCompanion({
+    this.fileId = const Value.absent(),
+    this.qwen3_8bEmbedding = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  FilesEmbeddingsCompanion.insert({
+    required String fileId,
+    this.qwen3_8bEmbedding = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : fileId = Value(fileId);
+  static Insertable<FilesEmbedding> custom({
+    Expression<String>? fileId,
+    Expression<Uint8List>? qwen3_8bEmbedding,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (fileId != null) 'file_id': fileId,
+      if (qwen3_8bEmbedding != null) 'qwen3_8b_embedding': qwen3_8bEmbedding,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  FilesEmbeddingsCompanion copyWith({
+    Value<String>? fileId,
+    Value<List<double>?>? qwen3_8bEmbedding,
+    Value<int>? rowid,
+  }) {
+    return FilesEmbeddingsCompanion(
+      fileId: fileId ?? this.fileId,
+      qwen3_8bEmbedding: qwen3_8bEmbedding ?? this.qwen3_8bEmbedding,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (fileId.present) {
+      map['file_id'] = Variable<String>(fileId.value);
+    }
+    if (qwen3_8bEmbedding.present) {
+      map['qwen3_8b_embedding'] = Variable<Uint8List>(
+        $FilesEmbeddingsTable.$converterqwen3_8bEmbeddingn.toSql(
+          qwen3_8bEmbedding.value,
+        ),
+      );
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FilesEmbeddingsCompanion(')
+          ..write('fileId: $fileId, ')
+          ..write('qwen3_8bEmbedding: $qwen3_8bEmbedding, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2883,6 +3126,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $FilesTable files = $FilesTable(this);
   late final $FoldersTable folders = $FoldersTable(this);
   late final $AlbumsTable albums = $AlbumsTable(this);
+  late final $FilesEmbeddingsTable filesEmbeddings = $FilesEmbeddingsTable(
+    this,
+  );
   late final Index collectionsIdIdx = Index(
     'collections_id_idx',
     'CREATE INDEX collections_id_idx ON collections (id)',
@@ -2939,6 +3185,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'folder_collection_id_idx',
     'CREATE INDEX folder_collection_id_idx ON folders (collection_id)',
   );
+  late final Index fileEmbeddingsFileIdIdx = Index(
+    'file_embeddings_file_id_idx',
+    'CREATE INDEX file_embeddings_file_id_idx ON files_embeddings (file_id)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2951,6 +3201,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     files,
     folders,
     albums,
+    filesEmbeddings,
     collectionsIdIdx,
     collectionsPathIdx,
     collectionsTypeIdx,
@@ -2965,6 +3216,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     folderPathIdx,
     folderParentIdx,
     folderCollectionIdIdx,
+    fileEmbeddingsFileIdIdx,
   ];
 }
 
@@ -5003,6 +5255,173 @@ typedef $$AlbumsTableProcessedTableManager =
       Album,
       PrefetchHooks Function()
     >;
+typedef $$FilesEmbeddingsTableCreateCompanionBuilder =
+    FilesEmbeddingsCompanion Function({
+      required String fileId,
+      Value<List<double>?> qwen3_8bEmbedding,
+      Value<int> rowid,
+    });
+typedef $$FilesEmbeddingsTableUpdateCompanionBuilder =
+    FilesEmbeddingsCompanion Function({
+      Value<String> fileId,
+      Value<List<double>?> qwen3_8bEmbedding,
+      Value<int> rowid,
+    });
+
+class $$FilesEmbeddingsTableFilterComposer
+    extends Composer<_$AppDatabase, $FilesEmbeddingsTable> {
+  $$FilesEmbeddingsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get fileId => $composableBuilder(
+    column: $table.fileId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnWithTypeConverterFilters<List<double>?, List<double>, Uint8List>
+  get qwen3_8bEmbedding => $composableBuilder(
+    column: $table.qwen3_8bEmbedding,
+    builder: (column) => ColumnWithTypeConverterFilters(column),
+  );
+}
+
+class $$FilesEmbeddingsTableOrderingComposer
+    extends Composer<_$AppDatabase, $FilesEmbeddingsTable> {
+  $$FilesEmbeddingsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get fileId => $composableBuilder(
+    column: $table.fileId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<Uint8List> get qwen3_8bEmbedding => $composableBuilder(
+    column: $table.qwen3_8bEmbedding,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$FilesEmbeddingsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $FilesEmbeddingsTable> {
+  $$FilesEmbeddingsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get fileId =>
+      $composableBuilder(column: $table.fileId, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<List<double>?, Uint8List>
+  get qwen3_8bEmbedding => $composableBuilder(
+    column: $table.qwen3_8bEmbedding,
+    builder: (column) => column,
+  );
+}
+
+class $$FilesEmbeddingsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $FilesEmbeddingsTable,
+          FilesEmbedding,
+          $$FilesEmbeddingsTableFilterComposer,
+          $$FilesEmbeddingsTableOrderingComposer,
+          $$FilesEmbeddingsTableAnnotationComposer,
+          $$FilesEmbeddingsTableCreateCompanionBuilder,
+          $$FilesEmbeddingsTableUpdateCompanionBuilder,
+          (
+            FilesEmbedding,
+            BaseReferences<
+              _$AppDatabase,
+              $FilesEmbeddingsTable,
+              FilesEmbedding
+            >,
+          ),
+          FilesEmbedding,
+          PrefetchHooks Function()
+        > {
+  $$FilesEmbeddingsTableTableManager(
+    _$AppDatabase db,
+    $FilesEmbeddingsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () =>
+                  $$FilesEmbeddingsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$FilesEmbeddingsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer:
+              () => $$FilesEmbeddingsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> fileId = const Value.absent(),
+                Value<List<double>?> qwen3_8bEmbedding = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FilesEmbeddingsCompanion(
+                fileId: fileId,
+                qwen3_8bEmbedding: qwen3_8bEmbedding,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String fileId,
+                Value<List<double>?> qwen3_8bEmbedding = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FilesEmbeddingsCompanion.insert(
+                fileId: fileId,
+                qwen3_8bEmbedding: qwen3_8bEmbedding,
+                rowid: rowid,
+              ),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          BaseReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$FilesEmbeddingsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $FilesEmbeddingsTable,
+      FilesEmbedding,
+      $$FilesEmbeddingsTableFilterComposer,
+      $$FilesEmbeddingsTableOrderingComposer,
+      $$FilesEmbeddingsTableAnnotationComposer,
+      $$FilesEmbeddingsTableCreateCompanionBuilder,
+      $$FilesEmbeddingsTableUpdateCompanionBuilder,
+      (
+        FilesEmbedding,
+        BaseReferences<_$AppDatabase, $FilesEmbeddingsTable, FilesEmbedding>,
+      ),
+      FilesEmbedding,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -5020,4 +5439,6 @@ class $AppDatabaseManager {
       $$FoldersTableTableManager(_db, _db.folders);
   $$AlbumsTableTableManager get albums =>
       $$AlbumsTableTableManager(_db, _db.albums);
+  $$FilesEmbeddingsTableTableManager get filesEmbeddings =>
+      $$FilesEmbeddingsTableTableManager(_db, _db.filesEmbeddings);
 }

@@ -15,13 +15,16 @@ import 'package:mydatatools/main.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
+import 'package:sqlite_vector/sqlite_vector.dart';
 import 'package:mydatatools/models/tables/album.dart';
 import 'package:mydatatools/models/tables/app.dart';
 import 'package:mydatatools/models/tables/app_user.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/converters/string_array_convertor.dart';
+import 'package:mydatatools/models/tables/converters/float_list_converter.dart';
 import 'package:mydatatools/models/tables/email.dart';
 import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatatools/models/tables/file_embedding.dart';
 import 'package:mydatatools/models/tables/folder.dart';
 import 'package:uuid/uuid.dart';
 
@@ -171,7 +174,16 @@ class DatabaseManager {
 }
 
 @DriftDatabase(
-  tables: [Apps, AppUsers, Collections, Emails, Files, Folders, Albums],
+  tables: [
+    Apps,
+    AppUsers,
+    Collections,
+    Emails,
+    Files,
+    Folders,
+    Albums,
+    FilesEmbeddings,
+  ],
 )
 class AppDatabase extends _$AppDatabase {
   final AppLogger logger = AppLogger(null);
@@ -187,7 +199,7 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration {
@@ -197,6 +209,9 @@ class AppDatabase extends _$AppDatabase {
         await m.createAll();
         logger.i("Load initial data");
         await _loadInitialData(m);
+        // Initialize the vector index for qwen3_8b embeddings (2048-dim Float32)
+        logger.i("Initializing vector index for files_embeddings");
+        await _initVectorIndex();
       },
       onUpgrade: (Migrator m, int from, int to) async {
         if (from < 2) {
@@ -214,9 +229,36 @@ class AppDatabase extends _$AppDatabase {
           await m.addColumn(folders, folders.thumbnail);
           await m.addColumn(folders, folders.downloadUrl);
         }
-        //continue
+        if (from < 4) {
+          logger.i(
+            "Upgrade to v4: Adding files_embeddings table and vector index",
+          );
+          await m.createTable(filesEmbeddings);
+          await _initVectorIndex();
+        }
+        if (from < 5) {
+          logger.i("Upgrade to v5: Re-initializing vector index for sqlite_vector");
+          await _initVectorIndex();
+        }
       },
     );
+  }
+
+  /// Initializes the sqlite_vector ANN index on the qwen3_8b_embedding column.
+  ///
+  /// sqlite_vector uses a regular BLOB column + a side-car index created via
+  /// `vector_init()`. This is different from the old vec0 virtual table.
+  /// The index persists in the database file after first creation.
+  ///
+  /// Gracefully no-ops if the extension is not loaded (tests without native lib).
+  Future<void> _initVectorIndex() async {
+    try {
+      await customStatement(
+        "SELECT vector_init('files_embeddings', 'qwen3_8b_embedding', 'type=FLOAT32,dimension=2048')",
+      );
+    } catch (e) {
+      logger.w('Could not initialize vector index (extension not loaded?): $e');
+    }
   }
 
   /// Make sure each app is in database
@@ -311,37 +353,56 @@ class AppDatabase extends _$AppDatabase {
   }
 }
 
+/// Returns a configured [Sqlite3] instance with the sqlite_vector extension
+/// loaded. Used as the `sqlite3:` factory for [NativeDatabase].
+///
+/// sqlite_vector handles bundling the native library for all platforms
+/// automatically via Dart native assets — no manual dylib copying needed.
+///
+/// Gracefully no-ops (with a warning) if the extension fails to load so
+/// dev/test builds without native assets still work.
+Sqlite3 _loadExtensions() {
+  try {
+    sqlite3.loadSqliteVectorExtension();
+    AppLogger(null).d('sqlite_vector extension loaded');
+  } catch (e) {
+    AppLogger(
+      null,
+    ).w('sqlite_vector not loaded (vector search unavailable): $e');
+  }
+  return sqlite3;
+}
+
 LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb) {
-  if (path == null || name == null) {
+  if (!useMemoryDb && (path == null || name == null)) {
     throw ("Path or Name not provided, can not start scanner");
   }
+
   // the LazyDatabase util lets us find the right location for the file async.
   return LazyDatabase(() async {
     AppLogger(null).i('Initialize Database | path=$path');
-    //check app startup initialization
-    io.File file = io.File(p.join(path!, 'data', name));
-    path = file.path;
 
-    // Make sqlite3 pick a more suitable location for temporary files - the
-    // one from the system may be inaccessible due to ios/mac app sandbox.
-    // We can't access /tmp on Android, which sqlite3 would try by default.
-    // Explicitly tell it about the correct temporary directory.
-    sqlite3.tempDirectory = (await getTemporaryDirectory()).path;
-
-    AppLogger(null).i("Opening Database | $path");
     if (!useMemoryDb) {
+      // check app startup initialization
+      io.File file = io.File(p.join(path!, 'data', name));
+      path = file.path;
+
+      // Make sqlite3 pick a more suitable location for temporary files - the
+      // one from the system may be inaccessible due to ios/mac app sandbox.
+      sqlite3.tempDirectory = (await getTemporaryDirectory()).path;
+
+      AppLogger(null).i("Opening Database | $path");
       return NativeDatabase(
         file,
         logStatements: false,
         cachePreparedStatements: true,
-        setup: null,
+        sqlite3: _loadExtensions,
       );
-      //return NativeDatabase.createInBackground(file, logStatements: true, cachePreparedStatements: true, setup: null);
     } else {
       return NativeDatabase.memory(
         logStatements: false,
-        setup: null,
         cachePreparedStatements: false,
+        sqlite3: _loadExtensions,
       );
     }
   });

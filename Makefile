@@ -98,6 +98,10 @@ deploy-download-service: init
 		--region=$(REGION) \
 		--substitutions _SERVICE_NAME=$(SERVICE_NAME),_REGION=$(REGION),_GCS_BUCKET=mydata-tools_downloads,_GCS_FOLDER_PREFIX=local-llm-models/,_REPO_NAME=$(IMAGE_REPO)
 
+
+# Cleanup
+.PHONY: clean
+
 # Cleanup
 .PHONY: clean
 clean:

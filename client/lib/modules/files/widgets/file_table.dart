@@ -63,8 +63,8 @@ class _FileTable extends State<FileTable> {
           child: SingleChildScrollView(
             scrollDirection: Axis.vertical,
             child: DataTable(
-              dataRowMaxHeight: 72,
-              dataRowMinHeight: 72,
+              dataRowMaxHeight: 56,
+              dataRowMinHeight: 56,
               columnSpacing: spacing,
               horizontalMargin: 12,
               showCheckboxColumn: true,
@@ -185,8 +185,8 @@ class _FileTable extends State<FileTable> {
                     children: [
                       (f.thumbnail == null && !isImage)
                           ? SizedBox(
-                              width: 100,
-                              height: 64,
+                              width: 50,
+                              height: 32,
                               child: Center(
                                 child: Icon(getIconForMimeType(f.contentType)),
                               ),
@@ -309,8 +309,8 @@ class _FileTable extends State<FileTable> {
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
                       const SizedBox(
-                        width: 100,
-                        height: 64,
+                        width: 50,
+                        height: 32,
                         child: Center(
                           child: Icon(Icons.folder, color: Colors.amber),
                         ),
@@ -436,15 +436,15 @@ class _FileTable extends State<FileTable> {
       }
 
       return SizedBox(
-        width: 100,
-        height: 64,
+        width: 50,
+        height: 32,
         child: Center(
           child: Padding(
             padding: const EdgeInsets.all(4),
             child: Image(
               image: ResizeImage(
                 provider,
-                height: 64,
+                height: 32,
               ),
               fit: BoxFit.contain,
               errorBuilder: (context, error, stackTrace) =>
@@ -457,8 +457,8 @@ class _FileTable extends State<FileTable> {
       //do nothing, return placeholder
     }
     return const SizedBox(
-      width: 100,
-      height: 64,
+      width: 50,
+      height: 32,
       child: Center(child: Icon(Icons.broken_image)),
     );
   }
