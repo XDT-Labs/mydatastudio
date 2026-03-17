@@ -87,7 +87,7 @@ dependencies:
   screen_retriever: ^0.2.0
   google_fonts: ^8.0.2
   genui: ^0.7.0
-  speech_to_text: ^7.0.0
+
   pdfx: ^2.6.0
   flutter_map: ^7.0.2
   latlong2: ^0.9.1

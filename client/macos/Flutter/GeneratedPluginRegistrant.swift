@@ -15,7 +15,6 @@ import media_kit_video
 import package_info_plus
 import pdfx
 import screen_retriever_macos
-import speech_to_text
 import url_launcher_macos
 import wakelock_plus
 import window_manager
@@ -32,7 +31,6 @@ func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   FPPPackageInfoPlusPlugin.register(with: registry.registrar(forPlugin: "FPPPackageInfoPlusPlugin"))
   PdfxPlugin.register(with: registry.registrar(forPlugin: "PdfxPlugin"))
   ScreenRetrieverMacosPlugin.register(with: registry.registrar(forPlugin: "ScreenRetrieverMacosPlugin"))
-  SpeechToTextPlugin.register(with: registry.registrar(forPlugin: "SpeechToTextPlugin"))
   UrlLauncherPlugin.register(with: registry.registrar(forPlugin: "UrlLauncherPlugin"))
   WakelockPlusMacosPlugin.register(with: registry.registrar(forPlugin: "WakelockPlusMacosPlugin"))
   WindowManagerPlugin.register(with: registry.registrar(forPlugin: "WindowManagerPlugin"))

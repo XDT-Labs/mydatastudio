@@ -4,6 +4,7 @@ import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 import 'package:mydatatools/database_manager.dart';
+import 'package:mydatatools/repositories/database_repository.dart';
 import 'package:mydatatools/models/tables/app_user.dart';
 import 'package:mydatatools/modules/files/services/file_upsert_service.dart';
 import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
@@ -187,6 +188,13 @@ class DbIsolateWriterClient {
         } else if (data['type'] == 'delete_file') {
           // Handle file delete
           await FileDesktopRepository(db).delete(data['file'] as File);
+          replyTo?.send({'status': 'ok'});
+        } else if (data['type'] == 'embedding') {
+          // Handle embedding upsert
+          await DatabaseRepository(db).upsertFileEmbedding(
+            data['fileId'] as String,
+            (data['embedding'] as List).cast<double>(),
+          );
           replyTo?.send({'status': 'ok'});
         } else if (data['type'] == 'user') {
           // Handle user save

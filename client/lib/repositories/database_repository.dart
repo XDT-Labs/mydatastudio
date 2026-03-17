@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/database_manager.dart';
+import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatatools/models/tables/file.dart';
 import 'package:drift/drift.dart';
 
 class DatabaseRepository {
@@ -128,5 +130,35 @@ class DatabaseRepository {
           ),
         )
         .toList();
+  }
+
+  /// Returns a list of files that do not have a corresponding entry in the
+  /// `files_embeddings` table, limited to [limit] results.
+  /// Filters for image content types.
+  Future<List<File>> getFilesWithMissingEmbeddings({int limit = 10}) async {
+    final query = db.select(db.files).join([
+      leftOuterJoin(
+        db.filesEmbeddings,
+        db.filesEmbeddings.fileId.equalsExp(db.files.id),
+      ),
+      innerJoin(
+        db.collections,
+        db.collections.id.equalsExp(db.files.collectionId),
+      ),
+    ])
+      ..where(
+        db.filesEmbeddings.fileId.isNull() &
+            db.files.contentType.like('image/%') &
+            db.files.isDeleted.equals(false),
+      )
+      ..limit(limit);
+
+    final rows = await query.get();
+    return rows.map((row) => row.readTable(db.files)).toList();
+  }
+
+  Future<Collection?> getCollection(String id) async {
+    return (db.select(db.collections)..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
   }
 }

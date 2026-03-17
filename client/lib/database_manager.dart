@@ -26,6 +26,8 @@ import 'package:mydatatools/models/tables/email.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/file_embedding.dart';
 import 'package:mydatatools/models/tables/folder.dart';
+import 'package:flutter/services.dart';
+import 'package:mydatatools/modules/files/services/embedding_isolate.dart';
 import 'package:uuid/uuid.dart';
 
 part 'database_manager.g.dart';
@@ -44,6 +46,7 @@ class DatabaseManager {
   AppDatabase? appDatabase;
   DbIsolateWriterClient? _writerIsolateClient;
   SendPort? _writerPort;
+  EmbeddingIsolate? _embeddingIsolate;
   DatabaseRepository? _repository;
   final AppLogger logger = AppLogger(null);
 
@@ -95,6 +98,9 @@ class DatabaseManager {
     // start scanners
     await _startScanners();
 
+    // start embedding isolate
+    await _startEmbeddingIsolate(path);
+
     isInitializedNotifier.value = true;
     return appDatabase!;
   }
@@ -143,6 +149,16 @@ class DatabaseManager {
       useMemoryDb: false,
     );
     _writerPort = _writerIsolateClient!.getSendPort();
+  }
+
+  Future<void> _startEmbeddingIsolate(String storagePath) async {
+    _embeddingIsolate = EmbeddingIsolate();
+    await _embeddingIsolate!.start(
+      storagePath,
+      AppConstants.dbName,
+      _writerPort!,
+      RootIsolateToken.instance!,
+    );
   }
 
   /// Returns the [SendPort] for the writer isolate

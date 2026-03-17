@@ -3,7 +3,7 @@ import 'package:genui/genui.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/modules/aichat/services/local_llm_content_generator.dart';
 import 'package:mydatatools/python_manager.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
+
 import 'package:file_picker/file_picker.dart';
 
 class AichatPage extends StatefulWidget {
@@ -32,8 +32,7 @@ class _AichatPage extends State<AichatPage> {
   String _selectedModel = 'Gemini 3 Flash';
   final List<String> _models = ['Gemini 3 Flash', 'Local LLM', 'ChatGPT', 'Grok'];
   final _textController = TextEditingController();
-  final stt.SpeechToText _speech = stt.SpeechToText();
-  bool _isListening = false;
+
 
   late final A2uiMessageProcessor _a2uiMessageProcessor;
   late final GenUiConversation _genUiConversation;
@@ -42,7 +41,7 @@ class _AichatPage extends State<AichatPage> {
   @override
   void initState() {
     super.initState();
-    _initSpeech();
+
 
     // listen for changes
     PythonManager.isLLMServiceRunning.addListener(() {
@@ -144,42 +143,7 @@ class _AichatPage extends State<AichatPage> {
     });
   }
 
-  void _initSpeech() async {
-    try {
-      await _speech.initialize(
-        onStatus: (status) => logger.d('Speech status: $status'),
-        onError: (errorNotification) => logger.e('Speech error: $errorNotification'),
-      );
-      if (mounted) setState(() {});
-    } catch (e) {
-      logger.e('Failed to initialize speech: $e');
-    }
-  }
 
-  void _listen() async {
-    if (!_isListening) {
-      bool available = await _speech.initialize(
-        onStatus: (status) {
-          logger.d('Speech status: $status');
-          if (status == 'done' || status == 'notListening') {
-            if (mounted) setState(() => _isListening = false);
-          }
-        },
-        onError: (errorNotification) => logger.e('Speech error: $errorNotification'),
-      );
-      if (available) {
-        setState(() => _isListening = true);
-        _speech.listen(
-          onResult: (val) => setState(() {
-            _textController.text = val.recognizedWords;
-          }),
-        );
-      }
-    } else {
-      setState(() => _isListening = false);
-      _speech.stop();
-    }
-  }
 
   void _sendMessage(String message) {
     if (message.trim().isEmpty) {
@@ -381,17 +345,7 @@ class _AichatPage extends State<AichatPage> {
                         ),
                         const Spacer(),
                         // Voice Icon
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          constraints: const BoxConstraints(),
-                          icon: Icon(
-                            _isListening ? Icons.mic : Icons.mic_none_outlined,
-                            color: _isListening ? Colors.red : const Color(0xFF3C3C43).withOpacity(0.6),
-                            size: 22,
-                          ),
-                          onPressed: _listen,
-                        ),
+
                         // Send Icon (Arrow in circle)
                         IconButton(
                           visualDensity: VisualDensity.compact,
