@@ -22,7 +22,8 @@ APP_ZIP_NAME = aichat-macos.zip
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = bartowski/google_gemma-3-4b-it-GGUF
 HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
-HF_EMBEDDING_MODEL = Qwen/Qwen3-VL-Embedding-2B
+HF_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-8B-GGUF"
+HF_EMBEDDING_FILE = Qwen3-Embedding-8B-Q4_K_M.gguf
 HF_EMBEDDING_DIR = $(PYTHON_DIR)/models/$(HF_EMBEDDING_MODEL)
 
 # Flutter Config
@@ -52,12 +53,16 @@ models:
 	else \
 		echo "$(HF_FILE) already exists, skipping download."; \
 	fi
-	@if [ ! -d $(HF_EMBEDDING_DIR) ]; then \
+	@if [ ! -f $(PYTHON_DIR)/models/$(HF_EMBEDDING_FILE) ]; then \
 		echo "Downloading Qwen-VL embedding model (Transformers)..."; \
-		hf download $(HF_EMBEDDING_MODEL) --local-dir $(HF_EMBEDDING_DIR); \
+		hf download $(HF_EMBEDDING_MODEL) ${HF_EMBEDDING_FILE} --local-dir $(PYTHON_DIR)/models; \
+		cp $(PYTHON_DIR)/models/$(HF_EMBEDDING_DIR)/$(HF_EMBEDDING_FILE) $(PYTHON_DIR)/models/$(HF_EMBEDDING_FILE);  \
+		rm -rf $(HF_EMBEDDING_DIR); \
 	else \
 		echo "Qwen-VL embedding model already exists, skipping download."; \
 	fi
+
+	
 
 
 # 2. Build Python Service

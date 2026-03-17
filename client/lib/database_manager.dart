@@ -237,7 +237,9 @@ class AppDatabase extends _$AppDatabase {
           await _initVectorIndex();
         }
         if (from < 5) {
-          logger.i("Upgrade to v5: Re-initializing vector index for sqlite_vector");
+          logger.i(
+            "Upgrade to v5: Re-initializing vector index for sqlite_vector",
+          );
           await _initVectorIndex();
         }
       },

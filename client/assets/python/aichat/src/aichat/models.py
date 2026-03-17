@@ -105,21 +105,24 @@ class EmbeddingRequest(BaseModel):
         None, 
         description="Base64-encoded image data (PNG, JPEG, etc.). Supported via Transformers (Qwen-VL)."
     )
+
+    #https://huggingface.co/Qwen/Qwen3-Embedding-8B-GGUF
+    #https://huggingface.co/DevQuasar/Qwen.Qwen3-VL-Embedding-2B-GGUF/tree/main
     model_name: str = Field(
         default=DEFAULT_LOCAL_MODEL,
-        description="Hugging Face model identifier (e.g., 'bartowski/gemma-3-4b-it-GGUF')"
+        description="Hugging Face model identifier (e.g., 'Qwen/Qwen3-Embedding-8B-GGUF')" #DevQuasar/Qwen.Qwen3-VL-Embedding-2B-GGUF
     )
     filename: Optional[str] = Field(
         default=DEFAULT_GGUF_FILE,
-        description="The GGUF filename to use (e.g., 'gemma-3-4b-it-Q4_K_M.gguf')"
+        description="The GGUF filename to use (e.g., 'Qwen3-Embedding-8B-Q4_K_M.gguf')" #Qwen.Qwen3-VL-Embedding-2B.Q4_K_M.gguf
     )
     
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "text": "This is a sample text to generate embeddings for.",
-                "model_name": "bartowski/gemma-3-4b-it-GGUF",
-                "filename": "gemma-3-4b-it-Q4_K_M.gguf"
+                "model_name": "Qwen/Qwen3-Embedding-8B-GGUF",
+                "filename": "Qwen3-Embedding-8B-Q4_K_M.gguf"
             }
         }
     )

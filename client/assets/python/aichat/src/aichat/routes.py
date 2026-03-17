@@ -319,6 +319,7 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
         
         # Use the universal generate_embedding function from model_manager
         try:
+            print(f"[EMBEDDING] Generating embedding for input_type: {'text' if request.text else 'image'}")
             embedding = gen_emb_fn(
                 model=embedding_model,
                 processor=embedding_processor,
@@ -332,7 +333,10 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
             else:
                 input_type = "image"
             input_content = request.text if request.text else f"base64_image({len(request.image_base64)})"
+            
+            print(f"[EMBEDDING] Success! Generated embedding with dimension: {len(embedding)}")
         except ValueError as ve:
+             print(f"[EMBEDDING] [ERROR] Validation error: {ve}")
              raise HTTPException(status_code=400, detail=str(ve))
             
         return {
@@ -346,9 +350,12 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
     except HTTPException:
         raise
     except ValueError as ve:
+        print(f"[EMBEDDING] [ERROR] Value error: {ve}")
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
-        print(f"[ERROR] Failed to generate embedding: {e}")
+        print(f"[EMBEDDING] [ERROR] Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to generate embedding: {e}"

@@ -157,11 +157,13 @@ def generate_embedding(
     """
     if hasattr(model, 'client') and hasattr(model.client, 'embed'):
         # LlamaCpp path (Text only)
+        print("[EMBEDDING] Route: LlamaCpp")
         if image_base64:
             raise ValueError("LlamaCpp does not support image embeddings in this implementation.")
         return generate_text_embedding(text, model, processor)
     
     # Transformers path
+    print(f"[EMBEDDING] Route: Transformers (Multimodal)")
     return generate_transformers_multimodal_embedding(model, processor, text, image_base64)
 
 
@@ -203,12 +205,16 @@ def generate_transformers_multimodal_embedding(
     ).to(device)
     
     with torch.no_grad():
+        print(f"[EMBEDDING] Performing inference on device: {device}")
         outputs = model(**inputs)
         # Last Token Pooling ([EOS]) as per research
         # Qwen3-VL-Embedding returns the embedding in the last hidden state of the [EOS] token
         embeddings = outputs.last_hidden_state[:, -1, :]
+        print(f"[EMBEDDING] Raw embedding shape: {embeddings.shape}")
+        
         # Normalize the embedding
         embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+        print(f"[EMBEDDING] Normalized embedding head: {embeddings[0, :5].tolist()}...")
         
     return embeddings[0].tolist()
 
@@ -219,12 +225,16 @@ def generate_text_embedding(text: str, model: Any, processor: Any) -> List[float
     """
     # If using LlamaCpp directly (from LangChain's LLM), we can use the underlying client
     if hasattr(model, 'client') and hasattr(model.client, 'embed'):
+        print(f"[EMBEDDING] Generating text embedding (LlamaCpp) for: {text[:50]}...")
         result = model.client.embed(text)
         if isinstance(result, list) and len(result) > 0:
             if isinstance(result[0], list):
+                print(f"[EMBEDDING] result[0] is list, len={len(result[0])}")
                 return result[0]
             elif hasattr(result[0], 'embedding'):
+                print(f"[EMBEDDING] result[0] has .embedding, len={len(result[0].embedding)}")
                 return result[0].embedding
+        print(f"[EMBEDDING] result type: {type(result)} len={len(result)}")
         return result
     else:
         raise ValueError("Provided model does not support LlamaCpp embedding generation correctly")
