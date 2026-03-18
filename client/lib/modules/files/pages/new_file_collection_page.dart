@@ -255,6 +255,11 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
         return;
       }
 
+      // Start the initial scan immediately after adding the collection
+      ScannerManager.getInstance()
+          .getScanner(collection)
+          ?.start(collection, collection.path, true, true);
+
       // Extract readable email from Collection name: "Google Drive (user@example.com)"
       final nameMatch = RegExp(r'\((.+?)\)').firstMatch(collection.name);
       setState(() {

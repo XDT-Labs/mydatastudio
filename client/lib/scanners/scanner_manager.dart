@@ -112,14 +112,6 @@ class ScannerManager {
           driveWriterPort,
         );
         scanners[c.id] = cloudScanner;
-        
-        logger.i("Starting initial scan for ${c.name}...");
-        // Kick off the initial scan immediately
-        cloudScanner.start(c, c.path, true, false).then((val) {
-          logger.i("Initial scan request completed with return code: $val");
-        }).catchError((e) {
-          logger.e("Initial scan request failed", error: e);
-        });
         break;
 
       case AppConstants.scannerEmailGmail:

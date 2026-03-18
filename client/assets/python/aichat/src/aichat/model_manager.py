@@ -101,8 +101,11 @@ def load_embedding_model(model_id: str, filename: str, local_dir: str) -> Any:
         return load_transformers_embedding_model(model_id, local_dir)
     
     # Default to LlamaCpp for GGUF models
-    from .utils import download_gguf_model_if_needed
-    model_path = download_gguf_model_if_needed(model_id, filename, local_dir)
+    from .utils import find_local_model, download_gguf_model
+    model_path = find_local_model(filename, local_dir)
+    if not model_path:
+        print(f"[EMBEDDING] Model not found locally, downloading: {model_id}/{filename}")
+        model_path = download_gguf_model(model_id, filename, local_dir)
     
     print(f"[EMBEDDING] Initializing LlamaCpp for embeddings from {model_path}...")
     llm = LlamaCpp(

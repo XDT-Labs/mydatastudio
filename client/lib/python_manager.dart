@@ -108,13 +108,14 @@ class PythonManager {
         },
       );
 
-      // Write new PID to file
       try {
         pidFile.writeAsStringSync('${_pythonProc!.pid}');
         logger.d('[python] Wrote PID ${_pythonProc!.pid} to ${pidFile.path}');
       } catch (e) {
         logger.d('[python] Failed to write PID file: $e');
       }
+
+      logger.d('[python] Service process started with PID: ${_pythonProc!.pid}');
 
       await _pipeOutput(_pythonProc!);
 

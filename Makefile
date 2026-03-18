@@ -34,6 +34,9 @@ FLUTTER_DIR = client
 .PHONY: all
 all: models build-python local-install-python build-client
 
+.PHONY: dev
+dev: models build-python local-install-python
+
 # Project Initialization
 .PHONY: init
 init:
@@ -73,6 +76,7 @@ build-python:
 		pdm install && \
 		FORCE_CMAKE=1 CMAKE_ARGS="-DGGML_METAL=on -DGGML_NATIVE=off" pdm run pyinstaller -y main.spec && \
 		mkdir -p ../../../app && \
+		rm -f ../../../app/$(APP_ZIP_NAME) && \
 		cd dist/aichat && \
 		zip -r ../../../../../app/$(APP_ZIP_NAME) .
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
@@ -92,6 +96,7 @@ local-install-python: build-python
 	@echo "--- 💾 Installing service for local testing ---"
 	@mkdir -p ~/Library/Application\ Support/mydata.tools/
 	cp $(APP_ZIP_PATH) ~/Library/Application\ Support/mydata.tools/
+	rm -fr ~/Library/Application\ Support/mydata.tools/aichat
 	@echo "--- ✅ Copy complete ---"
 
 # Cloud Run Deployment
