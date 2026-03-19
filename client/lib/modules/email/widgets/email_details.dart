@@ -28,9 +28,7 @@ class _EmailDetails extends State<EmailDetails> {
   @override
   void initState() {
     super.initState();
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.white);
+    _controller = WebViewController();
     _loadEmailContent();
   }
 
@@ -43,15 +41,10 @@ class _EmailDetails extends State<EmailDetails> {
   }
 
   void _loadEmailContent() {
-    String content = widget.email.htmlBody ??
-        '<html><body style="font-family: sans-serif; white-space: pre-wrap;">${widget.email.plainBody ?? "(empty)"}</body></html>';
+    String html = widget.email.htmlBody ?? 
+        '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">${widget.email.plainBody ?? "(empty)"}</body></html>';
     
-    // Simple way to ensure it looks reasonable if it's just plain text or missing body
-    if (widget.email.htmlBody == null && widget.email.plainBody == null) {
-        content = '<html><body style="font-family: sans-serif; color: gray; text-align: center; padding-top: 50px;">(empty)</body></html>';
-    }
-
-    _controller.loadHtmlString(content);
+    _controller.loadHtmlString(html);
   }
 
   @override
