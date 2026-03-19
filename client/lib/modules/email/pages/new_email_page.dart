@@ -80,6 +80,7 @@ class _NewEmailPage extends State<NewEmailPage> {
             length: 6,
             child: Scaffold(
               appBar: AppBar(
+                toolbarHeight: 0,
                 bottom: const TabBar(
                   tabs: [
                     Tab(icon: Icon(Icons.email), text: 'Gmail'),

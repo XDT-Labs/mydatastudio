@@ -60,7 +60,13 @@ class _EmailDrawer extends State<EmailDrawer> {
           backgroundColor: Colors.transparent,
           floatingActionButton: FloatingActionButton(
             tooltip: "Add Email",
-            child: const Icon(Icons.add),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              side: const BorderSide(color: Colors.grey, width: 1),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.add, color: Colors.grey),
             onPressed: () {
               debugPrint("fab pressed");
               GoRouter.of(context).go("/email/add");
