@@ -69,6 +69,34 @@ class _EmailDrawer extends State<EmailDrawer> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    // 1. Grouping
+    final Map<String, List<Collection>> grouped = {};
+    for (var c in collections) {
+      final groupName = _getGroupName(c);
+      grouped.putIfAbsent(groupName, () => []).add(c);
+    }
+
+    // 2. Sort groups by their defined order
+    final sortedGroupNames = grouped.keys.toList()
+      ..sort((a, b) {
+        final orderA = _getGroupOrder(grouped[a]!.first.scanner);
+        final orderB = _getGroupOrder(grouped[b]!.first.scanner);
+        return orderA.compareTo(orderB);
+      });
+
+    // 3. Flatten into a list with headers for the ListView
+    final List<dynamic> flatList = [];
+    for (final groupName in sortedGroupNames) {
+      flatList.add(groupName);
+
+      final groupItems = grouped[groupName]!;
+      // Sort within the group alphabetically
+      groupItems.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      flatList.addAll(groupItems);
+    }
+
     return SizedBox.expand(
       child: Container(
         height: double.infinity,
@@ -78,8 +106,8 @@ class _EmailDrawer extends State<EmailDrawer> {
           backgroundColor: Colors.transparent,
           floatingActionButton: FloatingActionButton(
             tooltip: "Add Email",
-            backgroundColor: Colors.transparent,
-            elevation: 0,
+            backgroundColor: Colors.white,
+            elevation: 2,
             shape: RoundedRectangleBorder(
               side: const BorderSide(color: Colors.grey, width: 1),
               borderRadius: BorderRadius.circular(16),
@@ -92,11 +120,11 @@ class _EmailDrawer extends State<EmailDrawer> {
           body: Column(
             children: [
               const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+                padding: EdgeInsets.symmetric(horizontal: 8.0),
                 child: Align(
                   alignment: Alignment.topLeft,
                   child: Text(
-                    "ACCOUNTS",
+                    "SOURCES",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
@@ -108,9 +136,27 @@ class _EmailDrawer extends State<EmailDrawer> {
               ),
               Expanded(
                 child: ListView.builder(
-                  itemCount: collections.length,
+                  padding: EdgeInsets.zero,
+                  itemCount: flatList.length,
                   itemBuilder: (context, index) {
-                    final col = collections[index];
+                    final item = flatList[index];
+
+                    if (item is String) {
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 16, 8, 4),
+                        child: Text(
+                          item.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.primary.withOpacity(0.8),
+                            letterSpacing: 1.0,
+                          ),
+                        ),
+                      );
+                    }
+
+                    final col = item as Collection;
                     return _AccountExpansionTile(
                       collection: col,
                       isSelected: collection?.id == col.id,
@@ -125,7 +171,8 @@ class _EmailDrawer extends State<EmailDrawer> {
                         EmailPage.selectedFolder.add(folderId);
                         context.go('/email');
                       },
-                      onDelete: () => _showDeleteConfirmationDialog(context, col),
+                      onDelete: () =>
+                          _showDeleteConfirmationDialog(context, col),
                       onSync: () {
                         ScannerManager.getInstance()
                             .getScanner(col)
@@ -140,6 +187,24 @@ class _EmailDrawer extends State<EmailDrawer> {
         ),
       ),
     );
+  }
+
+  String _getGroupName(Collection c) {
+    switch (c.scanner) {
+      case AppConstants.scannerEmailGmail:
+        return 'Gmail';
+      default:
+        return 'Other';
+    }
+  }
+
+  int _getGroupOrder(String scanner) {
+    switch (scanner) {
+      case AppConstants.scannerEmailGmail:
+        return 0;
+      default:
+        return 1;
+    }
   }
 
   void _showDeleteConfirmationDialog(BuildContext context, Collection collection) {
@@ -229,20 +294,40 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    // Find Inbox and Sent folders
+    EmailFolder? inbox;
+    EmailFolder? sent;
+    final List<EmailFolder> otherFolders = [];
+
+    for (var f in folders) {
+      final normalizedId = f.id.toUpperCase();
+      final normalizedName = f.name.toUpperCase();
+      
+      if (normalizedId == 'INBOX' || normalizedName == 'INBOX') {
+        inbox = f;
+      } else if (normalizedId == 'SENT' || normalizedName == 'SENT') {
+        sent = f;
+      } else {
+        otherFolders.add(f);
+      }
+    }
     
+    // Sort other folders alphabetically
+    otherFolders.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
     return ExpansionTile(
       initiallyExpanded: widget.isSelected,
-      leading: Icon(
-        widget.collection.scanner == AppConstants.scannerEmailGmail 
-          ? Icons.mail 
-          : Icons.email_outlined,
-        color: widget.isSelected ? theme.colorScheme.primary : null,
-      ),
+      shape: const Border(),
+      collapsedShape: const Border(),
+      tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
       title: Text(
         widget.collection.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        softWrap: false,
         style: TextStyle(
           fontWeight: widget.isSelected ? FontWeight.bold : FontWeight.normal,
-          fontSize: 14,
         ),
       ),
       trailing: Row(
@@ -256,24 +341,57 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
             },
             itemBuilder: (context) => [
               const PopupMenuItem(value: 'sync', child: Text('Sync Account')),
-              const PopupMenuItem(value: 'delete', child: Text('Delete Account')),
+              const PopupMenuItem(
+                  value: 'delete', child: Text('Delete Account')),
             ],
           ),
         ],
       ),
       children: [
-        ListTile(
-          dense: true,
-          contentPadding: const EdgeInsets.only(left: 48),
-          title: const Text("All Inboxes"),
-          selected: widget.isSelected && widget.selectedFolderId == null,
-          onTap: widget.onAccountTap,
+        if (inbox != null) _buildFolderTile(context, inbox, "Inbox", Icons.inbox),
+        if (sent != null) _buildFolderTile(context, sent, "Sent", Icons.send),
+        
+        if (otherFolders.isNotEmpty)
+          Theme(
+            data: theme.copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              tilePadding: const EdgeInsets.only(left: 48.0, right: 16.0),
+              title: const Text(
+                "All Folders",
+                style: TextStyle(fontSize: 13),
+              ),
+              leading: const Icon(Icons.folder_outlined, size: 20),
+              dense: true,
+              children: otherFolders
+                  .map((f) => _buildFolderTile(context, f, f.name, null, indent: 32))
+                  .toList(),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildFolderTile(BuildContext context, EmailFolder f, String label, IconData? icon, {double indent = 48.0}) {
+    final theme = Theme.of(context);
+    final isSelected = widget.isSelected && widget.selectedFolderId == f.id;
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 8.0),
+      child: ListTile(
+        dense: true,
+        contentPadding: EdgeInsets.only(left: indent - 8.0),
+        leading: icon != null
+            ? Icon(icon,
+                size: 18, color: isSelected ? theme.colorScheme.primary : null)
+            : null,
+        title: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
         ),
-        ...folders.map((f) => ListTile(
-          dense: true,
-          contentPadding: const EdgeInsets.only(left: 48),
-          title: Text(f.name),
-          trailing: (f.messagesUnread ?? 0) > 0 
+        trailing: (f.messagesUnread ?? 0) > 0
             ? Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
@@ -282,14 +400,19 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
                 ),
                 child: Text(
                   f.messagesUnread.toString(),
-                  style: TextStyle(fontSize: 10, color: theme.colorScheme.onPrimaryContainer),
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: theme.colorScheme.onPrimaryContainer),
                 ),
               )
             : null,
-          selected: widget.isSelected && widget.selectedFolderId == f.id,
-          onTap: () => widget.onFolderTap(f.id),
-        )),
-      ],
+        selected: isSelected,
+        selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.3),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        onTap: () => widget.onFolderTap(f.id),
+      ),
     );
   }
 }

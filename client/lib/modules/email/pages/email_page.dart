@@ -53,18 +53,22 @@ class _EmailPage extends State<EmailPage> {
   bool isSidebarExpanded = false;
   bool isSearching = false;
   final TextEditingController searchController = TextEditingController();
+  bool _needsFolderAutoSelect = false;
 
   @override
   void initState() {
     _collectionService = GetCollectionsService.instance;
 
     _collectionsServiceSub = _collectionService!.sink.listen((value) {
+      final emailCollections = value.where((c) => c.type == 'email').toList();
       setState(() {
-        collections = value;
+        collections = emailCollections;
       });
-      if (value.isNotEmpty && EmailPage.selectedCollection.value == null) {
+      if (emailCollections.isNotEmpty &&
+          EmailPage.selectedCollection.value == null) {
         //select default collection
-        EmailPage.selectedCollection.add(value.first);
+        _needsFolderAutoSelect = true;
+        EmailPage.selectedCollection.add(emailCollections.first);
       }
     });
 
@@ -89,13 +93,30 @@ class _EmailPage extends State<EmailPage> {
       }
     });
     
-    _folderSub = GetEmailFoldersService.instance.sink.listen((List<EmailFolder> folders) {
-      if (mounted && EmailPage.selectedFolder.value != null) {
-        final folder = folders.where((f) => f.id == EmailPage.selectedFolder.value).firstOrNull;
-        if (folder != null) {
-          setState(() {
-            selectedFolderName = folder.name;
-          });
+    _folderSub =
+        GetEmailFoldersService.instance.sink.listen((List<EmailFolder> folders) {
+      if (mounted) {
+        if (_needsFolderAutoSelect && folders.isNotEmpty) {
+          _needsFolderAutoSelect = false;
+          final inbox = folders
+              .where((f) =>
+                  f.id.toUpperCase() == 'INBOX' ||
+                  f.name.toUpperCase() == 'INBOX')
+              .firstOrNull;
+          if (inbox != null) {
+            EmailPage.selectedFolder.add(inbox.id);
+          }
+        }
+
+        if (EmailPage.selectedFolder.value != null) {
+          final folder = folders
+              .where((f) => f.id == EmailPage.selectedFolder.value)
+              .firstOrNull;
+          if (folder != null) {
+            setState(() {
+              selectedFolderName = folder.name;
+            });
+          }
         }
       }
     });
