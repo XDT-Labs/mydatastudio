@@ -14,6 +14,10 @@ import 'package:mydatatools/modules/files/services/repositories/file_repository.
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/repositories/user_repository.dart';
 import 'package:mydatatools/services/get_user_service.dart';
+import 'package:mydatatools/modules/email/services/email_upsert_service.dart';
+import 'package:mydatatools/modules/email/services/email_folder_upsert_service.dart';
+import 'package:mydatatools/models/tables/email.dart';
+import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:logger/logger.dart';
 import 'package:mydatatools/app_logger.dart';
 
@@ -183,6 +187,18 @@ class DbIsolateWriterClient {
               isCloud: data['isCloud'] ?? false,
               isFullScan: data['isFullScan'] ?? false,
             ),
+          );
+          replyTo?.send({'status': 'ok'});
+        } else if (data['type'] == 'batch_email') {
+          List<Email> emailsToUpsert = (data['emails'] as List).cast<Email>();
+          await EmailUpsertService.instance.invoke(
+            EmailUpsertServiceCommand(emailsToUpsert, db),
+          );
+          replyTo?.send({'status': 'ok'});
+        } else if (data['type'] == 'email_folder') {
+          EmailFolder folder = data['folder'] as EmailFolder;
+          await EmailFolderUpsertService.instance.invoke(
+            EmailFolderUpsertServiceCommand(folder, db),
           );
           replyTo?.send({'status': 'ok'});
         } else if (data['type'] == 'delete_file') {

@@ -42,7 +42,7 @@ class AuthDialogManager {
                   onPressed: () async {
                     await LoginProviderExtension.handleGoogleMail(
                       context,
-                      collection,
+                      existing: collection,
                     );
                     // TODO close dialog
                   },

@@ -6,7 +6,6 @@ import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/modules/email/pages/email_page.dart';
 import 'package:mydatatools/oauth/desktop_oauth_manager.dart';
 import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
@@ -100,77 +99,106 @@ extension LoginProviderExtension on LoginProviders {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Google Mail handler (existing — unchanged)
-  // ---------------------------------------------------------------------------
-
-  static handleGoogleMail(BuildContext context, Collection? collection) async {
-    String? appDataDir = MainApp.appDataDirectory.value;
-
-    // Security Assessment required for broader distribution:
-    // @see https://support.google.com/cloud/answer/9110914
-    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
-      final provider = DesktopOAuthManager(
-        loginProvider: LoginProviders.google,
-      );
-
-      var client = await provider.login();
-
-      var peopleUrl = Uri.parse(
-        "https://people.googleapis.com/v1/people/me?personFields=emailAddresses",
-      );
-      var response = await http.get(
-        peopleUrl,
-        headers: {"Authorization": "Bearer ${client.credentials.accessToken}"},
-      );
-      if (response.statusCode == 200) {
-        Map<String, dynamic> user = jsonDecode(response.body);
-
-        var userId = user['resourceName'].split("/")[1];
-        var emails = user['emailAddresses'] as List;
-        var email =
-            emails.firstWhere(
-              (element) => (element['metadata']['primary'] ?? false) == true,
-            )['value'];
-
-        var id = collection?.id ?? const Uuid().v4().toString();
-        var root = File(appDataDir!);
-
-        Collection c = Collection(
-          id: id,
-          name: email,
-          path: "${root.path}/files/email/$email",
-          type: "email",
-          scanner: AppConstants.scannerEmailGmail,
-          scanStatus: "pending",
-          oauthService: "google",
-          accessToken: client.credentials.accessToken,
-          refreshToken: client.credentials.refreshToken,
-          idToken: client.credentials.idToken,
-          userId: userId,
-          expiration: client.credentials.expiration,
-          needsReAuth: false,
-        );
-
-        CollectionRepository().addCollection(c).then((value) {
-          GetCollectionsService.instance.invoke(
-            GetCollectionsServiceCommand("email"),
-          );
-          EmailPage.selectedCollection.add(value);
-        });
-
-        return Future(() => c);
-      } else {
-        AppLogger(null).e('Google People API error: ${response.body}');
-      }
-    } else {
+  /// Initiates the Google Mail OAuth2 flow, fetches the user's profile,
+  /// and creates a [Collection] of type `email` with scanner `email.gmail`.
+  static Future<Collection?> handleGoogleMail(
+    BuildContext context, {
+    Collection? existing,
+  }) async {
+    if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Unsupported platform, open up the desktop version of this application to add new accounts.',
+            'Gmail is only supported on the desktop version of this app.',
           ),
         ),
       );
+      return null;
+    }
+
+    try {
+      final appDataDir = MainApp.appDataDirectory.valueOrNull;
+      if (appDataDir == null) {
+        throw Exception('App data directory not initialized. Please restart the app.');
+      }
+      final oauthManager = DesktopOAuthManager(
+        loginProvider: LoginProviders.google,
+      );
+
+      final client = await oauthManager.login();
+
+      // Fetch Google profile to get user email & resource name
+      final peopleResponse = await http.get(
+        Uri.parse(
+          "https://people.googleapis.com/v1/people/me?personFields=emailAddresses",
+        ),
+        headers: {
+          "Authorization": "Bearer ${client.credentials.accessToken}",
+        },
+      );
+
+      if (peopleResponse.statusCode != 200) {
+        AppLogger(null).e(
+          'Google People API error (${peopleResponse.statusCode}): ${peopleResponse.body}',
+        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Failed to fetch Google profile. Please try again.',
+              ),
+            ),
+          );
+        }
+        return null;
+      }
+
+      final userData = jsonDecode(peopleResponse.body) as Map<String, dynamic>;
+      final userId = (userData['resourceName'] as String).split("/")[1];
+      final emails = userData['emailAddresses'] as List;
+      final email =
+          emails.firstWhere(
+            (e) => (e['metadata']['primary'] ?? false) == true,
+          )['value'] as String;
+
+      final collectionId = existing?.id ?? const Uuid().v4().toString();
+
+      final collection = Collection(
+        id: collectionId,
+        name: email,
+        path: "$appDataDir/files/email/$email",
+        type: "email",
+        scanner: AppConstants.scannerEmailGmail,
+        scanStatus: "pending",
+        oauthService: "google",
+        accessToken: client.credentials.accessToken,
+        refreshToken: client.credentials.refreshToken,
+        idToken: client.credentials.idToken,
+        userId: userId,
+        expiration: client.credentials.expiration,
+        needsReAuth: false,
+      );
+
+      if (existing != null) {
+        await CollectionRepository().updateCollection(collection);
+      } else {
+        await CollectionRepository().addCollection(collection);
+      }
+
+      // Notify the email collections list to refresh
+      GetCollectionsService.instance.invoke(
+        GetCollectionsServiceCommand("email"),
+      );
+
+      return collection;
+    } catch (e, stack) {
+      AppLogger(null).e('Gmail OAuth failed: $e\n$stack');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gmail sign-in failed: $e')),
+        );
+      }
+      return null;
     }
   }
 

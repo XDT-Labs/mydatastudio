@@ -23,6 +23,7 @@ import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/converters/string_array_convertor.dart';
 import 'package:mydatatools/models/tables/converters/float_list_converter.dart';
 import 'package:mydatatools/models/tables/email.dart';
+import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/file_embedding.dart';
 import 'package:mydatatools/models/tables/folder.dart';
@@ -43,6 +44,7 @@ class DatabaseManager {
 
   /// Flag to determine if an in-memory database should be used (for testing)
   bool useMemoryDb = false;
+  String? storagePath;
   AppDatabase? appDatabase;
   DbIsolateWriterClient? _writerIsolateClient;
   SendPort? _writerPort;
@@ -84,7 +86,11 @@ class DatabaseManager {
   Future<AppDatabase> initializeDatabase() async {
     io.File file = io.File(await _getConfigPath());
     var config = jsonDecode(file.readAsStringSync());
-    String path = config['path'];
+    storagePath = config['path'];
+    String path = storagePath!;
+
+    // Ensure the global appDataDirectory subject has the value
+    MainApp.appDataDirectory.add(path);
 
     // start database
     appDatabase = await _openDatabase(path);
@@ -195,6 +201,7 @@ class DatabaseManager {
     AppUsers,
     Collections,
     Emails,
+    EmailFolders,
     Files,
     Folders,
     Albums,
@@ -215,7 +222,7 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration {
@@ -257,6 +264,17 @@ class AppDatabase extends _$AppDatabase {
             "Upgrade to v5: Re-initializing vector index for sqlite_vector",
           );
           await _initVectorIndex();
+        }
+        if (from < 6) {
+          logger.i(
+            "Upgrade to v6: Adding EmailFolders table and folder/metadata columns to Emails",
+          );
+          await m.createTable(emailFolders);
+          await m.addColumn(emails, emails.folderId);
+          await m.addColumn(emails, emails.messageId);
+          await m.addColumn(emails, emails.threadId);
+          await m.addColumn(emails, emails.isRead);
+          await m.addColumn(emails, emails.hasAttachments);
         }
       },
     );

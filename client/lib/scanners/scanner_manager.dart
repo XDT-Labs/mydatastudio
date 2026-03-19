@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:isolate';
+import 'package:path/path.dart' as p;
 
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
@@ -7,6 +8,7 @@ import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/modules/files/services/scanners/google_file_scanner.dart';
 import 'package:mydatatools/modules/files/services/scanners/local_file_isolate.dart';
+import 'package:mydatatools/modules/email/services/scanners/gmail_scanner.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 
 class ScannerManager {
@@ -116,7 +118,14 @@ class ScannerManager {
 
       case AppConstants.scannerEmailGmail:
         logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-        // Gmail scanner registration handled elsewhere
+        SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
+        CollectionScanner emailScanner = GmailScanner(
+          dbPath: p.join(DatabaseManager.instance.storagePath!, 'data', AppConstants.dbName),
+          collection: c,
+          appDir: DatabaseManager.instance.storagePath!,
+          dbWriterPort: emailWriterPort,
+        );
+        scanners[c.id] = emailScanner;
         break;
 
       default:

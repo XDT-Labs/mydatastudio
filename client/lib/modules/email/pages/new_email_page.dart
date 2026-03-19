@@ -3,24 +3,13 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:convert';
-import 'dart:ffi';
-import 'dart:io';
-
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/main.dart';
 import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/modules/email/pages/email_page.dart';
-import 'package:mydatatools/oauth/desktop_oauth_manager.dart';
 import 'package:mydatatools/oauth/login_providers.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
-import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:http/http.dart' as http;
 import 'package:reactive_forms/reactive_forms.dart';
-import 'package:uuid/uuid.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class NewEmailPage extends StatefulWidget {
   const NewEmailPage({super.key});
@@ -61,14 +50,14 @@ class _NewEmailPage extends State<NewEmailPage> {
 
     final imapForm = FormGroup({
       'host': FormControl<String>(),
-      'port': FormControl<Int>(),
+      'port': FormControl<int>(),
       'username': FormControl<String>(),
       'password': FormControl<String>(),
     });
 
     final popForm = FormGroup({
       'host': FormControl<String>(),
-      'port': FormControl<Int>(),
+      'port': FormControl<int>(),
       'username': FormControl<String>(),
       'password': FormControl<String>(),
     });
@@ -94,31 +83,7 @@ class _NewEmailPage extends State<NewEmailPage> {
               ),
               body: TabBarView(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: Column(
-                      children: [
-                        SizedBox(
-                          width: 225,
-                          height: 48,
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.email),
-                            label: const Text("Login with Google"),
-                            onPressed: () async {
-                              await LoginProviderExtension.handleGoogleMail(
-                                context,
-                                null,
-                              );
-                              if (context.mounted) {
-                                GoRouter.of(context).go("/email");
-                                GoRouter.of(context).refresh();
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  const _GmailTab(),
                   Padding(
                     padding: const EdgeInsets.all(24.0),
                     child: Column(
@@ -233,89 +198,186 @@ class _NewEmailPage extends State<NewEmailPage> {
     );
   }
 
-  handleYahooMail(BuildContext context, List<Collection> collections) async {
-    String? rootDirectory = MainApp.appDataDirectory.value;
+  Future<void> handleYahooMail(BuildContext context, List<Collection> collections) async {
+    // TODO: Implement actual Yahoo OAuth
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Yahoo Mail login not yet implemented')),
+    );
+  }
+}
 
-    //Scopes:
-    //https://www.googleapis.com/auth/gmail.readonly
-    // TODO: Security Assessment will be required
-    //@see https://support.google.com/cloud/answer/9110914#zippy=%2Cgmail-api%2Cexceptions-to-verification-requirements%2Csteps-to-prepare-for-verification%2Csteps-for-apps-requesting-sensitive-scopes%2Csteps-for-apps-requesting-restricted-scopes%2Csteps-to-submit-your-app%2Csecurity-assessment
-    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
-      final provider = DesktopOAuthManager(
-        loginProvider: LoginProviders.google,
-      );
+// =============================================================================
+// Gmail Tab — stateful OAuth flow mirroring Google Drive
+// =============================================================================
 
-      var client = await provider.login();
-      //print('token=${client.credentials.accessToken}');
+enum _GmailAuthState { idle, loading, success, error }
 
-      /// Handle successful login by creating a new collection for the user or updating current collection
-      var peopleUrl = Uri.parse(
-        "https://people.googleapis.com/v1/people/me?personFields=emailAddresses",
-      );
-      var response = await http.get(
-        peopleUrl,
-        headers: {"Authorization": "Bearer ${client.credentials.accessToken}"},
-      );
-      if (response.statusCode == 200) {
-        Map<String, dynamic> user = jsonDecode(response.body);
+class _GmailTab extends StatefulWidget {
+  const _GmailTab();
 
-        var userId = user['resourceName'].split("/")[1];
-        var emails = user['emailAddresses'] as List;
-        var email =
-            emails.firstWhere(
-              (element) => (element['metadata']['primary'] ?? false) == true,
-            )['value'];
+  @override
+  State<_GmailTab> createState() => _GmailTabState();
+}
 
-        // Find existing email
-        var existingCollection = collections.firstWhereOrNull(
-          (element) => element.name == email,
-        );
+class _GmailTabState extends State<_GmailTab> {
+  _GmailAuthState _authState = _GmailAuthState.idle;
+  String? _errorMessage;
+  String? _connectedEmail;
 
-        var id = existingCollection?.id ?? const Uuid().v4().toString();
+  static const Color _googleBlue = Color(0xFF4285F4);
 
-        // figure out local path to db directory, so we know where to store all local cached files (such as email attachments we download)
-        var root = File(rootDirectory!);
+  Future<void> _connectGmail() async {
+    setState(() {
+      _authState = _GmailAuthState.loading;
+      _errorMessage = null;
+    });
 
-        // Create/Update Collection with the following bits of oauth data
-        Collection collection = Collection(
-          id: id,
-          name: email,
-          path: "${root.path}/files/email/$email",
-          type: "email",
-          scanner: AppConstants.scannerEmailGmail,
-          scanStatus: "pending",
-          oauthService: "google",
-          accessToken: client.credentials.accessToken,
-          refreshToken: client.credentials.refreshToken,
-          idToken: client.credentials.idToken,
-          userId: userId,
-          expiration: client.credentials.expiration,
-          needsReAuth: false,
-        );
+    try {
+      final collection = await LoginProviderExtension.handleGoogleMail(context);
 
-        //Save collection
-        // TODO create Service for addCollection
-        CollectionRepository().addCollection(collection).then((value) {
-          GetCollectionsService.instance.invoke(
-            GetCollectionsServiceCommand("email"),
-          ); //reload all
-          //make new default selected collection
-          EmailPage.selectedCollection.add(value);
-          context.go("/email");
+      if (!mounted) return;
+
+      if (collection == null) {
+        setState(() {
+          _authState = _GmailAuthState.error;
+          _errorMessage = 'Sign-in was cancelled or failed. Please try again.';
         });
-
-        return Future(() => collection);
-      } else {
-        print("Error");
+        return;
       }
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Unsupported platform, open up the desktop version of this application to add new accounts.',
-          ),
-        ),
-      );
+
+      setState(() {
+        _authState = _GmailAuthState.success;
+        _connectedEmail = collection.name;
+      });
+
+      await Future.delayed(const Duration(milliseconds: 900));
+      if (!mounted) return;
+      GoRouter.of(context).go('/email');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _authState = _GmailAuthState.error;
+        _errorMessage = e.toString();
+      });
     }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          child: switch (_authState) {
+            _GmailAuthState.loading => _buildLoading(),
+            _GmailAuthState.success => _buildSuccess(),
+            _GmailAuthState.error   => _buildError(),
+            _GmailAuthState.idle    => _buildIdle(),
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIdle() {
+    return _buildCard(
+      key: const ValueKey('idle'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.email, size: 72, color: _googleBlue),
+          const SizedBox(height: 24),
+          const Text(
+            'Connect Gmail',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Sign in with your Google account to scan and backup your emails '
+            'directly to this app.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.5),
+          ),
+          const SizedBox(height: 28),
+          _buildGoogleSignInButton(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoading() {
+    return _buildCard(
+      key: const ValueKey('loading'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 20),
+          const Text('Connecting to Gmail…', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSuccess() {
+    return _buildCard(
+      key: const ValueKey('success'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.check_circle, color: Colors.green, size: 64),
+          const SizedBox(height: 20),
+          const Text('Gmail Connected!', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+          if (_connectedEmail != null) Text(_connectedEmail!, style: const TextStyle(color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildError() {
+    return _buildCard(
+      key: const ValueKey('error'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.error, color: Colors.red, size: 64),
+          const SizedBox(height: 20),
+          const Text('Connection Failed', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+          if (_errorMessage != null) Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(onPressed: _connectGmail, child: const Text('Try Again')),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCard({required Widget child, required Key key}) {
+    return Card(
+      key: key,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(padding: const EdgeInsets.all(36), child: child),
+    );
+  }
+
+  Widget _buildGoogleSignInButton() {
+    return ElevatedButton.icon(
+      onPressed: _connectGmail,
+      icon: const FaIcon(FontAwesomeIcons.google, size: 18, color: _googleBlue),
+      label: const Text('Sign in with Google'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: Colors.grey.shade300),
+        ),
+      ),
+    );
   }
 }

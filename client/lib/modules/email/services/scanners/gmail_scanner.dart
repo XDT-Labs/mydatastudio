@@ -9,15 +9,21 @@ import 'package:flutter/services.dart';
 // TODO
 //@see https://pub.dev/packages/driven
 class GmailScanner extends CollectionScanner {
-  String dbPath;
+  final SendPort? dbWriterPort;
+  final String dbPath;
   final Collection collection;
-  late String appDir;
+  final String appDir;
   GmailScannerIsolate? isolate;
   bool isStopped = false;
 
   final AppLogger logger = AppLogger(null);
 
-  GmailScanner(this.dbPath, this.collection, this.appDir);
+  GmailScanner({
+    required this.dbPath,
+    required this.collection,
+    required this.appDir,
+    this.dbWriterPort,
+  });
 
   @override
   Future<int> start(
@@ -41,15 +47,18 @@ class GmailScanner extends CollectionScanner {
 
     //start isolate
     RootIsolateToken? token = RootIsolateToken.instance;
-    isolate = GmailScannerIsolate(token, receivePort.sendPort, dbPath, appDir);
-    int count = await isolate!.start(
+    isolate = GmailScannerIsolate(
+      token: token,
+      dbWriterPort: dbWriterPort,
+      appDir: appDir,
+    );
+    await isolate!.start(
       collection,
-      path ?? collection.path,
-      recursive,
-      force,
+      folderId: path,
+      force: force,
     );
 
-    return Future(() => count);
+    return 0;
   }
 
   @override

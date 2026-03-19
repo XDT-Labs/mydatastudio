@@ -2,606 +2,366 @@ import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:isolate';
 
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/modules/email/services/email_repository.dart';
-import 'package:mydatatools/modules/email/services/get_emails_service.dart';
-import 'package:mydatatools/oauth/google_auth_client.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
-
 import 'package:flutter/services.dart';
 import 'package:googleapis/gmail/v1.dart';
+import 'package:mydatatools/app_logger.dart';
+import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatatools/models/tables/email.dart';
+import 'package:mydatatools/models/tables/email_folder.dart';
+import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatatools/modules/email/services/get_emails_service.dart';
+import 'package:mydatatools/oauth/google_auth_client.dart';
 import 'package:uuid/uuid.dart';
 
 class GmailScannerIsolate {
-  //constructor args
-  RootIsolateToken? token;
-  SendPort sendPort;
-  Isolate? isolate;
-  String dbPath;
-  String appDir;
-  //class props
-  AppLogger logger = AppLogger(null);
+  final RootIsolateToken? token;
+  final SendPort? dbWriterPort;
+  final String appDir;
+  Isolate? _isolate;
+  final AppLogger logger = AppLogger(null);
 
-  GmailScannerIsolate(this.token, this.sendPort, this.dbPath, this.appDir)
-    : super() {
-    logger = AppLogger(sendPort);
-  }
+  GmailScannerIsolate({
+    this.token,
+    this.dbWriterPort,
+    required this.appDir,
+  });
 
-  Future<int> start(
-    Collection collection,
-    String? path,
-    recursive,
-    bool force,
-  ) async {
-    // A Stream that handles communication between isolates
-    ReceivePort p = ReceivePort();
-    RootIsolateToken? token = RootIsolateToken.instance;
+  Future<void> start(
+    Collection collection, {
+    String? folderId, // Optional Gmail label ID
+    bool force = false,
+  }) async {
+    if (dbWriterPort == null) {
+       throw Exception("dbWriterPort is required for GmailScannerIsolate");
+    }
+
+    ReceivePort receivePort = ReceivePort("GmailScannerIsolateClient");
+    
     Map<String, dynamic> args = {
-      'token': token,
-      'port': p.sendPort,
-      'dbPath': dbPath,
-      'collectionId': collection.id,
+      'token': token ?? RootIsolateToken.instance,
+      'port': receivePort.sendPort,
+      'dbWriterPort': dbWriterPort,
+      'collection': collection,
+      'folderId': folderId,
+      'appDir': appDir,
     };
 
-    isolate = await Isolate.spawn<Map<String, dynamic>>(_scan, args);
-    isolate!.addOnExitListener(p.sendPort);
+    _isolate = await Isolate.spawn(GmailScannerIsolateWorker.worker, args);
 
-    p.listen((message) {
-      if (message is String) {
-        if (message == "command:refresh") {
+    receivePort.listen((message) {
+      if (message is Map) {
+        if (message['type'] == 'refresh') {
           GetEmailsService.instance.invoke(
-            EmailServiceCommand(collection, "date", false),
+            EmailServiceCommand(collection, sortColumn: "date", sortAsc: false, folderId: folderId),
           );
-        } else {
-          // TODO
         }
       }
     });
-
-    return Future(() => 0);
   }
 
-  void stop() async {
-    //clear any isolates
-    if (isolate != null) {
-      isolate!.kill(priority: Isolate.beforeNextEvent);
-      logger.w('Killed local file scanner');
-    }
+  void stop() {
+    _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
   }
+}
 
-  void _scan(Map<String, dynamic> args) async {
-    //print(args);
-    RootIsolateToken? token = args['token'];
-    SendPort resultPort = args['port'];
-    String dbPath = args['dbPath'];
-    String collectionId = args['collectionId'];
+class GmailScannerIsolateWorker {
+  static Future<void> worker(Map<String, dynamic> args) async {
+    final RootIsolateToken? token = args['token'];
+    final SendPort clientPort = args['port'];
+    final SendPort dbWriterPort = args['dbWriterPort'];
+    final Collection collection = args['collection'];
+    final String? folderId = args['folderId'];
+    final String appDir = args['appDir'];
 
     if (token != null) {
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
     }
 
-    //Start Database inside isolate
-    AppDatabase? database = _initDatabase(dbPath);
+    final AppLogger logger = AppLogger(clientPort);
 
-    // start scanner
-    var fileCount = await _scanEmail(database, collectionId);
-
-    // return all files
-    Isolate.exit(resultPort, fileCount);
-  }
-
-  /// Starting method to run in isolate
-  Future<int> _scanEmail(AppDatabase? database, String collectionId) async {
-    CollectionRepository collectionRepository = CollectionRepository();
-    EmailRepository emailRepository = EmailRepository();
-
-    Collection? collection = await collectionRepository.collectionById(
-      collectionId,
-    );
-    if (collection == null) {
-      logger.e("Collection Not Found, killing isolate");
-      stop();
-    }
-
+    // Validate/Refresh Token
     String? accessToken;
     try {
       accessToken = await GoogleAuthClient.validateToken(
-        collection!.accessToken!,
+        collection.accessToken!,
         collection.refreshToken!,
       );
-    } catch (err) {
-      collection!.needsReAuth = true;
+    } catch (e) {
+      logger.e("Failed to validate Gmail token: $e");
+      Isolate.exit(clientPort, {'error': 'auth_failed'});
     }
 
-    int count = 0;
-    if (accessToken != null) {
-      //first get the newest emails since the last time we ran
-      count += await _getNewestEmails(emailRepository, collection, accessToken);
-      //double check there are no old emails we missed (ex:app closed before sync completed)
-      count += await _getOldestEmails(emailRepository, collection, accessToken);
-      //Check emails in trash and soft-delete from local repo and remove any attachments on disk
-      count += await _getEmailsInTrashToDelete(
-        emailRepository,
-        collection,
-        accessToken,
-      );
-      //Check emails in spam and soft-delete from local repo and remove any attachments on disk
-      count += await _getEmailsInSpamToDelete(
-        emailRepository,
-        collection,
-        accessToken,
-      );
-    }
-    return Future(() => count);
-  }
+    // if validation fails it throws an exception or Isolate.exit is called inside catch block
 
-  /// Get the newest emails since the last time we ran
-  /// First it will find the newest date in the db and then pull all emails since that date
-  /// This will follow the 'nexttoken' from the api reponse to page through all emails
-  /// This will save all attachements to the local disk
-  Future<int> _getNewestEmails(
-    EmailRepository emailRepository,
-    Collection collection,
-    String accessToken,
-  ) async {
-    // Check token and refresh if needed
-    DateTime? maxDate = await emailRepository.getMaxEmailDate(collection.id);
-    String? maxQuery = 'in:inbox';
-    if (maxDate != null) {
-      maxQuery = "after:${(maxDate.millisecondsSinceEpoch / 1000).floor()}";
-    }
-
-    //get new emails
-    var count = await _pullEmails(
-      emailRepository,
-      collection,
-      maxQuery,
-      true,
-      false,
-      null,
-      collection.accessToken,
-    );
-
-    return Future(() => count);
-  }
-
-  /// Get any old emails we might have missed on initial sync
-  /// First it will find the oldest date in the db and then pull all emails before that date
-  /// This will follow the 'nexttoken' from the api reponse to page through all emails
-  /// This will save all attachements to the local disk
-  Future<int> _getOldestEmails(
-    EmailRepository emailRepository,
-    Collection collection,
-    String accessToken,
-  ) async {
-    int count = 0;
-    DateTime? minDate = await emailRepository.getMinEmailDate(collection.id);
-    if (minDate != null) {
-      String minQuery =
-          "before:${(minDate.millisecondsSinceEpoch / 1000).floor()}";
-
-      //get new emails
-      count = await _pullEmails(
-        emailRepository,
-        collection,
-        minQuery,
-        true,
-        false,
-        null,
-        collection.accessToken,
-      );
-    }
-    return Future(() => count);
-  }
-
-  /// Find all emails in trash and delete them from the local db
-  /// This will delete any attachments saved to local disk too.
-  Future<int> _getEmailsInTrashToDelete(
-    EmailRepository emailRepository,
-    Collection collection,
-    String accessToken,
-  ) async {
-    int count = 0;
-    String query = "in:trash";
-    //get new emails
-    count = await _deleteEmails(
-      emailRepository,
-      collection,
-      query,
-      false,
-      true,
-      null,
-      collection.accessToken,
-    );
-
-    return Future(() => count);
-  }
-
-  /// Find all emails in spam and delete them from the local db if they originally came in the inbox.
-  /// Emails filtered by gmail will not be in local db.
-  /// This will delete any attachments saved to local disk too.
-  Future<int> _getEmailsInSpamToDelete(
-    EmailRepository emailRepository,
-    Collection collection,
-    String accessToken,
-  ) async {
-    int count = 0;
-    String query = "in:spam";
-    //get new emails
-    count = await _deleteEmails(
-      emailRepository,
-      collection,
-      query,
-      false,
-      true,
-      null,
-      collection.accessToken,
-    );
-
-    return Future(() => count);
-  }
-
-  Future<int> _pullEmails(
-    EmailRepository emailRepository,
-    Collection collection,
-    String? query_,
-    bool downloadAttachments,
-    bool includeSpamTrash,
-    String? pageToken,
-    String? accessToken,
-  ) async {
-    int count = 0;
-    // Create a new GmailApi object with Bearer Token header
     Map<String, String> authHeaders = {"Authorization": "Bearer $accessToken"};
     final authHttpClient = GoogleAuthClient(authHeaders);
-    GmailApi gmailApi = GmailApi(authHttpClient);
+    final GmailApi gmailApi = GmailApi(authHttpClient);
 
-    String? nextPageToken;
-    List<Message> messages = [];
-    List<Email> emailBatch = [];
+    try {
+      // 1. Sync Labels (Folders)
+      logger.s("Syncing Gmail labels...");
+      final labelsResponse = await gmailApi.users.labels.list('me');
+      final labels = labelsResponse.labels ?? [];
+      
+      for (var label in labels) {
+        final folder = mapLabelToFolder(label, collection.id);
+        dbWriterPort.send({'type': 'email_folder', 'folder': folder});
+      }
 
-    // if null, start with a default query to get latest messages
-    String query = query_ ?? "before:${DateTime.now().year + 1}";
-    //"newer_than:${days}d"; //"after:186d2adcd2343c01"; //"newer_than:2d";
-
-    //pull message ids
-    logger.s("Query gmail for messages");
-    //print("Query for gmail messages matching: query=$activeQuery | token=$pageToken");
-    ListMessagesResponse messagesResponse = await gmailApi.users.messages.list(
-      collection.name,
-      includeSpamTrash: includeSpamTrash,
-      maxResults: 250,
-      pageToken: pageToken, // TODO, remove
-      q: query,
-    );
-
-    //grab values out of response
-    nextPageToken = messagesResponse.nextPageToken;
-    messages = messagesResponse.messages ?? [];
-
-    // Iterate through the list of messages and extract the information you need.
-    for (Message msg in messages) {
-      String id = msg.id!;
-
-      //call api to get the rest of the messages
-      var m = await gmailApi.users.messages.get("me", id, format: "full");
-      var headers = jsonEncode(m.payload?.headers);
-      //Pull important data out of headers
-      MessagePartHeader? subject = m.payload?.headers?.singleWhere(
-        (element) => element.name?.toLowerCase() == "subject",
-        orElse: () => MessagePartHeader(name: "Subject", value: null),
-      );
-      MessagePartHeader? from = m.payload?.headers?.singleWhere(
-        (element) => element.name?.toLowerCase() == "from",
-        orElse: () => MessagePartHeader(name: "From", value: null),
-      );
-
-      // TODO, support array of TO headers
-      MessagePartHeader? to = m.payload?.headers?.firstWhere(
-        (element) => element.name?.toLowerCase() == "to",
-        orElse: () => MessagePartHeader(name: "To", value: null),
-      );
-
-      MessagePartHeader? cc = m.payload?.headers?.singleWhere(
-        (element) => element.name?.toLowerCase() == "cc",
-        orElse: () => MessagePartHeader(name: "CC", value: null),
-      );
-      //MessagePartHeader? msgDate = m.payload?.headers?.singleWhere((element) => element.name?.toLowerCase() == "date",
-      //    orElse: () => MessagePartHeader(name: "Date", value: null));
-      DateTime msgDateTime = DateTime.fromMillisecondsSinceEpoch(
-        int.parse(m.internalDate as String),
-      );
-      //DateTime? msgDateTime;
-      //msgDateTime = HttpDate.parse(msgDate.value!);
-
-      String? plainPayload = parseBodyParts(
-        m.payload?.parts ?? [],
-        "text/plain",
-      );
-      String? htmlPayload = parseBodyParts(m.payload?.parts ?? [], "text/html");
-      List<File> attachments = [];
-      if (downloadAttachments) {
-        attachments = await parseAttachmentParts(
-          accessToken!,
+      // 2. Sync Emails
+      if (folderId != null) {
+        logger.s("Syncing folder: $folderId");
+        await _pullEmails(
+          gmailApi,
+          dbWriterPort,
+          clientPort,
           collection,
           appDir,
-          id,
-          int.parse(
-            m.internalDate ?? DateTime.now().millisecondsSinceEpoch.toString(),
-          ),
-          msgDateTime,
-          m.payload?.parts ?? [],
+          accessToken,
+          labelId: folderId,
         );
-      }
-
-      //build object
-      Email email = Email(
-        id: id,
-        collectionId: collection.id,
-        date: msgDateTime,
-        subject: subject?.value,
-        snippet: m.snippet,
-        to: to?.value?.split(",") ?? [],
-        cc: cc?.value?.split(",") ?? [],
-        from: from?.value ?? 'unknown',
-        headers: headers,
-        labels: m.labelIds ?? [],
-        plainBody: plainPayload,
-        htmlBody: htmlPayload,
-        attachments: attachments,
-        isDeleted: false,
-      );
-      emailBatch.add(email);
-    }
-
-    if (emailBatch.isNotEmpty) {
-      logger.s("Saving ${emailBatch.length} emails");
-      //save emails
-      emailRepository.addEmails(collection.id, emailBatch);
-      sendPort.send("command:refresh");
-      logger.s("");
-    }
-
-    //print("get more messages");
-    count += await _pullEmails(
-      emailRepository,
-      collection,
-      query,
-      downloadAttachments,
-      includeSpamTrash,
-      nextPageToken,
-      accessToken,
-    );
-
-    return Future(() => count);
-  }
-
-  ///The _deleteEmails method deletes emails from a Gmail account.
-  ///
-  ///The method takes the following parameters:
-  ///emailRepository: The EmailRepository object to use to access the local database.
-  ///collection: The Collection object representing the collection to which the emails belong.
-  ///query_: The query string to use to find the emails to delete.
-  ///downloadAttachments: Whether or not to download the attachments of the emails.
-  ///includeSpamTrash: Whether or not to include spam and trash emails in the search.
-  ///pageToken: The page token to use to retrieve the next page of results.
-  ///accessToken: The access token to use to authenticate with the Gmail API.
-  ///The method returns a Future that resolves to the number of emails that were deleted.
-  ///
-  ///The method first creates a new GmailApi object with the provided access token.
-  ///It then uses the users.messages.list method to retrieve a list of messages that match the provided query.
-  ///
-  ///The method then uses the getAllById method of the EmailRepository object to retrieve all of the emails in the
-  ///local database that have the IDs in the list. The method then flips the isDeleted flag of each email to true.
-  ///
-  ///The method then uses the deleteEmails method of the EmailRepository object to delete the emails from the local database.
-  ///
-  ///The method then returns a Future that resolves to the number of emails that were deleted.
-  Future<int> _deleteEmails(
-    EmailRepository emailRepository,
-    Collection collection,
-    String query_,
-    bool downloadAttachments,
-    bool includeSpamTrash,
-    String? pageToken,
-    String? accessToken,
-  ) async {
-    // Create a new GmailApi object with Bearer Token header
-    Map<String, String> authHeaders = {"Authorization": "Bearer $accessToken"};
-    final authHttpClient = GoogleAuthClient(authHeaders);
-    GmailApi gmailApi = GmailApi(authHttpClient);
-
-    String? nextPageToken;
-    List<Message> messages = [];
-    List<Email> emailBatch = [];
-
-    ListMessagesResponse messagesResponse = await gmailApi.users.messages.list(
-      collection.name,
-      includeSpamTrash: includeSpamTrash,
-      maxResults: 50,
-      pageToken: pageToken, // TODO, remove
-      q: query_,
-    );
-
-    //grab values out of response
-    nextPageToken = messagesResponse.nextPageToken;
-    messages = messagesResponse.messages ?? [];
-
-    // Iterate through the list of messages and extract the information you need.
-    List<String> ids = [];
-    for (Message msg in messages) {
-      String id = msg.id!;
-      ids.add(id);
-    }
-    //find all emails in local db, and flip is deleted flag
-    emailBatch = await emailRepository.getAllById(ids);
-    for (Email e in emailBatch) {
-      e.isDeleted = true;
-    }
-
-    if (emailBatch.isNotEmpty) {
-      logger.s("Deleting ${emailBatch.length} emails");
-      //save emails
-      emailRepository.deleteEmails(collection.id, emailBatch);
-      sendPort.send("command:refresh");
-      logger.s("");
-    }
-
-    int count = 0;
-    //print("get more messages");
-    count += await _pullEmails(
-      emailRepository,
-      collection,
-      query_,
-      downloadAttachments,
-      includeSpamTrash,
-      nextPageToken,
-      accessToken,
-    );
-
-    return Future(() => count);
-  }
-
-  ///The parseBodyParts method parses the body parts of a Gmail message and returns the text of the first part that matches the specified mime type.
-  ///
-  ///parameters:
-  ///
-  ///parts: The list of message parts to parse.
-  ///mimeType: The mime type of the text to find.
-  ///
-  ///The method returns the text of the first part that matches the specified mime type, or null if no matching part is found.
-  ///
-  ///The method first iterates through the list of message parts, looking for a part that matches the specified mime type.
-  ///If a matching part is found, the method decodes the part's body and returns the decoded text.
-  ///
-  ///If no matching part is found, the method iterates through the list of message parts again, looking for a part
-  ///that has a nested part that matches the specified mime type. If a matching part is found, the method decodes
-  ///the nested part's body and returns the decoded text.
-  ///
-  ///If no matching part is found, the method returns null.
-  String? parseBodyParts(List<MessagePart> parts, String mimeType) {
-    //1st look for root level part that matches (emails without attachments)
-    for (var part in parts) {
-      if (part.mimeType == mimeType) {
-        var decoded = base64Url.decode(part.body?.data ?? "");
-        return utf8.decode(decoded).trim();
-      }
-    }
-
-    //look in nested parts for a match
-    for (var part in parts) {
-      if (part.parts != null) {
-        for (var innerPart in part.parts ?? []) {
-          if (innerPart.mimeType == mimeType) {
-            var decoded = base64Url.decode(innerPart.body?.data ?? "");
-            return utf8.decode(decoded).trim();
-          }
+      } else {
+        // Default sync: Inbox, Sent, Trash, Spam
+        const defaultLabels = ['INBOX', 'SENT', 'TRASH', 'SPAM'];
+        for (var label in defaultLabels) {
+          logger.s("Syncing label: $label");
+          await _pullEmails(
+            gmailApi,
+            dbWriterPort,
+            clientPort,
+            collection,
+            appDir,
+            accessToken,
+            labelId: label,
+          );
         }
       }
+
+      logger.s("Gmail sync complete.");
+      clientPort.send({'type': 'refresh'});
+    } catch (e, stack) {
+      logger.e("Error in Gmail Isolate: $e", error: e, stackTrace: stack);
+    } finally {
+      Isolate.exit(clientPort, {'status': 'done'});
+    }
+  }
+
+  static Future<void> _pullEmails(
+    GmailApi gmailApi,
+    SendPort dbWriterPort,
+    SendPort clientPort,
+    Collection collection,
+    String appDir,
+    String accessToken, {
+    String? labelId,
+    String? pageToken,
+  }) async {
+    final logger = AppLogger(clientPort);
+    
+    final response = await gmailApi.users.messages.list(
+      'me',
+      labelIds: labelId != null ? [labelId] : null,
+      pageToken: pageToken,
+      maxResults: 50, // Small batch for responsiveness
+    );
+
+    final messages = response.messages ?? [];
+    if (messages.isEmpty) return;
+
+    List<Email> emailBatch = [];
+
+    for (var msgRef in messages) {
+      try {
+        final m = await gmailApi.users.messages.get('me', msgRef.id!, format: 'full');
+        
+        DateTime msgDate = DateTime.fromMillisecondsSinceEpoch(
+          int.parse(m.internalDate!),
+        );
+
+        String? subject = _getHeader(m.payload?.headers, 'subject');
+        String? from = _getHeader(m.payload?.headers, 'from');
+        String? toRaw = _getHeader(m.payload?.headers, 'to');
+        String? ccRaw = _getHeader(m.payload?.headers, 'cc');
+        String? messageId = _getHeader(m.payload?.headers, 'message-id');
+
+        String? plainBody = _parseBodyParts(m.payload?.parts ?? [], 'text/plain');
+        String? htmlBody = _parseBodyParts(m.payload?.parts ?? [], 'text/html');
+
+        // Note: Gmail API doesn't provide a simple "hasAttachments" flag in list view.
+        // We check if there are parts with attachmentId or if mimeType is multipart/mixed.
+        bool hasAttachments = _checkAttachments(m.payload?.parts ?? []);
+
+        final email = Email(
+          id: m.id!,
+          collectionId: collection.id,
+          date: msgDate,
+          from: from ?? 'unknown',
+          to: toRaw?.split(',').map((e) => e.trim()).toList() ?? [],
+          cc: ccRaw?.split(',').map((e) => e.trim()).toList() ?? [],
+          subject: subject,
+          snippet: m.snippet,
+          htmlBody: htmlBody,
+          plainBody: plainBody,
+          labels: m.labelIds ?? [],
+          headers: jsonEncode(m.payload?.headers),
+          folderId: labelId,
+          messageId: messageId,
+          threadId: m.threadId,
+          isRead: !(m.labelIds?.contains('UNREAD') ?? false),
+          hasAttachments: hasAttachments,
+          isDeleted: m.labelIds?.contains('TRASH') ?? false,
+        );
+
+        emailBatch.add(email);
+
+        // Download attachments if any
+        if (hasAttachments) {
+           // We could spawn a sub-task or just do it here. 
+           // For now, let's keep the existing logic but route via dbWriterPort.
+           final attachments = await _downloadAttachments(
+             gmailApi,
+             collection,
+             appDir,
+             m.id!,
+             msgDate,
+             m.payload?.parts ?? [],
+           );
+           // In this system, attachments are currently stored in Email.attachments
+           // and saved by EmailRepository.addEmails? 
+           // Actually, the existing code adds them to the Email object.
+           // But our drift model for Email doesn't store attachments directly 
+           // (it's a join or separate table usually). 
+           // Existing Email model has `List<File>? attachments`.
+           email.attachments = attachments;
+           
+           // Send file objects to DbWriter too so they show up in Files module if needed?
+           // The existing code didn't seem to do that, it just kept them in the Email object.
+           for(var file in attachments) {
+             dbWriterPort.send({'type': 'file', 'file': file});
+           }
+        }
+
+      } catch (e) {
+        logger.w("Failed to fetch/parse message ${msgRef.id}: $e");
+      }
     }
 
+    if (emailBatch.isNotEmpty) {
+      dbWriterPort.send({'type': 'batch_email', 'emails': emailBatch});
+      clientPort.send({'type': 'refresh'});
+    }
+
+    if (response.nextPageToken != null) {
+      await _pullEmails(
+        gmailApi,
+        dbWriterPort,
+        clientPort,
+        collection,
+        appDir,
+        accessToken,
+        labelId: labelId,
+        pageToken: response.nextPageToken,
+      );
+    }
+  }
+
+  static String? _getHeader(List<MessagePartHeader>? headers, String name) {
+    try {
+      return headers
+          ?.firstWhere((h) => h.name?.toLowerCase() == name.toLowerCase())
+          .value;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String? _parseBodyParts(List<MessagePart> parts, String mimeType) {
+    for (var part in parts) {
+      if (part.mimeType == mimeType && part.body?.data != null) {
+        return utf8.decode(base64Url.decode(part.body!.data!));
+      }
+      if (part.parts != null) {
+        final result = _parseBodyParts(part.parts!, mimeType);
+        if (result != null) return result;
+      }
+    }
     return null;
   }
 
-  /// Parameters:
-  /// collection: The collection to which the attachments belong.
-  /// appDir: The directory where the attachments will be saved.
-  /// messageId: The ID of the message that contains the attachments.
-  /// epochDate: The epoch date of the message.
-  /// parts: The list of message parts that contain the attachments.
-  ///
-  /// Returns: A list of File objects representing the parsed attachments.
-  ///
-  /// Description:
-  ///
-  /// This method parses the attachments of a Gmail message and saves them to the specified directory.
-  /// The attachments are saved in a subdirectory of the specified directory, named after the year, month, and day of the message.
-  /// The name of each attachment is the same as the name of the file in the Gmail message.
-  ///
-  Future<List<File>> parseAttachmentParts(
-    String accessToken,
+  static bool _checkAttachments(List<MessagePart> parts) {
+    for (var part in parts) {
+      if (part.body?.attachmentId != null) return true;
+      if (part.parts != null && _checkAttachments(part.parts!)) return true;
+    }
+    return false;
+  }
+
+  static Future<List<File>> _downloadAttachments(
+    GmailApi gmailApi,
     Collection collection,
     String appDir,
     String messageId,
-    int epochDate,
-    DateTime msgDateTime,
+    DateTime msgDate,
     List<MessagePart> parts,
   ) async {
     List<File> files = [];
-    final AppLogger logger = AppLogger(null);
     for (var part in parts) {
       if (part.body?.attachmentId != null) {
         try {
-          //print("Attachment: ${part.filename} ${part.body?.attachmentId}");
-          //String url = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/$messageId/attachments/${part.body?.attachmentId}';
-
-          Map<String, String> authHeaders = {
-            "Authorization": "Bearer $accessToken",
-          };
-          final authHttpClient = GoogleAuthClient(authHeaders);
-          GmailApi gmailApi = GmailApi(authHttpClient);
-          var apiMsg = await gmailApi.users.messages.attachments.get(
+          final attachment = await gmailApi.users.messages.attachments.get(
             'me',
             messageId,
-            part.body?.attachmentId ?? "",
+            part.body!.attachmentId!,
           );
 
-          //print(response);
-          String contentType = part.mimeType ?? "application/octet-stream";
-          String? fileName = part.filename;
-          if (fileName!.isEmpty) {
-            fileName = "unknown_$messageId";
-          }
-          String email = collection.name;
-          String year =
-              DateTime.fromMillisecondsSinceEpoch(epochDate).year.toString();
-          String month =
-              DateTime.fromMillisecondsSinceEpoch(epochDate).month.toString();
-          String day =
-              DateTime.fromMillisecondsSinceEpoch(epochDate).day.toString();
+          final fileName = part.filename ?? 'unnamed_attachment';
+          final sep = io.Platform.pathSeparator;
+          final path = '$appDir${sep}files${sep}email${sep}${collection.name}${sep}${msgDate.year}${sep}${msgDate.month}${sep}${msgDate.day}';
+          
+          await io.Directory(path).create(recursive: true);
+          final file = io.File('$path$sep$fileName');
+          await file.writeAsBytes(base64Url.decode(attachment.data!));
 
-          String sep = io.Platform.pathSeparator;
-          io.Directory dir = io.Directory(
-            '$appDir${sep}files${sep}email$sep$email$sep$year$sep$month$sep$day',
-          );
-          //create dir, if it doesn't exist
-          dir.createSync(recursive: true);
-          io.File file = io.File('${dir.path}$sep$fileName');
-          //write bytes to file
-          file.writeAsBytesSync(base64.decode(apiMsg.data!));
-
-          logger.t(
-            'Download Attachment: $fileName | dir:$dir | messageId: $messageId',
-          );
-          File f = File(
+          final f = File(
             id: const Uuid().v4().toString(),
             collectionId: collection.id,
             name: fileName,
             path: file.path,
-            parent: dir.path,
-            dateCreated: msgDateTime,
-            dateLastModified: msgDateTime,
-            size: 0,
-            contentType: contentType,
+            parent: path,
+            dateCreated: msgDate,
+            dateLastModified: msgDate,
+            size: file.lengthSync(),
+            contentType: part.mimeType ?? 'application/octet-stream',
             isDeleted: false,
           );
           files.add(f);
         } catch (e) {
-          logger.w(
-            'Cannot parse attachment: $e | messageId: $messageId | part: $part',
-          );
+          // Log and continue
         }
       }
+      if (part.parts != null) {
+        files.addAll(await _downloadAttachments(
+          gmailApi,
+          collection,
+          appDir,
+          messageId,
+          msgDate,
+          part.parts!,
+        ));
+      }
     }
-
     return files;
   }
 
-  AppDatabase? _initDatabase(String dbPath) {
-    return null;
+  static EmailFolder mapLabelToFolder(Label label, String collectionId) {
+    return EmailFolder(
+      id: label.id!,
+      collectionId: collectionId,
+      name: label.name!,
+      type: label.type == 'system' ? 'system' : 'user',
+      messagesTotal: label.messagesTotal,
+      messagesUnread: label.messagesUnread,
+    );
   }
 }
