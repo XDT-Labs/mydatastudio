@@ -44,6 +44,14 @@ class CloudFileIsolate extends CollectionScanner {
     bool recursive,
     bool force,
   ) async {
+    if (isScanning.value && !force) {
+      return 0;
+    }
+
+    if (force) {
+      stop();
+    }
+
     isScanning.add(true);
     final String debugName = 'CloudFileIsolate_${collection.id}';
 

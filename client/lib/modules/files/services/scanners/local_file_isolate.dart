@@ -28,6 +28,14 @@ class LocalFileIsolate extends CollectionScanner {
       String? path,
       recursive,
       bool force,) async {
+    if (isScanning.value && !force) {
+      return 0;
+    }
+
+    if (force) {
+      stop();
+    }
+
     isScanning.add(true);
     // A Stream that handles communication between isolates
     ReceivePort p = ReceivePort();
