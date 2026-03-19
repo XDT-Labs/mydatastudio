@@ -1,5 +1,6 @@
 import 'package:mydatatools/models/tables/email.dart';
 import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 class EmailDetails extends StatefulWidget {
   const EmailDetails({
@@ -22,6 +23,37 @@ class EmailDetails extends StatefulWidget {
 }
 
 class _EmailDetails extends State<EmailDetails> {
+  late final WebViewController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.white);
+    _loadEmailContent();
+  }
+
+  @override
+  void didUpdateWidget(EmailDetails oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.email.id != widget.email.id) {
+      _loadEmailContent();
+    }
+  }
+
+  void _loadEmailContent() {
+    String content = widget.email.htmlBody ??
+        '<html><body style="font-family: sans-serif; white-space: pre-wrap;">${widget.email.plainBody ?? "(empty)"}</body></html>';
+    
+    // Simple way to ensure it looks reasonable if it's just plain text or missing body
+    if (widget.email.htmlBody == null && widget.email.plainBody == null) {
+        content = '<html><body style="font-family: sans-serif; color: gray; text-align: center; padding-top: 50px;">(empty)</body></html>';
+    }
+
+    _controller.loadHtmlString(content);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -76,10 +108,7 @@ class _EmailDetails extends State<EmailDetails> {
           ),
           // Content
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: SelectableText(widget.email.plainBody ?? '(empty)'),
-            ),
+            child: WebViewWidget(controller: _controller),
           ),
         ],
       ),
