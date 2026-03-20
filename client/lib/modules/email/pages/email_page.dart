@@ -532,15 +532,24 @@ class _EmailPage extends State<EmailPage> {
   Future<void> _deleteSelectedEmails(List<Email> items) async {
     try {
       final ids = items.map((e) => e.id).toList();
-      final uids = items.map((e) => e.uid).whereType<int>().toList();
 
       // 1. Remote Delete (if applicable)
-      if (collection != null && uids.isNotEmpty) {
+      if (collection != null) {
         final scanner = ScannerManager.getInstance().getScanner(collection!);
         if (scanner != null) {
-          final folderId = EmailPage.selectedFolder.value ?? 'INBOX';
-          // This runs in the background
-          scanner.moveToTrash(collection!, folderId, uids);
+          final groupedByFolder = <String, List<int>>{};
+          
+          for (var item in items) {
+            if (item.uid != null) {
+              // Priority: item's folder, then current view's folder, finally fallback to INBOX safely
+              final fId = item.folderId ?? EmailPage.selectedFolder.value ?? 'INBOX';
+              groupedByFolder.putIfAbsent(fId, () => []).add(item.uid!);
+            }
+          }
+
+          for (var entry in groupedByFolder.entries) {
+            scanner.moveToTrash(collection!, entry.key, entry.value);
+          }
         }
       }
 
