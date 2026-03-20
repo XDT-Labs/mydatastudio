@@ -23,6 +23,7 @@ class Collections extends Table {
   DateTimeColumn get expiration => dateTime().nullable()();
   DateTimeColumn get lastScanDate => dateTime().nullable()();
   BoolColumn get needsReAuth => boolean()();
+  BoolColumn get downloadAttachments => boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -44,6 +45,7 @@ class Collection implements Insertable<Collection> {
   DateTime? expiration;
   DateTime? lastScanDate;
   bool needsReAuth = false;
+  bool downloadAttachments = false;
 
   // fields not in db
   String? status;
@@ -64,6 +66,7 @@ class Collection implements Insertable<Collection> {
     this.expiration,
     this.lastScanDate,
     required this.needsReAuth,
+    this.downloadAttachments = false,
   });
 
   Collection.fromDb({
@@ -81,6 +84,7 @@ class Collection implements Insertable<Collection> {
     this.expiration,
     this.lastScanDate,
     required this.needsReAuth,
+    required this.downloadAttachments,
   });
 
   @override
@@ -100,6 +104,7 @@ class Collection implements Insertable<Collection> {
       expiration: Value(expiration),
       lastScanDate: Value(lastScanDate),
       needsReAuth: Value(needsReAuth),
+      downloadAttachments: Value(downloadAttachments),
     ).toColumns(nullToAbsent);
   }
 }

@@ -46,7 +46,7 @@ class ScannerManager {
     for (var c in collections) {
       await Future.delayed(const Duration(seconds: 5));
       logger.d('${c.id} | ${c.path}');
-      _registerSingleScanner(c);
+      registerScanner(c);
     }
 
     //listen for new collections and add them at runtime
@@ -59,7 +59,7 @@ class ScannerManager {
       // Check for new collections to add
       for (var c in changes) {
         if (getScanner(c) == null) {
-          _registerSingleScanner(c);
+          registerScanner(c);
         }
       }
 
@@ -87,63 +87,66 @@ class ScannerManager {
     }
   }
 
-  void startScanner(Collection c) {
-    // TODO, not implemented yet
+  Future<void> startScanner(Collection c) async {
+    final scanner = await registerScanner(c);
+    await scanner.start(c, null, true, true);
   }
 
   CollectionScanner? getScanner(Collection c) {
     return scanners[c.id];
   }
 
-  void _registerSingleScanner(Collection c) async {
+  Future<CollectionScanner> registerScanner(Collection c) async {
+    if (scanners.containsKey(c.id)) return scanners[c.id]!;
+    
+    CollectionScanner scanner;
     switch (c.scanner) {
       case AppConstants.scannerFileLocal:
         logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
         SendPort? writerPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner localScanner = LocalFileIsolate(
+        scanner = LocalFileIsolate(
           null,
           writerPort,
         );
-        scanners.putIfAbsent(c.id, () => localScanner);
         break;
 
       case AppConstants.scannerFileGDrive:
         logger.i("Registering GDrive scanner for ${c.name} (ID: ${c.id})");
         SendPort driveWriterPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner cloudScanner = CloudFileIsolate(
+        scanner = CloudFileIsolate(
           null, // Central logger port not used yet
           driveWriterPort,
         );
-        scanners[c.id] = cloudScanner;
         break;
 
       case AppConstants.scannerEmailGmail:
         logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
         SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner emailScanner = GmailScanner(
+        scanner = GmailScanner(
           dbPath: p.join(DatabaseManager.instance.storagePath!, 'data', AppConstants.dbName),
           collection: c,
           appDir: DatabaseManager.instance.storagePath!,
           dbWriterPort: emailWriterPort,
         );
-        scanners[c.id] = emailScanner;
         break;
       
       case AppConstants.scannerEmailYahoo:
         logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
         SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner emailScanner = YahooScanner(
+        scanner = YahooScanner(
           dbPath: p.join(DatabaseManager.instance.storagePath!, 'data', AppConstants.dbName),
           collection: c,
           appDir: DatabaseManager.instance.storagePath!,
           dbWriterPort: emailWriterPort,
         );
-        scanners[c.id] = emailScanner;
         break;
 
       default:
         logger.w("Scanner type '${c.scanner}' not recognized.");
-        break;
+        throw Exception("Scanner type '${c.scanner}' not recognized.");
     }
+    
+    scanners[c.id] = scanner;
+    return scanner;
   }
 }

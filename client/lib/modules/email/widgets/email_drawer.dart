@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
@@ -19,6 +20,7 @@ class EmailDrawer extends StatefulWidget {
 }
 
 class _EmailDrawer extends State<EmailDrawer> {
+  final AppLogger logger = AppLogger(null);
   final GetCollectionsService _collectionsService =
       GetCollectionsService.instance;
   StreamSubscription<List<Collection>>? _collectionsServiceSub;
@@ -174,6 +176,7 @@ class _EmailDrawer extends State<EmailDrawer> {
                       onDelete: () =>
                           _showDeleteConfirmationDialog(context, col),
                       onSync: () {
+                        logger.s("Starting full sync for ${col.name}");
                         ScannerManager.getInstance()
                             .getScanner(col)
                             ?.start(col, null, true, true);

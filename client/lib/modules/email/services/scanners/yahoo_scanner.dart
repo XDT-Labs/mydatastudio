@@ -33,15 +33,66 @@ class YahooScanner extends CollectionScanner {
     // check if scan has already been run once
     if (!force && collection.lastScanDate != null) return Future(() => 0);
 
-    // TODO: start isolate and perform sync
-    logger.i("Yahoo sync started (stub)");
+    // If scanning already, don't restart.
+    if (isScanning.value) return 0;
+    
+    isScanning.add(true);
+    logger.i("Yahoo sync started for ${collection.name}");
+
+    //start full scan in isolate
+    ReceivePort receivePort = ReceivePort();
+    receivePort.listen((message) {
+      if (message is String && message.isNotEmpty) {
+        logger.s(message);
+      }
+      if (message is Map && message['status'] == 'done') {
+        isScanning.add(false);
+      }
+    });
+
+    //start isolate
+    RootIsolateToken? token = RootIsolateToken.instance;
+    isolate = YahooScannerIsolate(
+      token: token,
+      dbWriterPort: dbWriterPort,
+      appDir: appDir,
+    );
+    await isolate!.start(
+      collection,
+      folderId: path,
+      force: force,
+      statusPort: receivePort.sendPort,
+    );
 
     return 0;
   }
 
   @override
+  Future<void> moveToTrash(
+    Collection collection,
+    String folderId,
+    List<int> uids,
+  ) async {
+    if (uids.isEmpty) return;
+    
+    // Lazy-init isolate if needed
+    isolate ??= YahooScannerIsolate(
+      token: RootIsolateToken.instance,
+      dbWriterPort: dbWriterPort,
+      appDir: appDir,
+    );
+    
+    await isolate!.moveToTrash(
+      collection,
+      folderId: folderId,
+      uids: uids,
+    );
+  }
+
+  @override
   void stop() async {
     isStopped = true;
-    // isolate?.stop();
+    isolate?.stop();
+    isScanning.add(false);
   }
 }

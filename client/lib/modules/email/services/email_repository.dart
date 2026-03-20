@@ -1,8 +1,12 @@
+import 'dart:io' as io;
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/email.dart';
 import 'package:mydatatools/models/tables/file.dart' as model;
 import 'package:drift/drift.dart';
+import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
+// removed unused import
 
 class EmailRepository {
   final AppDatabase database;
@@ -22,41 +26,50 @@ class EmailRepository {
     String? search,
     String? sortColumn,
     bool? sortAsc,
+    int? limit,
+    int? offset,
   }) async {
     sortColumn ??= "date";
     sortAsc ??= false;
 
-    return await (database.select(database.emails)
-          ..where((e) => e.collectionId.equals(collectionId))
-          ..where((e) {
-            if (folderId != null) {
-              return e.folderId.equals(folderId);
-            }
-            return const Constant(true);
-          })
-          ..where((e) {
-            if (search != null && search.isNotEmpty) {
-              return e.subject.contains(search) | e.from.contains(search) | e.snippet.contains(search);
-            }
-            return const Constant(true);
-          })
-          ..orderBy([
-            (t) {
-              Expression column;
-              if (sortColumn == 'from') {
-                column = t.from;
-              } else if (sortColumn == 'subject') {
-                column = t.subject;
-              } else {
-                column = t.date;
-              }
-              return OrderingTerm(
-                expression: column,
-                mode: sortAsc! ? OrderingMode.asc : OrderingMode.desc,
-              );
-            }
-          ]))
-        .get();
+    final query = database.select(database.emails)
+      ..where((e) => e.collectionId.equals(collectionId))
+      ..where((e) {
+        if (folderId != null) {
+          return e.folderId.equals(folderId);
+        }
+        return const Constant(true);
+      })
+      ..where((e) {
+        if (search != null && search.isNotEmpty) {
+          return e.subject.contains(search) |
+              e.from.contains(search) |
+              e.snippet.contains(search);
+        }
+        return const Constant(true);
+      })
+      ..orderBy([
+        (t) {
+          Expression column;
+          if (sortColumn == 'from') {
+            column = t.from;
+          } else if (sortColumn == 'subject') {
+            column = t.subject;
+          } else {
+            column = t.date;
+          }
+          return OrderingTerm(
+            expression: column,
+            mode: sortAsc! ? OrderingMode.asc : OrderingMode.desc,
+          );
+        }
+      ]);
+
+    if (limit != null) {
+      query.limit(limit, offset: offset);
+    }
+
+    return await query.get();
   }
 
   Future<int> emailCount(String collectionId) async {
@@ -105,11 +118,68 @@ class EmailRepository {
     });
   }
 
-  Future<void> deleteEmails(List<Email> emails) async {
-    await database.batch((batch) {
-      for (var e in emails) {
-        batch.delete(database.emails, e);
+  Future<void> deleteEmails(List<String> ids) async {
+    final fileRepo = FileDesktopRepository(database);
+    for (var id in ids) {
+      try {
+        // 1. Get associated files
+        final files = await fileRepo.getByEmailId(id);
+        for (var f in files) {
+          // 2. Delete physical file
+          try {
+            final ioFile = io.File(f.path);
+            if (await ioFile.exists()) {
+              await ioFile.delete();
+            }
+          } catch (err) {
+            logger.e("Error deleting attachment file at ${f.path}: $err");
+          }
+          // 3. Delete from DB (File entry)
+          await fileRepo.delete(f);
+        }
+        // 4. Delete the email record
+        await (database.delete(database.emails)..where((t) => t.id.equals(id)))
+            .go();
+      } catch (err) {
+        logger.e("Error during email deletion for ID $id: $err");
       }
-    });
+    }
+  }
+
+  Future<void> cleanupDeletedYahoo(
+    Collection collection,
+    String folder,
+    List<int> remoteUids,
+  ) async {
+    // 1. Get all local email IDs and UIDs for this folder
+    final query = database.selectOnly(database.emails)
+      ..addColumns([database.emails.id, database.emails.uid])
+      ..where(
+        database.emails.collectionId.equals(collection.id) &
+            database.emails.folderId.equals(folder),
+      );
+
+    final rows = await query.get();
+    final localEmails = rows.map((row) => (
+          id: row.read(database.emails.id)!,
+          uid: row.read(database.emails.uid),
+        )).toList();
+
+    // 2. Find missing emails by UID
+    final remoteUidSet = remoteUids.toSet();
+    final toDeleteIds = localEmails
+        .where((e) {
+          if (e.uid == null) return false;
+          return !remoteUidSet.contains(e.uid);
+        })
+        .map((e) => e.id)
+        .toList();
+
+    if (toDeleteIds.isNotEmpty) {
+      logger.i(
+        "Cleanup: Deleting ${toDeleteIds.length} emails locally that were removed from Yahoo folder $folder.",
+      );
+      await deleteEmails(toDeleteIds);
+    }
   }
 }

@@ -13,6 +13,8 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 import 'package:mydatatools/app_constants.dart';
+import 'package:mydatatools/modules/email/pages/email_page.dart';
+import 'package:mydatatools/scanners/scanner_manager.dart';
 
 class NewEmailPage extends StatefulWidget {
   const NewEmailPage({super.key});
@@ -227,6 +229,9 @@ class _GmailTabState extends State<_GmailTab> {
         _connectedEmail = collection.name;
       });
 
+      EmailPage.selectedCollection.add(collection);
+      ScannerManager.getInstance().startScanner(collection);
+
       await Future.delayed(const Duration(milliseconds: 900));
       if (!mounted) return;
       GoRouter.of(context).go('/email');
@@ -383,6 +388,7 @@ class _YahooTabState extends State<_YahooTab> {
     'appPassword': FormControl<String>(
       validators: [Validators.required, Validators.minLength(16)],
     ),
+    'downloadAttachments': FormControl<bool>(value: true),
   });
 
   static const Color _yahooPurple = Color(0xFF6001D2);
@@ -414,9 +420,11 @@ class _YahooTabState extends State<_YahooTab> {
         accessToken: appPassword, // Store app password in accessToken field
         userId: email,
         needsReAuth: false,
+        downloadAttachments: _form.control('downloadAttachments').value as bool? ?? false,
       );
 
       GetCollectionsService.instance.addCollection(c);
+      ScannerManager.getInstance().startScanner(c);
 
       if (!mounted) return;
 
@@ -424,6 +432,8 @@ class _YahooTabState extends State<_YahooTab> {
         _authState = _YahooAuthState.success;
         _connectedEmail = email;
       });
+
+      EmailPage.selectedCollection.add(c);
 
       await Future.delayed(const Duration(milliseconds: 900));
       if (!mounted) return;
@@ -545,18 +555,30 @@ class _YahooTabState extends State<_YahooTab> {
                   'minLength': (error) => 'App password should be 16 characters',
                 },
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
+              ReactiveCheckboxListTile(
+                formControlName: 'downloadAttachments',
+                title: const Text('Save a local copy of all attachments'),
+                subtitle: const Text('Downloaded attachments will be indexed for search'),
+                controlAffinity: ListTileControlAffinity.leading,
+                contentPadding: EdgeInsets.zero,
+              ),
+              const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
-                child: ElevatedButton(
+                height: 52,
+                child: ElevatedButton.icon(
                   onPressed: _connectYahoo,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _yahooPurple,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
-                  child: const Text('Connect Yahoo Account', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text(
+                    'Connect Yahoo Account',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
             ],

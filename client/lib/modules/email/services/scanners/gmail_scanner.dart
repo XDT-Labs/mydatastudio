@@ -36,12 +36,21 @@ class GmailScanner extends CollectionScanner {
     if (!force && collection.lastScanDate != null) return Future(() => 0);
     // TODO: add a date range check to rerun scan
 
+    // If scanning already, don't restart.
+    if (isScanning.value) return 0;
+    
+    isScanning.add(true);
+    logger.i("Gmail sync started for ${collection.name}");
+
     //start full scan in isolate
     ReceivePort receivePort = ReceivePort();
     receivePort.listen((message) {
       //listen for logger status messages
       if (message is String && message.isNotEmpty) {
         logger.s(message);
+      }
+      if (message is Map && message['status'] == 'done') {
+        isScanning.add(false);
       }
     });
 
@@ -63,6 +72,7 @@ class GmailScanner extends CollectionScanner {
       collection,
       folderId: labelId,
       force: force,
+      statusPort: receivePort.sendPort,
     );
 
     return 0;
@@ -72,5 +82,6 @@ class GmailScanner extends CollectionScanner {
   void stop() async {
     isStopped = true;
     isolate?.stop();
+    isScanning.add(false);
   }
 }
