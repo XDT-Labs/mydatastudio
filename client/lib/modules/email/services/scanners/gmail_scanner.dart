@@ -45,6 +45,13 @@ class GmailScanner extends CollectionScanner {
       }
     });
 
+    // If the path looks like a local file path (e.g., from the Files module), 
+    // we don't want to pass it to Gmail as a label ID. 
+    String? labelId;
+    if (path != null && !path.startsWith('/') && !path.contains(appDir)) {
+      labelId = path;
+    }
+
     //start isolate
     RootIsolateToken? token = RootIsolateToken.instance;
     isolate = GmailScannerIsolate(
@@ -54,7 +61,7 @@ class GmailScanner extends CollectionScanner {
     );
     await isolate!.start(
       collection,
-      folderId: path,
+      folderId: labelId,
       force: force,
     );
 

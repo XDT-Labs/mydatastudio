@@ -85,6 +85,10 @@ class _FileDrawer extends State<FileDrawer> {
         return 'Dropbox';
       case AppConstants.scannerFileOneDrive:
         return 'OneDrive';
+      case AppConstants.scannerEmailGmail:
+        return 'Gmail';
+      case AppConstants.scannerEmailOutlook:
+        return 'Outlook';
       default:
         return 'Other';
     }
@@ -100,8 +104,12 @@ class _FileDrawer extends State<FileDrawer> {
         return 2;
       case AppConstants.scannerFileOneDrive:
         return 3;
-      default:
+      case AppConstants.scannerEmailGmail:
         return 4;
+      case AppConstants.scannerEmailOutlook:
+        return 5;
+      default:
+        return 6;
     }
   }
 
@@ -109,8 +117,9 @@ class _FileDrawer extends State<FileDrawer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // 1. Filter
-    final List<Collection> filesC = collections.where((element) => element.type == 'file').toList();
+    // 1. Filter: Include both file and email collections
+    final List<Collection> filesC = collections.where((element) => 
+      element.type == 'file' || element.type == 'email').toList();
 
     // 2. Grouping
     final Map<String, List<Collection>> grouped = {};

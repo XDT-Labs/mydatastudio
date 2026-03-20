@@ -81,7 +81,16 @@ class _EmailTable extends State<EmailTable> {
     ];
   }
 
-  List<DataRow> getRows(BuildContext context, List<Email> emails, double width) {
+  List<DataRow> getRows(BuildContext context, List<Email> emails, double totalWidth) {
+    // Estimated widths for fixed columns
+    const double fromWidth = 200.0;
+    const double attachmentWidth = 40.0;
+    const double dateWidth = 120.0;
+    const double checkboxAndMarginWidth = 80.0; // Space for the leading checkbox and cell margins
+
+    // Calculate subject width to fill the remaining space
+    final double subjectWidth = math.max(100.0, totalWidth - (fromWidth + attachmentWidth + dateWidth + checkboxAndMarginWidth));
+
     return emails.map((email) {
       String from = email.from.split("<")[0].trim();
       Moment moment = Moment.fromMillisecondsSinceEpoch(
@@ -95,11 +104,11 @@ class _EmailTable extends State<EmailTable> {
         selected: email.isSelected ?? false,
         cells: [
           DataCell(
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 200),
+            SizedBox(
+              width: fromWidth,
               child: Text(
                 from,
-                overflow: TextOverflow.clip,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
                 ),
@@ -108,8 +117,8 @@ class _EmailTable extends State<EmailTable> {
             onTap: () => EmailSelectedNotification(email).dispatch(context),
           ),
           DataCell(
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: math.max(100.0, width - 400)),
+            SizedBox(
+              width: subjectWidth,
               child: Text(
                 email.subject ?? '',
                 overflow: TextOverflow.ellipsis,
@@ -121,19 +130,22 @@ class _EmailTable extends State<EmailTable> {
             onTap: () => EmailSelectedNotification(email).dispatch(context),
           ),
           DataCell(
-            email.hasAttachments
-                ? const Icon(Icons.attachment, size: 16, color: Colors.grey)
-                : const SizedBox.shrink(),
+            SizedBox(
+              width: attachmentWidth,
+              child: email.hasAttachments
+                  ? const Icon(Icons.attachment, size: 16, color: Colors.grey)
+                  : const SizedBox.shrink(),
+            ),
             onTap: () => EmailSelectedNotification(email).dispatch(context),
           ),
           DataCell(
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 100),
+            SizedBox(
+              width: dateWidth,
               child: Tooltip(
                 message: email.date.toLocal().toString(),
                 child: Text(
                   moment.fromNow(form: Abbreviation.full),
-                  overflow: TextOverflow.clip,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
                   ),

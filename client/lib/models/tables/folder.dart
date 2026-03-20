@@ -8,6 +8,7 @@ import 'package:drift/drift.dart';
 @TableIndex(name: 'folder_path_idx', columns: {#path})
 @TableIndex(name: 'folder_parent_idx', columns: {#parent})
 @TableIndex(name: 'folder_collection_id_idx', columns: {#collectionId})
+@TableIndex(name: 'folder_email_id_idx', columns: {#emailId})
 class Folders extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
@@ -18,6 +19,7 @@ class Folders extends Table {
   DateTimeColumn get lastScannedDate => dateTime().nullable()();
   TextColumn get thumbnail => text().nullable()();
   TextColumn get downloadUrl => text().nullable()();
+  TextColumn get emailId => text().nullable()();
   TextColumn get collectionId => text()();
 
   @override
@@ -43,6 +45,7 @@ class Folder implements FileAsset, Insertable<Folder> {
   String collectionId;
   String? thumbnail;
   String? downloadUrl;
+  String? emailId;
 
   Folder({
     required this.id,
@@ -55,6 +58,7 @@ class Folder implements FileAsset, Insertable<Folder> {
     required this.collectionId,
     this.thumbnail,
     this.downloadUrl,
+    this.emailId,
   });
 
   Folder.fromDb({
@@ -68,6 +72,7 @@ class Folder implements FileAsset, Insertable<Folder> {
     required this.collectionId,
     this.thumbnail,
     this.downloadUrl,
+    this.emailId,
   });
 
   @override
@@ -83,6 +88,7 @@ class Folder implements FileAsset, Insertable<Folder> {
       collectionId: Value(collectionId),
       thumbnail: Value(thumbnail),
       downloadUrl: Value(downloadUrl),
+      emailId: Value(emailId),
     ).toColumns(nullToAbsent);
   }
 }

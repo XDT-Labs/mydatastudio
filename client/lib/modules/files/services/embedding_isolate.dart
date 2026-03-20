@@ -159,8 +159,6 @@ class EmbeddingIsolate {
             final duration = DateTime.now().difference(start);
             logger.d("Processed file ${file.path} in $duration");
 
-            print(embedding);
-
             if (embedding != null) {
               // Send to DbIsolateWriter
               final responsePort = ReceivePort();

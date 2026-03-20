@@ -12,8 +12,8 @@ import 'package:mydatatools/modules/files/services/cleanup_deleted_files_service
 import 'package:mydatatools/modules/files/services/batch_file_upsert_service.dart';
 import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatatools/models/tables/folder.dart';
 import 'package:mydatatools/repositories/user_repository.dart';
-import 'package:mydatatools/services/get_user_service.dart';
 import 'package:mydatatools/modules/email/services/email_upsert_service.dart';
 import 'package:mydatatools/modules/email/services/email_folder_upsert_service.dart';
 import 'package:mydatatools/models/tables/email.dart';
@@ -160,8 +160,10 @@ class DbIsolateWriterClient {
 
       try {
         if (data['type'] == 'file') {
+          File f = data['file'] as File;
+          logger.d("DbIsolateWriter: Received file upsert for ${f.name} (id: ${f.id}, collectionId: ${f.collectionId})");
           await FileUpsertService.instance.invoke(
-            FileUpsertServiceCommand(data['file'], db),
+            FileUpsertServiceCommand(f, db),
           );
           replyTo?.send({'status': 'ok'});
         } else if (data['type'] == 'batch_file') {
@@ -171,8 +173,10 @@ class DbIsolateWriterClient {
           );
           replyTo?.send({'status': 'ok'});
         } else if (data['type'] == 'folder') {
+          Folder folder = data['folder'] as Folder;
+          logger.d("DbIsolateWriter: Received folder upsert for ${folder.name} (path: ${folder.path}, parent: ${folder.parent})");
           await FolderUpsertService.instance.invoke(
-            FolderUpsertServiceCommand(data['folder'], db),
+            FolderUpsertServiceCommand(folder, db),
           );
           replyTo?.send({'status': 'ok'});
         } else if (data['type'] == 'cleanup_deleted') {

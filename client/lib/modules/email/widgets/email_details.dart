@@ -1,6 +1,11 @@
+import 'dart:io' as io;
+import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/email.dart';
+import 'package:mydatatools/models/tables/file.dart' as model;
+import 'package:mydatatools/modules/email/services/email_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:open_filex/open_filex.dart';
 
 class EmailDetails extends StatefulWidget {
   const EmailDetails({
@@ -24,12 +29,14 @@ class EmailDetails extends StatefulWidget {
 
 class _EmailDetails extends State<EmailDetails> {
   late final WebViewController _controller;
+  List<model.File> _attachments = [];
 
   @override
   void initState() {
     super.initState();
     _controller = WebViewController();
     _loadEmailContent();
+    _fetchAttachments();
   }
 
   @override
@@ -37,6 +44,17 @@ class _EmailDetails extends State<EmailDetails> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.email.id != widget.email.id) {
       _loadEmailContent();
+      _fetchAttachments();
+    }
+  }
+
+  Future<void> _fetchAttachments() async {
+    final repo = EmailRepository(DatabaseManager.instance.database!);
+    final attachments = await repo.getAttachments(widget.email.id);
+    if (mounted) {
+      setState(() {
+        _attachments = attachments;
+      });
     }
   }
 
@@ -103,8 +121,117 @@ class _EmailDetails extends State<EmailDetails> {
           Expanded(
             child: WebViewWidget(controller: _controller),
           ),
+          
+          // Attachments Row
+          if (_attachments.isNotEmpty) _buildAttachmentsSection(),
         ],
       ),
     );
+  }
+
+  Widget _buildAttachmentsSection() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        border: Border(top: BorderSide(color: Colors.grey.shade200, width: 1)),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                '${_attachments.length} Attachments',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 100,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _attachments.length,
+              itemBuilder: (context, index) {
+                final attachment = _attachments[index];
+                return _buildAttachmentThumbnail(attachment);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAttachmentThumbnail(model.File file) {
+    final isImage = file.contentType.startsWith('image/');
+    
+    return GestureDetector(
+      onTap: () async {
+        if (await io.File(file.path).exists()) {
+          await OpenFilex.open(file.path);
+        }
+      },
+      child: Container(
+        width: 120,
+        margin: const EdgeInsets.only(right: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: Colors.grey.shade300),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 2,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: isImage
+                  ? Image.file(
+                      io.File(file.path),
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const Icon(Icons.broken_image, color: Colors.grey),
+                    )
+                  : Center(
+                      child: Icon(
+                        _getIconForType(file.contentType),
+                        size: 32,
+                        color: Colors.grey.shade400,
+                      ),
+                    ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(6),
+              color: Colors.grey.shade50,
+              child: Text(
+                file.name,
+                style: const TextStyle(fontSize: 10, overflow: TextOverflow.ellipsis),
+                maxLines: 1,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _getIconForType(String? mimeType) {
+    if (mimeType == null) return Icons.insert_drive_file;
+    if (mimeType.contains('pdf')) return Icons.picture_as_pdf;
+    if (mimeType.contains('text')) return Icons.description;
+    if (mimeType.contains('zip') || mimeType.contains('compressed')) {
+      return Icons.folder_zip;
+    }
+    if (mimeType.contains('video')) return Icons.video_file;
+    if (mimeType.contains('audio')) return Icons.audio_file;
+    return Icons.insert_drive_file;
   }
 }

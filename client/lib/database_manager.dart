@@ -222,7 +222,7 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration {
@@ -275,6 +275,14 @@ class AppDatabase extends _$AppDatabase {
           await m.addColumn(emails, emails.threadId);
           await m.addColumn(emails, emails.isRead);
           await m.addColumn(emails, emails.hasAttachments);
+        }
+        if (from < 7) {
+          logger.i("Upgrade to v7: Adding emailId column to Files table");
+          await m.addColumn(files, files.emailId);
+        }
+        if (from < 8) {
+          logger.i("Upgrade to v8: Adding emailId column to Folders table");
+          await m.addColumn(folders, folders.emailId);
         }
       },
     );

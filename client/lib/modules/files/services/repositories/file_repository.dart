@@ -104,6 +104,7 @@ class FileDesktopRepository {
                 contentType: drift.Value(file.contentType),
                 thumbnail: drift.Value(file.thumbnail),
                 downloadUrl: drift.Value(file.downloadUrl),
+                emailId: drift.Value(file.emailId),
                 isDeleted: const drift.Value(false),
               ),
               where: (t) => t.id.equals(file.id),
@@ -112,6 +113,12 @@ class FileDesktopRepository {
         }
       });
     }
+  }
+
+  Future<List<File>> getByEmailId(String emailId) async {
+    return await (db.select(db.files)
+          ..where((t) => t.emailId.equals(emailId) & t.isDeleted.equals(false)))
+        .get();
   }
 
   Future<void> deleteAllByCollectionId(String collectionId) async {

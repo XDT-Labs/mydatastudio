@@ -1,6 +1,7 @@
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/email.dart';
+import 'package:mydatatools/models/tables/file.dart' as model;
 import 'package:drift/drift.dart';
 
 class EmailRepository {
@@ -8,6 +9,12 @@ class EmailRepository {
   AppLogger logger = AppLogger(null);
 
   EmailRepository(this.database);
+
+  Future<List<model.File>> getAttachments(String emailId) async {
+    return await (database.select(database.files)
+          ..where((f) => f.emailId.equals(emailId)))
+        .get();
+  }
 
   Future<List<Email>> emails(
     String collectionId, {
