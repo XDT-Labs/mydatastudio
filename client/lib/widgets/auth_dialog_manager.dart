@@ -14,8 +14,6 @@ class AuthDialogManager {
         if (c.needsReAuth && c.type == 'email') {
           if (c.oauthService == 'google') {
             _showGoogleAuthDialog(c);
-          } else if (c.oauthService == 'yahoo') {
-            _showYahooAuthDialog(c);
           }
         }
       }
@@ -49,44 +47,6 @@ class AuthDialogManager {
                       existing: collection,
                     );
                     // TODO close dialog
-                  },
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _showYahooAuthDialog(Collection collection) {
-    showDialog<SimpleDialog>(
-      context: _globalNavigationKey.currentState!.context,
-      builder: (BuildContext context) {
-        return SimpleDialog(
-          title: const Text('Yahoo Authentication Expired'),
-          children: <Widget>[
-            SimpleDialogOption(
-              onPressed: null,
-              child: Text(
-                "Your Yahoo token for '${collection.name}' has expired or been reset.\nClick button to re-authenticate.",
-              ),
-            ),
-            SimpleDialogOption(
-              child: SizedBox(
-                width: 225,
-                height: 48,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.email),
-                  label: const Text("Login with Yahoo"),
-                  onPressed: () async {
-                    await LoginProviderExtension.handleYahooMail(
-                      context,
-                      existing: collection,
-                    );
-                    if (context.mounted) {
-                      Navigator.of(context).pop();
-                    }
                   },
                 ),
               ),
