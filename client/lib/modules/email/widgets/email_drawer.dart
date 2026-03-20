@@ -193,6 +193,10 @@ class _EmailDrawer extends State<EmailDrawer> {
     switch (c.scanner) {
       case AppConstants.scannerEmailGmail:
         return 'Gmail';
+      case AppConstants.scannerEmailYahoo:
+        return 'Yahoo';
+      case AppConstants.scannerEmailOutlook:
+        return 'Outlook';
       default:
         return 'Other';
     }
@@ -202,8 +206,12 @@ class _EmailDrawer extends State<EmailDrawer> {
     switch (scanner) {
       case AppConstants.scannerEmailGmail:
         return 0;
-      default:
+      case AppConstants.scannerEmailYahoo:
         return 1;
+      case AppConstants.scannerEmailOutlook:
+        return 2;
+      default:
+        return 3;
     }
   }
 

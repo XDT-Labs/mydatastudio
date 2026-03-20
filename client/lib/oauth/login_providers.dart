@@ -14,7 +14,7 @@ import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
 // ignore: constant_identifier_names
-enum LoginProviders { google, googleDrive, azure }
+enum LoginProviders { google, googleDrive, azure, yahoo }
 
 ///
 /// Based on this stackoverflow answer
@@ -28,6 +28,8 @@ extension LoginProviderExtension on LoginProviders {
         return 'google'; // same identity provider, different scopes
       case LoginProviders.azure:
         return 'azure';
+      case LoginProviders.yahoo:
+        return 'yahoo';
     }
   }
 
@@ -38,6 +40,8 @@ extension LoginProviderExtension on LoginProviders {
         return "https://accounts.google.com/o/oauth2/v2/auth";
       case LoginProviders.azure:
         return "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+      case LoginProviders.yahoo:
+        return "https://api.login.yahoo.com/oauth2/request_auth";
     }
   }
 
@@ -48,6 +52,8 @@ extension LoginProviderExtension on LoginProviders {
         return "https://oauth2.googleapis.com/token";
       case LoginProviders.azure:
         return "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+      case LoginProviders.yahoo:
+        return "https://api.login.yahoo.com/oauth2/get_token";
     }
   }
 
@@ -60,6 +66,8 @@ extension LoginProviderExtension on LoginProviders {
         return const String.fromEnvironment('GOOGLE_CLIENT_ID');
       case LoginProviders.azure:
         return const String.fromEnvironment('AZURE_CLIENT_ID');
+      case LoginProviders.yahoo:
+        return const String.fromEnvironment('YAHOO_CLIENT_ID');
     }
   }
 
@@ -72,6 +80,8 @@ extension LoginProviderExtension on LoginProviders {
         return const String.fromEnvironment('GOOGLE_CLIENT_SECRET');
       case LoginProviders.azure:
         return "";
+      case LoginProviders.yahoo:
+        return const String.fromEnvironment('YAHOO_CLIENT_SECRET');
     }
   }
 
@@ -96,6 +106,8 @@ extension LoginProviderExtension on LoginProviders {
         ];
       case LoginProviders.azure:
         return ['openid', 'email'];
+      case LoginProviders.yahoo:
+        return ['openid', 'email', 'profile', 'mail-r'];
     }
   }
 
@@ -319,4 +331,102 @@ extension LoginProviderExtension on LoginProviders {
       return null;
     }
   }
+
+  /// Initiates the Yahoo Mail OAuth2 flow, fetches the user's profile,
+  /// and creates a [Collection] of type `email` with scanner `email.yahoo`.
+  static Future<Collection?> handleYahooMail(
+    BuildContext context, {
+    Collection? existing,
+  }) async {
+    if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Yahoo Mail is only supported on the desktop version of this app.',
+          ),
+        ),
+      );
+      return null;
+    }
+
+    try {
+      final appDataDir = MainApp.appDataDirectory.valueOrNull;
+      if (appDataDir == null) {
+        throw Exception('App data directory not initialized. Please restart the app.');
+      }
+      final oauthManager = DesktopOAuthManager(
+        loginProvider: LoginProviders.yahoo,
+      );
+
+      final client = await oauthManager.login();
+
+      // Fetch Yahoo profile to get user email & sub (ID)
+      final profileResponse = await http.get(
+        Uri.parse("https://api.login.yahoo.com/openid/v1/userinfo"),
+        headers: {
+          "Authorization": "Bearer ${client.credentials.accessToken}",
+        },
+      );
+
+      if (profileResponse.statusCode != 200) {
+        AppLogger(null).e(
+          'Yahoo Profile API error (${profileResponse.statusCode}): ${profileResponse.body}',
+        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Failed to fetch Yahoo profile. Please try again.',
+              ),
+            ),
+          );
+        }
+        return null;
+      }
+
+      final userData = jsonDecode(profileResponse.body) as Map<String, dynamic>;
+      final userId = userData['sub'] as String;
+      final email = userData['email'] as String;
+
+      final collectionId = existing?.id ?? const Uuid().v4().toString();
+
+      final collection = Collection(
+        id: collectionId,
+        name: email,
+        path: "$appDataDir/files/email/$email",
+        type: "email",
+        scanner: AppConstants.scannerEmailYahoo,
+        scanStatus: "pending",
+        oauthService: "yahoo",
+        accessToken: client.credentials.accessToken,
+        refreshToken: client.credentials.refreshToken,
+        idToken: client.credentials.idToken,
+        userId: userId,
+        expiration: client.credentials.expiration,
+        needsReAuth: false,
+      );
+
+      if (existing != null) {
+        await CollectionRepository().updateCollection(collection);
+      } else {
+        await CollectionRepository().addCollection(collection);
+      }
+
+      // Notify the email collections list to refresh
+      GetCollectionsService.instance.invoke(
+        GetCollectionsServiceCommand("email"),
+      );
+
+      return collection;
+    } catch (e, stack) {
+      AppLogger(null).e('Yahoo OAuth failed: $e\n$stack');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Yahoo sign-in failed: $e')),
+        );
+      }
+      return null;
+    }
+  }
 }
+

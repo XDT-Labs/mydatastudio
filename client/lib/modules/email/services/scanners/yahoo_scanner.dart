@@ -1,29 +1,27 @@
+import 'dart:isolate';
+
 import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/modules/email/services/email_repository.dart';
+import 'package:mydatatools/modules/email/services/scanners/yahoo_scanner_isolate.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
+import 'package:flutter/services.dart';
 
 class YahooScanner extends CollectionScanner {
-  final AppDatabase database;
+  final SendPort? dbWriterPort;
+  final String dbPath;
   final Collection collection;
-  final int repeatFrequency;
-  late String accessToken;
-  late String refreshToken;
-  late String appDir;
+  final String appDir;
+  YahooScannerIsolate? isolate;
   bool isStopped = false;
 
   final AppLogger logger = AppLogger(null);
 
-  YahooScanner(
-    this.database,
-    this.collection,
-    this.appDir,
-    this.repeatFrequency,
-  ) {
-    accessToken = collection.accessToken ?? '';
-    refreshToken = collection.refreshToken ?? '';
-  }
+  YahooScanner({
+    required this.dbPath,
+    required this.collection,
+    required this.appDir,
+    this.dbWriterPort,
+  });
 
   @override
   Future<int> start(
@@ -32,23 +30,18 @@ class YahooScanner extends CollectionScanner {
     bool recursive,
     bool force,
   ) async {
-    //skip on restart
+    // check if scan has already been run once
     if (!force && collection.lastScanDate != null) return Future(() => 0);
 
-    EmailRepository emailRepository = EmailRepository(DatabaseManager.instance.database!);
+    // TODO: start isolate and perform sync
+    logger.i("Yahoo sync started (stub)");
 
-    DateTime? minDate = await emailRepository.getMinEmailDate(collection.id);
-    String? minQuery;
-    if (minDate != null) {
-      minQuery = "before:${minDate.millisecondsSinceEpoch}";
-    }
-    logger.d(minQuery);
-
-    return Future(() => -1);
+    return 0;
   }
 
   @override
   void stop() async {
     isStopped = true;
+    // isolate?.stop();
   }
 }
