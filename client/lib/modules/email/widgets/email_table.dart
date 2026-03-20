@@ -21,24 +21,32 @@ class _EmailTable extends State<EmailTable> {
 
   @override
   Widget build(BuildContext context) {
-    List<DataColumn> columns = getColumns(context);
-
     return Container(
       color: Colors.grey.shade50,
       constraints: const BoxConstraints.expand(),
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
+          final List<DataColumn> columns = getColumns(
+            context,
+            constraints.maxWidth,
+          );
+
           return SingleChildScrollView(
-            child: DataTable(
-              columns: columns,
-              sortColumnIndex: sortColumnIndex,
-              sortAscending: sortAsc,
-              showCheckboxColumn: true,
-              horizontalMargin: 12,
-              dataRowMaxHeight: 40,
-              dataRowMinHeight: 40,
-              headingRowHeight: 40,
-              rows: getRows(context, widget.emails, constraints.maxWidth),
+            scrollDirection: Axis.vertical,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columns: columns,
+                sortColumnIndex: sortColumnIndex,
+                sortAscending: sortAsc,
+                showCheckboxColumn: true,
+                horizontalMargin: 8,
+                columnSpacing: 8,
+                dataRowMaxHeight: 40,
+                dataRowMinHeight: 40,
+                headingRowHeight: 40,
+                rows: getRows(context, widget.emails, constraints.maxWidth),
+              ),
             ),
           );
         },
@@ -46,12 +54,23 @@ class _EmailTable extends State<EmailTable> {
     );
   }
 
-  List<DataColumn> getColumns(BuildContext context) {
+  List<DataColumn> getColumns(BuildContext context, double totalWidth) {
+    const double fromWidth = 180.0;
+    const double attachmentWidth = 32.0;
+    const double dateWidth = 100.0;
+    const double checkboxAndMarginWidth = 100.0;
+
+    final double subjectWidth = math.max(
+      100.0,
+      totalWidth -
+          (fromWidth + attachmentWidth + dateWidth + checkboxAndMarginWidth),
+    );
+
     return <DataColumn>[
       DataColumn(
-        label: const Text(
-          'From',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        label: const SizedBox(
+          width: fromWidth,
+          child: Text('From', style: TextStyle(fontWeight: FontWeight.bold)),
         ),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
@@ -60,16 +79,27 @@ class _EmailTable extends State<EmailTable> {
           EmailSortChangedNotification(sortColumn, sortAsc).dispatch(context);
         },
       ),
-      const DataColumn(
-        numeric: false,
-        label: Text('Subject', style: TextStyle(fontWeight: FontWeight.normal)),
-      ),
-      const DataColumn(label: Icon(Icons.attachment, size: 16)),
       DataColumn(
-        numeric: true,
-        label: const Text(
-          'Date',
-          style: TextStyle(fontWeight: FontWeight.normal),
+        numeric: false,
+        label: SizedBox(
+          width: subjectWidth,
+          child: const Text(
+            'Subject',
+            style: TextStyle(fontWeight: FontWeight.normal),
+          ),
+        ),
+      ),
+      const DataColumn(
+        label: SizedBox(
+          width: attachmentWidth,
+          child: Icon(Icons.attachment, size: 16),
+        ),
+      ),
+      DataColumn(
+        numeric: false,
+        label: const SizedBox(
+          width: dateWidth,
+          child: Text('Date', style: TextStyle(fontWeight: FontWeight.normal)),
         ),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
@@ -81,22 +111,30 @@ class _EmailTable extends State<EmailTable> {
     ];
   }
 
-  List<DataRow> getRows(BuildContext context, List<Email> emails, double totalWidth) {
+  List<DataRow> getRows(
+    BuildContext context,
+    List<Email> emails,
+    double totalWidth,
+  ) {
     // Estimated widths for fixed columns
-    const double fromWidth = 200.0;
-    const double attachmentWidth = 40.0;
-    const double dateWidth = 120.0;
-    const double checkboxAndMarginWidth = 80.0; // Space for the leading checkbox and cell margins
+    const double fromWidth = 180.0;
+    const double attachmentWidth = 32.0;
+    const double dateWidth = 100.0;
+    const double checkboxAndMarginWidth =
+        100.0; // Space for the leading checkbox and cell margins
 
     // Calculate subject width to fill the remaining space
-    final double subjectWidth = math.max(100.0, totalWidth - (fromWidth + attachmentWidth + dateWidth + checkboxAndMarginWidth));
+    final double subjectWidth = math.max(
+      120.0,
+      totalWidth -
+          (fromWidth + attachmentWidth + dateWidth + checkboxAndMarginWidth),
+    );
 
     return emails.map((email) {
       String from = email.from.split("<")[0].trim();
-      Moment moment = Moment.fromMillisecondsSinceEpoch(
-        email.date.toUtc().millisecondsSinceEpoch,
-        isUtc: true,
-      );
+      Moment moment = Moment(email.date.toLocal());
+      bool isToday =
+          moment.format("yyyy-MM-dd") == Moment.now().format("yyyy-MM-dd");
 
       bool isRead = email.isRead;
 
@@ -132,9 +170,14 @@ class _EmailTable extends State<EmailTable> {
           DataCell(
             SizedBox(
               width: attachmentWidth,
-              child: email.hasAttachments
-                  ? const Icon(Icons.attachment, size: 16, color: Colors.grey)
-                  : const SizedBox.shrink(),
+              child:
+                  email.hasAttachments
+                      ? const Icon(
+                        Icons.attachment,
+                        size: 16,
+                        color: Colors.grey,
+                      )
+                      : const SizedBox.shrink(),
             ),
             onTap: () => EmailSelectedNotification(email).dispatch(context),
           ),
@@ -142,9 +185,11 @@ class _EmailTable extends State<EmailTable> {
             SizedBox(
               width: dateWidth,
               child: Tooltip(
-                message: email.date.toLocal().toString(),
+                message: moment.format("LLLL"),
                 child: Text(
-                  moment.fromNow(form: Abbreviation.full),
+                  isToday
+                      ? moment.format("h:mm A")
+                      : moment.format("M/DD/YYYY"),
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
