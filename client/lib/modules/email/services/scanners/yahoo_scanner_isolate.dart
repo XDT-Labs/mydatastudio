@@ -209,9 +209,10 @@ class YahooScannerIsolateWorker {
       await client.selectMailboxByPath(targetFolder);
       
       // Fetch ALL UIDs to detect deletions
+      List<int> allUids = [];
       try {
         final searchResult = await client.uidSearchMessages(searchCriteria: 'ALL');
-        final allUids = searchResult.matchingSequence?.toList() ?? [];
+        allUids = searchResult.matchingSequence?.toList() ?? [];
         clientPort?.send({
           'type': 'cleanup_uids',
           'folder': targetFolder,
@@ -221,83 +222,48 @@ class YahooScannerIsolateWorker {
         logger.e("Failed to fetch all UIDs for folder cleanup: $err");
       }
 
-      logger.s("Fetching up to 100 recent messages...");
-      final fetchResult = await client.fetchRecentMessages(messageCount: 100, criteria: 'BODY.PEEK[]');
-      logger.s("Fetched ${fetchResult.messages.length} messages.");
-      
-      List<Email> emailBatch = [];
-      for (final message in fetchResult.messages) {
-        final messageId = message.getHeaderValue('Message-ID');
-        int? uid;
-        try {
-          uid = (message as dynamic).uid;
-        } catch (_) {}
-
-        String emailId = messageId ?? 
-            const Uuid().v5(Namespace.url.value, 'email:yahoo:${collection.id}:$targetFolder:${uid ?? const Uuid().v4()}');
+      if (allUids.isEmpty) {
+        logger.s("No messages found in $targetFolder.");
+      } else {
+        const int batchSize = 50;
+        final reversedUids = allUids.reversed.toList();
+        logger.s("Starting full sync of ${reversedUids.length} messages in $targetFolder...");
         
-        final plainBody = message.decodeTextPlainPart();
-        final htmlBody = message.decodeTextHtmlPart();
-        final snippet = plainBody != null 
-            ? (plainBody.length > 200 ? plainBody.substring(0, 200) : plainBody)
-            : '';
+        for (int i = 0; i < reversedUids.length; i += batchSize) {
+          final end = (i + batchSize < reversedUids.length) ? i + batchSize : reversedUids.length;
+          final batchUids = reversedUids.sublist(i, end);
+          
+          logger.s("Fetching batch ${(i ~/ batchSize) + 1} (${batchUids.length} messages)...");
+          
+          final sequence = MessageSequence();
+          for (final uid in batchUids) {
+            sequence.add(uid);
+          }
+          
+          try {
+            final fetchResult = await client.uidFetchMessages(sequence, 'BODY.PEEK[]');
+            logger.s("Fetched ${fetchResult.messages.length} messages in batch.");
+            
+            List<Email> emailBatch = [];
+            for (final message in fetchResult.messages) {
+              final emailObj = await _parseAndProcessMessage(
+                message: message,
+                collection: collection,
+                targetFolder: targetFolder,
+                dbWriterPort: dbWriterPort,
+                logger: logger,
+              );
+              emailBatch.add(emailObj);
+            }
 
-        final hasAttachments = message.hasAttachments();
-        final msgDate = message.decodeDate() ?? DateTime.now();
-
-        final emailObj = Email(
-          id: emailId,
-          uid: uid,
-          collectionId: collection.id,
-          date: msgDate,
-          from: message.from?.first.toString() ?? 'unknown',
-          to: message.to?.map((e) => e.toString()).toList() ?? [],
-          cc: message.cc?.map((e) => e.toString()).toList() ?? [],
-          subject: message.decodeSubject() ?? '(no subject)',
-          snippet: snippet,
-          plainBody: plainBody,
-          htmlBody: htmlBody,
-          folderId: targetFolder,
-          messageId: messageId,
-          isRead: false, 
-          hasAttachments: hasAttachments,
-          isDeleted: false,
-        );
-
-        if (hasAttachments && collection.downloadAttachments) {
-          final labelName = targetFolder;
-          final year = msgDate.year.toString();
-          final rootPathNormalized = p.normalize(collection.path);
-          final absoluteYearPath = p.normalize(p.join(rootPathNormalized, labelName, year));
-
-          await _ensureFolderHierarchy(
-            dbWriterPort: dbWriterPort,
-            collection: collection,
-            labelName: labelName,
-            year: year,
-            msgDate: msgDate,
-          );
-
-          final allParts = _collectAllParts(message);
-          final attachments = await _downloadAttachments(
-            collection: collection,
-            messageId: emailId,
-            msgDate: msgDate,
-            parts: allParts,
-            targetFolderPath: absoluteYearPath,
-            dbWriterPort: dbWriterPort,
-            logger: logger,
-          );
-          emailObj.attachments = attachments;
-          for (var file in attachments) {
-            dbWriterPort.send({'type': 'file', 'file': file});
+            if (emailBatch.isNotEmpty) {
+              dbWriterPort.send({'type': 'batch_email', 'emails': emailBatch});
+              clientPort?.send({'type': 'refresh'});
+            }
+          } catch (e) {
+            logger.e("Failed to fetch batch starting at $i: $e");
           }
         }
-        emailBatch.add(emailObj);
-      }
-
-      if (emailBatch.isNotEmpty) {
-        dbWriterPort.send({'type': 'batch_email', 'emails': emailBatch});
       }
 
       logger.s("Yahoo sync complete.");
@@ -354,8 +320,11 @@ class YahooScannerIsolateWorker {
           try { content = pPart.decodeContent(); } catch (_) { try { content = pPart.decode(); } catch (_) {} }
           
           if (content != null) {
-            if (content is List<int>) await file.writeAsBytes(content);
-            else if (content is String) await file.writeAsString(content);
+            if (content is List<int>) {
+              await file.writeAsBytes(content);
+            } else if (content is String) {
+              await file.writeAsString(content);
+            }
 
             final f = db_file.File(
               id: const Uuid().v5(Namespace.url.value, 'file:email:${collection.id}:$messageId:$fileName'),
@@ -410,5 +379,81 @@ class YahooScannerIsolateWorker {
     final n = name.toUpperCase();
     if (n == 'INBOX' || n == 'SENT' || n == 'TRASH' || n == 'SPAM' || n == 'DRAFTS') return 'system';
     return 'user';
+  }
+
+  static Future<Email> _parseAndProcessMessage({
+    required MimeMessage message,
+    required Collection collection,
+    required String targetFolder,
+    required SendPort dbWriterPort,
+    required AppLogger logger,
+  }) async {
+    final messageId = message.getHeaderValue('Message-ID');
+    int? uid;
+    try {
+      uid = (message as dynamic).uid;
+    } catch (_) {}
+
+    String emailId = messageId ?? 
+        const Uuid().v5(Namespace.url.value, 'email:yahoo:${collection.id}:$targetFolder:${uid ?? const Uuid().v4()}');
+    
+    final plainBody = message.decodeTextPlainPart();
+    final htmlBody = message.decodeTextHtmlPart();
+    final snippet = plainBody != null 
+        ? (plainBody.length > 200 ? plainBody.substring(0, 200) : plainBody)
+        : '';
+
+    final hasAttachments = message.hasAttachments();
+    final msgDate = message.decodeDate() ?? DateTime.now();
+
+    final emailObj = Email(
+      id: emailId,
+      uid: uid,
+      collectionId: collection.id,
+      date: msgDate,
+      from: message.from?.first.toString() ?? 'unknown',
+      to: message.to?.map((e) => e.toString()).toList() ?? [],
+      cc: message.cc?.map((e) => e.toString()).toList() ?? [],
+      subject: message.decodeSubject() ?? '(no subject)',
+      snippet: snippet,
+      plainBody: plainBody,
+      htmlBody: htmlBody,
+      folderId: targetFolder,
+      messageId: messageId,
+      isRead: false, 
+      hasAttachments: hasAttachments,
+      isDeleted: false,
+    );
+
+    if (hasAttachments && collection.downloadAttachments) {
+      final labelName = targetFolder;
+      final year = msgDate.year.toString();
+      final rootPathNormalized = p.normalize(collection.path);
+      final absoluteYearPath = p.normalize(p.join(rootPathNormalized, labelName, year));
+
+      await _ensureFolderHierarchy(
+        dbWriterPort: dbWriterPort,
+        collection: collection,
+        labelName: labelName,
+        year: year,
+        msgDate: msgDate,
+      );
+
+      final allParts = _collectAllParts(message);
+      final attachments = await _downloadAttachments(
+        collection: collection,
+        messageId: emailId,
+        msgDate: msgDate,
+        parts: allParts,
+        targetFolderPath: absoluteYearPath,
+        dbWriterPort: dbWriterPort,
+        logger: logger,
+      );
+      emailObj.attachments = attachments;
+      for (var file in attachments) {
+        dbWriterPort.send({'type': 'file', 'file': file});
+      }
+    }
+    return emailObj;
   }
 }
