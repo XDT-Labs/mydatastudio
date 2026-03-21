@@ -18,6 +18,8 @@ class AppConstants {
   /// Scanner type constants — used in [Collection.scanner] and [FileSourceRegistry].
   static const String scannerEmailGmail = "email.gmail";
   static const String scannerEmailOutlook = "email.outlook";
+  static const String scannerEmailOutlookPst = "email.outlook.pst";
+
 
   // File source scanners
   static const String scannerFileLocal = "file.local";

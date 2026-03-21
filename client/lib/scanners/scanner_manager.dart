@@ -9,6 +9,8 @@ import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/modules/files/services/scanners/google_file_scanner.dart';
 import 'package:mydatatools/modules/files/services/scanners/local_file_isolate.dart';
 import 'package:mydatatools/modules/email/services/scanners/gmail_scanner.dart';
+import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner.dart';
+
 import 'package:mydatatools/scanners/collection_scanner.dart';
 
 class ScannerManager {
@@ -127,6 +129,22 @@ class ScannerManager {
         );
         scanners[c.id] = emailScanner;
         break;
+      case AppConstants.scannerEmailOutlookPst:
+        logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
+        SendPort pstWriterPort = await DatabaseManager.instance.writerPort;
+        CollectionScanner pstScanner = OutlookPstScanner(
+          dbPath: p.join(
+            DatabaseManager.instance.storagePath!,
+            'data',
+            AppConstants.dbName,
+          ),
+          collection: c,
+          appDir: DatabaseManager.instance.storagePath!,
+          dbWriterPort: pstWriterPort,
+        );
+        scanners[c.id] = pstScanner;
+        break;
+
 
       default:
         logger.w("Scanner type '${c.scanner}' not recognized.");

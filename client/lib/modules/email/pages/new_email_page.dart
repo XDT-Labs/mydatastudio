@@ -3,13 +3,20 @@
 // found in the LICENSE file.
 
 import 'dart:async';
+import 'package:mydatatools/main.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/oauth/login_providers.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
+import 'package:uuid/uuid.dart';
+
+import 'package:mydatatools/app_constants.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:reactive_forms/reactive_forms.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
 
 class NewEmailPage extends StatefulWidget {
   const NewEmailPage({super.key});
@@ -46,7 +53,7 @@ class _NewEmailPage extends State<NewEmailPage> {
     //final textTheme = Theme.of(context).textTheme;
     //final colorScheme = Theme.of(context).colorScheme;
 
-    final outlookPstForm = FormGroup({'file': FormControl<String>()});
+
 
     final imapForm = FormGroup({
       'host': FormControl<String>(),
@@ -122,31 +129,8 @@ class _NewEmailPage extends State<NewEmailPage> {
                       ],
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: ReactiveForm(
-                      formGroup: outlookPstForm,
-                      child: Column(
-                        children: <Widget>[
-                          ReactiveTextField(
-                            formControlName: 'file',
-                            validationMessages: {
-                              'required':
-                                  (error) => 'A valid file must be entered',
-                            },
-                          ),
-                          const ElevatedButton(
-                            onPressed: null,
-                            child: Text("Browse"),
-                          ),
-                          const ElevatedButton(
-                            onPressed: null,
-                            child: Text("Import Emails"),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  const _OutlookPstTab(),
+
                   Padding(
                     padding: const EdgeInsets.all(24.0),
                     child: ReactiveForm(
@@ -381,3 +365,150 @@ class _GmailTabState extends State<_GmailTab> {
     );
   }
 }
+
+// =============================================================================
+// Outlook PST Tab — browser for a local .pst file
+// =============================================================================
+
+class _OutlookPstTab extends StatefulWidget {
+  const _OutlookPstTab();
+
+  @override
+  State<_OutlookPstTab> createState() => _OutlookPstTabState();
+}
+
+class _OutlookPstTabState extends State<_OutlookPstTab> {
+  final _form = FormGroup({
+    'file': FormControl<String>(validators: [Validators.required]),
+  });
+
+  bool _isImporting = false;
+
+  Future<void> _browse() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pst'],
+      allowMultiple: false,
+    );
+
+    if (result != null && result.files.single.path != null) {
+      _form.control('file').value = result.files.single.path;
+    }
+  }
+
+  Future<void> _import() async {
+    if (!_form.valid) {
+      _form.markAllAsTouched();
+      return;
+    }
+
+    setState(() => _isImporting = true);
+
+    try {
+      final filePath = _form.control('file').value as String;
+      final fileName = p.basename(filePath);
+      
+      final appDataDir = MainApp.appDataDirectory.valueOrNull;
+      if (appDataDir == null) throw Exception('App data directory not ready');
+
+      // Create collection for PST
+      final collectionId = const Uuid().v4();
+      final collection = Collection(
+        id: collectionId,
+        name: fileName,
+        path: filePath, 
+        type: 'email',
+        scanner: AppConstants.scannerEmailOutlookPst,
+        scanStatus: 'pending',
+        needsReAuth: false,
+      );
+
+      await CollectionRepository().addCollection(collection);
+
+      // Refresh collections
+      GetCollectionsService.instance.invoke(GetCollectionsServiceCommand('email'));
+
+      if (!mounted) return;
+      GoRouter.of(context).go('/email');
+      
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to import PST: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isImporting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(36),
+            child: ReactiveForm(
+              formGroup: _form,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.archive_outlined, size: 72, color: Colors.orange),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Outlook PST Archive',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Select an Outlook PST data file to import all emails, folders, and attachments.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.5),
+                  ),
+                  const SizedBox(height: 28),
+                  ReactiveTextField<String>(
+                    formControlName: 'file',
+                    readOnly: true,
+                    decoration: InputDecoration(
+                      labelText: 'PST File Path',
+                      hintText: 'No file selected',
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.folder_open),
+                        onPressed: _isImporting ? null : _browse,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: _isImporting ? null : _import,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange.shade700,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: _isImporting
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            )
+                          : const Text('Import PST File'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+

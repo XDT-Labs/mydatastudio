@@ -28,4 +28,11 @@ from aichat.main import main
 if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()
-    main()
+    
+    if len(sys.argv) > 1 and sys.argv[1] == "--pst":
+        # Remove the --pst flag from sys.argv so pst_parser's argparse works correctly
+        sys.argv.pop(1)
+        from aichat.pst_parser import main as pst_main
+        pst_main()
+    else:
+        main()
