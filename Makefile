@@ -22,9 +22,8 @@ APP_ZIP_NAME = aichat-macos.zip
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = bartowski/google_gemma-3-4b-it-GGUF
 HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
-HF_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-8B-GGUF"
-HF_EMBEDDING_FILE = Qwen3-Embedding-8B-Q4_K_M.gguf
-HF_EMBEDDING_DIR = $(PYTHON_DIR)/models/$(HF_EMBEDDING_MODEL)
+HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
+HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
 
 # Flutter Config
 FLUTTER_DIR = client
@@ -45,10 +44,10 @@ init:
 	gcloud config set project $(PROJECT_ID)
 	@echo "Project configuration complete."
 
-# 1. Download GGUF Models
+# 1. Download Models
 .PHONY: models
 models:
-	@echo "--- 📥 Checking/Downloading GGUF models ---"
+	@echo "--- 📥 Checking/Downloading models ---"
 	@mkdir -p $(PYTHON_DIR)/models
 	@if [ ! -f $(PYTHON_DIR)/models/$(HF_FILE) ]; then \
 		echo "Downloading $(HF_FILE)..."; \
@@ -56,13 +55,11 @@ models:
 	else \
 		echo "$(HF_FILE) already exists, skipping download."; \
 	fi
-	@if [ ! -f $(PYTHON_DIR)/models/$(HF_EMBEDDING_FILE) ]; then \
-		echo "Downloading Qwen-VL embedding model (Transformers)..."; \
-		hf download $(HF_EMBEDDING_MODEL) ${HF_EMBEDDING_FILE} --local-dir $(PYTHON_DIR)/models; \
-		cp $(PYTHON_DIR)/models/$(HF_EMBEDDING_DIR)/$(HF_EMBEDDING_FILE) $(PYTHON_DIR)/models/$(HF_EMBEDDING_FILE);  \
-		rm -rf $(HF_EMBEDDING_DIR); \
+	@if [ ! -d $(HF_SIGLIP_DIR) ]; then \
+		echo "Downloading SigLip 2 embedding model (Transformers)..."; \
+		hf download $(HF_SIGLIP_MODEL) --local-dir $(HF_SIGLIP_DIR); \
 	else \
-		echo "Qwen-VL embedding model already exists, skipping download."; \
+		echo "SigLip 2 embedding model already exists, skipping download."; \
 	fi
 
 	
@@ -95,8 +92,9 @@ build-client:
 local-install-python: build-python
 	@echo "--- 💾 Installing service for local testing ---"
 	@mkdir -p ~/Library/Application\ Support/mydata.tools/
-	cp $(APP_ZIP_PATH) ~/Library/Application\ Support/mydata.tools/
+	rm -fr ~/Library/Application\ Support/mydata.tools/*.zip
 	rm -fr ~/Library/Application\ Support/mydata.tools/aichat
+	cp $(APP_ZIP_PATH) ~/Library/Application\ Support/mydata.tools/
 	@echo "--- ✅ Copy complete ---"
 
 # Cloud Run Deployment
