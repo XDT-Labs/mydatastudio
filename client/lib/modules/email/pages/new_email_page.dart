@@ -307,6 +307,7 @@ class _OutlookPstTab extends StatefulWidget {
 
 class _OutlookPstTabState extends State<_OutlookPstTab> {
   final _form = FormGroup({
+    'title': FormControl<String>(validators: [Validators.required]),
     'file': FormControl<String>(validators: [Validators.required]),
   });
 
@@ -320,7 +321,13 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
     );
 
     if (result != null && result.files.single.path != null) {
-      _form.control('file').value = result.files.single.path;
+      final filePath = result.files.single.path!;
+      _form.control('file').value = filePath;
+      
+      // Auto-populate title if empty
+      if (_form.control('title').value == null || (_form.control('title').value as String).isEmpty) {
+        _form.control('title').value = p.basenameWithoutExtension(filePath);
+      }
     }
   }
 
@@ -334,7 +341,7 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
 
     try {
       final filePath = _form.control('file').value as String;
-      final fileName = p.basename(filePath);
+      final title = _form.control('title').value as String;
       
       final appDataDir = MainApp.appDataDirectory.valueOrNull;
       if (appDataDir == null) throw Exception('App data directory not ready');
@@ -343,7 +350,7 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
       final collectionId = const Uuid().v4();
       final collection = Collection(
         id: collectionId,
-        name: fileName,
+        name: title,
         path: filePath, 
         type: 'email',
         scanner: AppConstants.scannerEmailOutlookPst,
@@ -411,6 +418,15 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
                     style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.5),
                   ),
                   const SizedBox(height: 28),
+                  ReactiveTextField<String>(
+                    formControlName: 'title',
+                    decoration: const InputDecoration(
+                      labelText: 'Collection Title',
+                      hintText: 'e.g., My Old Emails',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   ReactiveTextField<String>(
                     formControlName: 'file',
                     readOnly: true,
