@@ -233,10 +233,16 @@ class _EmailPage extends State<EmailPage> {
       return;
     }
 
-    // Try to get scanner. It might not be registered yet if just added.
+    // Set to false initially until we get the actual scanner status
+    if (mounted) setState(() => isScanning = false);
+
+    // Robustly wait for the scanner to be registered
     final mgr = ScannerManager.getInstance();
-    final scanner = mgr.getScanner(c);
-    if (scanner != null) {
+    mgr.getScannerAsync(c).then((scanner) {
+      if (!mounted) return;
+      // Ensure we are still interested in this same collection
+      if (EmailPage.selectedCollection.value?.id != c.id) return;
+
       _scannerSub = scanner.isScanning.listen((scanning) {
         if (mounted) {
           setState(() {
@@ -244,23 +250,7 @@ class _EmailPage extends State<EmailPage> {
           });
         }
       });
-    } else {
-      // If scanner is null, wait a bit and try again once.
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (!mounted) return;
-        final s = mgr.getScanner(c);
-        if (s != null) {
-          _scannerSub = s.isScanning.listen((scanning) {
-            if (mounted) {
-              setState(() {
-                isScanning = scanning;
-              });
-            }
-          });
-        }
-      });
-      if (mounted) setState(() => isScanning = false);
-    }
+    });
   }
 
   @override

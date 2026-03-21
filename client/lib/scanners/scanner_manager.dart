@@ -96,57 +96,95 @@ class ScannerManager {
     return scanners[c.id];
   }
 
+  final Map<String, Completer<CollectionScanner>> _pendingScanners = {};
+  final Map<String, Future<CollectionScanner>> _registrationFutures = {};
+
+  /// Returns a Future that completes when a scanner is registered for the collection.
+  /// If it's already registered, the Future completes immediately.
+  Future<CollectionScanner> getScannerAsync(Collection c) {
+    if (scanners.containsKey(c.id)) {
+      return Future.value(scanners[c.id]!);
+    }
+    return _pendingScanners
+        .putIfAbsent(c.id, () => Completer<CollectionScanner>())
+        .future;
+  }
+
   Future<CollectionScanner> registerScanner(Collection c) async {
     if (scanners.containsKey(c.id)) return scanners[c.id]!;
     
-    CollectionScanner scanner;
-    switch (c.scanner) {
-      case AppConstants.scannerFileLocal:
-        logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-        SendPort? writerPort = await DatabaseManager.instance.writerPort;
-        scanner = LocalFileIsolate(
-          null,
-          writerPort,
-        );
-        break;
-
-      case AppConstants.scannerFileGDrive:
-        logger.i("Registering GDrive scanner for ${c.name} (ID: ${c.id})");
-        SendPort driveWriterPort = await DatabaseManager.instance.writerPort;
-        scanner = CloudFileIsolate(
-          null, // Central logger port not used yet
-          driveWriterPort,
-        );
-        break;
-
-      case AppConstants.scannerEmailGmail:
-        logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-        SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
-        scanner = GmailScanner(
-          dbPath: p.join(DatabaseManager.instance.storagePath!, 'data', AppConstants.dbName),
-          collection: c,
-          appDir: DatabaseManager.instance.storagePath!,
-          dbWriterPort: emailWriterPort,
-        );
-        break;
-      
-      case AppConstants.scannerEmailYahoo:
-        logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-        SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
-        scanner = YahooScanner(
-          dbPath: p.join(DatabaseManager.instance.storagePath!, 'data', AppConstants.dbName),
-          collection: c,
-          appDir: DatabaseManager.instance.storagePath!,
-          dbWriterPort: emailWriterPort,
-        );
-        break;
-
-      default:
-        logger.w("Scanner type '${c.scanner}' not recognized.");
-        throw Exception("Scanner type '${c.scanner}' not recognized.");
+    // If registration is already in progress, return the existing future
+    if (_registrationFutures.containsKey(c.id)) {
+      return _registrationFutures[c.id]!;
     }
-    
-    scanners[c.id] = scanner;
-    return scanner;
+
+    final future = _doRegisterScanner(c);
+    _registrationFutures[c.id] = future;
+    return future;
+  }
+
+  Future<CollectionScanner> _doRegisterScanner(Collection c) async {
+    try {
+      CollectionScanner scanner;
+      switch (c.scanner) {
+        case AppConstants.scannerFileLocal:
+          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
+          SendPort? writerPort = await DatabaseManager.instance.writerPort;
+          scanner = LocalFileIsolate(
+            null,
+            writerPort,
+          );
+          break;
+
+        case AppConstants.scannerFileGDrive:
+          logger.i("Registering GDrive scanner for ${c.name} (ID: ${c.id})");
+          SendPort driveWriterPort = await DatabaseManager.instance.writerPort;
+          scanner = CloudFileIsolate(
+            null, // Central logger port not used yet
+            driveWriterPort,
+          );
+          break;
+
+        case AppConstants.scannerEmailGmail:
+          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
+          SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
+          scanner = GmailScanner(
+            dbPath: p.join(
+              DatabaseManager.instance.storagePath!,
+              'data',
+              AppConstants.dbName,
+            ),
+            collection: c,
+            appDir: DatabaseManager.instance.storagePath!,
+            dbWriterPort: emailWriterPort,
+          );
+          break;
+
+        case AppConstants.scannerEmailYahoo:
+          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
+          SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
+          scanner = YahooScanner(
+            dbPath: p.join(
+              DatabaseManager.instance.storagePath!,
+              'data',
+              AppConstants.dbName,
+            ),
+            collection: c,
+            appDir: DatabaseManager.instance.storagePath!,
+            dbWriterPort: emailWriterPort,
+          );
+          break;
+
+        default:
+          logger.w("Scanner type '${c.scanner}' not recognized.");
+          throw Exception("Scanner type '${c.scanner}' not recognized.");
+      }
+
+      scanners[c.id] = scanner;
+      _pendingScanners.remove(c.id)?.complete(scanner);
+      return scanner;
+    } finally {
+      _registrationFutures.remove(c.id);
+    }
   }
 }
