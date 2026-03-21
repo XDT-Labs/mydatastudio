@@ -88,6 +88,45 @@ class PstParser:
         """Return True if this folder stores non-email items (contacts, calendar, etc.)."""
         return (folder_name or "").strip().lower() in NON_EMAIL_FOLDER_NAMES
 
+    @staticmethod
+    def _get_attachment_filename(att, index: int) -> str:
+        """
+        Extract a human-readable filename from a pypff.attachment object.
+
+        pypff.attachment has no get_name() method; filenames are stored as MAPI
+        properties inside the record set:
+          PR_ATTACH_LONG_FILENAME  (0x3707) – preferred (full Unicode name)
+          PR_ATTACH_FILENAME       (0x3704) – 8.3 short name fallback
+          PR_DISPLAY_NAME          (0x3001) – last resort display name
+        """
+        # MAPI property IDs to probe, in order of preference
+        FILENAME_PROPS = (0x3707, 0x3704, 0x3001)
+
+        try:
+            for rs_idx in range(att.number_of_record_sets):
+                rs = att.get_record_set(rs_idx)
+                # Build a map of entry_type → entry for quick lookup
+                props: dict = {}
+                for e_idx in range(rs.number_of_entries):
+                    try:
+                        entry = rs.get_entry(e_idx)
+                        props[entry.entry_type] = entry
+                    except Exception:
+                        continue
+                for prop_id in FILENAME_PROPS:
+                    if prop_id in props:
+                        try:
+                            name = props[prop_id].get_data_as_string()
+                            if name and name.strip():
+                                return name.strip()
+                        except Exception:
+                            continue
+        except Exception:
+            pass
+
+        return f"attachment_{index}"
+
+
     def _process_folder(self, folder, folder_path):
         folder_name = folder.get_name() or "Root"
         current_path = os.path.join(folder_path, folder_name)
@@ -217,34 +256,44 @@ class PstParser:
                 data["html_body"] = ""
             
             # Extract attachments
+            # NOTE: pypff.attachment has no get_name() or get_data().
+            # - Filename comes from MAPI record-set properties:
+            #     PR_ATTACH_LONG_FILENAME (0x3707) preferred,
+            #     PR_ATTACH_FILENAME      (0x3704) short name fallback,
+            #     PR_DISPLAY_NAME         (0x3001) last resort.
+            # - Binary data comes from seek_offset(0, 0) + read_buffer(size).
             try:
                 num_attachments = message.get_number_of_attachments()
                 if num_attachments > 0:
                     attachment_folder = os.path.join(self.output_dir, folder_path, str(year))
-                    if not os.path.exists(attachment_folder):
-                        os.makedirs(attachment_folder, exist_ok=True)
-                        
+                    os.makedirs(attachment_folder, exist_ok=True)
+
                     for i in range(num_attachments):
                         try:
                             att = message.get_attachment(i)
-                            filename = att.get_name() or f"attachment_{i}"
-                            
+                            filename = self._get_attachment_filename(att, i)
+
                             safe_filename = f"{entry_id}_{filename}"
                             file_path = os.path.join(attachment_folder, safe_filename)
-                            
-                            with open(file_path, "wb") as f:
-                                f.write(att.get_data())
-                                
+
+                            att.seek_offset(0, 0)
+                            raw_data = att.read_buffer(att.size)
+
+                            with open(file_path, "wb") as f_out:
+                                f_out.write(raw_data)
+
                             data["attachments"].append({
                                 "name": filename,
                                 "path": file_path,
                                 "size": os.path.getsize(file_path),
-                                "contentType": "application/octet-stream"
+                                "contentType": "application/octet-stream",
                             })
                         except Exception as att_e:
-                            # Log attachment error but continue with message
+                            # Individual attachment failed; keep processing others
                             pass
-            except:
+            except Exception:
+                # get_number_of_attachments() can raise for corrupted/unsupported
+                # PST entries (libpff descriptor table error).  Skip gracefully.
                 pass
             
             return data

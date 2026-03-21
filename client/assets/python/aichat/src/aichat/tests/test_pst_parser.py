@@ -473,6 +473,133 @@ class TestItemTypeFiltering:
 
 
 # ---------------------------------------------------------------------------
+# Attachments
+# ---------------------------------------------------------------------------
+
+class TestAttachments:
+    """Attachment extraction must be correct and present for emails that have them."""
+
+    def test_attachments_field_is_always_a_list(self, parsed_emails):
+        """
+        Every email record must have 'attachments' as a list (never None/missing).
+        An email with no attachments should have an empty list, not None.
+        """
+        failures = [
+            {
+                "subject": e.get("subject", "(no subject)"),
+                "folder": e.get("folder", ""),
+                "attachments": repr(e.get("attachments")),
+            }
+            for e in parsed_emails
+            if not isinstance(e.get("attachments"), list)
+        ]
+        if failures:
+            sample = failures[:10]
+            details = "\n".join(
+                f"  [{i+1}] folder={r['folder']} | subject={r['subject']} | attachments={r['attachments']}"
+                for i, r in enumerate(sample)
+            )
+            pytest.fail(
+                f"{len(failures)} email(s) have a non-list 'attachments' field "
+                f"(showing first {len(sample)}):\n{details}"
+            )
+
+    def test_at_least_one_email_has_attachments(self, parsed_emails):
+        """
+        A real-world PST with 1000+ emails should contain at least one email
+        that has an attachment.  If this fails it means the attachment extraction
+        code is silently swallowing every attachment (e.g. all get_data() calls
+        are crashing and being silently ignored).
+        """
+        emails_with_attachments = [e for e in parsed_emails if e.get("attachments")]
+        assert len(emails_with_attachments) > 0, (
+            f"No emails with attachments found out of {len(parsed_emails)} total. "
+            "Attachment extraction may be broken (check silent exception handling "
+            "in _process_message)."
+        )
+
+    def test_attachment_entries_have_required_keys(self, parsed_emails):
+        """
+        Each attachment dict must have: name, path, size, contentType.
+        A missing key means the attachment was partially extracted.
+        """
+        REQUIRED_ATT_KEYS = {"name", "path", "size", "contentType"}
+        failures = []
+        for email in parsed_emails:
+            for att in email.get("attachments") or []:
+                missing = REQUIRED_ATT_KEYS - set(att.keys())
+                if missing:
+                    failures.append({
+                        "subject": email.get("subject", "(no subject)"),
+                        "att_name": att.get("name", "?"),
+                        "missing_keys": sorted(missing),
+                    })
+        if failures:
+            sample = failures[:10]
+            details = "\n".join(
+                f"  [{i+1}] subject={r['subject']} | att={r['att_name']} | missing={r['missing_keys']}"
+                for i, r in enumerate(sample)
+            )
+            pytest.fail(
+                f"{len(failures)} attachment(s) are missing required keys "
+                f"(showing first {len(sample)}):\n{details}"
+            )
+
+    def test_attachment_files_exist_on_disk(self, parsed_emails):
+        """
+        Every attachment that was extracted must have its file actually present
+        on disk at the reported path.  A missing file means the write failed
+        silently.
+        """
+        failures = []
+        for email in parsed_emails:
+            for att in email.get("attachments") or []:
+                path = att.get("path", "")
+                if path and not os.path.exists(path):
+                    failures.append({
+                        "subject": email.get("subject", "(no subject)"),
+                        "att_name": att.get("name", "?"),
+                        "path": path,
+                    })
+        if failures:
+            sample = failures[:10]
+            details = "\n".join(
+                f"  [{i+1}] subject={r['subject']} | att={r['att_name']} | path={r['path']}"
+                for i, r in enumerate(sample)
+            )
+            pytest.fail(
+                f"{len(failures)} attachment file(s) are missing on disk "
+                f"(showing first {len(sample)}):\n{details}"
+            )
+
+    def test_attachment_sizes_are_positive(self, parsed_emails):
+        """
+        Every extracted attachment must have a size > 0.  A zero-byte file
+        almost certainly means the read/write failed silently.
+        """
+        failures = []
+        for email in parsed_emails:
+            for att in email.get("attachments") or []:
+                size = att.get("size", -1)
+                if not isinstance(size, (int, float)) or size <= 0:
+                    failures.append({
+                        "subject": email.get("subject", "(no subject)"),
+                        "att_name": att.get("name", "?"),
+                        "size": size,
+                    })
+        if failures:
+            sample = failures[:10]
+            details = "\n".join(
+                f"  [{i+1}] subject={r['subject']} | att={r['att_name']} | size={r['size']}"
+                for i, r in enumerate(sample)
+            )
+            pytest.fail(
+                f"{len(failures)} attachment(s) have a zero or invalid size "
+                f"(showing first {len(sample)}):\n{details}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Summary / smoke test
 # ---------------------------------------------------------------------------
 
@@ -485,7 +612,7 @@ class TestPstFileSanity:
 
     def test_email_records_have_required_keys(self, parsed_emails):
         """Every email record must have the minimum set of required keys."""
-        required_keys = {"type", "subject", "sender", "to", "cc", "date", "folder"}
+        required_keys = {"type", "subject", "sender", "to", "cc", "date", "folder", "attachments"}
         failures = []
         for email in parsed_emails:
             missing = required_keys - set(email.keys())
@@ -523,6 +650,13 @@ class TestPstFileSanity:
         empty_to = sum(1 for e in parsed_emails if not e.get("to"))
         empty_cc = sum(1 for e in parsed_emails if not e.get("cc"))
 
+        # Attachment stats
+        emails_with_attachments = [
+            e for e in parsed_emails if e.get("attachments")
+        ]
+        total_attachments = sum(len(e["attachments"]) for e in emails_with_attachments)
+        att_count = len(emails_with_attachments)
+
         with capsys.disabled():
             print(f"\n{'='*60}")
             print(f"PST Parsing Statistics for: {PST_FILE}")
@@ -532,4 +666,12 @@ class TestPstFileSanity:
             print(f"  FROM is 'Unknown'/bad      : {unknown_from}   ({unknown_from/total*100:.1f}%)")
             print(f"  TO list is empty           : {empty_to}   ({empty_to/total*100:.1f}%)")
             print(f"  CC list is empty           : {empty_cc}   ({empty_cc/total*100:.1f}%)")
+            print(f"  Emails with attachments    : {att_count}   ({att_count/total*100:.1f}%)")
+            print(f"  Total attachments found    : {total_attachments}")
+            if emails_with_attachments:
+                sample = emails_with_attachments[:5]
+                print(f"  Sample (up to 5):")
+                for e in sample:
+                    names = ", ".join(a.get("name", "?") for a in e["attachments"])
+                    print(f"    subject={e.get('subject', '')!r} | files=[{names}]")
             print(f"{'='*60}")
