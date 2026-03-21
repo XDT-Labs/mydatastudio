@@ -20,6 +20,7 @@ import 'package:mydatatools/models/tables/email.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:logger/logger.dart';
 import 'package:mydatatools/app_logger.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 
 class DbIsolateWriterClient {
   Isolate? _isolate;
@@ -221,6 +222,28 @@ class DbIsolateWriterClient {
           UserRepository(db).saveUser(data['user'] as AppUser).then((v) async {
             replyTo?.send({'status': 'ok', 'id': v?.id});
           });
+        } else if (data['type'] == 'delete_collection') {
+          // Handle collection delete in background
+          final id = data['id'] as String;
+          logger.d("DbIsolateWriter: Received collection delete for $id");
+          await CollectionRepository(db).deleteCollection(id);
+          replyTo?.send({'status': 'ok'});
+        } else if (data['type'] == 'update_collection_status') {
+          // Handle collection status update
+          final id = data['id'] as String;
+          final status = data['status'] as String;
+          final lastScan = data['lastScan'] as String?;
+          
+          final repo = CollectionRepository(db);
+          final col = await repo.collectionById(id);
+          if (col != null) {
+            col.scanStatus = status;
+            if (lastScan != null) {
+              col.lastScanDate = DateTime.tryParse(lastScan);
+            }
+            await repo.updateCollection(col);
+          }
+          replyTo?.send({'status': 'ok'});
         } else {
           logger.w("Unknown message type: ${data['type']}");
           replyTo?.send({'error': 'Unknown message type: ${data['type']}'});

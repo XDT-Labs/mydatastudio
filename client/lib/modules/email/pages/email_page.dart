@@ -24,6 +24,7 @@ class EmailPage extends StatefulWidget {
 
   static BehaviorSubject<Collection?> selectedCollection = BehaviorSubject<Collection?>.seeded(null);
   static BehaviorSubject<String?> selectedFolder = BehaviorSubject<String?>.seeded(null);
+  static BehaviorSubject<bool> isDeleting = BehaviorSubject<bool>.seeded(false);
 
   @override
   State<EmailPage> createState() => _EmailPage();
@@ -188,8 +189,20 @@ class _EmailPage extends State<EmailPage> {
               )
             : getBreadcrumb(collection, selectedFolderName),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1.0),
-          child: Container(height: 1.0, color: Colors.grey.shade300),
+          preferredSize: const Size.fromHeight(4.0),
+          child: StreamBuilder<bool>(
+            stream: EmailPage.isDeleting,
+            builder: (context, snapshot) {
+              final isDeleting = snapshot.data ?? false;
+              if (isDeleting) {
+                return const LinearProgressIndicator(
+                  minHeight: 4,
+                  backgroundColor: Colors.transparent,
+                );
+              }
+              return Container(height: 1.0, color: Colors.grey.shade300);
+            },
+          ),
         ),
         actions: <Widget>[
           if (isSearching)
@@ -264,6 +277,7 @@ class _EmailPage extends State<EmailPage> {
                         return true;
                       }
                       if (n is EmailSelectedNotification) {
+                        logger.i("Email selected: ${n.email.subject}");
                         setState(() {
                           if (selectedEmail == null) {
                             // First open: Expand by default at 700px

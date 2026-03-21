@@ -59,6 +59,10 @@ class DatabaseManager {
     return _repository;
   }
 
+  DbIsolateWriterClient? get writerIsolateClient {
+    return _writerIsolateClient;
+  }
+
   /// Returns the [AppDatabase] instance
   AppDatabase? get database {
     return appDatabase;

@@ -201,11 +201,11 @@ class _EmailTable extends State<EmailTable> {
           ),
         ],
         onSelectChanged: (bool? e) {
+          debugPrint("Email row select changed: ${email.subject} - $e");
           setState(() {
             email.isSelected = e ?? false;
-            if (email.isSelected == true) {
-              EmailSelectedNotification(email).dispatch(context);
-            }
+            // Always dispatch notification when a row is clicked/selected
+            EmailSelectedNotification(email).dispatch(context);
           });
         },
       );

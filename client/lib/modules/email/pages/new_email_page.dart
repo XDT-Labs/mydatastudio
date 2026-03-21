@@ -10,8 +10,12 @@ import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:mydatatools/app_constants.dart';
+import 'package:mydatatools/database_manager.dart';
+import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
 import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
 import 'package:go_router/go_router.dart';
 import 'package:reactive_forms/reactive_forms.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -55,25 +59,11 @@ class _NewEmailPage extends State<NewEmailPage> {
 
 
 
-    final imapForm = FormGroup({
-      'host': FormControl<String>(),
-      'port': FormControl<int>(),
-      'username': FormControl<String>(),
-      'password': FormControl<String>(),
-    });
-
-    final popForm = FormGroup({
-      'host': FormControl<String>(),
-      'port': FormControl<int>(),
-      'username': FormControl<String>(),
-      'password': FormControl<String>(),
-    });
-
     return Scaffold(
       body: Center(
         child: SizedBox.expand(
           child: DefaultTabController(
-            length: 6,
+            length: 3,
             child: Scaffold(
               appBar: AppBar(
                 toolbarHeight: 0,
@@ -81,10 +71,7 @@ class _NewEmailPage extends State<NewEmailPage> {
                   tabs: [
                     Tab(icon: Icon(Icons.email), text: 'Gmail'),
                     Tab(icon: Icon(Icons.email), text: 'Yahoo Mail'),
-                    Tab(icon: Icon(Icons.email), text: 'Outlook Mail'),
                     Tab(icon: Icon(Icons.email), text: 'Outlook PST'),
-                    Tab(icon: Icon(Icons.email), text: 'IMAP'),
-                    Tab(icon: Icon(Icons.email), text: 'POP'),
                   ],
                 ),
               ),
@@ -113,66 +100,7 @@ class _NewEmailPage extends State<NewEmailPage> {
                       ],
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: Column(
-                      children: [
-                        SizedBox(
-                          width: 225,
-                          height: 48,
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.email),
-                            label: const Text("Login with Outlook"),
-                            onPressed: null,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                   const _OutlookPstTab(),
-
-                  Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: ReactiveForm(
-                      formGroup: imapForm,
-                      child: Column(
-                        children: <Widget>[
-                          ReactiveTextField(formControlName: 'host'),
-                          ReactiveTextField(formControlName: 'port'),
-                          ReactiveTextField(formControlName: 'username'),
-                          ReactiveTextField(
-                            formControlName: 'password',
-                            obscureText: true,
-                          ),
-                          const ElevatedButton(
-                            onPressed: null,
-                            child: Text("Import Emails"),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: ReactiveForm(
-                      formGroup: popForm,
-                      child: Column(
-                        children: <Widget>[
-                          ReactiveTextField(formControlName: 'host'),
-                          ReactiveTextField(formControlName: 'port'),
-                          ReactiveTextField(formControlName: 'username'),
-                          ReactiveTextField(
-                            formControlName: 'password',
-                            obscureText: true,
-                          ),
-                          const ElevatedButton(
-                            onPressed: null,
-                            child: Text("Import Emails"),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -425,8 +353,22 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
 
       await CollectionRepository().addCollection(collection);
 
+      // Start the one-time scan isolate immediately
+      final writerPort = await DatabaseManager.instance.writerPort;
+      final serverUrl = MainApp.llmServiceUrl.value;
+      if (serverUrl == null) throw Exception('LLM Service url is not configured');
+
+      final pstIsolate = OutlookPstScannerIsolate(
+        token: RootIsolateToken.instance,
+        dbWriterPort: writerPort,
+        appDir: appDataDir,
+        serverUrl: serverUrl,
+      );
+      await pstIsolate.start(collection);
+
       // Refresh collections
       GetCollectionsService.instance.invoke(GetCollectionsServiceCommand('email'));
+
 
       if (!mounted) return;
       GoRouter.of(context).go('/email');

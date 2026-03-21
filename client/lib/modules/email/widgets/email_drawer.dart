@@ -1,14 +1,18 @@
 import 'dart:async';
 
 import 'package:mydatatools/app_constants.dart';
+import 'package:mydatatools/database_manager.dart';
+import 'package:mydatatools/main.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:mydatatools/modules/email/pages/email_page.dart';
 import 'package:mydatatools/modules/email/services/get_email_folders_service.dart';
+import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
 import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 class EmailDrawer extends StatefulWidget {
@@ -173,10 +177,34 @@ class _EmailDrawer extends State<EmailDrawer> {
                       },
                       onDelete: () =>
                           _showDeleteConfirmationDialog(context, col),
-                      onSync: () {
-                        ScannerManager.getInstance()
-                            .getScanner(col)
+                      onSync: () async {
+                        if (col.scanner == AppConstants.scannerEmailOutlookPst) {
+                          // For PST we run one-time import isolate
+                          final writerPort = await DatabaseManager.instance.writerPort;
+                          final serverUrl = MainApp.llmServiceUrl.value;
+                          final appDataDir = MainApp.appDataDirectory.valueOrNull;
+
+                          if (serverUrl != null && appDataDir != null) {
+                             final pstIsolate = OutlookPstScannerIsolate(
+                              token: RootIsolateToken.instance,
+                              dbWriterPort: writerPort,
+                              appDir: appDataDir,
+                              serverUrl: serverUrl,
+                            );
+                            ScannerManager.getInstance().pstScanners[col.id] = pstIsolate;
+                            await pstIsolate.start(col, force: true);
+                          } else {
+                             if( context.mounted ) {
+                               ScaffoldMessenger.of(context).showSnackBar(
+                                 const SnackBar(content: Text('Cannot start PST sync: services or directory not ready')),
+                               );
+                             }
+                          }
+                        } else {
+                          ScannerManager.getInstance()
+                              .getScanner(col)
                             ?.start(col, null, true, true);
+                        }
                       },
                     );
                   },
@@ -225,12 +253,34 @@ class _EmailDrawer extends State<EmailDrawer> {
               child: const Text('Delete', style: TextStyle(color: Colors.red)),
               onPressed: () async {
                 Navigator.of(context).pop();
-                await CollectionRepository().deleteCollection(collection.id);
-                // Also need to delete folders/emails explicitly if the repository doesn't handles cascade in drift
-                // For now assuming the repo handles it or we'll add it.
-                _collectionsService.invoke(GetCollectionsServiceCommand("email"));
-                if (EmailPage.selectedCollection.value?.id == collection.id) {
-                   EmailPage.selectedCollection.add(null);
+                
+                // 1. Show progress in the header
+                EmailPage.isDeleting.add(true);
+
+                try {
+                  // 2. Stop any running scanner for this collection
+                  ScannerManager.getInstance().stopScanner(collection.id);
+
+                  // 3. Send delete command to background isolate
+                  final writer = DatabaseManager.instance.writerIsolateClient;
+                  if (writer != null) {
+                    await writer.send({
+                      'type': 'delete_collection',
+                      'id': collection.id,
+                    });
+                  } else {
+                    // Fallback to repository if writer is unavailable
+                    await CollectionRepository().deleteCollection(collection.id);
+                  }
+
+                  // 4. Refresh and cleanup
+                  _collectionsService.invoke(GetCollectionsServiceCommand("email"));
+                  if (EmailPage.selectedCollection.value?.id == collection.id) {
+                    EmailPage.selectedCollection.add(null);
+                  }
+                } finally {
+                  // 5. Hide progress
+                  EmailPage.isDeleting.add(false);
                 }
               },
             ),

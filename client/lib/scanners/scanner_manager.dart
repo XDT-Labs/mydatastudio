@@ -9,7 +9,7 @@ import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/modules/files/services/scanners/google_file_scanner.dart';
 import 'package:mydatatools/modules/files/services/scanners/local_file_isolate.dart';
 import 'package:mydatatools/modules/email/services/scanners/gmail_scanner.dart';
-import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner.dart';
+import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
 
 import 'package:mydatatools/scanners/collection_scanner.dart';
 
@@ -18,6 +18,7 @@ class ScannerManager {
   static final ScannerManager _instance = ScannerManager._internal();
   List<Collection> collections = [];
   Map<String, CollectionScanner> scanners = {};
+  Map<String, OutlookPstScannerIsolate> pstScanners = {};
 
   late AppDatabase database;
   //class reference to keep change listeners running
@@ -45,6 +46,9 @@ class ScannerManager {
     //start scanner for all existing collections
     var collections = await database.select(database.collections).get();
     for (var c in collections) {
+      if (c.scanner == AppConstants.scannerEmailOutlookPst) {
+        continue;
+      }
       await Future.delayed(const Duration(seconds: 5));
       logger.d('${c.id} | ${c.path}');
       _registerSingleScanner(c);
@@ -59,6 +63,9 @@ class ScannerManager {
 
       // Check for new collections to add
       for (var c in changes) {
+        if (c.scanner == AppConstants.scannerEmailOutlookPst) {
+          continue;
+        }
         if (getScanner(c) == null) {
           _registerSingleScanner(c);
         }
@@ -77,14 +84,29 @@ class ScannerManager {
     });
   }
 
+  void stopScanner(String collectionId) {
+    if (scanners.containsKey(collectionId)) {
+      logger.i("Stopping scanner for collection: $collectionId");
+      scanners[collectionId]?.stop();
+      scanners.remove(collectionId);
+    }
+    if (pstScanners.containsKey(collectionId)) {
+      logger.i("Stopping PST scanner for collection: $collectionId");
+      pstScanners[collectionId]?.stop();
+      pstScanners.remove(collectionId);
+    }
+  }
+
   void stopScanners() {
     try {
-      for (var key in scanners.keys) {
-        scanners[key]!.stop();
-        scanners.remove(key);
+      for (var key in scanners.keys.toList()) {
+        stopScanner(key);
+      }
+      for (var key in pstScanners.keys.toList()) {
+        stopScanner(key);
       }
     } catch (error) {
-      //print(error);
+      logger.e("Error stopping scanners: $error");
     }
   }
 
@@ -129,22 +151,11 @@ class ScannerManager {
         );
         scanners[c.id] = emailScanner;
         break;
-      case AppConstants.scannerEmailOutlookPst:
-        logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-        SendPort pstWriterPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner pstScanner = OutlookPstScanner(
-          dbPath: p.join(
-            DatabaseManager.instance.storagePath!,
-            'data',
-            AppConstants.dbName,
-          ),
-          collection: c,
-          appDir: DatabaseManager.instance.storagePath!,
-          dbWriterPort: pstWriterPort,
-        );
-        scanners[c.id] = pstScanner;
-        break;
 
+      case AppConstants.scannerEmailOutlookPst:
+        // Handled as a one-time import via direct isolate call in UI.
+        // We silently ignore it here to suppress the "type not recognized" warning on startup.
+        break;
 
       default:
         logger.w("Scanner type '${c.scanner}' not recognized.");
