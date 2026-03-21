@@ -126,3 +126,15 @@ class EmbeddingRequest(BaseModel):
             }
         }
     )
+
+
+class PstImportRequest(BaseModel):
+    """
+    Request model for PST file import.
+    
+    Attributes:
+        file_path (str): Absolute path to the .pst file on the local machine
+        output_dir (str): Directory where attachments should be extracted
+    """
+    file_path: str = Field(..., description="Path to the PST file on the local machine")
+    output_dir: str = Field(..., description="Directory to save extracted attachments")
