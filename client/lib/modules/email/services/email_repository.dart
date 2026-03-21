@@ -119,30 +119,37 @@ class EmailRepository {
   }
 
   Future<void> deleteEmails(List<String> ids) async {
+    if (ids.isEmpty) return;
+
     final fileRepo = FileDesktopRepository(database);
-    for (var id in ids) {
-      try {
-        // 1. Get associated files
-        final files = await fileRepo.getByEmailId(id);
-        for (var f in files) {
-          // 2. Delete physical file
-          try {
-            final ioFile = io.File(f.path);
-            if (await ioFile.exists()) {
-              await ioFile.delete();
-            }
-          } catch (err) {
-            logger.e("Error deleting attachment file at ${f.path}: $err");
+    try {
+      // 1. Get all associated files in one query
+      final files = await fileRepo.getByEmailIds(ids);
+
+      // 2. Delete physical files from filesystem
+      for (var f in files) {
+        try {
+          final ioFile = io.File(f.path);
+          if (await ioFile.exists()) {
+            await ioFile.delete();
           }
-          // 3. Delete from DB (File entry)
-          await fileRepo.delete(f);
+        } catch (err) {
+          logger.e("Error deleting attachment file at ${f.path}: $err");
         }
-        // 4. Delete the email record
-        await (database.delete(database.emails)..where((t) => t.id.equals(id)))
-            .go();
-      } catch (err) {
-        logger.e("Error during email deletion for ID $id: $err");
       }
+
+      // 3. Delete File entries from DB (bulk)
+      if (files.isNotEmpty) {
+        final fileIds = files.map((f) => f.id).toList();
+        await (database.delete(database.files)..where((t) => t.id.isIn(fileIds)))
+            .go();
+      }
+
+      // 4. Delete the email records (bulk)
+      await (database.delete(database.emails)..where((t) => t.id.isIn(ids)))
+          .go();
+    } catch (err) {
+      logger.e("Error during bulk email deletion: $err");
     }
   }
 
