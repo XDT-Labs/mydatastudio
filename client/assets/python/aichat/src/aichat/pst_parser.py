@@ -8,6 +8,24 @@ from datetime import datetime
 from email import headerregistry, policy
 from email.parser import HeaderParser
 
+# PST folder names that store non-email items (contacts, calendar events,
+# tasks, notes, etc.).  Any folder whose name (case-insensitive) matches one
+# of these will have its messages *skipped* during the walk so they are never
+# surfaced as email records to the caller.
+NON_EMAIL_FOLDER_NAMES = frozenset({
+    "contacts",
+    "calendar",
+    "tasks",
+    "notes",
+    "journal",
+    # Exchange sync/conflict folders – not real mail
+    "sync issues",
+    "conflicts",
+    "server failures",
+    "local failures",
+})
+
+
 class PstParser:
     def __init__(self, pst_file, output_dir):
         self.pst_file = pst_file
@@ -65,18 +83,36 @@ class PstParser:
         root = self.pst.get_root_folder()
         yield from self._process_folder(root, "")
         
+    @staticmethod
+    def _is_non_email_folder(folder_name: str) -> bool:
+        """Return True if this folder stores non-email items (contacts, calendar, etc.)."""
+        return (folder_name or "").strip().lower() in NON_EMAIL_FOLDER_NAMES
+
     def _process_folder(self, folder, folder_path):
         folder_name = folder.get_name() or "Root"
         current_path = os.path.join(folder_path, folder_name)
-        
+        is_non_email = self._is_non_email_folder(folder_name)
+
         # Notify Dart about the folder
         yield {
             "type": "folder",
             "name": folder_name,
             "path": current_path,
-            "count": folder.get_number_of_sub_messages()
+            "count": folder.get_number_of_sub_messages(),
+            "is_email_folder": not is_non_email,
         }
-        
+
+        # Skip messages in well-known non-email folders (contacts, calendar, etc.)
+        if is_non_email:
+            num_folders = folder.get_number_of_sub_folders()
+            for i in range(num_folders):
+                try:
+                    sub_folder = folder.get_sub_folder(i)
+                    yield from self._process_folder(sub_folder, current_path)
+                except Exception as e:
+                    yield {"type": "error", "message": f"Error getting sub-folder {i} in {folder_name}: {str(e)}"}
+            return
+
         # Process messages using index-based access
         num_messages = folder.get_number_of_sub_messages()
         for i in range(num_messages):
@@ -87,7 +123,7 @@ class PstParser:
                     yield result
             except Exception as e:
                 yield {"type": "error", "message": f"Error getting message {i} in {folder_name}: {str(e)}"}
-            
+
         # Recursive walk using index-based access
         num_folders = folder.get_number_of_sub_folders()
         for i in range(num_folders):

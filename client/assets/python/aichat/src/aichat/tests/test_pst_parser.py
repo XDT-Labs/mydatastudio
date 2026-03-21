@@ -24,7 +24,7 @@ import pytest
 # Adjust the path so we can import PstParser from the sibling package
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from pst_parser import PstParser  # noqa: E402
+from pst_parser import PstParser, NON_EMAIL_FOLDER_NAMES  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Path to the test PST file – override via env var if needed
@@ -60,19 +60,12 @@ def _is_bad_from(s: str) -> bool:
     return (s or "").strip().lower() in BAD_FROM_VALUES
 
 
-# Non-email PST folders – items in these folders are contacts, tasks, calendar
-# events, etc. They legitimately have no From/To/CC and should not be tested
-# as if they were mail messages.
-NON_EMAIL_FOLDER_NAMES = {
-    "contacts", "calendar", "tasks", "notes", "journal",
-    "deleted items", "outbox",  # 'outbox' items may be incomplete
-    # Exchange system/sync folders – not real emails
-    "sync issues", "conflicts", "server failures", "local failures",
-}
-
-
 def _is_non_email_folder(folder_path: str) -> bool:
-    """Return True if any path component matches a known non-email folder."""
+    """Return True if any path component matches a known non-email folder.
+
+    Delegates to the parser's own NON_EMAIL_FOLDER_NAMES so the test stays
+    in sync with production logic automatically.
+    """
     parts = [p.lower() for p in re.split(r'[\\/]', folder_path)]
     return bool(NON_EMAIL_FOLDER_NAMES & set(parts))
 
@@ -80,6 +73,23 @@ def _is_non_email_folder(folder_path: str) -> bool:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def all_raw_records():
+    """
+    Parse the PST file once and return ALL non-folder records (emails, errors)
+    as-is, with NO folder filtering applied.  Used by TestItemTypeFiltering to
+    verify the parser itself gates non-email folders.
+    """
+    if not os.path.exists(PST_FILE):
+        pytest.skip(f"PST file not found at {PST_FILE!r}. Set TEST_PST_FILE env var.")
+
+    parser = PstParser(PST_FILE, output_dir="/tmp/pst_test_output")
+    parser.open()
+    records = [r for r in parser.walk() if r.get("type") != "folder"]
+    parser.close()
+    return records
+
 
 @pytest.fixture(scope="module")
 def parsed_emails():
@@ -343,6 +353,121 @@ class TestCcField:
             )
             pytest.fail(
                 f"{len(failures)} email(s) have CC recipients without email addresses "
+                f"(showing first {len(sample)}):\n{details}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Item-type filtering – the parser must never emit non-email items as emails
+# ---------------------------------------------------------------------------
+
+class TestItemTypeFiltering:
+    """
+    Verify that the parser itself (not just the test fixture) suppresses
+    contacts, calendar events, tasks, notes, and other non-email items.
+
+    These tests use the raw, unfiltered record list so they exercise
+    PstParser logic, not post-parse filtering in the test suite.
+    """
+
+    def test_no_email_records_from_contacts_folder(self, all_raw_records):
+        """
+        Any record whose folder path contains 'Contacts' (case-insensitive)
+        must NOT have type == 'email'.  PST Contacts are stored as messages
+        internally but are vCards, not emails.
+        """
+        violations = [
+            r for r in all_raw_records
+            if r.get("type") == "email"
+            and "contacts" in r.get("folder", "").lower()
+        ]
+        if violations:
+            sample = violations[:10]
+            details = "\n".join(
+                f"  [{i+1}] folder={r['folder']} | subject={r.get('subject', '')}"
+                for i, r in enumerate(sample)
+            )
+            pytest.fail(
+                f"{len(violations)} contact record(s) were emitted as type='email' "
+                f"(showing first {len(sample)}):\n{details}"
+            )
+
+    def test_no_email_records_from_calendar_folder(self, all_raw_records):
+        """
+        Calendar entries must not appear as emails.
+        """
+        violations = [
+            r for r in all_raw_records
+            if r.get("type") == "email"
+            and "calendar" in r.get("folder", "").lower()
+        ]
+        if violations:
+            sample = violations[:10]
+            details = "\n".join(
+                f"  [{i+1}] folder={r['folder']} | subject={r.get('subject', '')}"
+                for i, r in enumerate(sample)
+            )
+            pytest.fail(
+                f"{len(violations)} calendar record(s) were emitted as type='email' "
+                f"(showing first {len(sample)}):\n{details}"
+            )
+
+    def test_no_email_records_from_tasks_folder(self, all_raw_records):
+        """Task items must not appear as emails."""
+        violations = [
+            r for r in all_raw_records
+            if r.get("type") == "email"
+            and "tasks" in r.get("folder", "").lower()
+        ]
+        if violations:
+            sample = violations[:10]
+            details = "\n".join(
+                f"  [{i+1}] folder={r['folder']} | subject={r.get('subject', '')}"
+                for i, r in enumerate(sample)
+            )
+            pytest.fail(
+                f"{len(violations)} task record(s) were emitted as type='email' "
+                f"(showing first {len(sample)}):\n{details}"
+            )
+
+    def test_no_email_records_from_notes_folder(self, all_raw_records):
+        """Note items must not appear as emails."""
+        violations = [
+            r for r in all_raw_records
+            if r.get("type") == "email"
+            and "notes" in r.get("folder", "").lower()
+        ]
+        if violations:
+            sample = violations[:10]
+            details = "\n".join(
+                f"  [{i+1}] folder={r['folder']} | subject={r.get('subject', '')}"
+                for i, r in enumerate(sample)
+            )
+            pytest.fail(
+                f"{len(violations)} note record(s) were emitted as type='email' "
+                f"(showing first {len(sample)}):\n{details}"
+            )
+
+    def test_no_email_records_from_any_non_email_folder(self, all_raw_records):
+        """
+        Comprehensive check: no record whose folder path contains ANY of the
+        known non-email folder names should surface as type='email'.
+        This is the single source-of-truth test that will catch new folder
+        types being added to NON_EMAIL_FOLDER_NAMES.
+        """
+        violations = [
+            r for r in all_raw_records
+            if r.get("type") == "email"
+            and _is_non_email_folder(r.get("folder", ""))
+        ]
+        if violations:
+            sample = violations[:20]
+            details = "\n".join(
+                f"  [{i+1}] folder={r['folder']} | subject={r.get('subject', '')} | sender={r.get('sender', '')}"
+                for i, r in enumerate(sample)
+            )
+            pytest.fail(
+                f"{len(violations)} non-email item(s) were emitted as type='email' "
                 f"(showing first {len(sample)}):\n{details}"
             )
 
