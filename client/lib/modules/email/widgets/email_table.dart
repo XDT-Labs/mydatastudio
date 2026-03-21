@@ -6,18 +6,54 @@ import 'package:moment_dart/moment_dart.dart';
 import 'dart:math' as math;
 
 class EmailTable extends StatefulWidget {
-  const EmailTable({super.key, required this.emails});
+  const EmailTable({
+    super.key,
+    required this.emails,
+    this.scrollController,
+    this.sortColumn = 'date',
+    this.sortAsc = false,
+  });
 
   final List<Email> emails;
+  final ScrollController? scrollController;
+  final String sortColumn;
+  final bool sortAsc;
 
   @override
   State<EmailTable> createState() => _EmailTable();
 }
 
 class _EmailTable extends State<EmailTable> {
-  int sortColumnIndex = 0;
-  String sortColumn = 'path';
-  bool sortAsc = true;
+  late int sortColumnIndex;
+  late String sortColumn;
+  late bool sortAsc;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateSortParams();
+  }
+
+  @override
+  void didUpdateWidget(EmailTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sortColumn != widget.sortColumn ||
+        oldWidget.sortAsc != widget.sortAsc) {
+      _updateSortParams();
+    }
+  }
+
+  void _updateSortParams() {
+    sortColumn = widget.sortColumn;
+    sortAsc = widget.sortAsc;
+    if (sortColumn == 'from') {
+      sortColumnIndex = 0;
+    } else if (sortColumn == 'date') {
+      sortColumnIndex = 3;
+    } else {
+      sortColumnIndex = 1; // Default to subject index
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,6 +69,7 @@ class _EmailTable extends State<EmailTable> {
 
           return SingleChildScrollView(
             scrollDirection: Axis.vertical,
+            controller: widget.scrollController,
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
@@ -73,9 +110,11 @@ class _EmailTable extends State<EmailTable> {
           child: Text('From', style: TextStyle(fontWeight: FontWeight.bold)),
         ),
         onSort: (columnIndex, sortAscending) {
-          sortColumnIndex = columnIndex;
-          sortColumn = 'from';
-          sortAsc = sortAscending;
+          setState(() {
+            sortColumnIndex = columnIndex;
+            sortColumn = 'from';
+            sortAsc = sortAscending;
+          });
           EmailSortChangedNotification(sortColumn, sortAsc).dispatch(context);
         },
       ),
@@ -88,6 +127,14 @@ class _EmailTable extends State<EmailTable> {
             style: TextStyle(fontWeight: FontWeight.normal),
           ),
         ),
+        onSort: (columnIndex, sortAscending) {
+          setState(() {
+            sortColumnIndex = columnIndex;
+            sortColumn = 'subject';
+            sortAsc = sortAscending;
+          });
+          EmailSortChangedNotification(sortColumn, sortAsc).dispatch(context);
+        },
       ),
       const DataColumn(
         label: SizedBox(
@@ -102,9 +149,11 @@ class _EmailTable extends State<EmailTable> {
           child: Text('Date', style: TextStyle(fontWeight: FontWeight.normal)),
         ),
         onSort: (columnIndex, sortAscending) {
-          sortColumnIndex = columnIndex;
-          sortColumn = 'date';
-          sortAsc = sortAscending;
+          setState(() {
+            sortColumnIndex = columnIndex;
+            sortColumn = 'date';
+            sortAsc = sortAscending;
+          });
           EmailSortChangedNotification(sortColumn, sortAsc).dispatch(context);
         },
       ),

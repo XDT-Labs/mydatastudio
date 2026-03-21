@@ -9,6 +9,7 @@ import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/modules/files/services/scanners/google_file_scanner.dart';
 import 'package:mydatatools/modules/files/services/scanners/local_file_isolate.dart';
 import 'package:mydatatools/modules/email/services/scanners/gmail_scanner.dart';
+import 'package:mydatatools/modules/email/services/scanners/yahoo_scanner.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 
 class ScannerManager {
@@ -45,7 +46,7 @@ class ScannerManager {
     for (var c in collections) {
       await Future.delayed(const Duration(seconds: 5));
       logger.d('${c.id} | ${c.path}');
-      _registerSingleScanner(c);
+      registerScanner(c);
     }
 
     //listen for new collections and add them at runtime
@@ -58,7 +59,7 @@ class ScannerManager {
       // Check for new collections to add
       for (var c in changes) {
         if (getScanner(c) == null) {
-          _registerSingleScanner(c);
+          registerScanner(c);
         }
       }
 
@@ -86,51 +87,104 @@ class ScannerManager {
     }
   }
 
-  void startScanner(Collection c) {
-    // TODO, not implemented yet
+  Future<void> startScanner(Collection c) async {
+    final scanner = await registerScanner(c);
+    await scanner.start(c, null, true, true);
   }
 
   CollectionScanner? getScanner(Collection c) {
     return scanners[c.id];
   }
 
-  void _registerSingleScanner(Collection c) async {
-    switch (c.scanner) {
-      case AppConstants.scannerFileLocal:
-        logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-        SendPort? writerPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner localScanner = LocalFileIsolate(
-          null,
-          writerPort,
-        );
-        scanners.putIfAbsent(c.id, () => localScanner);
-        break;
+  final Map<String, Completer<CollectionScanner>> _pendingScanners = {};
+  final Map<String, Future<CollectionScanner>> _registrationFutures = {};
 
-      case AppConstants.scannerFileGDrive:
-        logger.i("Registering GDrive scanner for ${c.name} (ID: ${c.id})");
-        SendPort driveWriterPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner cloudScanner = CloudFileIsolate(
-          null, // Central logger port not used yet
-          driveWriterPort,
-        );
-        scanners[c.id] = cloudScanner;
-        break;
+  /// Returns a Future that completes when a scanner is registered for the collection.
+  /// If it's already registered, the Future completes immediately.
+  Future<CollectionScanner> getScannerAsync(Collection c) {
+    if (scanners.containsKey(c.id)) {
+      return Future.value(scanners[c.id]!);
+    }
+    return _pendingScanners
+        .putIfAbsent(c.id, () => Completer<CollectionScanner>())
+        .future;
+  }
 
-      case AppConstants.scannerEmailGmail:
-        logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-        SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner emailScanner = GmailScanner(
-          dbPath: p.join(DatabaseManager.instance.storagePath!, 'data', AppConstants.dbName),
-          collection: c,
-          appDir: DatabaseManager.instance.storagePath!,
-          dbWriterPort: emailWriterPort,
-        );
-        scanners[c.id] = emailScanner;
-        break;
+  Future<CollectionScanner> registerScanner(Collection c) async {
+    if (scanners.containsKey(c.id)) return scanners[c.id]!;
+    
+    // If registration is already in progress, return the existing future
+    if (_registrationFutures.containsKey(c.id)) {
+      return _registrationFutures[c.id]!;
+    }
 
-      default:
-        logger.w("Scanner type '${c.scanner}' not recognized.");
-        break;
+    final future = _doRegisterScanner(c);
+    _registrationFutures[c.id] = future;
+    return future;
+  }
+
+  Future<CollectionScanner> _doRegisterScanner(Collection c) async {
+    try {
+      CollectionScanner scanner;
+      switch (c.scanner) {
+        case AppConstants.scannerFileLocal:
+          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
+          SendPort? writerPort = await DatabaseManager.instance.writerPort;
+          scanner = LocalFileIsolate(
+            null,
+            writerPort,
+          );
+          break;
+
+        case AppConstants.scannerFileGDrive:
+          logger.i("Registering GDrive scanner for ${c.name} (ID: ${c.id})");
+          SendPort driveWriterPort = await DatabaseManager.instance.writerPort;
+          scanner = CloudFileIsolate(
+            null, // Central logger port not used yet
+            driveWriterPort,
+          );
+          break;
+
+        case AppConstants.scannerEmailGmail:
+          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
+          SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
+          scanner = GmailScanner(
+            dbPath: p.join(
+              DatabaseManager.instance.storagePath!,
+              'data',
+              AppConstants.dbName,
+            ),
+            collection: c,
+            appDir: DatabaseManager.instance.storagePath!,
+            dbWriterPort: emailWriterPort,
+          );
+          break;
+
+        case AppConstants.scannerEmailYahoo:
+          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
+          SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
+          scanner = YahooScanner(
+            dbPath: p.join(
+              DatabaseManager.instance.storagePath!,
+              'data',
+              AppConstants.dbName,
+            ),
+            collection: c,
+            appDir: DatabaseManager.instance.storagePath!,
+            dbWriterPort: emailWriterPort,
+          );
+          break;
+
+        default:
+          logger.w("Scanner type '${c.scanner}' not recognized.");
+          throw Exception("Scanner type '${c.scanner}' not recognized.");
+      }
+
+      scanners[c.id] = scanner;
+      _pendingScanners.remove(c.id)?.complete(scanner);
+      return scanner;
+    } finally {
+      _registrationFutures.remove(c.id);
     }
   }
 }

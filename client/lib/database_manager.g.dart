@@ -726,6 +726,20 @@ class $CollectionsTable extends Collections
       'CHECK ("needs_re_auth" IN (0, 1))',
     ),
   );
+  static const VerificationMeta _downloadAttachmentsMeta =
+      const VerificationMeta('downloadAttachments');
+  @override
+  late final GeneratedColumn<bool> downloadAttachments = GeneratedColumn<bool>(
+    'download_attachments',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("download_attachments" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -742,6 +756,7 @@ class $CollectionsTable extends Collections
     expiration,
     lastScanDate,
     needsReAuth,
+    downloadAttachments,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -865,6 +880,15 @@ class $CollectionsTable extends Collections
     } else if (isInserting) {
       context.missing(_needsReAuthMeta);
     }
+    if (data.containsKey('download_attachments')) {
+      context.handle(
+        _downloadAttachmentsMeta,
+        downloadAttachments.isAcceptableOrUnknown(
+          data['download_attachments']!,
+          _downloadAttachmentsMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -937,6 +961,11 @@ class $CollectionsTable extends Collections
             DriftSqlType.bool,
             data['${effectivePrefix}needs_re_auth'],
           )!,
+      downloadAttachments:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.bool,
+            data['${effectivePrefix}download_attachments'],
+          )!,
     );
   }
 
@@ -961,6 +990,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
   final Value<DateTime?> expiration;
   final Value<DateTime?> lastScanDate;
   final Value<bool> needsReAuth;
+  final Value<bool> downloadAttachments;
   final Value<int> rowid;
   const CollectionsCompanion({
     this.id = const Value.absent(),
@@ -977,6 +1007,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     this.expiration = const Value.absent(),
     this.lastScanDate = const Value.absent(),
     this.needsReAuth = const Value.absent(),
+    this.downloadAttachments = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CollectionsCompanion.insert({
@@ -994,6 +1025,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     this.expiration = const Value.absent(),
     this.lastScanDate = const Value.absent(),
     required bool needsReAuth,
+    this.downloadAttachments = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -1017,6 +1049,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     Expression<DateTime>? expiration,
     Expression<DateTime>? lastScanDate,
     Expression<bool>? needsReAuth,
+    Expression<bool>? downloadAttachments,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1034,6 +1067,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
       if (expiration != null) 'expiration': expiration,
       if (lastScanDate != null) 'last_scan_date': lastScanDate,
       if (needsReAuth != null) 'needs_re_auth': needsReAuth,
+      if (downloadAttachments != null)
+        'download_attachments': downloadAttachments,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1053,6 +1088,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     Value<DateTime?>? expiration,
     Value<DateTime?>? lastScanDate,
     Value<bool>? needsReAuth,
+    Value<bool>? downloadAttachments,
     Value<int>? rowid,
   }) {
     return CollectionsCompanion(
@@ -1070,6 +1106,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
       expiration: expiration ?? this.expiration,
       lastScanDate: lastScanDate ?? this.lastScanDate,
       needsReAuth: needsReAuth ?? this.needsReAuth,
+      downloadAttachments: downloadAttachments ?? this.downloadAttachments,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1119,6 +1156,9 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     if (needsReAuth.present) {
       map['needs_re_auth'] = Variable<bool>(needsReAuth.value);
     }
+    if (downloadAttachments.present) {
+      map['download_attachments'] = Variable<bool>(downloadAttachments.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1142,6 +1182,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
           ..write('expiration: $expiration, ')
           ..write('lastScanDate: $lastScanDate, ')
           ..write('needsReAuth: $needsReAuth, ')
+          ..write('downloadAttachments: $downloadAttachments, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1349,6 +1390,15 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _uidMeta = const VerificationMeta('uid');
+  @override
+  late final GeneratedColumn<int> uid = GeneratedColumn<int>(
+    'uid',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1369,6 +1419,7 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
     isRead,
     hasAttachments,
     isDeleted,
+    uid,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1483,6 +1534,12 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
         isDeleted.isAcceptableOrUnknown(data['is_deleted']!, _isDeletedMeta),
       );
     }
+    if (data.containsKey('uid')) {
+      context.handle(
+        _uidMeta,
+        uid.isAcceptableOrUnknown(data['uid']!, _uidMeta),
+      );
+    }
     return context;
   }
 
@@ -1562,6 +1619,10 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
         DriftSqlType.string,
         data['${effectivePrefix}thread_id'],
       ),
+      uid: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}uid'],
+      ),
       isRead:
           attachedDatabase.typeMapping.read(
             DriftSqlType.bool,
@@ -1612,6 +1673,7 @@ class EmailsCompanion extends UpdateCompanion<Email> {
   final Value<bool> isRead;
   final Value<bool> hasAttachments;
   final Value<bool> isDeleted;
+  final Value<int?> uid;
   final Value<int> rowid;
   const EmailsCompanion({
     this.id = const Value.absent(),
@@ -1632,6 +1694,7 @@ class EmailsCompanion extends UpdateCompanion<Email> {
     this.isRead = const Value.absent(),
     this.hasAttachments = const Value.absent(),
     this.isDeleted = const Value.absent(),
+    this.uid = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   EmailsCompanion.insert({
@@ -1653,6 +1716,7 @@ class EmailsCompanion extends UpdateCompanion<Email> {
     this.isRead = const Value.absent(),
     this.hasAttachments = const Value.absent(),
     this.isDeleted = const Value.absent(),
+    this.uid = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        collectionId = Value(collectionId),
@@ -1680,6 +1744,7 @@ class EmailsCompanion extends UpdateCompanion<Email> {
     Expression<bool>? isRead,
     Expression<bool>? hasAttachments,
     Expression<bool>? isDeleted,
+    Expression<int>? uid,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1701,6 +1766,7 @@ class EmailsCompanion extends UpdateCompanion<Email> {
       if (isRead != null) 'is_read': isRead,
       if (hasAttachments != null) 'has_attachments': hasAttachments,
       if (isDeleted != null) 'is_deleted': isDeleted,
+      if (uid != null) 'uid': uid,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1724,6 +1790,7 @@ class EmailsCompanion extends UpdateCompanion<Email> {
     Value<bool>? isRead,
     Value<bool>? hasAttachments,
     Value<bool>? isDeleted,
+    Value<int?>? uid,
     Value<int>? rowid,
   }) {
     return EmailsCompanion(
@@ -1745,6 +1812,7 @@ class EmailsCompanion extends UpdateCompanion<Email> {
       isRead: isRead ?? this.isRead,
       hasAttachments: hasAttachments ?? this.hasAttachments,
       isDeleted: isDeleted ?? this.isDeleted,
+      uid: uid ?? this.uid,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1808,6 +1876,9 @@ class EmailsCompanion extends UpdateCompanion<Email> {
     if (isDeleted.present) {
       map['is_deleted'] = Variable<bool>(isDeleted.value);
     }
+    if (uid.present) {
+      map['uid'] = Variable<int>(uid.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1835,6 +1906,7 @@ class EmailsCompanion extends UpdateCompanion<Email> {
           ..write('isRead: $isRead, ')
           ..write('hasAttachments: $hasAttachments, ')
           ..write('isDeleted: $isDeleted, ')
+          ..write('uid: $uid, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4268,6 +4340,7 @@ typedef $$CollectionsTableCreateCompanionBuilder =
       Value<DateTime?> expiration,
       Value<DateTime?> lastScanDate,
       required bool needsReAuth,
+      Value<bool> downloadAttachments,
       Value<int> rowid,
     });
 typedef $$CollectionsTableUpdateCompanionBuilder =
@@ -4286,6 +4359,7 @@ typedef $$CollectionsTableUpdateCompanionBuilder =
       Value<DateTime?> expiration,
       Value<DateTime?> lastScanDate,
       Value<bool> needsReAuth,
+      Value<bool> downloadAttachments,
       Value<int> rowid,
     });
 
@@ -4394,6 +4468,11 @@ class $$CollectionsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<bool> get downloadAttachments => $composableBuilder(
+    column: $table.downloadAttachments,
+    builder: (column) => ColumnFilters(column),
+  );
+
   Expression<bool> emailFoldersRefs(
     Expression<bool> Function($$EmailFoldersTableFilterComposer f) f,
   ) {
@@ -4498,6 +4577,11 @@ class $$CollectionsTableOrderingComposer
     column: $table.needsReAuth,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get downloadAttachments => $composableBuilder(
+    column: $table.downloadAttachments,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CollectionsTableAnnotationComposer
@@ -4562,6 +4646,11 @@ class $$CollectionsTableAnnotationComposer
 
   GeneratedColumn<bool> get needsReAuth => $composableBuilder(
     column: $table.needsReAuth,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get downloadAttachments => $composableBuilder(
+    column: $table.downloadAttachments,
     builder: (column) => column,
   );
 
@@ -4634,6 +4723,7 @@ class $$CollectionsTableTableManager
                 Value<DateTime?> expiration = const Value.absent(),
                 Value<DateTime?> lastScanDate = const Value.absent(),
                 Value<bool> needsReAuth = const Value.absent(),
+                Value<bool> downloadAttachments = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CollectionsCompanion(
                 id: id,
@@ -4650,6 +4740,7 @@ class $$CollectionsTableTableManager
                 expiration: expiration,
                 lastScanDate: lastScanDate,
                 needsReAuth: needsReAuth,
+                downloadAttachments: downloadAttachments,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4668,6 +4759,7 @@ class $$CollectionsTableTableManager
                 Value<DateTime?> expiration = const Value.absent(),
                 Value<DateTime?> lastScanDate = const Value.absent(),
                 required bool needsReAuth,
+                Value<bool> downloadAttachments = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CollectionsCompanion.insert(
                 id: id,
@@ -4684,6 +4776,7 @@ class $$CollectionsTableTableManager
                 expiration: expiration,
                 lastScanDate: lastScanDate,
                 needsReAuth: needsReAuth,
+                downloadAttachments: downloadAttachments,
                 rowid: rowid,
               ),
           withReferenceMapper:
@@ -4767,6 +4860,7 @@ typedef $$EmailsTableCreateCompanionBuilder =
       Value<bool> isRead,
       Value<bool> hasAttachments,
       Value<bool> isDeleted,
+      Value<int?> uid,
       Value<int> rowid,
     });
 typedef $$EmailsTableUpdateCompanionBuilder =
@@ -4789,6 +4883,7 @@ typedef $$EmailsTableUpdateCompanionBuilder =
       Value<bool> isRead,
       Value<bool> hasAttachments,
       Value<bool> isDeleted,
+      Value<int?> uid,
       Value<int> rowid,
     });
 
@@ -4893,6 +4988,11 @@ class $$EmailsTableFilterComposer
     column: $table.isDeleted,
     builder: (column) => ColumnFilters(column),
   );
+
+  ColumnFilters<int> get uid => $composableBuilder(
+    column: $table.uid,
+    builder: (column) => ColumnFilters(column),
+  );
 }
 
 class $$EmailsTableOrderingComposer
@@ -4993,6 +5093,11 @@ class $$EmailsTableOrderingComposer
     column: $table.isDeleted,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get uid => $composableBuilder(
+    column: $table.uid,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$EmailsTableAnnotationComposer
@@ -5061,6 +5166,9 @@ class $$EmailsTableAnnotationComposer
 
   GeneratedColumn<bool> get isDeleted =>
       $composableBuilder(column: $table.isDeleted, builder: (column) => column);
+
+  GeneratedColumn<int> get uid =>
+      $composableBuilder(column: $table.uid, builder: (column) => column);
 }
 
 class $$EmailsTableTableManager
@@ -5109,6 +5217,7 @@ class $$EmailsTableTableManager
                 Value<bool> isRead = const Value.absent(),
                 Value<bool> hasAttachments = const Value.absent(),
                 Value<bool> isDeleted = const Value.absent(),
+                Value<int?> uid = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => EmailsCompanion(
                 id: id,
@@ -5129,6 +5238,7 @@ class $$EmailsTableTableManager
                 isRead: isRead,
                 hasAttachments: hasAttachments,
                 isDeleted: isDeleted,
+                uid: uid,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5151,6 +5261,7 @@ class $$EmailsTableTableManager
                 Value<bool> isRead = const Value.absent(),
                 Value<bool> hasAttachments = const Value.absent(),
                 Value<bool> isDeleted = const Value.absent(),
+                Value<int?> uid = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => EmailsCompanion.insert(
                 id: id,
@@ -5171,6 +5282,7 @@ class $$EmailsTableTableManager
                 isRead: isRead,
                 hasAttachments: hasAttachments,
                 isDeleted: isDeleted,
+                uid: uid,
                 rowid: rowid,
               ),
           withReferenceMapper:

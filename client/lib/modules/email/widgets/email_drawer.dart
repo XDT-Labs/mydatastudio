@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
@@ -19,6 +20,7 @@ class EmailDrawer extends StatefulWidget {
 }
 
 class _EmailDrawer extends State<EmailDrawer> {
+  final AppLogger logger = AppLogger(null);
   final GetCollectionsService _collectionsService =
       GetCollectionsService.instance;
   StreamSubscription<List<Collection>>? _collectionsServiceSub;
@@ -174,6 +176,7 @@ class _EmailDrawer extends State<EmailDrawer> {
                       onDelete: () =>
                           _showDeleteConfirmationDialog(context, col),
                       onSync: () {
+                        logger.s("Starting full sync for ${col.name}");
                         ScannerManager.getInstance()
                             .getScanner(col)
                             ?.start(col, null, true, true);
@@ -193,6 +196,10 @@ class _EmailDrawer extends State<EmailDrawer> {
     switch (c.scanner) {
       case AppConstants.scannerEmailGmail:
         return 'Gmail';
+      case AppConstants.scannerEmailYahoo:
+        return 'Yahoo';
+      case AppConstants.scannerEmailOutlook:
+        return 'Outlook';
       default:
         return 'Other';
     }
@@ -202,8 +209,12 @@ class _EmailDrawer extends State<EmailDrawer> {
     switch (scanner) {
       case AppConstants.scannerEmailGmail:
         return 0;
-      default:
+      case AppConstants.scannerEmailYahoo:
         return 1;
+      case AppConstants.scannerEmailOutlook:
+        return 2;
+      default:
+        return 3;
     }
   }
 
