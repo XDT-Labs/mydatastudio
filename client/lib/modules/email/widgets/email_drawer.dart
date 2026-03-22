@@ -261,7 +261,12 @@ class _EmailDrawer extends State<EmailDrawer> {
                   // 2. Stop any running scanner for this collection
                   ScannerManager.getInstance().stopScanner(collection.id);
 
-                  // 3. Send delete command to background isolate
+                  // 3. Cancel the reactive folder watch for this account so
+                  //    the orphaned subscription can't keep firing on the main
+                  //    thread after the account data is gone.
+                  GetEmailFoldersService.instance.disposeCollection(collection.id);
+
+                  // 4. Send delete command to background isolate
                   final writer = DatabaseManager.instance.writerIsolateClient;
                   if (writer != null) {
                     await writer.send({
@@ -273,13 +278,13 @@ class _EmailDrawer extends State<EmailDrawer> {
                     await CollectionRepository().deleteCollection(collection.id);
                   }
 
-                  // 4. Refresh and cleanup
+                  // 5. Refresh and cleanup
                   _collectionsService.invoke(GetCollectionsServiceCommand("email"));
                   if (EmailPage.selectedCollection.value?.id == collection.id) {
                     EmailPage.selectedCollection.add(null);
                   }
                 } finally {
-                  // 5. Hide progress
+                  // 6. Hide progress
                   EmailPage.isDeleting.add(false);
                 }
               },

@@ -13,16 +13,20 @@ class GetEmailsService extends RxService<EmailServiceCommand, List<Email>> {
   @override
   Future<List<Email>> invoke(EmailServiceCommand command) async {
     isLoading.add(true);
-    //first check for newest emails
 
-    //load files and folders from db
-    List<Email> emails = await EmailRepository(DatabaseManager.instance.database!).emails(
+    // DatabaseManager now opens the connection with NativeDatabase.createInBackground(),
+    // so all SQLite I/O is automatically executed on a background thread — no
+    // additional work needed here.
+    final List<Email> emails = await EmailRepository(
+      DatabaseManager.instance.database!,
+    ).emails(
       command.collection.id,
       folderId: command.folderId,
       search: command.search,
       sortColumn: command.sortColumn,
       sortAsc: command.sortAsc,
     );
+
     sink.add(emails);
     isLoading.add(false);
     return emails;

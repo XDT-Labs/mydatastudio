@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:mydatatools/modules/email/services/email_folder_repository.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
@@ -8,36 +10,75 @@ class EmailFolderServiceCommand {
   EmailFolderServiceCommand(this.collectionId);
 }
 
-class GetEmailFoldersService extends RxService<EmailFolderServiceCommand, List<EmailFolder>> {
-  static final GetEmailFoldersService instance = GetEmailFoldersService._internal();
+/// A reactive service that loads email folders for a collection.
+///
+/// **Subscription management:** Each unique [collectionId] gets exactly one
+/// persistent Drift `watch()` subscription. Calling [invoke] multiple times
+/// for the same collectionId will NOT create duplicate subscriptions — it
+/// simply returns the last-known value immediately via [sink]. Call
+/// [disposeCollection] when an account is removed to clean up its subscription.
+class GetEmailFoldersService
+    extends RxService<EmailFolderServiceCommand, List<EmailFolder>> {
+  static final GetEmailFoldersService instance =
+      GetEmailFoldersService._internal();
 
   factory GetEmailFoldersService() {
     return instance;
   }
 
+  /// Optional injected database for testing. When null the service uses the
+  /// [DatabaseManager] singleton (production behaviour).
+  AppDatabase? _db;
+
   GetEmailFoldersService._internal() : super();
+
+  // @visibleForTesting: allow tests to inject a database without the singleton.
+  void setDatabaseForTesting(AppDatabase db) {
+    _db = db;
+  }
+
+  AppDatabase get _database => _db ?? DatabaseManager.instance.database!;
+
+  /// Tracks one persistent watch subscription per collectionId.
+  final Map<String, StreamSubscription<List<EmailFolder>>> _watchSubs = {};
 
   @override
   Future<List<EmailFolder>> invoke(EmailFolderServiceCommand command) async {
+    final collectionId = command.collectionId;
+
+    // Do a one-shot fetch immediately so callers get data right away.
     isLoading.add(true);
-    EmailFolderRepository repo = EmailFolderRepository(DatabaseManager.instance.database!);
-    
-    // Watch folders for this collection
-    final database = DatabaseManager.instance.database!;
-    final query = database.select(database.emailFolders)
-      ..where((t) => t.collectionId.equals(command.collectionId));
-    
-    final folders = await repo.byCollectionId(command.collectionId);
+    final EmailFolderRepository repo = EmailFolderRepository(_database);
+    final folders = await repo.byCollectionId(collectionId);
     sink.add(folders);
     isLoading.add(false);
 
-    // If we want it reactive, we should subscribe to the drift watch
-    // Note: In RxService, multiple calls to invoke might result in multiple subscriptions if not handled.
-    // For now, we'll just return the initial list and rely on the sink to push updates.
-    query.watch().listen((event) {
-      sink.add(event);
-    });
+    // Only set up the persistent Drift watch if we don't already have one for
+    // this collectionId. This prevents subscription leaks on repeated calls.
+    if (!_watchSubs.containsKey(collectionId)) {
+      final query = _database.select(_database.emailFolders)
+        ..where((t) => t.collectionId.equals(collectionId));
+
+      _watchSubs[collectionId] = query.watch().listen((updatedFolders) {
+        sink.add(updatedFolders);
+      });
+    }
 
     return folders;
+  }
+
+  /// Cancel the reactive watch subscription for [collectionId]. Call this
+  /// after deleting an account so the orphaned listener does not fire.
+  void disposeCollection(String collectionId) {
+    _watchSubs.remove(collectionId)?.cancel();
+  }
+
+  /// Cancel all active watch subscriptions (e.g. on app shutdown or test teardown).
+  void disposeAll() {
+    for (final sub in _watchSubs.values) {
+      sub.cancel();
+    }
+    _watchSubs.clear();
+    _db = null;
   }
 }

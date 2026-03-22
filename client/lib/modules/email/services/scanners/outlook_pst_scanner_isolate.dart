@@ -189,7 +189,9 @@ class OutlookPstScannerIsolateWorker {
           }
 
           count++;
-          if (count % 10 == 0) {
+          if (count % 50 == 0) {
+            // Refresh rate of 50 emails keeps UI updates visible without
+            // hammering the main thread with DB queries.
             clientPort.send({'type': 'refresh'});
           }
         } 

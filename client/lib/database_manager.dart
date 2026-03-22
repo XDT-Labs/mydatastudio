@@ -289,6 +289,22 @@ class AppDatabase extends _$AppDatabase {
           await m.addColumn(folders, folders.emailId);
         }
       },
+      beforeOpen: (OpeningDetails details) async {
+        // WAL (Write-Ahead Logging) allows the DbIsolateWriter to bulk-write
+        // while the main connection reads concurrently. Without WAL, a write
+        // transaction blocks ALL readers at the SQLite level, even if they're
+        // on separate connections/isolates.
+        //
+        // These PRAGMAs are connection-scoped and safe to re-apply on every open.
+        await customStatement('PRAGMA journal_mode=WAL;');
+
+        // Allow up to 5 seconds of retry before returning SQLITE_BUSY.
+        // Prevents sporadic errors when the writer and reader briefly contend
+        // (e.g. during PST bulk import).
+        await customStatement('PRAGMA busy_timeout=5000;');
+
+        logger.i('Database opened: journal_mode=WAL, busy_timeout=5000ms');
+      },
     );
   }
 
@@ -440,7 +456,11 @@ LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb) {
       sqlite3.tempDirectory = (await getTemporaryDirectory()).path;
 
       AppLogger(null).i("Opening Database | $path");
-      return NativeDatabase(
+      // createInBackground moves all SQLite I/O to a dedicated background
+      // isolate managed by Drift. This prevents any DB query from blocking
+      // frames on the main UI thread, fixing jank during email queries and
+      // PST imports.
+      return NativeDatabase.createInBackground(
         file,
         logStatements: false,
         cachePreparedStatements: true,
