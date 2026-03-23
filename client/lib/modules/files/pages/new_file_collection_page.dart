@@ -136,10 +136,12 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
                   ElevatedButton(
                     onPressed: () {
                       if (form.valid) {
+                        final selectedPath = form.control('path').value as String;
                         Collection fc = Collection(
                           id: const Uuid().v4().toString(),
                           name: form.control('name').value,
-                          path: form.control('path').value,
+                          path: selectedPath,
+                          localCopyPath: selectedPath, // absolute root for relative-path resolution
                           type: "file",
                           scanner: AppConstants.scannerFileLocal,
                           scanStatus: "pending",

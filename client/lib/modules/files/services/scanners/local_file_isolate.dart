@@ -8,6 +8,7 @@ import 'package:mydatatools/models/tables/folder.dart';
 import 'package:mydatatools/modules/files/files_constants.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
+import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
 import 'package:path/path.dart' as p;
 import 'package:logger/logger.dart';
 
@@ -42,7 +43,12 @@ class LocalFileIsolate extends CollectionScanner {
     RootIsolateToken? token = RootIsolateToken.instance;
     Map<String, dynamic> args = {
       'path': path,
-      'rootPath': path, // absolute root; worker uses this to compute relative paths
+      // rootPath is ALWAYS the absolute collection root, regardless of which
+      // sub-directory is being scanned. This ensures that p.relative() in the
+      // worker produces paths relative to the collection root (e.g.
+      // "2026-01-01/photo.jpg"), not relative to the scanned sub-directory
+      // (which would incorrectly give "photo.jpg" with parent='').
+      'rootPath': collection.localCopyPath ?? collection.path,
       'recursive': recursive,
       'collectionId': collection.id,
     };
@@ -276,14 +282,13 @@ class LocalFileIsolateWorker{
       return null;
     }
 
-    // Compute relative path for storage.
-    String relPath = p.relative(absPath, from: rootPath);
-    if (relPath == '.') relPath = '';
-    String relParent = p.relative(p.dirname(absPath), from: rootPath);
-    if (relParent == '.') relParent = '';
+    // Compute relative path for storage via the shared helper so this logic
+    // is unit-tested independently of the file system.
+    final relPath = ScannerPathHelper.relativePath(absPath, rootPath, isFolder: true);
+    final relParent = ScannerPathHelper.relativeParent(absPath, rootPath);
 
     return Folder(
-        id: '$collectionId_:$relPath',
+        id: ScannerPathHelper.buildId(collectionId_, relPath),
         name: name,
         path: relPath,
         parent: relParent,
@@ -317,14 +322,12 @@ class LocalFileIsolateWorker{
 
     DateTime lmDate = file_.lastModifiedSync();
 
-    // Compute relative path for storage.
-    String relPath = p.relative(absPath, from: rootPath);
-    if (relPath == '.') relPath = name;
-    String relParent = p.relative(p.dirname(absPath), from: rootPath);
-    if (relParent == '.') relParent = '';
+    // Compute relative path for storage via the shared helper.
+    final relPath = ScannerPathHelper.relativePath(absPath, rootPath);
+    final relParent = ScannerPathHelper.relativeParent(absPath, rootPath);
 
     return File(
-      id: '$collectionId_:$relPath',
+      id: ScannerPathHelper.buildId(collectionId_, relPath),
       collectionId: collectionId_,
       name: name,
       path: relPath,

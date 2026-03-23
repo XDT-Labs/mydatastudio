@@ -43,7 +43,7 @@ class CollectionRepository {
   ///
   /// Create new collection
   Future<Collection?> addCollection(Collection val) async {
-    db.into(db.collections).insert(val);
+    await db.into(db.collections).insert(val);
     return Future(() => val);
   }
 
