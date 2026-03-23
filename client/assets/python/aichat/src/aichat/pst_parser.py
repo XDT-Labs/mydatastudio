@@ -4,6 +4,7 @@ import os
 import argparse
 import sys
 import re
+import mimetypes
 from datetime import datetime
 from email import headerregistry, policy
 from email.parser import HeaderParser
@@ -23,6 +24,19 @@ NON_EMAIL_FOLDER_NAMES = frozenset({
     "conflicts",
     "server failures",
     "local failures",
+})
+
+# These folder names are transparent wrappers in the PST hierarchy.
+# Their names are excluded from the path so that
+#   Root / Top of Personal Folders / Inbox / 2010
+# becomes simply:
+#   Inbox / 2010
+WRAPPER_FOLDER_NAMES = frozenset({
+    "root",
+    "top of personal folders",
+    "personal folders",
+    "mailbox",
+    "outlook data file",
 })
 
 
@@ -84,6 +98,11 @@ class PstParser:
         yield from self._process_folder(root, "")
         
     @staticmethod
+    def _is_wrapper_folder(folder_name: str) -> bool:
+        """Return True if this folder is a transparent wrapper (Root, Top of Personal Folders, etc.)."""
+        return (folder_name or "").strip().lower() in WRAPPER_FOLDER_NAMES
+
+    @staticmethod
     def _is_non_email_folder(folder_name: str) -> bool:
         """Return True if this folder stores non-email items (contacts, calendar, etc.)."""
         return (folder_name or "").strip().lower() in NON_EMAIL_FOLDER_NAMES
@@ -126,11 +145,34 @@ class PstParser:
 
         return f"attachment_{index}"
 
+    @staticmethod
+    def _get_content_type(filename: str) -> str:
+        """
+        Determine the MIME type for an attachment from its file extension.
+        Falls back to 'application/octet-stream' if the type cannot be inferred.
+        """
+        mime_type, _ = mimetypes.guess_type(filename)
+        return mime_type or "application/octet-stream"
+
 
     def _process_folder(self, folder, folder_path):
         folder_name = folder.get_name() or "Root"
-        current_path = os.path.join(folder_path, folder_name)
+        is_wrapper = self._is_wrapper_folder(folder_name)
         is_non_email = self._is_non_email_folder(folder_name)
+
+        # Wrapper folders (Root, Top of Personal Folders, etc.) are transparent:
+        # we skip them in the path so Inbox appears at the top level.
+        if is_wrapper:
+            num_folders = folder.get_number_of_sub_folders()
+            for i in range(num_folders):
+                try:
+                    sub_folder = folder.get_sub_folder(i)
+                    yield from self._process_folder(sub_folder, folder_path)
+                except Exception as e:
+                    yield {"type": "error", "message": f"Error getting sub-folder {i} in {folder_name}: {str(e)}"}
+            return
+
+        current_path = os.path.join(folder_path, folder_name) if folder_path else folder_name
 
         # Notify Dart about the folder
         yield {
@@ -286,7 +328,7 @@ class PstParser:
                                 "name": filename,
                                 "path": file_path,
                                 "size": os.path.getsize(file_path),
-                                "contentType": "application/octet-stream",
+                                "contentType": self._get_content_type(filename),
                             })
                         except Exception as att_e:
                             # Individual attachment failed; keep processing others

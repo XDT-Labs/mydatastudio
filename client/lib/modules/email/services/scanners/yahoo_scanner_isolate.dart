@@ -9,6 +9,7 @@ import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:mydatatools/models/tables/file.dart' as db_file;
 import 'package:mydatatools/models/tables/folder.dart' as db_folder;
 import 'package:mydatatools/modules/email/services/get_emails_service.dart';
+import 'package:mydatatools/modules/files/files_constants.dart';
 import 'dart:io' as io;
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/modules/email/services/email_repository.dart';
@@ -250,6 +251,7 @@ class YahooScannerIsolateWorker {
                 message: message,
                 collection: collection,
                 targetFolder: targetFolder,
+                appDir: args['appDir'] as String,
                 dbWriterPort: dbWriterPort,
                 logger: logger,
               );
@@ -278,29 +280,20 @@ class YahooScannerIsolateWorker {
     }
   }
 
-  static List<dynamic> _collectAllParts(dynamic part) {
-    if (part == null) return [];
-    List<dynamic> all = [];
-    dynamic data;
-    try { data = part.mimeData; } catch (_) { data = part; }
-
-    if (data != null) {
-      final parts = data.parts;
-      if (parts != null) {
-        for (var p in parts) {
-          all.add(p);
-          all.addAll(_collectAllParts(p));
-        }
-      }
-    }
-    return all;
+  /// Returns all MIME parts that have a filename (i.e. are attachments or
+  /// named inline parts). Uses enough_mail's built-in [allPartsFlat] so we
+  /// correctly traverse the whole MIME tree without reimplementing it.
+  static List<MimePart> _collectAttachmentParts(MimeMessage message) {
+    return message.allPartsFlat
+        .where((part) => part.decodeFileName() != null)
+        .toList();
   }
 
   static Future<List<db_file.File>> _downloadAttachments({
     required Collection collection,
     required String messageId,
     required DateTime msgDate,
-    required List<dynamic> parts,
+    required List<MimePart> parts,
     required String targetFolderPath,
     required SendPort dbWriterPort,
     required AppLogger logger,
@@ -308,42 +301,34 @@ class YahooScannerIsolateWorker {
     List<db_file.File> files = [];
     await io.Directory(targetFolderPath).create(recursive: true);
 
-    for (var part in parts) {
-      String? fileName;
-      try { fileName = part.decodeFileName(); } catch (_) {}
-      
-      if (fileName != null) {
-        try {
-          final file = io.File(p.join(targetFolderPath, '${messageId}_$fileName'));
-          dynamic pPart = part;
-          Object? content;
-          try { content = pPart.decodeContent(); } catch (_) { try { content = pPart.decode(); } catch (_) {} }
-          
-          if (content != null) {
-            if (content is List<int>) {
-              await file.writeAsBytes(content);
-            } else if (content is String) {
-              await file.writeAsString(content);
-            }
+    for (final part in parts) {
+      final fileName = part.decodeFileName();
+      if (fileName == null) continue;
 
-            final f = db_file.File(
-              id: const Uuid().v5(Namespace.url.value, 'file:email:${collection.id}:$messageId:$fileName'),
-              collectionId: collection.id,
-              name: fileName,
-              path: file.path,
-              parent: targetFolderPath,
-              dateCreated: msgDate,
-              dateLastModified: msgDate,
-              size: file.lengthSync(),
-              contentType: (part as dynamic).mediaType?.toString() ?? 'application/octet-stream',
-              isDeleted: false,
-              emailId: messageId,
-            );
-            files.add(f);
-          }
-        } catch (e) {
-          logger.w("YahooScanner: Failed to save attachment: $e");
+      try {
+        final file = io.File(p.join(targetFolderPath, '${messageId}_$fileName'));
+        final content = part.decodeContentBinary();
+
+        if (content != null && content.isNotEmpty) {
+          await file.writeAsBytes(content);
+
+          final f = db_file.File(
+            id: const Uuid().v5(Namespace.url.value, 'file:email:${collection.id}:$messageId:$fileName'),
+            collectionId: collection.id,
+            name: fileName,
+            path: file.path,
+            parent: targetFolderPath,
+            dateCreated: msgDate,
+            dateLastModified: msgDate,
+            size: file.lengthSync(),
+            contentType: _mapMimeType(part.mediaType.text),
+            isDeleted: false,
+            emailId: messageId,
+          );
+          files.add(f);
         }
+      } catch (e) {
+        logger.w('YahooScanner: Failed to save attachment $fileName: $e');
       }
     }
     return files;
@@ -352,13 +337,15 @@ class YahooScannerIsolateWorker {
   static Future<void> _ensureFolderHierarchy({
     required SendPort dbWriterPort,
     required Collection collection,
+    required String extractionRoot,
     required String labelName,
     required String year,
     required DateTime msgDate,
   }) async {
-    final rootPath = collection.path;
-    final labelPath = p.normalize(p.join(rootPath, labelName));
-    dbWriterPort.send({'type': 'folder', 'folder': _createFolderObj(labelPath, rootPath, labelName, collection.id, msgDate)});
+    // Create INBOX-level folder
+    final labelPath = p.normalize(p.join(extractionRoot, labelName));
+    dbWriterPort.send({'type': 'folder', 'folder': _createFolderObj(labelPath, extractionRoot, labelName, collection.id, msgDate)});
+    // Create year-level folder under INBOX
     final yearPath = p.normalize(p.join(labelPath, year));
     dbWriterPort.send({'type': 'folder', 'folder': _createFolderObj(yearPath, labelPath, year, collection.id, msgDate)});
   }
@@ -385,6 +372,7 @@ class YahooScannerIsolateWorker {
     required MimeMessage message,
     required Collection collection,
     required String targetFolder,
+    required String appDir,
     required SendPort dbWriterPort,
     required AppLogger logger,
   }) async {
@@ -428,23 +416,26 @@ class YahooScannerIsolateWorker {
     if (hasAttachments && collection.downloadAttachments) {
       final labelName = targetFolder;
       final year = msgDate.year.toString();
-      final rootPathNormalized = p.normalize(collection.path);
-      final absoluteYearPath = p.normalize(p.join(rootPathNormalized, labelName, year));
+      // Use the app-managed extraction root (not collection.path which is an
+      // email address for Yahoo accounts) so paths are absolute on disk.
+      final extractionRoot = p.normalize(p.join(appDir, 'files', 'email', collection.id));
+      final absoluteYearPath = p.normalize(p.join(extractionRoot, labelName, year));
 
       await _ensureFolderHierarchy(
         dbWriterPort: dbWriterPort,
         collection: collection,
+        extractionRoot: extractionRoot,
         labelName: labelName,
         year: year,
         msgDate: msgDate,
       );
 
-      final allParts = _collectAllParts(message);
+      final attachmentParts = _collectAttachmentParts(message);
       final attachments = await _downloadAttachments(
         collection: collection,
         messageId: emailId,
         msgDate: msgDate,
-        parts: allParts,
+        parts: attachmentParts,
         targetFolderPath: absoluteYearPath,
         dbWriterPort: dbWriterPort,
         logger: logger,
@@ -455,5 +446,14 @@ class YahooScannerIsolateWorker {
       }
     }
     return emailObj;
+  }
+
+  /// Maps a standard MIME type to the internal [FilesConstants] value.
+  static String _mapMimeType(String mimeType) {
+    if (mimeType.startsWith('image/')) return FilesConstants.mimeTypeImage;
+    if (mimeType.startsWith('video/')) return FilesConstants.mimeTypeMovie;
+    if (mimeType.startsWith('audio/')) return FilesConstants.mimeTypeMusic;
+    if (mimeType == 'application/pdf') return FilesConstants.mimeTypePdf;
+    return FilesConstants.mimeTypeUnKnown;
   }
 }

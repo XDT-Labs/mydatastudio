@@ -1,3 +1,4 @@
+import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/file_asset.dart';
@@ -6,6 +7,7 @@ import 'package:mydatatools/modules/files/services/repositories/folder_repositor
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/services/rx_service.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
+import 'package:path/path.dart' as p;
 
 /// Number of files fetched per page.
 const int kFilesPageSize = 200;
@@ -33,6 +35,27 @@ class GetFileAndFoldersService
     String path = command.path;
     if (path.length > 1 && path.endsWith('/')) {
       path = path.substring(0, path.length - 1);
+    }
+
+    // For email collections the nominal collection.path is not a browsable
+    // directory (it could be a .pst file path or an email address like
+    // mikenimer@yahoo.com). Resolve to the extraction root where attachments
+    // are stored so the file module can navigate the folder/year tree.
+    const _emailScanners = {
+      AppConstants.scannerEmailOutlookPst,
+      AppConstants.scannerEmailYahoo,
+      AppConstants.scannerEmailGmail,
+    };
+    if (_emailScanners.contains(command.collection.scanner)) {
+      final storagePath = DatabaseManager.instance.storagePath;
+      if (storagePath != null) {
+        final extractionRoot = p.join(storagePath, 'files', 'email', command.collection.id);
+        // Only remap when the caller is still pointing at the raw collection path
+        // (i.e. not when the user has already navigated deeper inside the tree).
+        if (!path.startsWith(extractionRoot)) {
+          path = extractionRoot;
+        }
+      }
     }
 
     // Skip scanner if it's just a refresh-only or load-more request.

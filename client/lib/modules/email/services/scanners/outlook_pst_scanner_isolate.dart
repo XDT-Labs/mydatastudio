@@ -9,7 +9,9 @@ import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/email.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatatools/models/tables/folder.dart';
 import 'package:mydatatools/modules/email/services/get_emails_service.dart';
+import 'package:mydatatools/modules/files/files_constants.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:http/http.dart' as http;
@@ -117,6 +119,8 @@ class OutlookPstScannerIsolateWorker {
 
     // Keep track of internal IDs
     final Map<String, String> folderPathToId = {};
+    // Track directories already emitted as Folder records for the file module.
+    final Set<String> emittedFolderPaths = {};
     int count = 0;
 
     // 3. Listen to stream output
@@ -169,20 +173,38 @@ class OutlookPstScannerIsolateWorker {
 
           dbWriterPort.send({'type': 'batch_email', 'emails': [email]});
 
-          // Process attachments
+          // Process attachments — also emit Folder records so the file module
+          // can navigate the directory tree (e.g., INBOX → 2010 → files).
           for (var att in data['attachments']) {
             final fileId = const Uuid().v4();
+            final attPath = att['path'] as String? ?? '';
+
+            // Ensure every directory level from extractionRoot down to the
+            // attachment's parent has a Folder record in the file module DB.
+            if (attPath.isNotEmpty) {
+              _ensureFolderPath(
+                attPath: attPath,
+                extractionRoot: extractionRoot,
+                collectionId: collection.id,
+                emailDate: email.date,
+                emittedFolderPaths: emittedFolderPaths,
+                dbWriterPort: dbWriterPort,
+              );
+            }
+
             final file = File(
               id: fileId,
               name: att['name'],
-              path: att['path'],
-              // parent must match collection.path so the file browser query
-              // (getByParentPath with collection.path) returns these attachments.
-              parent: collection.path,
+              path: attPath,
+              // Use p.dirname(attPath) so the file lives under its
+              // INBOX/2010 sub-folder within the extraction root.
+              // This makes it browsable when the file module opens at
+              // extractionRoot.
+              parent: attPath.isNotEmpty ? p.dirname(attPath) : extractionRoot,
               dateCreated: email.date,
               dateLastModified: email.date,
               collectionId: collection.id,
-              contentType: att['contentType'] ?? 'application/octet-stream',
+              contentType: _mapMimeType(att['contentType'] as String? ?? 'application/octet-stream'),
               size: (att['size'] as num).toInt(),
               isDeleted: false,
               emailId: emailId,
@@ -221,6 +243,66 @@ class OutlookPstScannerIsolateWorker {
 
     clientPort.send({'type': 'refresh'});
     Isolate.exit(clientPort, {'done': true});
+  }
+
+  /// Maps a standard MIME type (e.g. "image/jpeg") to the internal
+  /// [FilesConstants] value used throughout the app.  Falls back to
+  /// [FilesConstants.mimeTypeUnKnown] if the type is not recognised.
+  static String _mapMimeType(String mimeType) {
+    if (mimeType.startsWith('image/')) return FilesConstants.mimeTypeImage;
+    if (mimeType.startsWith('video/')) return FilesConstants.mimeTypeMovie;
+    if (mimeType.startsWith('audio/')) return FilesConstants.mimeTypeMusic;
+    if (mimeType == 'application/pdf') return FilesConstants.mimeTypePdf;
+    return FilesConstants.mimeTypeUnKnown;
+  }
+
+  /// Ensures every directory level from [extractionRoot] down to the parent
+  /// of [attPath] has a [Folder] record in the file-module database.
+  ///
+  /// Works by collecting all ancestor paths (exclusive of extractionRoot itself,
+  /// since the file module already browses from there) and emitting a
+  /// `{'type': 'folder', 'folder': Folder}` message for each one that hasn't
+  /// been emitted yet.  Paths already in [emittedFolderPaths] are skipped to
+  /// avoid duplicate inserts.
+  static void _ensureFolderPath({
+    required String attPath,
+    required String extractionRoot,
+    required String collectionId,
+    required DateTime emailDate,
+    required Set<String> emittedFolderPaths,
+    required SendPort dbWriterPort,
+  }) {
+    // Build the list of ancestor dirs between extractionRoot and attPath's
+    // parent, ordered from shallowest to deepest.
+    final List<String> dirs = [];
+    String current = p.dirname(attPath);
+    while (current != extractionRoot && current.startsWith(extractionRoot)) {
+      dirs.insert(0, current); // prepend so we go top-down
+      final up = p.dirname(current);
+      if (up == current) break; // filesystem root guard
+      current = up;
+    }
+    // Also include extractionRoot itself so the first level is visible.
+    dirs.insert(0, extractionRoot);
+
+    for (final dirPath in dirs) {
+      if (emittedFolderPaths.contains(dirPath)) continue;
+      emittedFolderPaths.add(dirPath);
+
+      final parentPath = p.dirname(dirPath);
+      final folder = Folder(
+        id: '${collectionId}:${dirPath}',
+        name: p.basename(dirPath),
+        path: dirPath,
+        // extractionRoot has the collection.id as its notional parent, which
+        // keeps it anchored to the collection without a real parent record.
+        parent: parentPath == dirPath ? collectionId : parentPath,
+        dateCreated: emailDate,
+        dateLastModified: emailDate,
+        collectionId: collectionId,
+      );
+      dbWriterPort.send({'type': 'folder', 'folder': folder});
+    }
   }
 }
 

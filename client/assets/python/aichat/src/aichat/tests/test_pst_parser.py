@@ -598,6 +598,86 @@ class TestAttachments:
                 f"(showing first {len(sample)}):\n{details}"
             )
 
+    # ------------------------------------------------------------
+    # Image extensions that should produce an image/* content type
+    # ------------------------------------------------------------
+    _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
+
+    def test_attachment_image_content_type_is_not_octet_stream(self, parsed_emails):
+        """
+        Attachments whose filename has a recognised image extension must have a
+        content type of 'image/*', NOT 'application/octet-stream'.
+
+        If this fails the parser is not using mimetypes.guess_type() (or it is
+        overriding the result with the hardcoded fallback).
+        """
+        failures = []
+        for email in parsed_emails:
+            for att in email.get("attachments") or []:
+                name = att.get("name", "")
+                ext = os.path.splitext(name)[-1].lower()
+                if ext not in self._IMAGE_EXTENSIONS:
+                    continue
+                ct = att.get("contentType", "")
+                if not ct.startswith("image/"):
+                    failures.append({
+                        "subject": email.get("subject", "(no subject)"),
+                        "att_name": name,
+                        "contentType": ct,
+                    })
+        if failures:
+            sample = failures[:10]
+            details = "\n".join(
+                f"  [{i+1}] subject={r['subject']} | att={r['att_name']} | contentType={r['contentType']!r}"
+                for i, r in enumerate(sample)
+            )
+            pytest.fail(
+                f"{len(failures)} image attachment(s) have a non-image content type "
+                f"(showing first {len(sample)}):\n{details}"
+            )
+
+    def test_attachment_path_contains_folder_and_year(self, parsed_emails):
+        """
+        Every attachment path must contain:
+          1. The email folder name somewhere in the path  (e.g. 'INBOX')
+          2. A 4-digit year directory component           (e.g. '2010')
+
+        This validates that the Python parser is organising attachments under
+        ``output_dir/<folder_path>/<year>/`` as per the spec.
+        """
+        year_re = re.compile(r"[\\/]\d{4}[\\/]")
+        failures = []
+        for email in parsed_emails:
+            folder = email.get("folder", "")
+            # Use the leaf folder name for the path check
+            leaf = os.path.basename(folder) if folder else ""
+            for att in email.get("attachments") or []:
+                path = att.get("path", "")
+                missing = []
+                if leaf and leaf.lower() not in path.lower():
+                    missing.append(f"folder '{leaf}'")
+                if not year_re.search(path):
+                    missing.append("year component (e.g. /2010/)")
+                if missing:
+                    failures.append({
+                        "subject": email.get("subject", "(no subject)"),
+                        "folder": folder,
+                        "att_name": att.get("name", "?"),
+                        "path": path,
+                        "missing": ", ".join(missing),
+                    })
+        if failures:
+            sample = failures[:10]
+            details = "\n".join(
+                f"  [{i+1}] folder={r['folder']} | att={r['att_name']} | "
+                f"missing={r['missing']} | path={r['path']}"
+                for i, r in enumerate(sample)
+            )
+            pytest.fail(
+                f"{len(failures)} attachment(s) have unexpected paths "
+                f"(showing first {len(sample)}):\n{details}"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Summary / smoke test
