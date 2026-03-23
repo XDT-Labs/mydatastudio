@@ -176,7 +176,9 @@ class OutlookPstScannerIsolateWorker {
               id: fileId,
               name: att['name'],
               path: att['path'],
-              parent: extractionRoot,
+              // parent must match collection.path so the file browser query
+              // (getByParentPath with collection.path) returns these attachments.
+              parent: collection.path,
               dateCreated: email.date,
               dateLastModified: email.date,
               collectionId: collection.id,

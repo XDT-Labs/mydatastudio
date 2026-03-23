@@ -27,9 +27,12 @@ class GetFileAndFoldersService
       path = path.substring(0, path.length - 1);
     }
 
-    // Skip scanner if it's just a refresh-only request
+    // Skip scanner if it's just a refresh-only request.
+    // The scan runs in a background isolate — we fire it without awaiting so
+    // the DB query and UI update happen immediately and don't stall waiting
+    // for the scanner to finish starting up.
     if (!command.refreshOnly) {
-      await ScannerManager.getInstance()
+      ScannerManager.getInstance()
           .getScanner(command.collection)
           ?.start(command.collection, path, false, false);
     }

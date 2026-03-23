@@ -6,9 +6,13 @@ import 'package:moment_dart/moment_dart.dart';
 import 'dart:math' as math;
 
 class EmailTable extends StatefulWidget {
-  const EmailTable({super.key, required this.emails});
+  const EmailTable({super.key, required this.emails, this.onLoadMore});
 
   final List<Email> emails;
+
+  /// Called when the user scrolls near the bottom of the list. Implementations
+  /// should fetch the next page of emails and append them.
+  final VoidCallback? onLoadMore;
 
   @override
   State<EmailTable> createState() => _EmailTable();
@@ -18,6 +22,30 @@ class _EmailTable extends State<EmailTable> {
   int sortColumnIndex = 0;
   String sortColumn = 'path';
   bool sortAsc = true;
+  late final ScrollController _verticalScrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _verticalScrollController = ScrollController();
+    _verticalScrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    if (widget.onLoadMore == null) return;
+    final pos = _verticalScrollController.position;
+    // Trigger load-more when within 200px of the bottom
+    if (pos.pixels >= pos.maxScrollExtent - 200) {
+      widget.onLoadMore!();
+    }
+  }
+
+  @override
+  void dispose() {
+    _verticalScrollController.removeListener(_onScroll);
+    _verticalScrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,6 +60,7 @@ class _EmailTable extends State<EmailTable> {
           );
 
           return SingleChildScrollView(
+            controller: _verticalScrollController,
             scrollDirection: Axis.vertical,
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,

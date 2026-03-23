@@ -22,41 +22,51 @@ class EmailRepository {
     String? search,
     String? sortColumn,
     bool? sortAsc,
+    int limit = 100,
+    int offset = 0,
   }) async {
     sortColumn ??= "date";
     sortAsc ??= false;
 
-    return await (database.select(database.emails)
-          ..where((e) => e.collectionId.equals(collectionId))
-          ..where((e) {
-            if (folderId != null) {
-              return e.folderId.equals(folderId);
-            }
-            return const Constant(true);
-          })
-          ..where((e) {
-            if (search != null && search.isNotEmpty) {
-              return e.subject.contains(search) | e.from.contains(search) | e.snippet.contains(search);
-            }
-            return const Constant(true);
-          })
-          ..orderBy([
-            (t) {
-              Expression column;
-              if (sortColumn == 'from') {
-                column = t.from;
-              } else if (sortColumn == 'subject') {
-                column = t.subject;
-              } else {
-                column = t.date;
-              }
-              return OrderingTerm(
-                expression: column,
-                mode: sortAsc! ? OrderingMode.asc : OrderingMode.desc,
-              );
-            }
-          ]))
-        .get();
+    final query = database.select(database.emails)
+      ..where((e) => e.collectionId.equals(collectionId))
+      ..where((e) {
+        if (folderId != null) {
+          return e.folderId.equals(folderId);
+        }
+        return const Constant(true);
+      })
+      ..where((e) {
+        if (search != null && search.isNotEmpty) {
+          return e.subject.contains(search) | e.from.contains(search) | e.snippet.contains(search);
+        }
+        return const Constant(true);
+      })
+      ..orderBy([
+        (t) {
+          Expression column;
+          if (sortColumn == 'from') {
+            column = t.from;
+          } else if (sortColumn == 'subject') {
+            column = t.subject;
+          } else {
+            column = t.date;
+          }
+          return OrderingTerm(
+            expression: column,
+            mode: sortAsc! ? OrderingMode.asc : OrderingMode.desc,
+          );
+        }
+      ]);
+
+    // Only apply pagination when limit > 0. Pass limit = -1 to get all rows
+    // (e.g. for export). Default is 100 to avoid loading thousands of Drift
+    // rows onto the main thread at once.
+    if (limit > 0) {
+      query.limit(limit, offset: offset);
+    }
+
+    return await query.get();
   }
 
   Future<int> emailCount(String collectionId) async {

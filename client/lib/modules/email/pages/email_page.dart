@@ -56,6 +56,12 @@ class _EmailPage extends State<EmailPage> {
   final TextEditingController searchController = TextEditingController();
   bool _needsFolderAutoSelect = false;
 
+  // Pagination
+  static const int _pageSize = 100;
+  int _currentOffset = 0;
+  bool _hasMore = true;
+  bool _isLoadingMore = false;
+
   @override
   void initState() {
     _collectionService = GetCollectionsService.instance;
@@ -130,6 +136,10 @@ class _EmailPage extends State<EmailPage> {
   void _refreshEmails() {
     if (collection == null) return;
 
+    // Reset pagination on every fresh load
+    _currentOffset = 0;
+    _hasMore = true;
+
     _emailService = GetEmailsService.instance;
     if (_emailsSub != null) _emailsSub?.cancel();
 
@@ -138,6 +148,8 @@ class _EmailPage extends State<EmailPage> {
         setState(() {
           emails = value;
           count = value.length;
+          // If we got fewer rows than the page size, there are no more pages
+          _hasMore = value.length >= _pageSize;
         });
       }
     });
@@ -149,11 +161,41 @@ class _EmailPage extends State<EmailPage> {
         search: searchController.text,
         sortColumn: sortColumn,
         sortAsc: sortAsc,
+        limit: _pageSize,
+        offset: 0,
       ),
     );
-    
+
     // Also trigger folder fetch to get names
     GetEmailFoldersService.instance.invoke(EmailFolderServiceCommand(collection!.id));
+  }
+
+  Future<void> _loadMoreEmails() async {
+    if (!_hasMore || _isLoadingMore || collection == null) return;
+    setState(() => _isLoadingMore = true);
+
+    final nextOffset = _currentOffset + _pageSize;
+    final nextPage = await EmailRepository(
+      DatabaseManager.instance.database!,
+    ).emails(
+      collection!.id,
+      folderId: EmailPage.selectedFolder.value,
+      search: searchController.text,
+      sortColumn: sortColumn,
+      sortAsc: sortAsc,
+      limit: _pageSize,
+      offset: nextOffset,
+    );
+
+    if (mounted) {
+      setState(() {
+        _currentOffset = nextOffset;
+        emails = [...emails, ...nextPage];
+        count = emails.length;
+        _hasMore = nextPage.length >= _pageSize;
+        _isLoadingMore = false;
+      });
+    }
   }
 
   @override
@@ -291,7 +333,7 @@ class _EmailPage extends State<EmailPage> {
                       }
                       return false;
                     },
-                    child: EmailTable(emails: emails),
+                    child: EmailTable(emails: emails, onLoadMore: _loadMoreEmails),
                   ),
                 ),
               ],
