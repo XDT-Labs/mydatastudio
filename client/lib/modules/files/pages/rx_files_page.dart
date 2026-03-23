@@ -15,6 +15,7 @@ import 'package:mydatatools/modules/files/widgets/file_details_drawer.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/modules/files/services/delete_file_service.dart';
+import 'package:mydatatools/helpers/file_path_resolver.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io' as io;
 import 'package:path/path.dart' as p;
@@ -104,12 +105,13 @@ class _RxFilesPage extends State<RxFilesPage> {
         _fileOffset = 0;
         _hasMoreFiles = true;
         _filesAndFoldersService!.invoke(
-          GetFileAndFoldersServiceCommand(value, value.path),
+          // '' = relative root path (stored as empty string in DB)
+          GetFileAndFoldersServiceCommand(value, ''),
         );
       }
       setState(() {
         collection = value;
-        path = value?.path;
+        path = ''; // relative root
         _breadcrumbTrail = []; // reset trail on collection change
         selectedItems = []; // reset selection on collection change
         selectedAsset = null; // close details drawer on collection change
@@ -206,15 +208,12 @@ class _RxFilesPage extends State<RxFilesPage> {
             icon: const Icon(Icons.refresh, color: Colors.black, weight: 100),
             tooltip: 'Refresh',
             onPressed: () {
-              //reset date
-              // collectionRepository.updateLastScanDate(collection, null);
-              //refresh path
               if (collection != null) {
                 logger.s("refresh file list");
                 _filesAndFoldersService!.invoke(
                   GetFileAndFoldersServiceCommand(
                     collection!,
-                    path ?? collection!.path,
+                    path ?? '',
                   ),
                 );
               }
@@ -307,7 +306,7 @@ class _RxFilesPage extends State<RxFilesPage> {
                             _filesAndFoldersService!.invoke(
                               GetFileAndFoldersServiceCommand(
                                 collection!,
-                                path ?? collection!.path,
+                                path ?? '',
                                 refreshOnly: true,
                               ),
                             );
@@ -374,6 +373,7 @@ class _RxFilesPage extends State<RxFilesPage> {
                     width: _drawerWidth,
                     child: FileDetailsDrawer(
                       asset: selectedAsset!,
+                      collection: collection!,
                       width: _drawerWidth,
                       onClose: () => setState(() => selectedAsset = null),
                       onExpand:
@@ -399,26 +399,25 @@ class _RxFilesPage extends State<RxFilesPage> {
           content: const Icon(Icons.home, color: Colors.black),
           onTap: () {
             setState(() {
-              this.path = collection.path;
+              this.path = '';
               _breadcrumbTrail = [];
               selectedAsset = null;
             });
             _filesAndFoldersService!.invoke(
-              GetFileAndFoldersServiceCommand(collection, collection.path),
+              GetFileAndFoldersServiceCommand(collection, ''),
             );
           },
         ),
         BreadCrumbItem(
           content: Text(collection.name),
           onTap: () {
-            // Go back to root of collection
             setState(() {
-              this.path = collection.path;
+              this.path = '';
               _breadcrumbTrail = [];
               selectedAsset = null;
             });
             _filesAndFoldersService!.invoke(
-              GetFileAndFoldersServiceCommand(collection, collection.path),
+              GetFileAndFoldersServiceCommand(collection, ''),
             );
           },
         ),
@@ -531,7 +530,9 @@ class _RxFilesPage extends State<RxFilesPage> {
     for (var item in itemsToDelete) {
       if (item is File) {
         try {
-          final ioFile = io.File(item.path);
+          // Reconstruct absolute path for filesystem delete.
+          final absPath = FilePathResolver.absolute(item, collection!);
+          final ioFile = io.File(absPath);
           if (await ioFile.exists()) {
             await ioFile.delete();
           }
@@ -557,7 +558,7 @@ class _RxFilesPage extends State<RxFilesPage> {
       _filesAndFoldersService!.invoke(
         GetFileAndFoldersServiceCommand(
           collection!,
-          path ?? collection!.path,
+          path ?? '',
           refreshOnly: true,
         ),
       );
@@ -608,7 +609,9 @@ class _RxFilesPage extends State<RxFilesPage> {
               }
             }
           } else {
-            final sourceFile = io.File(item.path);
+            // Reconstruct absolute path for local files.
+            final absPath = FilePathResolver.absolute(item, collection!);
+            final sourceFile = io.File(absPath);
             await sourceFile.copy(destinationPath);
             copiedCount++;
           }

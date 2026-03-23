@@ -226,7 +226,7 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration {
@@ -316,6 +316,100 @@ class AppDatabase extends _$AppDatabase {
           } catch (e) {
             logger.w("Indexes already exist in Emails table, skipping.");
           }
+        }
+        if (from < 12) {
+          logger.i(
+            'Upgrade to v12: Adding localCopyPath to Collections '
+            'and migrating files/folders to relative paths',
+          );
+          await m.addColumn(collections, collections.localCopyPath);
+
+          // Data migration using raw SQL — the Drift table accessors are not
+          // available inside onUpgrade (m.database is GeneratedDatabase, not
+          // AppDatabase). We use customStatement / m.database.customSelect
+          // to do the data work safely.
+          //
+          // Step 1: For each collection, set local_copy_path = path.
+          await m.database.customStatement(
+            'UPDATE collections SET local_copy_path = path WHERE path IS NOT NULL AND path != \'\'',
+          );
+
+          // Step 2: Strip absolute prefix from files.path, files.parent.
+          // We do this in Dart by loading rows and updating them.
+          final colRows = await m.database
+              .customSelect('SELECT id, path FROM collections WHERE path IS NOT NULL AND path != \'\'')
+              .get();
+
+          for (final colRow in colRows) {
+            final colId = colRow.read<String>('id');
+            final root = colRow.read<String>('path');
+            final prefix = root.endsWith('/') ? root : '$root/';
+
+            // Update files — only migrate rows whose path still contains
+            // the absolute prefix (not yet migrated). Rows already using
+            // a relative path are left untouched.
+            final fileRows = await m.database
+                .customSelect(
+                  'SELECT id, path, parent FROM files WHERE collection_id = ? AND path LIKE ?',
+                  variables: [
+                    Variable.withString(colId),
+                    Variable.withString('$prefix%'),
+                  ],
+                )
+                .get();
+            for (final row in fileRows) {
+              final oldId = row.read<String>('id');
+              final oldPath = row.read<String>('path');
+              final oldParent = row.read<String>('parent');
+              final relPath = oldPath.substring(prefix.length);
+              final relParent = oldParent.startsWith(prefix)
+                  ? oldParent.substring(prefix.length)
+                  : (oldParent == root ? '' : oldParent);
+              final newId = '$colId:$relPath';
+              if (newId == oldId) continue; // already migrated, skip
+              // Delete any conflicting row with the new id first so we don't
+              // hit the UNIQUE constraint.
+              await m.database.customStatement(
+                'DELETE FROM files WHERE id = ? AND id != ?',
+                [newId, oldId],
+              );
+              await m.database.customStatement(
+                'UPDATE files SET id = ?, path = ?, parent = ? WHERE id = ?',
+                [newId, relPath, relParent, oldId],
+              );
+            }
+
+            // Update folders — same idempotent logic.
+            final folderRows = await m.database
+                .customSelect(
+                  'SELECT id, path, parent FROM folders WHERE collection_id = ? AND path LIKE ?',
+                  variables: [
+                    Variable.withString(colId),
+                    Variable.withString('$prefix%'),
+                  ],
+                )
+                .get();
+            for (final row in folderRows) {
+              final oldId = row.read<String>('id');
+              final oldPath = row.read<String>('path');
+              final oldParent = row.read<String>('parent');
+              final relPath = oldPath.substring(prefix.length);
+              final relParent = oldParent.startsWith(prefix)
+                  ? oldParent.substring(prefix.length)
+                  : (oldParent == root ? '' : oldParent);
+              final newId = '$colId:$relPath';
+              if (newId == oldId) continue;
+              await m.database.customStatement(
+                'DELETE FROM folders WHERE id = ? AND id != ?',
+                [newId, oldId],
+              );
+              await m.database.customStatement(
+                'UPDATE folders SET id = ?, path = ?, parent = ? WHERE id = ?',
+                [newId, relPath, relParent, oldId],
+              );
+            }
+          }
+          logger.i('v12 data migration complete');
         }
       },
       beforeOpen: (OpeningDetails details) async {

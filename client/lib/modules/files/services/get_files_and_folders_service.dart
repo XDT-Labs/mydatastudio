@@ -7,6 +7,7 @@ import 'package:mydatatools/modules/files/services/repositories/folder_repositor
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/services/rx_service.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
+import 'package:mydatatools/helpers/file_path_resolver.dart';
 import 'package:path/path.dart' as p;
 
 /// Number of files fetched per page.
@@ -32,49 +33,64 @@ class GetFileAndFoldersService
     FileDesktopRepository fileRepo = FileDesktopRepository(db!);
     FolderDesktopRepository folderRepo = FolderDesktopRepository(db);
 
-    String path = command.path;
-    if (path.length > 1 && path.endsWith('/')) {
-      path = path.substring(0, path.length - 1);
+    // relativePath is what gets stored in the DB and used for repo queries.
+    String relativePath = command.path;
+    if (relativePath.length > 1 && relativePath.endsWith('/')) {
+      relativePath = relativePath.substring(0, relativePath.length - 1);
     }
 
-    // For email collections the nominal collection.path is not a browsable
-    // directory (it could be a .pst file path or an email address like
-    // mikenimer@yahoo.com). Resolve to the extraction root where attachments
-    // are stored so the file module can navigate the folder/year tree.
+    // absolutePath is used for filesystem operations (scanner start).
+    String absolutePath;
+
     const _emailScanners = {
       AppConstants.scannerEmailOutlookPst,
       AppConstants.scannerEmailYahoo,
       AppConstants.scannerEmailGmail,
     };
+
     if (_emailScanners.contains(command.collection.scanner)) {
+      // Email collections use a computed extraction root; files are stored
+      // relative to this root in the database.
       final storagePath = DatabaseManager.instance.storagePath;
       if (storagePath != null) {
-        final extractionRoot = p.join(storagePath, 'files', 'email', command.collection.id);
-        // Only remap when the caller is still pointing at the raw collection path
-        // (i.e. not when the user has already navigated deeper inside the tree).
-        if (!path.startsWith(extractionRoot)) {
-          path = extractionRoot;
+        final extractionRoot = p.join(
+          storagePath, 'files', 'email', command.collection.id,
+        );
+        // absolutePath is always the extraction root for scanner calls.
+        absolutePath = relativePath.isEmpty
+            ? extractionRoot
+            : p.join(extractionRoot, relativePath);
+        // Remap relativePath to '' when caller is at the collection root.
+        if (!command.path.startsWith(extractionRoot)) {
+          relativePath = '';
+          absolutePath = extractionRoot;
         }
+      } else {
+        absolutePath = FilePathResolver.absoluteFromPath(
+            relativePath, command.collection);
       }
+    } else {
+      // Local/cloud collections: resolve absolute path from localCopyPath.
+      absolutePath = FilePathResolver.absoluteFromPath(
+          relativePath, command.collection);
+      if (absolutePath.isEmpty) absolutePath = command.collection.path;
     }
 
     // Skip scanner if it's just a refresh-only or load-more request.
-    // The scan runs in a background isolate — we fire it without awaiting so
-    // the DB query and UI update happen immediately.
     if (!command.refreshOnly && command.offset == 0) {
       ScannerManager.getInstance()
           .getScanner(command.collection)
-          ?.start(command.collection, path, false, false);
+          ?.start(command.collection, absolutePath, false, false);
     }
 
-    // Folders always load fully (rarely > 500 per dir); only files paginate.
+    // Folders always load fully; only files paginate.
     final List<FileAsset> folders = command.offset == 0
-        ? await folderRepo.getByParentPath(command.collection.id, path)
+        ? await folderRepo.getByParentPath(command.collection.id, relativePath)
         : [];
 
     final List<FileAsset> files = await fileRepo.getByParentPath(
       command.collection.id,
-      path,
+      relativePath,
       limit: command.pageSize,
       offset: command.offset,
     );
@@ -82,10 +98,8 @@ class GetFileAndFoldersService
     final List<FileAsset> newItems = [...folders, ...files];
 
     if (command.offset == 0) {
-      // First page — replace the current list entirely.
       _currentItems = newItems;
     } else {
-      // Load-more — append to the existing list.
       _currentItems = [..._currentItems, ...newItems];
     }
     sink.add(_currentItems);
