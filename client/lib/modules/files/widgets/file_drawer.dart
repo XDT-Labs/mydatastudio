@@ -47,8 +47,11 @@ class _FileDrawer extends State<FileDrawer> {
       }
     });
 
-    _collectionService!.invoke(GetCollectionsServiceCommand(null));
-
+    // Deferred to post-frame so FileDrawer renders its skeleton immediately
+    // rather than triggering a BehaviorSubject replay cascade in initState.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _collectionService!.invoke(GetCollectionsServiceCommand(null));
+    });
     super.initState();
   }
 

@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -12,11 +14,20 @@ void main() {
     // Use in-memory database
     DatabaseManager.instance.useMemoryDb = true;
 
-    // Initialize database (this will create tables)
-    // todo
+    // Initialize database manually to avoid path_provider errors in tests
+    DatabaseManager.instance.appDatabase = AppDatabase(
+      NativeDatabase.memory(),
+      null,
+      'test_db',
+      true,
+    );
 
     // Mock Secure Storage
     FlutterSecureStorage.setMockInitialValues({});
+  });
+
+  tearDown(() async {
+    await DatabaseManager.instance.appDatabase?.close();
   });
 
   testWidgets('LoginForm login success test', (WidgetTester tester) async {
@@ -29,13 +40,20 @@ void main() {
     );
     final hash = Password.hash(password, algorithm);
 
+    final String tempPath = '/tmp/mydatatools_test_${const Uuid().v4()}';
     final user = AppUser(
       id: const Uuid().v4(),
       name: 'testuser',
       password: hash,
       email: 'test@example.com',
-      localStoragePath: '/tmp/test', // Dummy path
+      localStoragePath: tempPath,
     );
+
+    // Create dummy keys
+    final keyDir = Directory('$tempPath/keys');
+    keyDir.createSync(recursive: true);
+    File('${keyDir.path}/public.pem').writeAsStringSync('public-key');
+    File('${keyDir.path}/private.pem').writeAsStringSync('private-key');
 
     // We can't use UserRepository.saveUser because it tries to write keys to disk.
     // So we insert directly into DB.
@@ -67,6 +85,54 @@ void main() {
     // 5. Verify success
     expect(loginSuccess, isTrue);
     expect(find.text('Wrong password'), findsNothing);
+
+    // Cleanup
+    keyDir.parent.deleteSync(recursive: true);
+  });
+
+  testWidgets('LoginForm login keys missing error test', (
+    WidgetTester tester,
+  ) async {
+    // 1. Create a user in the DB BUT NO KEYS ON DISK
+    final password = 'password123';
+    final algorithm = PBKDF2(
+      blockLength: 64,
+      iterationCount: 10000,
+      desiredKeyLength: 64,
+    );
+    final hash = Password.hash(password, algorithm);
+
+    final String tempPath = '/tmp/mydatatools_test_nokeys_${const Uuid().v4()}';
+    final user = AppUser(
+      id: const Uuid().v4(),
+      name: 'testuser',
+      password: hash,
+      email: 'test@example.com',
+      localStoragePath: tempPath,
+    );
+
+    final db = await DatabaseManager.instance.database;
+    await db?.into(db.appUsers).insert(user);
+
+    // 2. Pump the widget
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: LoginForm(onLoginSuccessful: () {}))),
+    );
+
+    // 3. Enter password
+    await tester.enterText(find.byType(TextField), password);
+    await tester.pump();
+
+    // 4. Tap login button
+    await tester.tap(find.text('Login'));
+    await tester.pumpAndSettle();
+
+    // 5. Verify that the button is RE-ENABLED (not null) and an error is shown
+    // In our implementation, MaterialButton's onPressed is null when isSubmitting is true.
+    final loginButton = tester.widget<MaterialButton>(
+      find.widgetWithText(MaterialButton, 'Login'),
+    );
+    expect(loginButton.onPressed, isNotNull, reason: 'Button should be re-enabled after error');
   });
 
   testWidgets('LoginForm login failure test', (WidgetTester tester) async {

@@ -11,6 +11,7 @@ import 'package:mydatatools/modules/files/services/scanners/local_file_isolate.d
 import 'package:mydatatools/modules/email/services/scanners/gmail_scanner.dart';
 import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
 
+import 'package:mydatatools/modules/email/services/scanners/yahoo_scanner.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 
 class ScannerManager {
@@ -51,7 +52,7 @@ class ScannerManager {
       }
       await Future.delayed(const Duration(seconds: 5));
       logger.d('${c.id} | ${c.path}');
-      _registerSingleScanner(c);
+      registerScanner(c);
     }
 
     //listen for new collections and add them at runtime
@@ -67,7 +68,7 @@ class ScannerManager {
           continue;
         }
         if (getScanner(c) == null) {
-          _registerSingleScanner(c);
+          registerScanner(c);
         }
       }
 
@@ -110,56 +111,106 @@ class ScannerManager {
     }
   }
 
-  void startScanner(Collection c) {
-    // TODO, not implemented yet
+  Future<void> startScanner(Collection c) async {
+    final scanner = await registerScanner(c);
+    await scanner.start(c, null, true, true);
   }
 
   CollectionScanner? getScanner(Collection c) {
     return scanners[c.id];
   }
 
-  void _registerSingleScanner(Collection c) async {
-    switch (c.scanner) {
-      case AppConstants.scannerFileLocal:
-        logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-        SendPort? writerPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner localScanner = LocalFileIsolate(
-          null,
-          writerPort,
-        );
-        scanners.putIfAbsent(c.id, () => localScanner);
-        break;
+  final Map<String, Completer<CollectionScanner>> _pendingScanners = {};
+  final Map<String, Future<CollectionScanner>> _registrationFutures = {};
 
-      case AppConstants.scannerFileGDrive:
-        logger.i("Registering GDrive scanner for ${c.name} (ID: ${c.id})");
-        SendPort driveWriterPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner cloudScanner = CloudFileIsolate(
-          null, // Central logger port not used yet
-          driveWriterPort,
-        );
-        scanners[c.id] = cloudScanner;
-        break;
+  /// Returns a Future that completes when a scanner is registered for the collection.
+  /// If it's already registered, the Future completes immediately.
+  Future<CollectionScanner> getScannerAsync(Collection c) {
+    if (scanners.containsKey(c.id)) {
+      return Future.value(scanners[c.id]!);
+    }
+    return _pendingScanners
+        .putIfAbsent(c.id, () => Completer<CollectionScanner>())
+        .future;
+  }
 
-      case AppConstants.scannerEmailGmail:
-        logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-        SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
-        CollectionScanner emailScanner = GmailScanner(
-          dbPath: p.join(DatabaseManager.instance.storagePath!, 'data', AppConstants.dbName),
-          collection: c,
-          appDir: DatabaseManager.instance.storagePath!,
-          dbWriterPort: emailWriterPort,
-        );
-        scanners[c.id] = emailScanner;
-        break;
+  Future<CollectionScanner> registerScanner(Collection c) async {
+    if (scanners.containsKey(c.id)) return scanners[c.id]!;
 
-      case AppConstants.scannerEmailOutlookPst:
-        // Handled as a one-time import via direct isolate call in UI.
-        // We silently ignore it here to suppress the "type not recognized" warning on startup.
-        break;
+    // If registration is already in progress, return the existing future
+    if (_registrationFutures.containsKey(c.id)) {
+      return _registrationFutures[c.id]!;
+    }
 
-      default:
-        logger.w("Scanner type '${c.scanner}' not recognized.");
-        break;
+    final future = _doRegisterScanner(c);
+    _registrationFutures[c.id] = future;
+    return future;
+  }
+
+  Future<CollectionScanner> _doRegisterScanner(Collection c) async {
+    try {
+      CollectionScanner scanner;
+      switch (c.scanner) {
+        case AppConstants.scannerFileLocal:
+          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
+          SendPort? writerPort = await DatabaseManager.instance.writerPort;
+          scanner = LocalFileIsolate(null, writerPort);
+          break;
+
+        case AppConstants.scannerFileGDrive:
+          logger.i("Registering GDrive scanner for ${c.name} (ID: ${c.id})");
+          SendPort driveWriterPort = await DatabaseManager.instance.writerPort;
+          scanner = CloudFileIsolate(
+            null, // Central logger port not used yet
+            driveWriterPort,
+          );
+          break;
+
+        case AppConstants.scannerEmailGmail:
+          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
+          SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
+          scanner = GmailScanner(
+            dbPath: p.join(
+              DatabaseManager.instance.storagePath!,
+              'data',
+              AppConstants.dbName,
+            ),
+            collection: c,
+            appDir: DatabaseManager.instance.storagePath!,
+            dbWriterPort: emailWriterPort,
+          );
+          break;
+
+        case AppConstants.scannerEmailYahoo:
+          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
+          SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
+          scanner = YahooScanner(
+            dbPath: p.join(
+              DatabaseManager.instance.storagePath!,
+              'data',
+              AppConstants.dbName,
+            ),
+            collection: c,
+            appDir: DatabaseManager.instance.storagePath!,
+            dbWriterPort: emailWriterPort,
+          );
+          break;
+
+        case AppConstants.scannerEmailOutlookPst:
+          // Handled as a one-time import via direct isolate call in UI.
+          // We silently ignore it here to suppress the "type not recognized" warning on startup.
+          throw Exception("Outlook PST scanner is handled via direct isolate call and cannot be registered in ScannerManager.");
+
+        default:
+          logger.w("Scanner type '${c.scanner}' not recognized.");
+          throw Exception("Scanner type '${c.scanner}' not recognized.");
+      }
+
+      scanners[c.id] = scanner;
+      _pendingScanners.remove(c.id)?.complete(scanner);
+      return scanner;
+    } finally {
+      _registrationFutures.remove(c.id);
     }
   }
 }

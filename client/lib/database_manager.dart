@@ -226,7 +226,7 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration {
@@ -284,9 +284,38 @@ class AppDatabase extends _$AppDatabase {
           logger.i("Upgrade to v7: Adding emailId column to Files table");
           await m.addColumn(files, files.emailId);
         }
-        if (from < 8) {
-          logger.i("Upgrade to v8: Adding emailId column to Folders table");
-          await m.addColumn(folders, folders.emailId);
+        if (from < 10) {
+          logger.i("Upgrade to v10: Adding uid column to Emails table");
+          try {
+            await m.addColumn(emails, emails.uid);
+          } catch (e) {
+            if (e.toString().contains('duplicate column name')) {
+              logger.w("uid column already exists in Emails table, skipping.");
+            } else {
+              rethrow;
+            }
+          }
+        }
+        if (from < 11) {
+          logger.i(
+            "Upgrade to v11: Adding composite indexes for faster email lookups",
+          );
+          try {
+            await m.createIndex(
+              Index(
+                'email_folderid_idx',
+                'CREATE INDEX email_folderid_idx ON emails (folder_id)',
+              ),
+            );
+            await m.createIndex(
+              Index(
+                'email_comp_sync_idx',
+                'CREATE INDEX email_comp_sync_idx ON emails (collection_id, folder_id, date)',
+              ),
+            );
+          } catch (e) {
+            logger.w("Indexes already exist in Emails table, skipping.");
+          }
         }
       },
       beforeOpen: (OpeningDetails details) async {

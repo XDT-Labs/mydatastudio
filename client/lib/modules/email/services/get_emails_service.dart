@@ -38,6 +38,7 @@ class EmailServiceCommand extends RxCommand {
   final String? search;
   final String sortColumn;
   final bool sortAsc;
+
   /// Number of rows to fetch. Defaults to 100. Pass -1 to fetch all rows.
   final int limit;
   final int offset;
@@ -52,4 +53,3 @@ class EmailServiceCommand extends RxCommand {
     this.offset = 0,
   });
 }
-

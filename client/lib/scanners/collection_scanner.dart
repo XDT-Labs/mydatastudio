@@ -13,5 +13,11 @@ class CollectionScanner {
     return Future(() => -1);
   }
 
+  Future<void> moveToTrash(
+    Collection collection,
+    String folderId,
+    List<int> uids,
+  ) async {}
+
   void stop() async {}
 }

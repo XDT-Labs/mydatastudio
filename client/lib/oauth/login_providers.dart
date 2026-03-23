@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,6 +7,7 @@ import 'package:mydatatools/main.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/oauth/desktop_oauth_manager.dart';
 import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -308,6 +308,9 @@ extension LoginProviderExtension on LoginProviders {
         GetCollectionsServiceCommand('file'),
       );
 
+      // Start the scanner immediately
+      ScannerManager.getInstance().startScanner(collection);
+
       return collection;
     } catch (e, stack) {
       AppLogger(null).e('Google Drive OAuth failed: $e\n$stack');
@@ -319,4 +322,6 @@ extension LoginProviderExtension on LoginProviders {
       return null;
     }
   }
+
 }
+

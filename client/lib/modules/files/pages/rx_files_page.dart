@@ -106,7 +106,12 @@ class _RxFilesPage extends State<RxFilesPage> {
       });
     });
 
-    _collectionService!.invoke(GetCollectionsServiceCommand(null)); //load all
+    // Deferred to post-frame to prevent the BehaviorSubject sink from
+    // replaying its last value synchronously inside initState(), which would
+    // cascade setState() calls before the first frame renders.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _collectionService!.invoke(GetCollectionsServiceCommand(null));
+    });
     super.initState();
   }
 

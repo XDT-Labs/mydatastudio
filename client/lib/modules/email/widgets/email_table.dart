@@ -6,30 +6,71 @@ import 'package:moment_dart/moment_dart.dart';
 import 'dart:math' as math;
 
 class EmailTable extends StatefulWidget {
-  const EmailTable({super.key, required this.emails, this.onLoadMore});
+  const EmailTable({
+    super.key,
+    required this.emails,
+    this.scrollController,
+    this.sortColumn = 'date',
+    this.sortAsc = false,
+    this.onLoadMore,
+  });
 
   final List<Email> emails;
 
   /// Called when the user scrolls near the bottom of the list. Implementations
   /// should fetch the next page of emails and append them.
   final VoidCallback? onLoadMore;
+  final ScrollController? scrollController;
+  final String sortColumn;
+  final bool sortAsc;
 
   @override
   State<EmailTable> createState() => _EmailTable();
 }
 
 class _EmailTable extends State<EmailTable> {
-  int sortColumnIndex = 0;
-  String sortColumn = 'path';
-  bool sortAsc = true;
-  late final ScrollController _verticalScrollController;
+  late int sortColumnIndex;
+  late String sortColumn;
+  late bool sortAsc;
+
+  late ScrollController _verticalScrollController;
+  late final bool _ownsController;
 
   @override
   void initState() {
     super.initState();
-    _verticalScrollController = ScrollController();
+    _updateSortParams();
+    if (widget.scrollController != null) {
+      _verticalScrollController = widget.scrollController!;
+      _ownsController = false;
+    } else {
+      _verticalScrollController = ScrollController();
+      _ownsController = true;
+    }
     _verticalScrollController.addListener(_onScroll);
   }
+
+  @override
+  void didUpdateWidget(EmailTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sortColumn != widget.sortColumn ||
+        oldWidget.sortAsc != widget.sortAsc) {
+      _updateSortParams();
+    }
+  }
+
+  void _updateSortParams() {
+    sortColumn = widget.sortColumn;
+    sortAsc = widget.sortAsc;
+    if (sortColumn == 'from') {
+      sortColumnIndex = 0;
+    } else if (sortColumn == 'date') {
+      sortColumnIndex = 3;
+    } else {
+      sortColumnIndex = 1; // Default to subject index
+    }
+  }
+
 
   void _onScroll() {
     if (widget.onLoadMore == null) return;
@@ -43,7 +84,9 @@ class _EmailTable extends State<EmailTable> {
   @override
   void dispose() {
     _verticalScrollController.removeListener(_onScroll);
-    _verticalScrollController.dispose();
+    if (_ownsController) {
+      _verticalScrollController.dispose();
+    }
     super.dispose();
   }
 
@@ -102,9 +145,11 @@ class _EmailTable extends State<EmailTable> {
           child: Text('From', style: TextStyle(fontWeight: FontWeight.bold)),
         ),
         onSort: (columnIndex, sortAscending) {
-          sortColumnIndex = columnIndex;
-          sortColumn = 'from';
-          sortAsc = sortAscending;
+          setState(() {
+            sortColumnIndex = columnIndex;
+            sortColumn = 'from';
+            sortAsc = sortAscending;
+          });
           EmailSortChangedNotification(sortColumn, sortAsc).dispatch(context);
         },
       ),
@@ -117,6 +162,14 @@ class _EmailTable extends State<EmailTable> {
             style: TextStyle(fontWeight: FontWeight.normal),
           ),
         ),
+        onSort: (columnIndex, sortAscending) {
+          setState(() {
+            sortColumnIndex = columnIndex;
+            sortColumn = 'subject';
+            sortAsc = sortAscending;
+          });
+          EmailSortChangedNotification(sortColumn, sortAsc).dispatch(context);
+        },
       ),
       const DataColumn(
         label: SizedBox(
@@ -131,9 +184,11 @@ class _EmailTable extends State<EmailTable> {
           child: Text('Date', style: TextStyle(fontWeight: FontWeight.normal)),
         ),
         onSort: (columnIndex, sortAscending) {
-          sortColumnIndex = columnIndex;
-          sortColumn = 'date';
-          sortAsc = sortAscending;
+          setState(() {
+            sortColumnIndex = columnIndex;
+            sortColumn = 'date';
+            sortAsc = sortAscending;
+          });
           EmailSortChangedNotification(sortColumn, sortAsc).dispatch(context);
         },
       ),

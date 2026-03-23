@@ -32,6 +32,7 @@ class GmailScannerIsolate {
     Collection collection, {
     String? folderId, // Optional Gmail label ID
     bool force = false,
+    SendPort? statusPort, // Added statusPort to forward worker messages
   }) async {
     if (dbWriterPort == null) {
        throw Exception("dbWriterPort is required for GmailScannerIsolate");
@@ -51,6 +52,11 @@ class GmailScannerIsolate {
     _isolate = await Isolate.spawn(GmailScannerIsolateWorker.worker, args);
 
     receivePort.listen((message) {
+      // Forward status messages if requested
+      if (statusPort != null) {
+        statusPort.send(message);
+      }
+
       if (message is Map) {
         if (message['type'] == 'refresh') {
           GetEmailsService.instance.invoke(
@@ -59,6 +65,11 @@ class GmailScannerIsolate {
         }
       }
     });
+
+    // Make sure we update once on start if it was idle
+    if (statusPort != null) {
+      statusPort.send({'status': 'scanning'});
+    }
   }
 
   void stop() {
@@ -141,7 +152,7 @@ class GmailScannerIsolateWorker {
       }
 
       logger.s("Gmail sync complete.");
-      clientPort.send({'type': 'refresh'});
+      clientPort.send({'type': 'refresh', 'status': 'done'});
     } catch (e, stack) {
       logger.e("Error in Gmail Isolate: $e", error: e, stackTrace: stack);
     } finally {

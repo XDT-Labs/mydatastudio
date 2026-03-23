@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/main.dart';
@@ -23,12 +24,13 @@ class EmailDrawer extends StatefulWidget {
 }
 
 class _EmailDrawer extends State<EmailDrawer> {
+  final AppLogger logger = AppLogger(null);
   final GetCollectionsService _collectionsService =
       GetCollectionsService.instance;
   StreamSubscription<List<Collection>>? _collectionsServiceSub;
   StreamSubscription? _selectedCollectionSub;
   StreamSubscription? _selectedFolderSub;
-  
+
   List<Collection> collections = [];
   Collection? collection;
   String? selectedFolderId;
@@ -83,12 +85,12 @@ class _EmailDrawer extends State<EmailDrawer> {
     }
 
     // 2. Sort groups by their defined order
-    final sortedGroupNames = grouped.keys.toList()
-      ..sort((a, b) {
-        final orderA = _getGroupOrder(grouped[a]!.first.scanner);
-        final orderB = _getGroupOrder(grouped[b]!.first.scanner);
-        return orderA.compareTo(orderB);
-      });
+    final sortedGroupNames =
+        grouped.keys.toList()..sort((a, b) {
+          final orderA = _getGroupOrder(grouped[a]!.first.scanner);
+          final orderB = _getGroupOrder(grouped[b]!.first.scanner);
+          return orderA.compareTo(orderB);
+        });
 
     // 3. Flatten into a list with headers for the ListView
     final List<dynamic> flatList = [];
@@ -97,7 +99,9 @@ class _EmailDrawer extends State<EmailDrawer> {
 
       final groupItems = grouped[groupName]!;
       // Sort within the group alphabetically
-      groupItems.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      groupItems.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
       flatList.addAll(groupItems);
     }
 
@@ -175,35 +179,43 @@ class _EmailDrawer extends State<EmailDrawer> {
                         EmailPage.selectedFolder.add(folderId);
                         context.go('/email');
                       },
-                      onDelete: () =>
-                          _showDeleteConfirmationDialog(context, col),
+                      onDelete:
+                          () => _showDeleteConfirmationDialog(context, col),
                       onSync: () async {
-                        if (col.scanner == AppConstants.scannerEmailOutlookPst) {
+                        if (col.scanner ==
+                            AppConstants.scannerEmailOutlookPst) {
                           // For PST we run one-time import isolate
-                          final writerPort = await DatabaseManager.instance.writerPort;
+                          final writerPort =
+                              await DatabaseManager.instance.writerPort;
                           final serverUrl = MainApp.llmServiceUrl.value;
-                          final appDataDir = MainApp.appDataDirectory.valueOrNull;
+                          final appDataDir =
+                              MainApp.appDataDirectory.valueOrNull;
 
                           if (serverUrl != null && appDataDir != null) {
-                             final pstIsolate = OutlookPstScannerIsolate(
+                            final pstIsolate = OutlookPstScannerIsolate(
                               token: RootIsolateToken.instance,
                               dbWriterPort: writerPort,
                               appDir: appDataDir,
                               serverUrl: serverUrl,
                             );
-                            ScannerManager.getInstance().pstScanners[col.id] = pstIsolate;
+                            ScannerManager.getInstance().pstScanners[col.id] =
+                                pstIsolate;
                             await pstIsolate.start(col, force: true);
                           } else {
-                             if( context.mounted ) {
-                               ScaffoldMessenger.of(context).showSnackBar(
-                                 const SnackBar(content: Text('Cannot start PST sync: services or directory not ready')),
-                               );
-                             }
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Cannot start PST sync: services or directory not ready',
+                                  ),
+                                ),
+                              );
+                            }
                           }
                         } else {
                           ScannerManager.getInstance()
                               .getScanner(col)
-                            ?.start(col, null, true, true);
+                              ?.start(col, null, true, true);
                         }
                       },
                     );
@@ -221,6 +233,10 @@ class _EmailDrawer extends State<EmailDrawer> {
     switch (c.scanner) {
       case AppConstants.scannerEmailGmail:
         return 'Gmail';
+      case AppConstants.scannerEmailYahoo:
+        return 'Yahoo';
+      case AppConstants.scannerEmailOutlook:
+        return 'Outlook';
       default:
         return 'Other';
     }
@@ -230,12 +246,19 @@ class _EmailDrawer extends State<EmailDrawer> {
     switch (scanner) {
       case AppConstants.scannerEmailGmail:
         return 0;
-      default:
+      case AppConstants.scannerEmailYahoo:
         return 1;
+      case AppConstants.scannerEmailOutlook:
+        return 2;
+      default:
+        return 3;
     }
   }
 
-  void _showDeleteConfirmationDialog(BuildContext context, Collection collection) {
+  void _showDeleteConfirmationDialog(
+    BuildContext context,
+    Collection collection,
+  ) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -253,7 +276,7 @@ class _EmailDrawer extends State<EmailDrawer> {
               child: const Text('Delete', style: TextStyle(color: Colors.red)),
               onPressed: () async {
                 Navigator.of(context).pop();
-                
+
                 // 1. Show progress in the header
                 EmailPage.isDeleting.add(true);
 
@@ -264,7 +287,9 @@ class _EmailDrawer extends State<EmailDrawer> {
                   // 3. Cancel the reactive folder watch for this account so
                   //    the orphaned subscription can't keep firing on the main
                   //    thread after the account data is gone.
-                  GetEmailFoldersService.instance.disposeCollection(collection.id);
+                  GetEmailFoldersService.instance.disposeCollection(
+                    collection.id,
+                  );
 
                   // 4. Send delete command to background isolate
                   final writer = DatabaseManager.instance.writerIsolateClient;
@@ -275,11 +300,15 @@ class _EmailDrawer extends State<EmailDrawer> {
                     });
                   } else {
                     // Fallback to repository if writer is unavailable
-                    await CollectionRepository().deleteCollection(collection.id);
+                    await CollectionRepository().deleteCollection(
+                      collection.id,
+                    );
                   }
 
                   // 5. Refresh and cleanup
-                  _collectionsService.invoke(GetCollectionsServiceCommand("email"));
+                  _collectionsService.invoke(
+                    GetCollectionsServiceCommand("email"),
+                  );
                   if (EmailPage.selectedCollection.value?.id == collection.id) {
                     EmailPage.selectedCollection.add(null);
                   }
@@ -329,15 +358,18 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
     _folderSub = GetEmailFoldersService.instance.sink.listen((value) {
       if (mounted) {
         // Filter folders for this specific collection
-        final myFolders = value.where((f) => f.collectionId == widget.collection.id).toList();
+        final myFolders =
+            value.where((f) => f.collectionId == widget.collection.id).toList();
         if (myFolders.isNotEmpty) {
-           setState(() {
+          setState(() {
             folders = myFolders;
           });
         }
       }
     });
-    GetEmailFoldersService.instance.invoke(EmailFolderServiceCommand(widget.collection.id));
+    GetEmailFoldersService.instance.invoke(
+      EmailFolderServiceCommand(widget.collection.id),
+    );
   }
 
   @override
@@ -358,7 +390,7 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
     for (var f in folders) {
       final normalizedId = f.id.toUpperCase();
       final normalizedName = f.name.toUpperCase();
-      
+
       if (normalizedId == 'INBOX' || normalizedName == 'INBOX') {
         inbox = f;
       } else if (normalizedId == 'SENT' || normalizedName == 'SENT') {
@@ -367,9 +399,11 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
         otherFolders.add(f);
       }
     }
-    
+
     // Sort other folders alphabetically
-    otherFolders.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    otherFolders.sort(
+      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    );
 
     return ExpansionTile(
       initiallyExpanded: widget.isSelected,
@@ -394,51 +428,74 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
               if (val == 'sync') widget.onSync();
               if (val == 'delete') widget.onDelete();
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'sync', child: Text('Sync Account')),
-              const PopupMenuItem(
-                  value: 'delete', child: Text('Delete Account')),
-            ],
+            itemBuilder:
+                (context) => [
+                  const PopupMenuItem(
+                    value: 'sync',
+                    child: Text('Sync Account'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Text('Delete Account'),
+                  ),
+                ],
           ),
         ],
       ),
       children: [
-        if (inbox != null) _buildFolderTile(context, inbox, "Inbox", Icons.inbox),
+        if (inbox != null)
+          _buildFolderTile(context, inbox, "Inbox", Icons.inbox),
         if (sent != null) _buildFolderTile(context, sent, "Sent", Icons.send),
-        
+
         if (otherFolders.isNotEmpty)
           Theme(
             data: theme.copyWith(dividerColor: Colors.transparent),
             child: ExpansionTile(
               tilePadding: const EdgeInsets.only(left: 48.0, right: 16.0),
-              title: const Text(
-                "All Folders",
-                style: TextStyle(fontSize: 13),
-              ),
+              title: const Text("All Folders", style: TextStyle(fontSize: 13)),
               leading: const Icon(Icons.folder_outlined, size: 20),
               dense: true,
-              children: otherFolders
-                  .map((f) => _buildFolderTile(context, f, f.name, null, indent: 32))
-                  .toList(),
+              children:
+                  otherFolders
+                      .map(
+                        (f) => _buildFolderTile(
+                          context,
+                          f,
+                          f.name,
+                          null,
+                          indent: 32,
+                        ),
+                      )
+                      .toList(),
             ),
           ),
       ],
     );
   }
 
-  Widget _buildFolderTile(BuildContext context, EmailFolder f, String label, IconData? icon, {double indent = 48.0}) {
+  Widget _buildFolderTile(
+    BuildContext context,
+    EmailFolder f,
+    String label,
+    IconData? icon, {
+    double indent = 48.0,
+  }) {
     final theme = Theme.of(context);
     final isSelected = widget.isSelected && widget.selectedFolderId == f.id;
-    
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 8.0),
       child: ListTile(
         dense: true,
         contentPadding: EdgeInsets.only(left: indent - 8.0),
-        leading: icon != null
-            ? Icon(icon,
-                size: 18, color: isSelected ? theme.colorScheme.primary : null)
-            : null,
+        leading:
+            icon != null
+                ? Icon(
+                  icon,
+                  size: 18,
+                  color: isSelected ? theme.colorScheme.primary : null,
+                )
+                : null,
         title: Text(
           label,
           style: TextStyle(
@@ -446,26 +503,29 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
           ),
         ),
-        trailing: (f.messagesUnread ?? 0) > 0
-            ? Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  f.messagesUnread.toString(),
-                  style: TextStyle(
+        trailing:
+            (f.messagesUnread ?? 0) > 0
+                ? Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    f.messagesUnread.toString(),
+                    style: TextStyle(
                       fontSize: 10,
-                      color: theme.colorScheme.onPrimaryContainer),
-                ),
-              )
-            : null,
+                      color: theme.colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+                )
+                : null,
         selected: isSelected,
         selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.3),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         onTap: () => widget.onFolderTap(f.id),
       ),
     );
