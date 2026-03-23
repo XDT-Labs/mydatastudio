@@ -61,7 +61,12 @@ class _EmailDrawer extends State<EmailDrawer> {
       }
     });
 
-    _collectionsService.invoke(GetCollectionsServiceCommand("email"));
+    // Deferred to post-frame: prevents the BehaviorSubject from replaying
+    // its last value synchronously in initState(), which cascades setState()
+    // calls before the first frame can render.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _collectionsService.invoke(GetCollectionsServiceCommand("email"));
+    });
     super.initState();
   }
 
@@ -367,9 +372,17 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
         }
       }
     });
-    GetEmailFoldersService.instance.invoke(
-      EmailFolderServiceCommand(widget.collection.id),
-    );
+    // Deferred to post-frame: each visible account tile calls invoke() when
+    // mounted. Without deferral, N accounts fire N simultaneous DB queries
+    // whose BehaviorSubject callbacks all cascade setState() before the first
+    // frame can paint, causing the OS spinner on source click.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        GetEmailFoldersService.instance.invoke(
+          EmailFolderServiceCommand(widget.collection.id),
+        );
+      }
+    });
   }
 
   @override

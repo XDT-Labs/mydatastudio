@@ -17,12 +17,22 @@ class FolderDesktopRepository {
     return Future(() => folder);
   }
 
-  Future<List<Folder>> getByParentPath(String collectionId, String path) async {
-    List<Folder> folders =
-        await (db.select(db.folders)
-          ..where((t) => t.collectionId.equals(collectionId) & t.parent.equals(path))).get();
+  Future<List<Folder>> getByParentPath(
+    String collectionId,
+    String path, {
+    int limit = 500,
+    int offset = 0,
+  }) async {
+    final query =
+        db.select(db.folders)
+          ..where(
+            (t) =>
+                t.collectionId.equals(collectionId) & t.parent.equals(path),
+          )
+          ..orderBy([(t) => drift.OrderingTerm(expression: t.name)])
+          ..limit(limit, offset: offset);
 
-    return Future(() => folders);
+    return query.get();
   }
 
   Future<Folder?> create(Folder f) async {

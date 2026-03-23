@@ -58,6 +58,12 @@ class _RxFilesPage extends State<RxFilesPage> {
   Collection? collection;
   String? path;
 
+  // ── Pagination ──────────────────────────────────────────────
+  int _fileOffset = 0;
+  bool _hasMoreFiles = true;
+  bool _isLoadingMore = false;
+  final ScrollController _scrollController = ScrollController();
+
   /// Navigation trail — empty means we are at the collection root.
   List<_BreadcrumbEntry> _breadcrumbTrail = [];
   String sortColumn = "name";
@@ -69,6 +75,7 @@ class _RxFilesPage extends State<RxFilesPage> {
   @override
   void initState() {
     _collectionService = GetCollectionsService.instance;
+    _attachScrollListener();
 
     _collectionsServiceSub = _collectionService!.sink.listen((value) {
       setState(() {
@@ -93,6 +100,9 @@ class _RxFilesPage extends State<RxFilesPage> {
           });
         });
 
+        // Reset pagination on collection change, then load first page.
+        _fileOffset = 0;
+        _hasMoreFiles = true;
         _filesAndFoldersService!.invoke(
           GetFileAndFoldersServiceCommand(value, value.path),
         );
@@ -117,10 +127,45 @@ class _RxFilesPage extends State<RxFilesPage> {
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _fileServiceSub?.cancel();
     _collectionsServiceSub?.cancel();
     _selectedCollectionSub?.cancel();
     super.dispose();
+  }
+
+  /// Loads the next page of files for the current collection and path.
+  void _loadMoreFiles() {
+    if (_isLoadingMore || !_hasMoreFiles) return;
+    final col = collection;
+    final currentPath = path;
+    if (col == null || currentPath == null) return;
+    _isLoadingMore = true;
+    _fileOffset += kFilesPageSize;
+    _filesAndFoldersService!.invoke(
+      GetFileAndFoldersServiceCommand(
+        col,
+        currentPath,
+        offset: _fileOffset,
+      ),
+    ).then((results) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingMore = false;
+        if (results.length < kFilesPageSize) _hasMoreFiles = false;
+      });
+    });
+  }
+
+  /// Wires the scroll controller to trigger load-more at 80% scroll depth.
+  void _attachScrollListener() {
+    _scrollController.addListener(() {
+      if (!_scrollController.hasClients) return;
+      final pos = _scrollController.position;
+      if (pos.pixels >= pos.maxScrollExtent * 0.8) {
+        _loadMoreFiles();
+      }
+    });
   }
 
   @override
@@ -211,7 +256,10 @@ class _RxFilesPage extends State<RxFilesPage> {
                   child: Stack(
                     children: [
                       NotificationListener<FiledNotification>(
-                        child: FileTable(data: filesAndFolders),
+                        child: FileTable(
+                          data: filesAndFolders,
+                          scrollController: _scrollController,
+                        ),
                         onNotification: (FiledNotification n) {
                           if (n is PathChangedNotification) {
                             if (n.asset.path != collection?.path) {
@@ -231,6 +279,9 @@ class _RxFilesPage extends State<RxFilesPage> {
                                 selectedAsset =
                                     null; // close drawer when drilling into folder
                               });
+                              // Reset pagination before loading the new path.
+                              _fileOffset = 0;
+                              _hasMoreFiles = true;
                               _filesAndFoldersService!.invoke(
                                 GetFileAndFoldersServiceCommand(
                                   collection!,

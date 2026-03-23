@@ -19,8 +19,9 @@ import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class FileTable extends StatefulWidget {
-  const FileTable({super.key, required this.data});
+  const FileTable({super.key, required this.data, this.scrollController});
   final List<FileAsset> data;
+  final ScrollController? scrollController;
 
   @override
   State<FileTable> createState() => _FileTable();
@@ -61,6 +62,7 @@ class _FileTable extends State<FileTable> {
         return Container(
           constraints: const BoxConstraints.expand(),
           child: SingleChildScrollView(
+            controller: widget.scrollController,
             scrollDirection: Axis.vertical,
             child: DataTable(
               dataRowMaxHeight: 40,

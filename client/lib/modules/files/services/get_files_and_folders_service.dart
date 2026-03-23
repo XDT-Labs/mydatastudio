@@ -7,11 +7,19 @@ import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/services/rx_service.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 
+/// Number of files fetched per page.
+const int kFilesPageSize = 200;
+
 class GetFileAndFoldersService
     extends RxService<GetFileAndFoldersServiceCommand, List<FileAsset>> {
-  static final GetFileAndFoldersService _singleton = GetFileAndFoldersService();
+  static final GetFileAndFoldersService _singleton =
+      GetFileAndFoldersService();
   static get instance => _singleton;
   AppLogger logger = AppLogger(null);
+
+  /// Tracks the accumulated pages so load-more can append without reading
+  /// the sink (which is typed as Subject<R> and has no valueOrNull).
+  List<FileAsset> _currentItems = [];
 
   @override
   Future<List<FileAsset>> invoke(
@@ -27,25 +35,40 @@ class GetFileAndFoldersService
       path = path.substring(0, path.length - 1);
     }
 
-    // Skip scanner if it's just a refresh-only request.
+    // Skip scanner if it's just a refresh-only or load-more request.
     // The scan runs in a background isolate — we fire it without awaiting so
-    // the DB query and UI update happen immediately and don't stall waiting
-    // for the scanner to finish starting up.
-    if (!command.refreshOnly) {
+    // the DB query and UI update happen immediately.
+    if (!command.refreshOnly && command.offset == 0) {
       ScannerManager.getInstance()
           .getScanner(command.collection)
           ?.start(command.collection, path, false, false);
     }
 
-    List<FileAsset> files = await fileRepo.getByParentPath(command.collection.id, path);
-    List<FileAsset> folders = await folderRepo.getByParentPath(command.collection.id, path);
+    // Folders always load fully (rarely > 500 per dir); only files paginate.
+    final List<FileAsset> folders = command.offset == 0
+        ? await folderRepo.getByParentPath(command.collection.id, path)
+        : [];
 
-    List<FileAsset> assets = [...files, ...folders];
+    final List<FileAsset> files = await fileRepo.getByParentPath(
+      command.collection.id,
+      path,
+      limit: command.pageSize,
+      offset: command.offset,
+    );
 
-    sink.add(assets);
+    final List<FileAsset> newItems = [...folders, ...files];
+
+    if (command.offset == 0) {
+      // First page — replace the current list entirely.
+      _currentItems = newItems;
+    } else {
+      // Load-more — append to the existing list.
+      _currentItems = [..._currentItems, ...newItems];
+    }
+    sink.add(_currentItems);
+
     isLoading.add(false);
-
-    return Future(() => assets);
+    return newItems;
   }
 }
 
@@ -54,6 +77,19 @@ class GetFileAndFoldersServiceCommand implements RxCommand {
   String path;
   bool refreshOnly;
 
-  GetFileAndFoldersServiceCommand(this.collection, this.path, {this.refreshOnly = false});
+  /// Pagination offset for files (folders are always fully loaded on page 0).
+  int offset;
+
+  /// Number of files to fetch per page.
+  int pageSize;
+
+  GetFileAndFoldersServiceCommand(
+    this.collection,
+    this.path, {
+    this.refreshOnly = false,
+    this.offset = 0,
+    this.pageSize = kFilesPageSize,
+  });
 }
+
 
