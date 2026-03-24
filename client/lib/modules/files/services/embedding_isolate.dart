@@ -63,10 +63,12 @@ class EmbeddingIsolate {
               logger.i('[EmbeddingIsolate] $msg');
               break;
             case 'error':
+              final stData = data['stackTrace'];
+              final st = stData == null ? null : (stData is StackTrace ? stData : StackTrace.fromString(stData.toString()));
               logger.e(
                 '[EmbeddingIsolate] $msg',
                 error: data['error'],
-                stackTrace: data['stackTrace'],
+                stackTrace: st,
               );
               break;
             case 'warning':

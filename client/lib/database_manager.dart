@@ -596,7 +596,10 @@ LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb) {
       return NativeDatabase.createInBackground(
         file,
         logStatements: false,
-        cachePreparedStatements: true,
+        setup: (db) {
+          db.execute('PRAGMA busy_timeout=5000;');
+          db.execute('PRAGMA journal_mode=WAL;');
+        },
         sqlite3: _loadExtensions,
       );
     } else {
