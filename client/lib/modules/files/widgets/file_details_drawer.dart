@@ -294,7 +294,6 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        border: Border(left: BorderSide(color: Colors.grey.shade300, width: 1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -308,9 +307,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
               bottom: 4,
             ),
             decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: Colors.grey.shade200, width: 1),
-              ),
+              color: theme.colorScheme.surfaceContainerHigh,
             ),
             child: Row(
               children: [

@@ -26,7 +26,7 @@ class _AiChatDrawer extends State<AiChatDrawer> {
     return SizedBox.expand(
       child: Container(
         height: double.infinity,
-        color: Colors.transparent,
+        color: Colors.white,
         padding: const EdgeInsets.all(8),
         child: Text("AI Chat Drawer - TODO"),
       ),

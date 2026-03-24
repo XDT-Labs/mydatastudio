@@ -81,7 +81,6 @@ class _EmailDetails extends State<EmailDetails> {
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        border: Border(left: BorderSide(color: Colors.grey.shade300, width: 1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -90,9 +89,7 @@ class _EmailDetails extends State<EmailDetails> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: Colors.grey.shade200, width: 1),
-              ),
+              color: theme.colorScheme.surfaceContainerHigh,
             ),
             child: Row(
               children: [
@@ -139,10 +136,10 @@ class _EmailDetails extends State<EmailDetails> {
   }
 
   Widget _buildAttachmentsSection() {
+    final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        border: Border(top: BorderSide(color: Colors.grey.shade200, width: 1)),
+        color: theme.colorScheme.surfaceContainerHigh,
       ),
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -175,6 +172,7 @@ class _EmailDetails extends State<EmailDetails> {
 
   Widget _buildAttachmentThumbnail(model.File file) {
     final isImage = file.contentType.startsWith('image/');
+    final theme = Theme.of(context);
     
     return GestureDetector(
       onTap: () async {
@@ -186,13 +184,12 @@ class _EmailDetails extends State<EmailDetails> {
         width: 120,
         margin: const EdgeInsets.only(right: 8),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: theme.colorScheme.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: Colors.grey.shade300),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 2,
+              color: theme.colorScheme.shadow,
+              blurRadius: 4,
               offset: const Offset(0, 1),
             ),
           ],

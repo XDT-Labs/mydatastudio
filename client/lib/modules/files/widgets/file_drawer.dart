@@ -161,22 +161,16 @@ class _FileDrawer extends State<FileDrawer> {
 
     return SizedBox.expand(
       child: Container(
-        color: Colors.transparent,
+        color: Colors.white,
         padding: const EdgeInsets.all(8),
         child: Scaffold(
-          backgroundColor: Colors.transparent,
+          backgroundColor: Colors.white,
           floatingActionButton: FloatingActionButton(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              side: const BorderSide(color: Colors.grey, width: 1),
-              borderRadius: BorderRadius.circular(16),
-            ),
             tooltip: "Add Source",
             onPressed: () {
               GoRouter.of(context).go("/files/add");
             },
-            child: const Icon(Icons.add, color: Colors.grey),
+            child: const Icon(Icons.add),
           ),
           body: Column(
             children: [

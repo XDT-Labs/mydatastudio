@@ -40,31 +40,28 @@ class _NavigationWrapperState extends State<NavigationWrapper> {
                       (_drawerOpen && widget.drawer != null)
                           ? Container(
                               width: 250, 
-                              decoration: const BoxDecoration(
-                                color: Colors.white,
-                                border: Border(
-                                  right: BorderSide(color: Colors.black12, width: 1.0),
-                                ),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.surfaceContainerLow,
                               ),
                               child: widget.drawer,
                             )
                           : Container(),
                       Expanded(
                         child: Container(
-                          padding: const EdgeInsets.all(16), // slightly more padding around the content
+                          padding: const EdgeInsets.all(16), // effectively increasing spacing
                           decoration: BoxDecoration(
-                            color: theme.scaffoldBackgroundColor, // The gray background
+                            color: theme.colorScheme.surface, 
                           ),
                           child: Container(
                             clipBehavior: Clip.antiAlias,
                             decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8), // GCP style card radius
-                              boxShadow: const [
+                              color: theme.colorScheme.surfaceContainerLowest,
+                              borderRadius: BorderRadius.circular(8), // md roundedness
+                              boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black12,
-                                  blurRadius: 2.0,
-                                  offset: Offset(0, 1),
+                                  color: theme.colorScheme.shadow,
+                                  blurRadius: 8.0, // extra-diffused shadow
+                                  offset: const Offset(0, 2),
                                 ),
                               ],
                             ),
@@ -83,9 +80,7 @@ class _NavigationWrapperState extends State<NavigationWrapper> {
             child: Container(
               padding: const EdgeInsets.only(left: 16),
               decoration: BoxDecoration(
-                border: const Border(
-                  top: BorderSide(width: 1.0, color: Colors.black12),
-                ),
+                color: theme.colorScheme.surfaceVariant, // optional subtle separation
               ),
               child: const Row(children: [StatusMessage()]),
             ),

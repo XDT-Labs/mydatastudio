@@ -113,19 +113,13 @@ class _EmailDrawer extends State<EmailDrawer> {
     return SizedBox.expand(
       child: Container(
         height: double.infinity,
-        color: Colors.transparent,
+        color: Colors.white,
         padding: const EdgeInsets.all(8),
         child: Scaffold(
-          backgroundColor: Colors.transparent,
+          backgroundColor: Colors.white,
           floatingActionButton: FloatingActionButton(
             tooltip: "Add Email",
-            backgroundColor: Colors.white,
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-              side: const BorderSide(color: Colors.grey, width: 1),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Icon(Icons.add, color: Colors.grey),
+            child: const Icon(Icons.add),
             onPressed: () {
               GoRouter.of(context).go("/email/add");
             },
