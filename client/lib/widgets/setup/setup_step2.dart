@@ -28,11 +28,11 @@ class _SetupStep2State extends State<SetupStep2> {
     'storageLocation': FormControl<String>(validators: [Validators.required]),
   });
 
-  onStepCancelHandler() {
+  void onStepCancelHandler() {
     widget.onCancel();
   }
 
-  onStepContinueHandler(BuildContext context) async {
+  Future<void> onStepContinueHandler(BuildContext context) async {
     var appUser = widget.appUser;
 
     if (storageForm.valid && appUser != null) {

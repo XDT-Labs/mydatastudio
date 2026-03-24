@@ -64,7 +64,7 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                     padding: const EdgeInsets.symmetric(vertical: 2.0),
                     child: ListTile(
                       selected: isSelected,
-                      selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.3),
+                      selectedTileColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),

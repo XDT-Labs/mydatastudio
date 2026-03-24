@@ -5,20 +5,27 @@ import 'package:rxdart/rxdart.dart';
 import 'package:path/path.dart' as p;
 
 class ConcisePrinter extends LogPrinter {
-  final PrettyPrinter _errorPrinter = PrettyPrinter(methodCount: 8, errorMethodCount: 8, lineLength: 120, colors: true, printEmojis: true, printTime: false);
+  final PrettyPrinter _errorPrinter = PrettyPrinter(
+    methodCount: 8,
+    errorMethodCount: 8,
+    lineLength: 120,
+    colors: true,
+    printEmojis: true,
+    dateTimeFormat: DateTimeFormat.none,
+  );
 
   static final levelEmojis = {
-    Level.verbose: '🐱',
+    Level.trace: '🐱',
     Level.debug: '🐛',
     Level.info: '💡',
     Level.warning: '⚠️',
     Level.error: '⛔',
-    Level.wtf: '👾',
+    Level.fatal: '👾',
   };
 
   @override
   List<String> log(LogEvent event) {
-    if (event.level == Level.error || event.level == Level.warning || event.level == Level.wtf) {
+    if (event.level == Level.error || event.level == Level.warning || event.level == Level.fatal) {
       return _errorPrinter.log(event);
     }
 
@@ -59,8 +66,8 @@ class ConcisePrinter extends LogPrinter {
 class AppLogger extends Logger {
   SendPort? sendPort;
 
-  AppLogger(this.sendPort, {LogFilter? filter})
-      : super(printer: ConcisePrinter(), filter: filter);
+  AppLogger(this.sendPort, {super.filter})
+      : super(printer: ConcisePrinter());
 
   @override
   void log(Level level, dynamic message, {

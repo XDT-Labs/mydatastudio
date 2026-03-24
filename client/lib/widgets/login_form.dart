@@ -164,7 +164,7 @@ class _LoginFormState extends State<LoginForm> {
   /// Args:
   ///   context (BuildContext): The `context` parameter in the `formSubmitHandler` function is an object
   /// passed in from the build method
-  formSubmitHandler(BuildContext? context, Map<String, dynamic> values) async {
+  Future<void> formSubmitHandler(BuildContext? context, Map<String, dynamic> values) async {
     if (context?.mounted ?? false) {
       setState(() {
         isSubmitting = true;

@@ -156,16 +156,14 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
           }
         }
 
-        if (doc != null) {
-          final pages = doc.pagesCount;
-          final controller = PdfController(document: Future.value(doc));
-          if (mounted) {
-            setState(() {
-              _pdfController = controller;
-              _pdfTotalPages = pages;
-              _pdfCurrentPage = 1;
-            });
-          }
+        final pages = doc.pagesCount;
+        final controller = PdfController(document: Future.value(doc));
+        if (mounted) {
+          setState(() {
+            _pdfController = controller;
+            _pdfTotalPages = pages;
+            _pdfCurrentPage = 1;
+          });
         }
       } catch (e) {
         debugPrint('Error loading PDF: $e');
@@ -590,14 +588,12 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
   // ─── STL Preview (3D) ──────────────────────────────────────────
   Widget _buildStlPreview(File file) {
-    if (_threeJs == null) {
-      _threeJs = three.ThreeJS(
-        onSetupComplete: () {
-          if (mounted) setState(() {});
-        },
-        setup: () => _initStlScene(_resolvedPath(file)),
-      );
-    }
+    _threeJs ??= three.ThreeJS(
+      onSetupComplete: () {
+        if (mounted) setState(() {});
+      },
+      setup: () => _initStlScene(_resolvedPath(file)),
+    );
 
     return Container(
       height: _previewHeight,

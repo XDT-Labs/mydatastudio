@@ -495,8 +495,9 @@ class YahooScannerIsolateWorker {
         n == 'SENT' ||
         n == 'TRASH' ||
         n == 'SPAM' ||
-        n == 'DRAFTS')
+        n == 'DRAFTS') {
       return 'system';
+    }
     return 'user';
   }
 

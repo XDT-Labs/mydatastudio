@@ -1,8 +1,6 @@
 import 'dart:io';
 import 'dart:ui';
 
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/app_router.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/family_dam_app.dart';
@@ -11,13 +9,10 @@ import 'package:mydatatools/python_manager.dart';
 
 import 'package:mydatatools/repositories/watchers/database_change_watcher.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
-import 'package:mydatatools/services/get_user_service.dart';
 import 'package:mydatatools/widgets/auth_dialog_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:rxdart/rxdart.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:password_dart/password_dart.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:media_kit/media_kit.dart';
 
@@ -154,52 +149,12 @@ class MainAppState extends State<MainApp>
       //set python manager
       pythonManager = await pythonFuture;
 
-      // 3. Attempt Auto-Login
-      //await _attemptAutoLogin();
-
       // 4. Signal ready
       if (mounted) {
         setState(() {
           _isSetupComplete = MainApp.databaseManager != null;
         });
       }
-    }
-  }
-
-  Future<void> _attemptAutoLogin() async {
-    try {
-      const storage = FlutterSecureStorage(
-        iOptions: IOSOptions(
-          groupId: AppConstants.appName,
-          synchronizable: true,
-          accessibility: KeychainAccessibility.first_unlock,
-        ),
-      );
-
-      if (await storage.containsKey(key: AppConstants.securePassword)) {
-        // Check remember me preference
-        String? rememberMe = await storage.read(
-          key: AppConstants.secureRememberMe,
-        );
-        if (rememberMe != 'true') {
-          return;
-        }
-
-        String? pwd = await storage.read(key: AppConstants.securePassword);
-        if (pwd != null && pwd.isNotEmpty) {
-          var algorithm = PBKDF2(
-            blockLength: 64,
-            iterationCount: 10000,
-            desiredKeyLength: 64,
-          );
-          var hash = Password.hash(pwd, algorithm);
-
-          await GetUserService.instance.invoke(GetUserServiceCommand(hash));
-        }
-      }
-    } catch (e) {
-      // Log error but don't block startup
-      AppLogger(null).e("Auto-login failed", error: e);
     }
   }
 

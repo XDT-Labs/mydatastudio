@@ -65,7 +65,7 @@ class GoogleDriveProvider implements FileSourceProvider {
       final response = await api.files.list(
         q: "'$parentId' in parents and trashed = false",
         // Request specific fields to avoid fetching the entire resource
-        $fields: 'nextPageToken, files(${ _fileFields})',
+        $fields: 'nextPageToken, files($_fileFields)',
         pageToken: pageToken,
         pageSize: 200,
         orderBy: 'folder, name',
@@ -136,7 +136,7 @@ class GoogleDriveProvider implements FileSourceProvider {
   @override
   Future<bool> deleteFile(Collection collection, FileSourceFile file) async {
     try {
-      _logger.i('Trashing Drive file "${file.name}" (${file.id})');
+      _logger.i('Trashing Drive file "${file.name}" ($file.id)');
       final api = await _buildApi(collection);
 
       // Update the `trashed` field to move to trash rather than permanently delete

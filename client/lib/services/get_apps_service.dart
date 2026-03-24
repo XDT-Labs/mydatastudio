@@ -4,7 +4,7 @@ import 'package:mydatatools/services/rx_service.dart';
 
 class GetAppsService extends RxService<GetAppsServiceCommand, List<App>> {
   static final GetAppsService _singleton = GetAppsService();
-  static get instance => _singleton;
+  static GetAppsService get instance => _singleton;
 
   // Cache the app list — apps are static at runtime (populated once at DB
   // creation and never changed), so there is no need to re-query on every

@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 
 class FileUpsertService extends RxService<FileUpsertServiceCommand, File> {
   static final FileUpsertService _singleton = FileUpsertService();
-  static get instance => _singleton;
+  static FileUpsertService get instance => _singleton;
 
   @override
   Future<File> invoke(FileUpsertServiceCommand command) async {

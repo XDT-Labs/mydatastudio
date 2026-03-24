@@ -80,7 +80,7 @@ class _NavigationWrapperState extends State<NavigationWrapper> {
             child: Container(
               padding: const EdgeInsets.only(left: 16),
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceVariant, // optional subtle separation
+                color: theme.colorScheme.surfaceContainerHighest, // optional subtle separation
               ),
               child: const Row(children: [StatusMessage()]),
             ),

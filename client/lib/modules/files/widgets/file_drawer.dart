@@ -220,7 +220,7 @@ class _FileDrawer extends State<FileDrawer> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.primary.withOpacity(0.8),
+                            color: theme.colorScheme.primary.withValues(alpha: 0.8),
                             letterSpacing: 1.0,
                           ),
                         ),
@@ -237,7 +237,7 @@ class _FileDrawer extends State<FileDrawer> {
                       child: ListTile(
                         dense: subTitle != null,
                         selected: isSelected,
-                        selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.3),
+                        selectedTileColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -341,6 +341,10 @@ class _FileDrawer extends State<FileDrawer> {
 
                 final db = DatabaseManager.instance.database;
                 if (db != null) {
+                  // Capture context-dependent objects before async gap
+                  final router = GoRouter.of(context);
+                  final messenger = ScaffoldMessenger.of(context);
+
                   // Delete the collection and all related metadata (files, folders, etc.)
                   await CollectionRepository().deleteCollection(collection.id);
 
@@ -351,12 +355,10 @@ class _FileDrawer extends State<FileDrawer> {
 
                   // If the deleted collection was the current one, go home
                   if (this.collection?.id == collection.id) {
-                    GoRouter.of(context).go('/files');
-                    // We might need to refresh the page state or selected collection here
-                    // RxFilesPage.selectedCollection.add(null); // Would need to handle null in UI if allowed
+                    router.go('/files');
                   }
 
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  messenger.showSnackBar(
                     SnackBar(
                       content: Text('Collection "${collection.name}" deleted'),
                     ),

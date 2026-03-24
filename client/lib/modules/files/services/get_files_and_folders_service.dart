@@ -17,11 +17,11 @@ class GetFileAndFoldersService
     extends RxService<GetFileAndFoldersServiceCommand, List<FileAsset>> {
   static final GetFileAndFoldersService _singleton =
       GetFileAndFoldersService();
-  static get instance => _singleton;
+  static GetFileAndFoldersService get instance => _singleton;
   AppLogger logger = AppLogger(null);
 
   /// Tracks the accumulated pages so load-more can append without reading
-  /// the sink (which is typed as Subject<R> and has no valueOrNull).
+  /// the sink (which is typed as `Subject<R>` and has no valueOrNull).
   List<FileAsset> _currentItems = [];
 
   @override
@@ -42,13 +42,13 @@ class GetFileAndFoldersService
     // absolutePath is used for filesystem operations (scanner start).
     String absolutePath;
 
-    const _emailScanners = {
+    const emailScanners = {
       AppConstants.scannerEmailOutlookPst,
       AppConstants.scannerEmailYahoo,
       AppConstants.scannerEmailGmail,
     };
 
-    if (_emailScanners.contains(command.collection.scanner)) {
+    if (emailScanners.contains(command.collection.scanner)) {
       // Email collections use a computed extraction root; files are stored
       // relative to this root in the database.
       final storagePath = DatabaseManager.instance.storagePath;
@@ -113,6 +113,8 @@ class GetFileAndFoldersService
 
 class GetFileAndFoldersServiceCommand implements RxCommand {
   Collection collection;
+
+  /// Loads all files and folders for `path`. `path` can be a `Folder.ID` or `null` for the root of the collection.
   String path;
   bool refreshOnly;
 
@@ -130,5 +132,3 @@ class GetFileAndFoldersServiceCommand implements RxCommand {
     this.pageSize = kFilesPageSize,
   });
 }
-
-

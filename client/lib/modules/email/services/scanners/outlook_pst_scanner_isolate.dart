@@ -291,7 +291,7 @@ class OutlookPstScannerIsolateWorker {
 
       final parentPath = p.dirname(dirPath);
       final folder = Folder(
-        id: '${collectionId}:${dirPath}',
+        id: '$collectionId:$dirPath',
         name: p.basename(dirPath),
         path: dirPath,
         // extractionRoot has the collection.id as its notional parent, which

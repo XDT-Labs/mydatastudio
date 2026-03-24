@@ -7,7 +7,7 @@ import 'package:collection/collection.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:uuid/uuid.dart';
+
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -15,7 +15,7 @@ void main() {
   group('DatabaseRepository', () {
     //late DatabaseManager databaseRepository;
     io.Directory? path;
-    String dbName = 'test-${DateTime.now().millisecondsSinceEpoch}.sqllite';
+    //String dbName = 'test-${DateTime.now().millisecondsSinceEpoch}.sqllite';
 
     setUpAll(() async {
       //final Uri basedir = (goldenFileComparator as LocalFileComparator).basedir;
@@ -25,8 +25,7 @@ void main() {
       const MethodChannel channel = MethodChannel(
         'plugins.flutter.io/path_provider',
       );
-      // ignore: deprecated_member_use
-      channel.setMockMethodCallHandler((MethodCall methodCall) async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (MethodCall methodCall) async {
         return ".";
       });
 
@@ -37,10 +36,12 @@ void main() {
       //(await databaseRepository.database).close();
 
       if (path != null) {
+        /*
         io.File f = io.File("data/$dbName");
         if (f.existsSync()) {
           f.deleteSync();
         }
+        */
       }
     });
 
@@ -51,7 +52,7 @@ void main() {
     //Apps, AppUsers, Collections, Emails, Files, Folders
     test('check Collections tables exists', () async {
       print("closing database");
-      var tables = (await DatabaseManager.instance.database)?.allTables;
+      var tables = DatabaseManager.instance.database?.allTables;
 
       var t = tables?.firstWhereOrNull((e) {
         return e is m.Files;
@@ -60,6 +61,7 @@ void main() {
     });
 
     test("Delete File", () async {
+      /*
       m.File file = m.File(
         id: const Uuid().v4().toString(),
         name: "foo.jpg",
@@ -72,6 +74,7 @@ void main() {
         size: 101,
         isDeleted: false,
       );
+      */
       // var db = DatabaseManager.instance.database;
       // await db?.into(db?.files).insert(file);
 
@@ -86,6 +89,7 @@ void main() {
     });
 
     test("check all properties are saved", () async {
+      /*
       m.File file = m.File(
         id: const Uuid().v4().toString(),
         name: "foo.jpg",
@@ -98,6 +102,7 @@ void main() {
         size: 101,
         isDeleted: false,
       );
+      */
 
       // var db = await DatabaseManager.instance.database;
       // await db?.into(db?.files).insert(file);
@@ -129,6 +134,7 @@ void main() {
     });
 
     test("Insert multiple files", () async {
+      /*
       m.File file1 = m.File(
         id: const Uuid().v4().toString(),
         name: "foo1.jpg",
@@ -165,6 +171,7 @@ void main() {
         size: 101,
         isDeleted: false,
       );
+      */
 
       // var db = await databaseRepository.database;
       // await db.into(db.files).insert(file1);

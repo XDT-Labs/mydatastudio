@@ -20,11 +20,10 @@ const lightColorScheme = ColorScheme(
   onErrorContainer: Color(0xFF410E0B),
   outline: Color(0xFF596064),
   outlineVariant: Color(0x33596064), // 20% opacity ghost border
-  background: Color(0xFFF8F9FB),
-  onBackground: Color(0xFF2C3437),
+
   surface: Color(0xFFF8F9FB),
   onSurface: Color(0xFF2C3437),
-  surfaceVariant: Color(0xFFF0F4F6), // Using for generalized "low" container/variant
+
   onSurfaceVariant: Color(0xFF596064),
   inverseSurface: Color(0xFF2C3437),
   onInverseSurface: Color(0xFFF8F9FB),
@@ -63,11 +62,10 @@ const darkColorScheme = ColorScheme(
   onErrorContainer: Color(0xFFF9DEDC),
   outline: Color(0xFF938F99),
   outlineVariant: Color(0x33CAC4D0),
-  background: Color(0xFF1C1B1F),
-  onBackground: Color(0xFFE6E1E5),
+
   surface: Color(0xFF1C1B1F),
   onSurface: Color(0xFFE6E1E5),
-  surfaceVariant: Color(0xFF49454F),
+
   onSurfaceVariant: Color(0xFFCAC4D0),
   inverseSurface: Color(0xFFE6E1E5),
   onInverseSurface: Color(0xFF313033),

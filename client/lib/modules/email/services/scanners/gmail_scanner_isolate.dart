@@ -337,7 +337,7 @@ class GmailScannerIsolateWorker {
     List<File> files = [];
     final sep = io.Platform.pathSeparator;
     // Use the provided year folder path or default to messageId under root
-    final effectiveFolderPath = targetFolderPath ?? p.normalize('${collection.path}${sep}$messageId');
+    final effectiveFolderPath = targetFolderPath ?? p.normalize('${collection.path}$sep$messageId');
 
     // Ensure folder exists on disk
     await io.Directory(effectiveFolderPath).create(recursive: true);
@@ -358,7 +358,7 @@ class GmailScannerIsolateWorker {
           await file.writeAsBytes(base64Url.decode(attachment.data!));
 
           final f = File(
-            id: const Uuid().v5(Uuid.NAMESPACE_URL, 'file:email:${collection.id}:$messageId:$originalFileName'),
+            id: const Uuid().v5(Namespace.url.value, 'file:email:${collection.id}:$messageId:$fileName'),
             collectionId: collection.id,
             name: originalFileName,
             path: file.path,
@@ -414,7 +414,7 @@ class GmailScannerIsolateWorker {
 
   static Folder _createFolderObj(String path, String parent, String name, String collectionId, DateTime date, {String? emailId}) {
     return Folder(
-      id: const Uuid().v5(Uuid.NAMESPACE_URL, 'folder:email:$collectionId:$path'),
+      id: const Uuid().v5(Namespace.url.value, 'folder:email:$collectionId:$path'),
       collectionId: collectionId,
       name: name,
       path: path,

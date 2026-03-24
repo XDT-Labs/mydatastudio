@@ -238,7 +238,7 @@ class _FileTable extends State<FileTable> {
                     maxWidth: 140,
                   ),
                   child: Tooltip(
-                    message: f.dateCreated.toLocal().toString(),
+                    message: '${f.dateCreated.toLocal().toString()} and ${assets.length - 1} more',
                     child: Text(
                       moment.fromNowPrecise(
                         form: Abbreviation.full,
@@ -340,7 +340,7 @@ class _FileTable extends State<FileTable> {
               const DataCell(Text('')),
               const DataCell(Text('')),
               const DataCell(Text('')),
-],
+            ],
             onSelectChanged: (bool? e) {
               setState(() {
                 if (e != null && e) {
@@ -491,10 +491,6 @@ class _FileTable extends State<FileTable> {
     if (bytes <= 0) return "0 B";
     const suffixes = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
     var i = (log(bytes) / log(1024)).floor();
-    return ((bytes / pow(1024, i)).toStringAsFixed(
-          1,
-        )).replaceAll(RegExp(r'\.0$'), '') +
-        ' ' +
-        suffixes[i];
+    return '${(bytes / pow(1024, i)).toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} ${suffixes[i]}';
   }
 }

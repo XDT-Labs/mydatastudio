@@ -172,6 +172,7 @@ class _RxFilesPage extends State<RxFilesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     //final size = MediaQuery.of(context).size;
 
     if (collections.isEmpty) {
@@ -333,7 +334,7 @@ class _RxFilesPage extends State<RxFilesPage> {
                         builder: (context, snapshot) {
                           if (snapshot.data == true) {
                             return Container(
-                              color: Colors.white.withOpacity(0.3),
+                                color: theme.colorScheme.onSurface.withValues(alpha: 0.1),
                               child: const Center(
                                 child: CircularProgressIndicator(),
                               ),

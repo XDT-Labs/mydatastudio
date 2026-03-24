@@ -57,7 +57,7 @@ void main() {
 
     // We can't use UserRepository.saveUser because it tries to write keys to disk.
     // So we insert directly into DB.
-    final db = await DatabaseManager.instance.database;
+    final db = DatabaseManager.instance.database;
     await db?.into(db.appUsers).insert(user);
 
     // 2. Pump the widget
@@ -111,7 +111,7 @@ void main() {
       localStoragePath: tempPath,
     );
 
-    final db = await DatabaseManager.instance.database;
+    final db = DatabaseManager.instance.database;
     await db?.into(db.appUsers).insert(user);
 
     // 2. Pump the widget

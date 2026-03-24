@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 
 class BatchFileUpsertService extends RxService<BatchFileUpsertServiceCommand, List<File>> {
   static final BatchFileUpsertService _singleton = BatchFileUpsertService();
-  static get instance => _singleton;
+  static BatchFileUpsertService get instance => _singleton;
 
   @override
   Future<List<File>> invoke(BatchFileUpsertServiceCommand command) async {

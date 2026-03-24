@@ -6,7 +6,7 @@ import 'package:mydatatools/services/rx_service.dart';
 class PhotosByDateService
     extends RxService<PhotosByDateServiceCommand, Map<String, List<File>>> {
   static final PhotosByDateService _singleton = PhotosByDateService();
-  static get instance => _singleton;
+  static PhotosByDateService get instance => _singleton;
 
   final AppLogger logger = AppLogger(null);
 

@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:googleapis/adsense/v2.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/helpers/encryption_helper.dart';
@@ -125,7 +124,7 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
         throw Exception('Failed to save user');
       } else {
         //do full login to check everything is ok
-        AppUser? newUser = await GetUserService.instance!.invoke(
+        AppUser? newUser = await GetUserService.instance.invoke(
           GetUserServiceCommand(appUser!.password),
         );
         if (newUser != null) {
