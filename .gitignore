@@ -63,6 +63,7 @@ client/app/aichat-*.zip
 
 # Secrets and Local Config
 secrets.json
+secrets-dev.json
 client/config/secrets.json
 **/config/secrets/*.json
 .env
