@@ -109,9 +109,6 @@ deploy-download-service: init
 
 # Cleanup
 .PHONY: clean
-
-# Cleanup
-.PHONY: clean
 clean:
 	@echo "--- 🧹 Cleaning up build artifacts ---"
 	rm -rf $(PYTHON_DIR)/build $(PYTHON_DIR)/dist $(PYTHON_DIR)/models
