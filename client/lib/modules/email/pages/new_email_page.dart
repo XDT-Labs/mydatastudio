@@ -20,8 +20,6 @@ import 'package:go_router/go_router.dart';
 import 'package:reactive_forms/reactive_forms.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:uuid/uuid.dart';
-import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/modules/email/pages/email_page.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:file_picker/file_picker.dart';
@@ -349,10 +347,12 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
 
       // Create collection for PST
       final collectionId = const Uuid().v4();
+      final extractionRoot = p.join(appDataDir, 'files', 'email', collectionId);
       final collection = Collection(
         id: collectionId,
         name: title,
         path: filePath,
+        localCopyPath: extractionRoot,
         type: 'email',
         scanner: AppConstants.scannerEmailOutlookPst,
         scanStatus: 'pending',
@@ -534,10 +534,16 @@ class _YahooTabState extends State<_YahooTab> {
       final appPassword = _form.control('appPassword').value as String;
 
       // Create collection manually (App Password approach)
+      final collectionId = const Uuid().v4();
+      final appDataDir = MainApp.appDataDirectory.valueOrNull;
+      final extractionRoot = appDataDir != null
+          ? p.join(appDataDir, 'files', 'email', collectionId)
+          : null;
       final c = Collection(
-        id: const Uuid().v4(),
+        id: collectionId,
         name: email,
         path: email, // Root path for IMAP scanner
+        localCopyPath: extractionRoot,
         type: 'email',
         scanner: AppConstants.scannerEmailYahoo,
         scanStatus: 'idle',

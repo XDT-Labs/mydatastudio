@@ -10,6 +10,7 @@ import 'package:mydatatools/models/tables/file.dart' as db_file;
 import 'package:mydatatools/models/tables/folder.dart' as db_folder;
 import 'package:mydatatools/modules/email/services/get_emails_service.dart';
 import 'package:mydatatools/modules/files/files_constants.dart';
+import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
 import 'dart:io' as io;
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/modules/email/services/email_repository.dart';
@@ -294,30 +295,50 @@ class YahooScannerIsolateWorker {
     required String messageId,
     required DateTime msgDate,
     required List<MimePart> parts,
-    required String targetFolderPath,
+    required String targetFolderPath,    // absolute path on disk
+    required String extractionRoot,       // absolute collection root → for relative-path computation
     required SendPort dbWriterPort,
     required AppLogger logger,
   }) async {
     List<db_file.File> files = [];
     await io.Directory(targetFolderPath).create(recursive: true);
 
+    // SMTP Message-IDs often contain '<', '>', '@', '/' and other chars that
+    // are illegal in file-system paths. Strip everything unsafe.
+    final safeMessageId = messageId
+        .replaceAll(RegExp(r'[<>:/\\|?*\x00-\x1F]'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+
     for (final part in parts) {
       final fileName = part.decodeFileName();
       if (fileName == null) continue;
 
+      Uint8List? content;
       try {
-        final file = io.File(p.join(targetFolderPath, '${messageId}_$fileName'));
-        final content = part.decodeContentBinary();
+        content = part.decodeContentBinary();
+      } catch (e) {
+        // Malformed base64 / encoding errors — skip this attachment only.
+        logger.w('YahooScanner: Could not decode attachment $fileName (encoding error): $e');
+        continue;
+      }
 
+      try {
         if (content != null && content.isNotEmpty) {
+          final file = io.File(p.join(targetFolderPath, '${safeMessageId}_$fileName'));
           await file.writeAsBytes(content);
+
+          // Store relative paths so FilePathResolver + GetFileAndFoldersService
+          // can resolve them back to absolute using collection.localCopyPath.
+          final relPath   = ScannerPathHelper.relativePath(file.path, extractionRoot);
+          final relParent = ScannerPathHelper.relativeParent(file.path, extractionRoot);
 
           final f = db_file.File(
             id: const Uuid().v5(Namespace.url.value, 'file:email:${collection.id}:$messageId:$fileName'),
             collectionId: collection.id,
             name: fileName,
-            path: file.path,
-            parent: targetFolderPath,
+            path: relPath,
+            parent: relParent,
             dateCreated: msgDate,
             dateLastModified: msgDate,
             size: file.lengthSync(),
@@ -342,21 +363,50 @@ class YahooScannerIsolateWorker {
     required String year,
     required DateTime msgDate,
   }) async {
-    // Create INBOX-level folder
-    final labelPath = p.normalize(p.join(extractionRoot, labelName));
-    dbWriterPort.send({'type': 'folder', 'folder': _createFolderObj(labelPath, extractionRoot, labelName, collection.id, msgDate)});
-    // Create year-level folder under INBOX
-    final yearPath = p.normalize(p.join(labelPath, year));
-    dbWriterPort.send({'type': 'folder', 'folder': _createFolderObj(yearPath, labelPath, year, collection.id, msgDate)});
+    // Absolute paths are used only for the folder ID (stable UUID seed);
+    // path/parent stored in the DB are relative to extractionRoot.
+    final labelAbsPath = p.normalize(p.join(extractionRoot, labelName));
+    final yearAbsPath  = p.normalize(p.join(labelAbsPath, year));
+
+    dbWriterPort.send({
+      'type': 'folder',
+      'folder': _createFolderObj(
+        absPath: labelAbsPath,
+        extractionRoot: extractionRoot,
+        name: labelName,
+        collectionId: collection.id,
+        date: msgDate,
+      ),
+    });
+    dbWriterPort.send({
+      'type': 'folder',
+      'folder': _createFolderObj(
+        absPath: yearAbsPath,
+        extractionRoot: extractionRoot,
+        name: year,
+        collectionId: collection.id,
+        date: msgDate,
+      ),
+    });
   }
 
-  static db_folder.Folder _createFolderObj(String path, String parent, String name, String collectionId, DateTime date) {
+  /// Builds a [Folder] with relative path/parent so it matches the queries
+  /// in [GetFileAndFoldersService] that filter on the relative parent column.
+  static db_folder.Folder _createFolderObj({
+    required String absPath,
+    required String extractionRoot,
+    required String name,
+    required String collectionId,
+    required DateTime date,
+  }) {
+    final relPath   = ScannerPathHelper.relativePath(absPath, extractionRoot, isFolder: true);
+    final relParent = ScannerPathHelper.relativeParent(absPath, extractionRoot);
     return db_folder.Folder(
-      id: const Uuid().v5(Namespace.url.value, 'folder:email:$collectionId:$path'),
+      id: const Uuid().v5(Namespace.url.value, 'folder:email:$collectionId:$absPath'),
       collectionId: collectionId,
       name: name,
-      path: path,
-      parent: parent,
+      path: relPath,
+      parent: relParent,
       dateCreated: date,
       dateLastModified: date,
     );
@@ -437,6 +487,7 @@ class YahooScannerIsolateWorker {
         msgDate: msgDate,
         parts: attachmentParts,
         targetFolderPath: absoluteYearPath,
+        extractionRoot: extractionRoot,   // ← pass root for relative-path computation
         dbWriterPort: dbWriterPort,
         logger: logger,
       );

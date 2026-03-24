@@ -261,7 +261,7 @@ class _RxFilesPage extends State<RxFilesPage> {
                         ),
                         onNotification: (FiledNotification n) {
                           if (n is PathChangedNotification) {
-                            if (n.asset.path != collection?.path) {
+                            if (n.asset.path != path) {
                               //make sure path changed before triggering reload
                               setState(() {
                                 path = n.asset.path;

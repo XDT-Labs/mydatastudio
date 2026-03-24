@@ -56,15 +56,17 @@ class GetFileAndFoldersService
         final extractionRoot = p.join(
           storagePath, 'files', 'email', command.collection.id,
         );
-        // absolutePath is always the extraction root for scanner calls.
+        // command.path is always a relative path (e.g. "" / "INBOX" / "INBOX/2022").
+        // The only legacy case where it could be wrong is if an absolute path
+        // that is NOT under the extraction root was stored (e.g. the old
+        // email-address string). Reset to root only in that case.
+        if (p.isAbsolute(command.path) && !command.path.startsWith(extractionRoot)) {
+          relativePath = '';
+        }
+        // Build the absolute path for the scanner from the (possibly corrected) relativePath.
         absolutePath = relativePath.isEmpty
             ? extractionRoot
             : p.join(extractionRoot, relativePath);
-        // Remap relativePath to '' when caller is at the collection root.
-        if (!command.path.startsWith(extractionRoot)) {
-          relativePath = '';
-          absolutePath = extractionRoot;
-        }
       } else {
         absolutePath = FilePathResolver.absoluteFromPath(
             relativePath, command.collection);
