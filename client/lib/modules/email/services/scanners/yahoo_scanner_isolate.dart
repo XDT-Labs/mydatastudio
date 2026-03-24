@@ -14,6 +14,7 @@ import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.
 import 'dart:io' as io;
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/modules/email/services/email_repository.dart';
+import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:uuid/uuid.dart';
 
 class YahooScannerIsolate {
@@ -330,21 +331,38 @@ class YahooScannerIsolateWorker {
 
           // Store relative paths so FilePathResolver + GetFileAndFoldersService
           // can resolve them back to absolute using collection.localCopyPath.
-          final relPath   = ScannerPathHelper.relativePath(file.path, extractionRoot);
-          final relParent = ScannerPathHelper.relativeParent(file.path, extractionRoot);
+          // Generate thumbnail if it's an image
+          String? thumbnail;
+          if (_mapMimeType(part.mediaType.text) == FilesConstants.mimeTypeImage) {
+            try {
+              thumbnail = await ThumbnailGenerator().pathImageToBase64(file.path, FilesConstants.mimeTypeImage);
+            } catch (e) {
+              logger.w('YahooScanner: Failed to generate thumbnail for ${file.path}: $e');
+            }
+          }
+
+          String? relPath;
+          String? relParent;
+          try {
+            relPath = ScannerPathHelper.relativePath(file.path, extractionRoot);
+            relParent = ScannerPathHelper.relativeParent(file.path, extractionRoot);
+          } catch (e) {
+            logger.w('YahooScanner: Failed to compute relative path for ${file.path}: $e');
+          }
 
           final f = db_file.File(
             id: const Uuid().v5(Namespace.url.value, 'file:email:${collection.id}:$messageId:$fileName'),
             collectionId: collection.id,
             name: fileName,
-            path: relPath,
-            parent: relParent,
+            path: relPath ?? file.path,
+            parent: relParent ?? '',
             dateCreated: msgDate,
             dateLastModified: msgDate,
             size: file.lengthSync(),
             contentType: _mapMimeType(part.mediaType.text),
             isDeleted: false,
             emailId: messageId,
+            thumbnail: thumbnail,
           );
           files.add(f);
         }
