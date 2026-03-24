@@ -11,6 +11,7 @@ import 'package:mydatatools/scanners/collection_scanner.dart';
 import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
 import 'package:path/path.dart' as p;
 import 'package:logger/logger.dart';
+import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
 
 
 class LocalFileIsolate extends CollectionScanner {
@@ -202,7 +203,7 @@ class LocalFileIsolateWorker{
       if (asset is io.File) {
         count++;
         //save file
-        File? file = _validateFile(collectionId, asset, rootPath, scanStartTime);
+        File? file = await _validateFile(collectionId, asset, rootPath, scanStartTime);
         if( file != null ) {
           logger.i('Found file: ${file.path}');
           fileBatch.add(file);
@@ -300,12 +301,12 @@ class LocalFileIsolateWorker{
   }
 
   /// Validate files. Compute relative path for storage.
-  File? _validateFile(
+  Future<File?> _validateFile(
     String collectionId_,
     io.File file_,
     String rootPath,
     DateTime scanStartTime,
-  ) {
+  ) async {
     String absPath = file_.path;
     if (absPath.length > 1 && absPath.endsWith('/')) {
       absPath = absPath.substring(0, absPath.length - 1);
@@ -326,6 +327,19 @@ class LocalFileIsolateWorker{
     final relPath = ScannerPathHelper.relativePath(absPath, rootPath);
     final relParent = ScannerPathHelper.relativeParent(absPath, rootPath);
 
+    // Generate thumbnail if it's an image
+    String? thumbnail;
+    final mimeType = getMimeType(name);
+    if (mimeType == FilesConstants.mimeTypeImage) {
+      try {
+        // Thumbnail generation can be slow, but this is a background isolate.
+        // We use the absolute path for generation.
+        thumbnail = await ThumbnailGenerator().pathImageToBase64(absPath, mimeType);
+      } catch (e) {
+        logger?.w('LocalScanner: Failed to generate thumbnail for $absPath: $e');
+      }
+    }
+
     return File(
       id: ScannerPathHelper.buildId(collectionId_, relPath),
       collectionId: collectionId_,
@@ -337,7 +351,8 @@ class LocalFileIsolateWorker{
       lastScannedDate: scanStartTime,
       isDeleted: false,
       size: file_.lengthSync(),
-      contentType: getMimeType(name),
+      contentType: mimeType,
+      thumbnail: thumbnail,
     );
   }
 

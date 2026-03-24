@@ -5,6 +5,8 @@ import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:math';
 
+import 'package:mydatatools/helpers/file_path_resolver.dart';
+import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/file_asset.dart';
 import 'package:mydatatools/modules/files/files_constants.dart';
@@ -19,8 +21,9 @@ import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class FileTable extends StatefulWidget {
-  const FileTable({super.key, required this.data, this.scrollController});
+  const FileTable({super.key, required this.data, this.collection, this.scrollController});
   final List<FileAsset> data;
+  final Collection? collection;
   final ScrollController? scrollController;
 
   @override
@@ -435,7 +438,14 @@ class _FileTable extends State<FileTable> {
             ? NetworkImage(file.thumbnail!)
             : MemoryImage(base64Decode(file.thumbnail!));
       } else {
-        provider = FileImage(io.File(file.path));
+        // Use the resolver to handle relative paths (e.g., from email attachments)
+        final collection = widget.collection;
+        if (collection != null) {
+          final absPath = FilePathResolver.absoluteFromPath(file.path, collection);
+          provider = FileImage(io.File(absPath));
+        } else {
+          provider = FileImage(io.File(file.path));
+        }
       }
 
       return SizedBox(

@@ -257,6 +257,7 @@ class _RxFilesPage extends State<RxFilesPage> {
                       NotificationListener<FiledNotification>(
                         child: FileTable(
                           data: filesAndFolders,
+                          collection: collection,
                           scrollController: _scrollController,
                         ),
                         onNotification: (FiledNotification n) {
