@@ -59,6 +59,10 @@ class DatabaseManager {
     return _repository;
   }
 
+  DbIsolateWriterClient? get writerIsolateClient {
+    return _writerIsolateClient;
+  }
+
   /// Returns the [AppDatabase] instance
   AppDatabase? get database {
     return appDatabase;
@@ -232,7 +236,7 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration {
@@ -292,25 +296,147 @@ class AppDatabase extends _$AppDatabase {
         }
         if (from < 10) {
           logger.i("Upgrade to v10: Adding uid column to Emails table");
-          await m.addColumn(emails, emails.uid);
+          try {
+            await m.addColumn(emails, emails.uid);
+          } catch (e) {
+            if (e.toString().contains('duplicate column name')) {
+              logger.w("uid column already exists in Emails table, skipping.");
+            } else {
+              rethrow;
+            }
+          }
         }
         if (from < 11) {
           logger.i(
             "Upgrade to v11: Adding composite indexes for faster email lookups",
           );
-          await m.createIndex(
-            Index(
-              'email_folderid_idx',
-              'CREATE INDEX email_folderid_idx ON emails (folder_id)',
-            ),
-          );
-          await m.createIndex(
-            Index(
-              'email_comp_sync_idx',
-              'CREATE INDEX email_comp_sync_idx ON emails (collection_id, folder_id, date)',
-            ),
-          );
+          try {
+            await m.createIndex(
+              Index(
+                'email_folderid_idx',
+                'CREATE INDEX email_folderid_idx ON emails (folder_id)',
+              ),
+            );
+            await m.createIndex(
+              Index(
+                'email_comp_sync_idx',
+                'CREATE INDEX email_comp_sync_idx ON emails (collection_id, folder_id, date)',
+              ),
+            );
+          } catch (e) {
+            logger.w("Indexes already exist in Emails table, skipping.");
+          }
         }
+        if (from < 12) {
+          logger.i(
+            'Upgrade to v12: Adding localCopyPath to Collections '
+            'and migrating files/folders to relative paths',
+          );
+          await m.addColumn(collections, collections.localCopyPath);
+
+          // Data migration using raw SQL — the Drift table accessors are not
+          // available inside onUpgrade (m.database is GeneratedDatabase, not
+          // AppDatabase). We use customStatement / m.database.customSelect
+          // to do the data work safely.
+          //
+          // Step 1: For each collection, set local_copy_path = path.
+          await m.database.customStatement(
+            'UPDATE collections SET local_copy_path = path WHERE path IS NOT NULL AND path != \'\'',
+          );
+
+          // Step 2: Strip absolute prefix from files.path, files.parent.
+          // We do this in Dart by loading rows and updating them.
+          final colRows = await m.database
+              .customSelect('SELECT id, path FROM collections WHERE path IS NOT NULL AND path != \'\'')
+              .get();
+
+          for (final colRow in colRows) {
+            final colId = colRow.read<String>('id');
+            final root = colRow.read<String>('path');
+            final prefix = root.endsWith('/') ? root : '$root/';
+
+            // Update files — only migrate rows whose path still contains
+            // the absolute prefix (not yet migrated). Rows already using
+            // a relative path are left untouched.
+            final fileRows = await m.database
+                .customSelect(
+                  'SELECT id, path, parent FROM files WHERE collection_id = ? AND path LIKE ?',
+                  variables: [
+                    Variable.withString(colId),
+                    Variable.withString('$prefix%'),
+                  ],
+                )
+                .get();
+            for (final row in fileRows) {
+              final oldId = row.read<String>('id');
+              final oldPath = row.read<String>('path');
+              final oldParent = row.read<String>('parent');
+              final relPath = oldPath.substring(prefix.length);
+              final relParent = oldParent.startsWith(prefix)
+                  ? oldParent.substring(prefix.length)
+                  : (oldParent == root ? '' : oldParent);
+              final newId = '$colId:$relPath';
+              if (newId == oldId) continue; // already migrated, skip
+              // Delete any conflicting row with the new id first so we don't
+              // hit the UNIQUE constraint.
+              await m.database.customStatement(
+                'DELETE FROM files WHERE id = ? AND id != ?',
+                [newId, oldId],
+              );
+              await m.database.customStatement(
+                'UPDATE files SET id = ?, path = ?, parent = ? WHERE id = ?',
+                [newId, relPath, relParent, oldId],
+              );
+            }
+
+            // Update folders — same idempotent logic.
+            final folderRows = await m.database
+                .customSelect(
+                  'SELECT id, path, parent FROM folders WHERE collection_id = ? AND path LIKE ?',
+                  variables: [
+                    Variable.withString(colId),
+                    Variable.withString('$prefix%'),
+                  ],
+                )
+                .get();
+            for (final row in folderRows) {
+              final oldId = row.read<String>('id');
+              final oldPath = row.read<String>('path');
+              final oldParent = row.read<String>('parent');
+              final relPath = oldPath.substring(prefix.length);
+              final relParent = oldParent.startsWith(prefix)
+                  ? oldParent.substring(prefix.length)
+                  : (oldParent == root ? '' : oldParent);
+              final newId = '$colId:$relPath';
+              if (newId == oldId) continue;
+              await m.database.customStatement(
+                'DELETE FROM folders WHERE id = ? AND id != ?',
+                [newId, oldId],
+              );
+              await m.database.customStatement(
+                'UPDATE folders SET id = ?, path = ?, parent = ? WHERE id = ?',
+                [newId, relPath, relParent, oldId],
+              );
+            }
+          }
+          logger.i('v12 data migration complete');
+        }
+      },
+      beforeOpen: (OpeningDetails details) async {
+        // WAL (Write-Ahead Logging) allows the DbIsolateWriter to bulk-write
+        // while the main connection reads concurrently. Without WAL, a write
+        // transaction blocks ALL readers at the SQLite level, even if they're
+        // on separate connections/isolates.
+        //
+        // These PRAGMAs are connection-scoped and safe to re-apply on every open.
+        await customStatement('PRAGMA journal_mode=WAL;');
+
+        // Allow up to 5 seconds of retry before returning SQLITE_BUSY.
+        // Prevents sporadic errors when the writer and reader briefly contend
+        // (e.g. during PST bulk import).
+        await customStatement('PRAGMA busy_timeout=5000;');
+
+        logger.i('Database opened: journal_mode=WAL, busy_timeout=5000ms');
       },
     );
   }
@@ -463,7 +589,11 @@ LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb) {
       sqlite3.tempDirectory = (await getTemporaryDirectory()).path;
 
       AppLogger(null).i("Opening Database | $path");
-      return NativeDatabase(
+      // createInBackground moves all SQLite I/O to a dedicated background
+      // isolate managed by Drift. This prevents any DB query from blocking
+      // frames on the main UI thread, fixing jank during email queries and
+      // PST imports.
+      return NativeDatabase.createInBackground(
         file,
         logStatements: false,
         cachePreparedStatements: true,

@@ -162,11 +162,13 @@ extension LoginProviderExtension on LoginProviders {
           )['value'] as String;
 
       final collectionId = existing?.id ?? const Uuid().v4().toString();
+      final extractionRoot = '$appDataDir/files/email/$collectionId';
 
       final collection = Collection(
         id: collectionId,
         name: email,
         path: "$appDataDir/files/email/$email",
+        localCopyPath: extractionRoot,
         type: "email",
         scanner: AppConstants.scannerEmailGmail,
         scanStatus: "pending",

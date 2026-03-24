@@ -8,6 +8,7 @@ import 'package:mydatatools/models/tables/folder.dart';
 import 'package:mydatatools/modules/files/files_constants.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
+import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
 import 'package:path/path.dart' as p;
 import 'package:logger/logger.dart';
 
@@ -42,6 +43,12 @@ class LocalFileIsolate extends CollectionScanner {
     RootIsolateToken? token = RootIsolateToken.instance;
     Map<String, dynamic> args = {
       'path': path,
+      // rootPath is ALWAYS the absolute collection root, regardless of which
+      // sub-directory is being scanned. This ensures that p.relative() in the
+      // worker produces paths relative to the collection root (e.g.
+      // "2026-01-01/photo.jpg"), not relative to the scanned sub-directory
+      // (which would incorrectly give "photo.jpg" with parent='').
+      'rootPath': collection.localCopyPath ?? collection.path,
       'recursive': recursive,
       'collectionId': collection.id,
     };
@@ -127,6 +134,11 @@ class LocalFileIsolateWorker{
     if (path.length > 1 && path.endsWith('/')) {
       path = path.substring(0, path.length - 1);
     }
+    // rootPath is the absolute collection root used to compute relative paths.
+    String rootPath = args['rootPath'] as String? ?? path;
+    if (rootPath.length > 1 && rootPath.endsWith('/')) {
+      rootPath = rootPath.substring(0, rootPath.length - 1);
+    }
     bool recursive = args['recursive'];
     String collectionId = args['collectionId'];
 
@@ -137,19 +149,21 @@ class LocalFileIsolateWorker{
     var fileCount = await _scanDir(
       collectionId,
       path,
+      rootPath,
       recursive,
       scanStartTime,
     );
 
-    // Final cleanup and sync
+    // Final cleanup — send the RELATIVE path so the repo can match stored records.
+    final cleanupRelPath = p.relative(path, from: rootPath);
     final ReceivePort syncPort = ReceivePort();
     dbWriterPort.send({
       'type': 'cleanup_deleted',
       'collectionId': collectionId,
-      'path': path,
+      'path': cleanupRelPath == '.' ? '' : cleanupRelPath,
       'scanStartTime': scanStartTime,
       'recursive': recursive,
-      'replyTo': syncPort.sendPort, // Await this to ensure DB is updated before isolate exits
+      'replyTo': syncPort.sendPort,
     });
 
     // Wait for the DB writer to finish the cleanup task
@@ -162,7 +176,8 @@ class LocalFileIsolateWorker{
 
   Future<int> _scanDir(
     String collectionId,
-    String path,
+    String path,       // absolute path used for filesystem operations
+    String rootPath,   // absolute collection root for computing relative paths
     recursive,
     DateTime scanStartTime,
     [List<File>? currentBatch]
@@ -187,7 +202,7 @@ class LocalFileIsolateWorker{
       if (asset is io.File) {
         count++;
         //save file
-        File? file = _validateFile(collectionId, asset, scanStartTime);
+        File? file = _validateFile(collectionId, asset, rootPath, scanStartTime);
         if( file != null ) {
           logger.i('Found file: ${file.path}');
           fileBatch.add(file);
@@ -203,7 +218,7 @@ class LocalFileIsolateWorker{
         //send status message back
         logger.s('Scanning: ${asset.path}');
         //save directory
-        Folder? folder = _validateFolder(collectionId, asset, scanStartTime);
+        Folder? folder = _validateFolder(collectionId, asset, rootPath, scanStartTime);
         if( folder != null ) {
           logger.i('Found folder: ${folder.path}');
           dbWriterPort.send({
@@ -215,7 +230,8 @@ class LocalFileIsolateWorker{
             if (recursive) {
               int fileCount = await _scanDir(
                 collectionId,
-                folder.path, // Use normalized path
+                asset.path, // absolute path for filesystem traversal
+                rootPath,
                 recursive,
                 scanStartTime,
                 fileBatch,
@@ -244,35 +260,38 @@ class LocalFileIsolateWorker{
 
   //
 
-  /// Validate directories against the know paths we want to skip.
-  /// Convert dart.io to a local model object
+  /// Validate directories. Compute relative path for storage.
   Folder? _validateFolder(
     String collectionId_,
     io.Directory dir_,
+    String rootPath,
     DateTime scanStartTime,
   ) {
-    String path = dir_.path;
-    if (path.length > 1 && path.endsWith('/')) {
-      path = path.substring(0, path.length - 1);
+    String absPath = dir_.path;
+    if (absPath.length > 1 && absPath.endsWith('/')) {
+      absPath = absPath.substring(0, absPath.length - 1);
     }
-    String name = p.basename(path);
+    String name = p.basename(absPath);
 
     //skip any hidden or system folders
     bool hidden = name.startsWith('.');
     bool skipFolder = skipFolderRegex.hasMatch('/$name/');
-    
+
     if( hidden || skipFolder ){
-      logger?.i('Skipping folder (hidden=$hidden, skipFolder=$skipFolder): $path');
+      logger?.i('Skipping folder (hidden=$hidden, skipFolder=$skipFolder): $absPath');
       return null;
     }
 
-    String parentPath = p.dirname(path);
+    // Compute relative path for storage via the shared helper so this logic
+    // is unit-tested independently of the file system.
+    final relPath = ScannerPathHelper.relativePath(absPath, rootPath, isFolder: true);
+    final relParent = ScannerPathHelper.relativeParent(absPath, rootPath);
 
     return Folder(
-        id: '$collectionId_:$path',
+        id: ScannerPathHelper.buildId(collectionId_, relPath),
         name: name,
-        path: path,
-        parent: parentPath,
+        path: relPath,
+        parent: relParent,
         dateCreated: DateTime.now(),
         dateLastModified: DateTime.now(),
         lastScannedDate: scanStartTime,
@@ -280,46 +299,39 @@ class LocalFileIsolateWorker{
     );
   }
 
-  /// Validate directories against the know paths we want to skip.
-  /// Convert dart.io to a local model object
+  /// Validate files. Compute relative path for storage.
   File? _validateFile(
     String collectionId_,
     io.File file_,
+    String rootPath,
     DateTime scanStartTime,
   ) {
-    String path = file_.path;
-    if (path.length > 1 && path.endsWith('/')) {
-      path = path.substring(0, path.length - 1);
+    String absPath = file_.path;
+    if (absPath.length > 1 && absPath.endsWith('/')) {
+      absPath = absPath.substring(0, absPath.length - 1);
     }
-    String name = p.basename(path);
+    String name = p.basename(absPath);
 
-    //skip any files in a hidden or system folder
     bool hidden = name.startsWith('.');
-    // We don't usually skip files based on skipFolderRegex, but the original code did.
-    // However, it checked the full path. Let's keep it checking the full path but more safely,
-    // or just check the parent's skip status.
-    // The original code was: bool skipFolder = skipFolderRegex.hasMatch(file_.path);
-    // If a parent folder was skipped, this file wouldn't even be reached in _scanDir.
-    // So checking it here might be redundant if it's about folder names.
-    bool skipFolder = skipFolderRegex.hasMatch(file_.path); 
+    bool skipFolder = skipFolderRegex.hasMatch(file_.path);
 
     if( hidden || skipFolder ){
-      logger?.i('Skipping file (hidden=$hidden, skipFolder=$skipFolder): $path');
+      logger?.i('Skipping file (hidden=$hidden, skipFolder=$skipFolder): $absPath');
       return null;
     }
 
-
-    //Check if it exists, skip it if it does
     DateTime lmDate = file_.lastModifiedSync();
-    //todo: add date check to if statement
-    String parentPath = p.dirname(path);
+
+    // Compute relative path for storage via the shared helper.
+    final relPath = ScannerPathHelper.relativePath(absPath, rootPath);
+    final relParent = ScannerPathHelper.relativeParent(absPath, rootPath);
 
     return File(
-      id: '$collectionId_:$path',
+      id: ScannerPathHelper.buildId(collectionId_, relPath),
       collectionId: collectionId_,
       name: name,
-      path: path,
-      parent: parentPath,
+      path: relPath,
+      parent: relParent,
       dateCreated: lmDate,
       dateLastModified: lmDate,
       lastScannedDate: scanStartTime,

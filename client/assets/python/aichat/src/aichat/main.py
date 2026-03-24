@@ -40,6 +40,8 @@ app.post("/start-session", summary="Load a local GGUF model for chat")(routes.st
 app.post("/download-model", summary="Download a GGUF model from Hugging Face Hub")(routes.download_model)
 app.post("/chat", summary="Generate a chat response using the currently loaded model")(routes.generate_chat_response)
 app.post("/embedding", summary="Generate embeddings for text or image using Gemma-3-4B")(routes.generate_embedding)
+app.post("/import/pst", summary="Import and parse an Outlook PST file")(routes.import_pst)
+
 
 
 def main() -> None:

@@ -47,10 +47,10 @@ init:
 	gcloud config set project $(PROJECT_ID)
 	@echo "Project configuration complete."
 
-# 1. Download GGUF Models
+# 1. Download Models
 .PHONY: models
 models:
-	@echo "--- 📥 Checking/Downloading GGUF models ---"
+	@echo "--- 📥 Checking/Downloading models ---"
 	@mkdir -p $(PYTHON_DIR)/models
 	@if [ ! -f $(PYTHON_DIR)/models/$(HF_FILE) ]; then \
 		echo "Downloading $(HF_FILE)..."; \
@@ -58,13 +58,11 @@ models:
 	else \
 		echo "$(HF_FILE) already exists, skipping download."; \
 	fi
-	@if [ ! -f $(PYTHON_DIR)/models/$(HF_EMBEDDING_FILE) ]; then \
-		echo "Downloading Qwen-VL embedding model (Transformers)..."; \
-		hf download $(HF_EMBEDDING_MODEL) ${HF_EMBEDDING_FILE} --local-dir $(PYTHON_DIR)/models; \
-		cp $(PYTHON_DIR)/models/$(HF_EMBEDDING_DIR)/$(HF_EMBEDDING_FILE) $(PYTHON_DIR)/models/$(HF_EMBEDDING_FILE);  \
-		rm -rf $(HF_EMBEDDING_DIR); \
+	@if [ ! -d $(HF_SIGLIP_DIR) ]; then \
+		echo "Downloading SigLip 2 embedding model (Transformers)..."; \
+		hf download $(HF_SIGLIP_MODEL) --local-dir $(HF_SIGLIP_DIR); \
 	else \
-		echo "Qwen-VL embedding model already exists, skipping download."; \
+		echo "SigLip 2 embedding model already exists, skipping download."; \
 	fi
 
 	
@@ -126,9 +124,6 @@ deploy-download-service: init
 		--region=$(REGION) \
 		--substitutions _SERVICE_NAME=$(SERVICE_NAME),_REGION=$(REGION),_GCS_BUCKET=mydata-tools_downloads,_GCS_FOLDER_PREFIX=local-llm-models/,_REPO_NAME=$(IMAGE_REPO)
 
-
-# Cleanup
-.PHONY: clean
 
 # Cleanup
 .PHONY: clean

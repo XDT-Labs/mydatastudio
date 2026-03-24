@@ -12,9 +12,14 @@ class EmailTable extends StatefulWidget {
     this.scrollController,
     this.sortColumn = 'date',
     this.sortAsc = false,
+    this.onLoadMore,
   });
 
   final List<Email> emails;
+
+  /// Called when the user scrolls near the bottom of the list. Implementations
+  /// should fetch the next page of emails and append them.
+  final VoidCallback? onLoadMore;
   final ScrollController? scrollController;
   final String sortColumn;
   final bool sortAsc;
@@ -28,10 +33,21 @@ class _EmailTable extends State<EmailTable> {
   late String sortColumn;
   late bool sortAsc;
 
+  late ScrollController _verticalScrollController;
+  late final bool _ownsController;
+
   @override
   void initState() {
     super.initState();
     _updateSortParams();
+    if (widget.scrollController != null) {
+      _verticalScrollController = widget.scrollController!;
+      _ownsController = false;
+    } else {
+      _verticalScrollController = ScrollController();
+      _ownsController = true;
+    }
+    _verticalScrollController.addListener(_onScroll);
   }
 
   @override
@@ -55,6 +71,25 @@ class _EmailTable extends State<EmailTable> {
     }
   }
 
+
+  void _onScroll() {
+    if (widget.onLoadMore == null) return;
+    final pos = _verticalScrollController.position;
+    // Trigger load-more when within 200px of the bottom
+    if (pos.pixels >= pos.maxScrollExtent - 200) {
+      widget.onLoadMore!();
+    }
+  }
+
+  @override
+  void dispose() {
+    _verticalScrollController.removeListener(_onScroll);
+    if (_ownsController) {
+      _verticalScrollController.dispose();
+    }
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -68,8 +103,8 @@ class _EmailTable extends State<EmailTable> {
           );
 
           return SingleChildScrollView(
+            controller: _verticalScrollController,
             scrollDirection: Axis.vertical,
-            controller: widget.scrollController,
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
@@ -250,11 +285,11 @@ class _EmailTable extends State<EmailTable> {
           ),
         ],
         onSelectChanged: (bool? e) {
+          debugPrint("Email row select changed: ${email.subject} - $e");
           setState(() {
             email.isSelected = e ?? false;
-            if (email.isSelected == true) {
-              EmailSelectedNotification(email).dispatch(context);
-            }
+            // Always dispatch notification when a row is clicked/selected
+            EmailSelectedNotification(email).dispatch(context);
           });
         },
       );

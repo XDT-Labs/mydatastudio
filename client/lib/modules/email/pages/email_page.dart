@@ -9,7 +9,7 @@ import 'package:mydatatools/modules/email/notifications/email_sort_changed_notif
 import 'package:mydatatools/modules/email/pages/new_email_page.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/modules/email/services/email_repository.dart';
-import 'package:mydatatools/modules/email/services/get_emails_service.dart';
+
 import 'package:mydatatools/modules/email/services/get_email_folders_service.dart';
 import 'package:mydatatools/modules/email/widgets/email_details.dart';
 import 'package:mydatatools/modules/email/widgets/email_table.dart';
@@ -26,6 +26,7 @@ class EmailPage extends StatefulWidget {
       BehaviorSubject<Collection?>.seeded(null);
   static BehaviorSubject<String?> selectedFolder =
       BehaviorSubject<String?>.seeded(null);
+  static BehaviorSubject<bool> isDeleting = BehaviorSubject<bool>.seeded(false);
 
   @override
   State<EmailPage> createState() => _EmailPage();
@@ -34,7 +35,7 @@ class EmailPage extends StatefulWidget {
 class _EmailPage extends State<EmailPage> {
   AppLogger logger = AppLogger(null);
 
-  GetEmailsService? _emailService;
+
   GetCollectionsService? _collectionService;
   StreamSubscription<List<Collection>>? _collectionsServiceSub;
   StreamSubscription? _selectedCollectionSub;
@@ -54,8 +55,8 @@ class _EmailPage extends State<EmailPage> {
   String emailLayout = 'vertical';
 
   final ScrollController _scrollController = ScrollController();
-  int _offset = 0;
-  final int _pageSize = 50;
+  static const int _pageSize = 100;
+  int _currentOffset = 0;
   bool _isLoadingMore = false;
   bool _hasMore = true;
   Email? selectedEmail;
@@ -148,8 +149,12 @@ class _EmailPage extends State<EmailPage> {
       }
     });
 
-    //get all email collections
-    _collectionService?.invoke(GetCollectionsServiceCommand("email"));
+    //get all email collections — deferred to post-frame so the first frame
+    // renders immediately without triggering a synchronous BehaviorSubject
+    // replay cascade (listen() → setState → invoke → setState chain).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _collectionService?.invoke(GetCollectionsServiceCommand("email"));
+    });
     super.initState();
   }
 
@@ -159,58 +164,18 @@ class _EmailPage extends State<EmailPage> {
     if (mounted) {
       setState(() {
         emails = [];
-        _offset = 0;
+        _currentOffset = 0;
         _hasMore = true;
         _isLoadingMore = false;
       });
     }
 
-    _emailService = GetEmailsService.instance;
     _loadMoreEmails();
 
     // Also trigger folder fetch to get names
     GetEmailFoldersService.instance.invoke(
       EmailFolderServiceCommand(collection!.id),
     );
-  }
-
-  Future<void> _loadMoreEmails() async {
-    if (collection == null || _isLoadingMore || !_hasMore) return;
-
-    setState(() {
-      _isLoadingMore = true;
-    });
-
-    try {
-      final List<Email> moreEmails = await _emailService!.invoke(
-        EmailServiceCommand(
-          collection!,
-          folderId: EmailPage.selectedFolder.value,
-          search: searchController.text,
-          sortColumn: sortColumn,
-          sortAsc: sortAsc,
-          limit: _pageSize,
-          offset: _offset,
-        ),
-      );
-
-      if (mounted) {
-        setState(() {
-          emails.addAll(moreEmails);
-          _offset += moreEmails.length;
-          count = emails.length;
-          _isLoadingMore = false;
-          if (moreEmails.length < _pageSize) {
-            _hasMore = false;
-          }
-        });
-      }
-    } catch (e) {
-      logger.e("Error loading more emails: $e");
-      if (mounted) {
-        setState(() => _isLoadingMore = false);
-      }
-    }
   }
 
   void _onScroll() {
@@ -251,6 +216,34 @@ class _EmailPage extends State<EmailPage> {
         }
       });
     });
+  }
+
+  Future<void> _loadMoreEmails() async {
+    if (!_hasMore || _isLoadingMore || collection == null) return;
+    setState(() => _isLoadingMore = true);
+
+    final nextOffset = _currentOffset + _pageSize;
+    final nextPage = await EmailRepository(
+      DatabaseManager.instance.database!,
+    ).emails(
+      collection!.id,
+      folderId: EmailPage.selectedFolder.value,
+      search: searchController.text,
+      sortColumn: sortColumn,
+      sortAsc: sortAsc,
+      limit: _pageSize,
+      offset: nextOffset,
+    );
+
+    if (mounted) {
+      setState(() {
+        _currentOffset = nextOffset;
+        emails = [...emails, ...nextPage];
+        count = emails.length;
+        _hasMore = nextPage.length >= _pageSize;
+        _isLoadingMore = false;
+      });
+    }
   }
 
   @override
@@ -375,6 +368,7 @@ class _EmailPage extends State<EmailPage> {
                         return true;
                       }
                       if (n is EmailSelectedNotification) {
+                        logger.i("Email selected: ${n.email.subject}");
                         setState(() {
                           if (selectedEmail == null) {
                             // First open: Expand by default at 700px
@@ -400,6 +394,7 @@ class _EmailPage extends State<EmailPage> {
                               scrollController: _scrollController,
                               sortColumn: sortColumn,
                               sortAsc: sortAsc,
+                              onLoadMore: _loadMoreEmails,
                             ),
                   ),
                 ),
@@ -528,11 +523,12 @@ class _EmailPage extends State<EmailPage> {
         final scanner = ScannerManager.getInstance().getScanner(collection!);
         if (scanner != null) {
           final groupedByFolder = <String, List<int>>{};
-          
+
           for (var item in items) {
             if (item.uid != null) {
               // Priority: item's folder, then current view's folder, finally fallback to INBOX safely
-              final fId = item.folderId ?? EmailPage.selectedFolder.value ?? 'INBOX';
+              final fId =
+                  item.folderId ?? EmailPage.selectedFolder.value ?? 'INBOX';
               groupedByFolder.putIfAbsent(fId, () => []).add(item.uid!);
             }
           }

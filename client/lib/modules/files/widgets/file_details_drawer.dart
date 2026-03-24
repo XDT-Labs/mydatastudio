@@ -4,6 +4,7 @@ import 'dart:io' as io;
 
 import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
+import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/folder.dart';
 import 'package:mydatatools/models/tables/file_asset.dart';
@@ -22,17 +23,20 @@ import 'package:path_provider/path_provider.dart';
 import 'package:three_js/three_js.dart' as three;
 import 'package:three_js_simple_loaders/three_js_simple_loaders.dart';
 import 'package:mydatatools/modules/files/widgets/video_file_preview.dart';
+import 'package:mydatatools/helpers/file_path_resolver.dart';
 
 class FileDetailsDrawer extends StatefulWidget {
   const FileDetailsDrawer({
     super.key,
     required this.asset,
+    required this.collection,
     required this.width,
     required this.onClose,
     this.onExpand,
   });
 
   final FileAsset asset;
+  final Collection collection;
   final double width;
   final VoidCallback onClose;
   final VoidCallback? onExpand;
@@ -97,6 +101,11 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     super.dispose();
   }
 
+  /// Returns the absolute filesystem path for [file] using the collection root.
+  /// Cloud paths (gdrive://) and already-absolute paths pass through unchanged.
+  String _resolvedPath(File file) =>
+      FilePathResolver.absolute(file, widget.collection);
+
   Future<void> _loadMetadata() async {
     if (widget.asset is! File) return;
     final file = widget.asset as File;
@@ -105,7 +114,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     if (_isImage(file)) {
       setState(() => _loadingExif = true);
       try {
-        final ioFile = io.File(file.path);
+        final ioFile = io.File(_resolvedPath(file));
         if (await ioFile.exists()) {
           final exif = await readExifFromFile(ioFile);
           if (mounted) setState(() => _exifData = exif);
@@ -139,9 +148,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
             throw 'Failed to download PDF bytes from Google Drive';
           }
         } else {
-          final ioFile = io.File(file.path);
+          final ioFile = io.File(_resolvedPath(file));
           if (await ioFile.exists()) {
-            doc = await PdfDocument.openFile(file.path);
+            doc = await PdfDocument.openFile(_resolvedPath(file));
           } else {
             throw 'Local PDF file not found: ${file.path}';
           }
@@ -194,7 +203,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
             if (mounted) setState(() => _textContent = content);
           }
         } else {
-          final ioFile = io.File(file.path);
+          final ioFile = io.File(_resolvedPath(file));
           if (await ioFile.exists()) {
             final content = await ioFile.readAsString();
             if (mounted) setState(() => _textContent = content);
@@ -256,7 +265,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     if (widget.asset is! File) return;
     final file = widget.asset as File;
     try {
-      final ioFile = io.File(file.path);
+      final ioFile = io.File(_resolvedPath(file));
       await ioFile.writeAsString(_editController.text);
       if (mounted) {
         setState(() {
@@ -439,7 +448,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       if (file.thumbnail != null) {
         return _buildThumbnailWidget(file.thumbnail!);
       }
-      final ioFile = io.File(file.path);
+      final ioFile = io.File(_resolvedPath(file));
       if (ioFile.existsSync()) {
         return Image.file(ioFile, fit: BoxFit.contain);
       }
@@ -451,7 +460,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     return _previewContainer(
       background: Colors.grey.shade900,
       child: VideoFilePreview(
-        path: file.path,
+        path: _resolvedPath(file),
         height: _previewHeight,
         isGDrive: file.path.startsWith('gdrive://'),
         onDownloadGDrive: () => _getGDriveFileBytes(file),
@@ -589,7 +598,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         onSetupComplete: () {
           if (mounted) setState(() {});
         },
-        setup: () => _initStlScene(file.path),
+        setup: () => _initStlScene(_resolvedPath(file)),
       );
     }
 

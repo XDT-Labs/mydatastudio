@@ -740,6 +740,17 @@ class $CollectionsTable extends Collections
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _localCopyPathMeta = const VerificationMeta(
+    'localCopyPath',
+  );
+  @override
+  late final GeneratedColumn<String> localCopyPath = GeneratedColumn<String>(
+    'local_copy_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -757,6 +768,7 @@ class $CollectionsTable extends Collections
     lastScanDate,
     needsReAuth,
     downloadAttachments,
+    localCopyPath,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -889,6 +901,15 @@ class $CollectionsTable extends Collections
         ),
       );
     }
+    if (data.containsKey('local_copy_path')) {
+      context.handle(
+        _localCopyPathMeta,
+        localCopyPath.isAcceptableOrUnknown(
+          data['local_copy_path']!,
+          _localCopyPathMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -966,6 +987,10 @@ class $CollectionsTable extends Collections
             DriftSqlType.bool,
             data['${effectivePrefix}download_attachments'],
           )!,
+      localCopyPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}local_copy_path'],
+      ),
     );
   }
 
@@ -991,6 +1016,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
   final Value<DateTime?> lastScanDate;
   final Value<bool> needsReAuth;
   final Value<bool> downloadAttachments;
+  final Value<String?> localCopyPath;
   final Value<int> rowid;
   const CollectionsCompanion({
     this.id = const Value.absent(),
@@ -1008,6 +1034,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     this.lastScanDate = const Value.absent(),
     this.needsReAuth = const Value.absent(),
     this.downloadAttachments = const Value.absent(),
+    this.localCopyPath = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CollectionsCompanion.insert({
@@ -1026,6 +1053,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     this.lastScanDate = const Value.absent(),
     required bool needsReAuth,
     this.downloadAttachments = const Value.absent(),
+    this.localCopyPath = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -1050,6 +1078,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     Expression<DateTime>? lastScanDate,
     Expression<bool>? needsReAuth,
     Expression<bool>? downloadAttachments,
+    Expression<String>? localCopyPath,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1069,6 +1098,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
       if (needsReAuth != null) 'needs_re_auth': needsReAuth,
       if (downloadAttachments != null)
         'download_attachments': downloadAttachments,
+      if (localCopyPath != null) 'local_copy_path': localCopyPath,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1089,6 +1119,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     Value<DateTime?>? lastScanDate,
     Value<bool>? needsReAuth,
     Value<bool>? downloadAttachments,
+    Value<String?>? localCopyPath,
     Value<int>? rowid,
   }) {
     return CollectionsCompanion(
@@ -1107,6 +1138,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
       lastScanDate: lastScanDate ?? this.lastScanDate,
       needsReAuth: needsReAuth ?? this.needsReAuth,
       downloadAttachments: downloadAttachments ?? this.downloadAttachments,
+      localCopyPath: localCopyPath ?? this.localCopyPath,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1159,6 +1191,9 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     if (downloadAttachments.present) {
       map['download_attachments'] = Variable<bool>(downloadAttachments.value);
     }
+    if (localCopyPath.present) {
+      map['local_copy_path'] = Variable<String>(localCopyPath.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1183,6 +1218,7 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
           ..write('lastScanDate: $lastScanDate, ')
           ..write('needsReAuth: $needsReAuth, ')
           ..write('downloadAttachments: $downloadAttachments, ')
+          ..write('localCopyPath: $localCopyPath, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3792,6 +3828,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'email_collectionid_idx',
     'CREATE INDEX email_collectionid_idx ON emails (collection_id)',
   );
+  late final Index emailFolderidIdx = Index(
+    'email_folderid_idx',
+    'CREATE INDEX email_folderid_idx ON emails (folder_id)',
+  );
   late final Index emailDateIdx = Index(
     'email_date_idx',
     'CREATE INDEX email_date_idx ON emails (date)',
@@ -3799,6 +3839,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final Index emailFromIdx = Index(
     'email_from_idx',
     'CREATE INDEX email_from_idx ON emails ("from")',
+  );
+  late final Index emailCompSyncIdx = Index(
+    'email_comp_sync_idx',
+    'CREATE INDEX email_comp_sync_idx ON emails (collection_id, folder_id, date)',
   );
   late final Index emailFoldersIdIdx = Index(
     'email_folders_id_idx',
@@ -3867,8 +3911,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     collectionsTypeIdx,
     emailIdIdx,
     emailCollectionidIdx,
+    emailFolderidIdx,
     emailDateIdx,
     emailFromIdx,
+    emailCompSyncIdx,
     emailFoldersIdIdx,
     emailFoldersCollectionidIdx,
     filePathIdx,
@@ -4341,6 +4387,7 @@ typedef $$CollectionsTableCreateCompanionBuilder =
       Value<DateTime?> lastScanDate,
       required bool needsReAuth,
       Value<bool> downloadAttachments,
+      Value<String?> localCopyPath,
       Value<int> rowid,
     });
 typedef $$CollectionsTableUpdateCompanionBuilder =
@@ -4360,6 +4407,7 @@ typedef $$CollectionsTableUpdateCompanionBuilder =
       Value<DateTime?> lastScanDate,
       Value<bool> needsReAuth,
       Value<bool> downloadAttachments,
+      Value<String?> localCopyPath,
       Value<int> rowid,
     });
 
@@ -4473,6 +4521,11 @@ class $$CollectionsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<String> get localCopyPath => $composableBuilder(
+    column: $table.localCopyPath,
+    builder: (column) => ColumnFilters(column),
+  );
+
   Expression<bool> emailFoldersRefs(
     Expression<bool> Function($$EmailFoldersTableFilterComposer f) f,
   ) {
@@ -4582,6 +4635,11 @@ class $$CollectionsTableOrderingComposer
     column: $table.downloadAttachments,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get localCopyPath => $composableBuilder(
+    column: $table.localCopyPath,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CollectionsTableAnnotationComposer
@@ -4651,6 +4709,11 @@ class $$CollectionsTableAnnotationComposer
 
   GeneratedColumn<bool> get downloadAttachments => $composableBuilder(
     column: $table.downloadAttachments,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get localCopyPath => $composableBuilder(
+    column: $table.localCopyPath,
     builder: (column) => column,
   );
 
@@ -4724,6 +4787,7 @@ class $$CollectionsTableTableManager
                 Value<DateTime?> lastScanDate = const Value.absent(),
                 Value<bool> needsReAuth = const Value.absent(),
                 Value<bool> downloadAttachments = const Value.absent(),
+                Value<String?> localCopyPath = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CollectionsCompanion(
                 id: id,
@@ -4741,6 +4805,7 @@ class $$CollectionsTableTableManager
                 lastScanDate: lastScanDate,
                 needsReAuth: needsReAuth,
                 downloadAttachments: downloadAttachments,
+                localCopyPath: localCopyPath,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4760,6 +4825,7 @@ class $$CollectionsTableTableManager
                 Value<DateTime?> lastScanDate = const Value.absent(),
                 required bool needsReAuth,
                 Value<bool> downloadAttachments = const Value.absent(),
+                Value<String?> localCopyPath = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CollectionsCompanion.insert(
                 id: id,
@@ -4777,6 +4843,7 @@ class $$CollectionsTableTableManager
                 lastScanDate: lastScanDate,
                 needsReAuth: needsReAuth,
                 downloadAttachments: downloadAttachments,
+                localCopyPath: localCopyPath,
                 rowid: rowid,
               ),
           withReferenceMapper:

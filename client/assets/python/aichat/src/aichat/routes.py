@@ -5,11 +5,14 @@ This module contains all the FastAPI route handler functions that implement
 the business logic for the API endpoints. Each function corresponds to a
 specific API endpoint and handles request processing, validation, and response generation.
 """
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Generator
 from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
+import json
 
+from .models import ChatRequest, StartSessionRequest, EmbeddingRequest, PstImportRequest
+from .pst_parser import PstParser
 
-from .models import ChatRequest, StartSessionRequest, EmbeddingRequest
 from .model_manager import (
     load_local_model,
     load_embedding_model,
@@ -407,3 +410,24 @@ async def download_model(request: StartSessionRequest) -> Dict[str, Any]:
             status_code=500,
             detail=f"Failed to download model '{filename}' from '{model_id}': {e}"
         )
+
+
+async def import_pst(request: PstImportRequest):
+    """
+    Import and parse an Outlook PST file.
+    
+    Streams JSON objects representing folders, emails, and attachments found in the PST.
+    Attachments are extracted to the specified output directory.
+    """
+    def event_stream() -> Generator[str, None, None]:
+        parser = PstParser(request.file_path, request.output_dir)
+        try:
+            parser.open()
+            for item in parser.walk():
+                yield json.dumps(item) + "\n"
+            parser.close()
+        except Exception as e:
+            yield json.dumps({"type": "error", "message": str(e)}) + "\n"
+
+    return StreamingResponse(event_stream(), media_type="application/x-json-stream")
+

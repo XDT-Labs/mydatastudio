@@ -12,7 +12,6 @@ class GetCollectionsService
   @override
   Future<List<Collection>> invoke(GetCollectionsServiceCommand command) async {
     isLoading.add(true);
-    await Future.delayed(const Duration(milliseconds: 500));
     currentCommand = command;
     CollectionRepository repo = CollectionRepository();
     

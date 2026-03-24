@@ -42,9 +42,6 @@ def test_vision_loading():
 
     except Exception as e:
         print(f"❌ Error during loading: {e}")
-            
-    except Exception as e:
-        print(f"❌ Error during loading: {e}")
 
 if __name__ == "__main__":
     test_vision_loading()

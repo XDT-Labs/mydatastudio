@@ -59,8 +59,17 @@ class _EmailDetails extends State<EmailDetails> {
   }
 
   void _loadEmailContent() {
-    String html = widget.email.htmlBody ?? 
-        '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">${widget.email.plainBody ?? "(empty)"}</body></html>';
+    final htmlBody = widget.email.htmlBody;
+    final plainBody = widget.email.plainBody;
+    
+    String html;
+    if (htmlBody != null && htmlBody.trim().isNotEmpty) {
+      html = htmlBody;
+    } else if (plainBody != null && plainBody.trim().isNotEmpty) {
+      html = '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">$plainBody</body></html>';
+    } else {
+      html = '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">(No content)</body></html>';
+    }
     
     _controller.loadHtmlString(html);
   }

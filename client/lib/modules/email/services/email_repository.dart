@@ -16,8 +16,7 @@ class EmailRepository {
 
   Future<List<model.File>> getAttachments(String emailId) async {
     return await (database.select(database.files)
-          ..where((f) => f.emailId.equals(emailId)))
-        .get();
+      ..where((f) => f.emailId.equals(emailId))).get();
   }
 
   Future<List<Email>> emails(
@@ -26,46 +25,50 @@ class EmailRepository {
     String? search,
     String? sortColumn,
     bool? sortAsc,
-    int? limit,
-    int? offset,
+    int limit = 100,
+    int offset = 0,
   }) async {
     sortColumn ??= "date";
     sortAsc ??= false;
 
-    final query = database.select(database.emails)
-      ..where((e) => e.collectionId.equals(collectionId))
-      ..where((e) {
-        if (folderId != null) {
-          return e.folderId.equals(folderId);
-        }
-        return const Constant(true);
-      })
-      ..where((e) {
-        if (search != null && search.isNotEmpty) {
-          return e.subject.contains(search) |
-              e.from.contains(search) |
-              e.snippet.contains(search);
-        }
-        return const Constant(true);
-      })
-      ..orderBy([
-        (t) {
-          Expression column;
-          if (sortColumn == 'from') {
-            column = t.from;
-          } else if (sortColumn == 'subject') {
-            column = t.subject;
-          } else {
-            column = t.date;
-          }
-          return OrderingTerm(
-            expression: column,
-            mode: sortAsc! ? OrderingMode.asc : OrderingMode.desc,
-          );
-        }
-      ]);
+    final query =
+        database.select(database.emails)
+          ..where((e) => e.collectionId.equals(collectionId))
+          ..where((e) {
+            if (folderId != null) {
+              return e.folderId.equals(folderId);
+            }
+            return const Constant(true);
+          })
+          ..where((e) {
+            if (search != null && search.isNotEmpty) {
+              return e.subject.contains(search) |
+                  e.from.contains(search) |
+                  e.snippet.contains(search);
+            }
+            return const Constant(true);
+          })
+          ..orderBy([
+            (t) {
+              Expression column;
+              if (sortColumn == 'from') {
+                column = t.from;
+              } else if (sortColumn == 'subject') {
+                column = t.subject;
+              } else {
+                column = t.date;
+              }
+              return OrderingTerm(
+                expression: column,
+                mode: sortAsc! ? OrderingMode.asc : OrderingMode.desc,
+              );
+            },
+          ]);
 
-    if (limit != null) {
+    // Only apply pagination when limit > 0. Pass limit = -1 to get all rows
+    // (e.g. for export). Default is 100 to avoid loading thousands of Drift
+    // rows onto the main thread at once.
+    if (limit > 0) {
       query.limit(limit, offset: offset);
     }
 
@@ -73,40 +76,44 @@ class EmailRepository {
   }
 
   Future<int> emailCount(String collectionId) async {
-    return await (database
-            .customSelect(
-              'SELECT COUNT(*) AS c FROM emails WHERE collectionId = ?',
-              variables: [Variable.withString(collectionId)],
-              readsFrom: {database.emails},
-            ))
-            .map((row) => row.read<int>('c'))
-            .getSingle();
+    return await (database.customSelect(
+      'SELECT COUNT(*) AS c FROM emails WHERE collectionId = ?',
+      variables: [Variable.withString(collectionId)],
+      readsFrom: {database.emails},
+    )).map((row) => row.read<int>('c')).getSingle();
   }
 
   Future<DateTime?> getMinEmailDate(String collectionId) async {
-    Email? email = await (database.select(database.emails)
-          ..where((e) => e.collectionId.equals(collectionId))
-          ..orderBy([(t) => OrderingTerm(expression: t.date, mode: OrderingMode.asc)])
-          ..limit(1))
-        .getSingleOrNull();
+    Email? email =
+        await (database.select(database.emails)
+              ..where((e) => e.collectionId.equals(collectionId))
+              ..orderBy([
+                (t) => OrderingTerm(expression: t.date, mode: OrderingMode.asc),
+              ])
+              ..limit(1))
+            .getSingleOrNull();
     return email?.date;
   }
 
   Future<DateTime?> getMaxEmailDate(String collectionId) async {
-    Email? email = await (database.select(database.emails)
-          ..where((e) => e.collectionId.equals(collectionId))
-          ..orderBy([(t) => OrderingTerm(expression: t.date, mode: OrderingMode.desc)])
-          ..limit(1))
-        .getSingleOrNull();
+    Email? email =
+        await (database.select(database.emails)
+              ..where((e) => e.collectionId.equals(collectionId))
+              ..orderBy([
+                (t) =>
+                    OrderingTerm(expression: t.date, mode: OrderingMode.desc),
+              ])
+              ..limit(1))
+            .getSingleOrNull();
     return email?.date;
   }
 
   Future<List<Email>> getAllById(List<String> ids) async {
     List<Email> emails = [];
     if (ids.isNotEmpty) {
-      emails = await (database.select(database.emails)
-            ..where((e) => e.id.isIn(ids)))
-          .get();
+      emails =
+          await (database.select(database.emails)
+            ..where((e) => e.id.isIn(ids))).get();
     }
 
     return emails;
@@ -141,13 +148,13 @@ class EmailRepository {
       // 3. Delete File entries from DB (bulk)
       if (files.isNotEmpty) {
         final fileIds = files.map((f) => f.id).toList();
-        await (database.delete(database.files)..where((t) => t.id.isIn(fileIds)))
-            .go();
+        await (database.delete(database.files)
+          ..where((t) => t.id.isIn(fileIds))).go();
       }
 
       // 4. Delete the email records (bulk)
-      await (database.delete(database.emails)..where((t) => t.id.isIn(ids)))
-          .go();
+      await (database.delete(database.emails)
+        ..where((t) => t.id.isIn(ids))).go();
     } catch (err) {
       logger.e("Error during bulk email deletion: $err");
     }
@@ -159,28 +166,35 @@ class EmailRepository {
     List<int> remoteUids,
   ) async {
     // 1. Get all local email IDs and UIDs for this folder
-    final query = database.selectOnly(database.emails)
-      ..addColumns([database.emails.id, database.emails.uid])
-      ..where(
-        database.emails.collectionId.equals(collection.id) &
-            database.emails.folderId.equals(folder),
-      );
+    final query =
+        database.selectOnly(database.emails)
+          ..addColumns([database.emails.id, database.emails.uid])
+          ..where(
+            database.emails.collectionId.equals(collection.id) &
+                database.emails.folderId.equals(folder),
+          );
 
     final rows = await query.get();
-    final localEmails = rows.map((row) => (
-          id: row.read(database.emails.id)!,
-          uid: row.read(database.emails.uid),
-        )).toList();
+    final localEmails =
+        rows
+            .map(
+              (row) => (
+                id: row.read(database.emails.id)!,
+                uid: row.read(database.emails.uid),
+              ),
+            )
+            .toList();
 
     // 2. Find missing emails by UID
     final remoteUidSet = remoteUids.toSet();
-    final toDeleteIds = localEmails
-        .where((e) {
-          if (e.uid == null) return false;
-          return !remoteUidSet.contains(e.uid);
-        })
-        .map((e) => e.id)
-        .toList();
+    final toDeleteIds =
+        localEmails
+            .where((e) {
+              if (e.uid == null) return false;
+              return !remoteUidSet.contains(e.uid);
+            })
+            .map((e) => e.id)
+            .toList();
 
     if (toDeleteIds.isNotEmpty) {
       logger.i(

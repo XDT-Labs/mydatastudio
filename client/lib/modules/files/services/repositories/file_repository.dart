@@ -17,12 +17,24 @@ class FileDesktopRepository {
     return Future(() => file);
   }
 
-  Future<List<File>> getByParentPath(String collectionId, String path) async {
-    List<File> files =
-        await (db.select(db.files)
-          ..where((t) => t.collectionId.equals(collectionId) & t.parent.equals(path) & t.isDeleted.equals(false))).get();
+  Future<List<File>> getByParentPath(
+    String collectionId,
+    String path, {
+    int limit = 200,
+    int offset = 0,
+  }) async {
+    final query =
+        db.select(db.files)
+          ..where(
+            (t) =>
+                t.collectionId.equals(collectionId) &
+                t.parent.equals(path) &
+                t.isDeleted.equals(false),
+          )
+          ..orderBy([(t) => drift.OrderingTerm(expression: t.name)])
+          ..limit(limit, offset: offset);
 
-    return Future(() => files);
+    return query.get();
   }
 
   Future<File?> create(File f) async {

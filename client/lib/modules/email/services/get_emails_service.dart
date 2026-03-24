@@ -13,11 +13,10 @@ class GetEmailsService extends RxService<EmailServiceCommand, List<Email>> {
   @override
   Future<List<Email>> invoke(EmailServiceCommand command) async {
     isLoading.add(true);
-    //first check for newest emails
 
-    //load files and folders from db
-    List<Email> emails =
-        await EmailRepository(DatabaseManager.instance.database!).emails(
+    final List<Email> emails = await EmailRepository(
+      DatabaseManager.instance.database!,
+    ).emails(
       command.collection.id,
       folderId: command.folderId,
       search: command.search,
@@ -26,6 +25,7 @@ class GetEmailsService extends RxService<EmailServiceCommand, List<Email>> {
       limit: command.limit,
       offset: command.offset,
     );
+
     sink.add(emails);
     isLoading.add(false);
     return emails;
@@ -38,15 +38,18 @@ class EmailServiceCommand extends RxCommand {
   final String? search;
   final String sortColumn;
   final bool sortAsc;
-  final int? limit;
-  final int? offset;
+
+  /// Number of rows to fetch. Defaults to 100. Pass -1 to fetch all rows.
+  final int limit;
+  final int offset;
+
   EmailServiceCommand(
     this.collection, {
     this.folderId,
     this.search,
     this.sortColumn = 'date',
     this.sortAsc = false,
-    this.limit,
-    this.offset,
+    this.limit = 100,
+    this.offset = 0,
   });
 }

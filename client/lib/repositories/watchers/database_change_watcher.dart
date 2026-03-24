@@ -42,10 +42,10 @@ class DatabaseChangeWatcher {
 
   /// Start a realm change stream for each collection type
   void _initializeSyncWatchers() {
-    _watchCollections(database);
-    _watchFolders(database);
-    _watchFiles(database);
-    _watchEmails(database);
+    //_watchCollections(database);
+    //_watchFolders(database);
+    //_watchFiles(database);
+    //_watchEmails(database);
   }
 
   /// Listen for object changes in 'Collection'
