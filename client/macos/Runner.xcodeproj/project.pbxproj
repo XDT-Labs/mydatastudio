@@ -59,6 +59,15 @@
 			name = "Bundle Framework";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D519F5552F68871F00192A31 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -241,6 +250,7 @@
 				3399D490228B24CF009A79C7 /* ShellScript */,
 				8D4C3CDBBC1F88A4E1808029 /* [CP] Embed Pods Frameworks */,
 				A8EA0B7C80703A0686215886 /* [CP] Copy Pods Resources */,
+				D519F5552F68871F00192A31 /* CopyFiles */,
 			);
 			buildRules = (
 			);

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:mydatatools/app_constants.dart';
+import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/app_router.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/family_dam_app.dart';
@@ -18,6 +19,7 @@ import 'package:rxdart/rxdart.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:password_dart/password_dart.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:media_kit/media_kit.dart';
 
 /// The main() function is the starting point of the application. It first ensures that the Flutter binding is initialized.
 /// Then, it checks if the platform is Windows, Linux or macOS. If it is, it gets the current screen and sets the window title, minimum size and maximum size.
@@ -25,9 +27,10 @@ import 'package:window_manager/window_manager.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   // Must add this line.
   await windowManager.ensureInitialized();
-  
+
   // Intercept close events to manually shutdown python service before exit
   await windowManager.setPreventClose(true);
 
@@ -67,7 +70,8 @@ class MainApp extends StatefulWidget {
 }
 
 // In your top-level app widget (MainApp State) call stop when the app is disposed:
-class MainAppState extends State<MainApp> with WidgetsBindingObserver, WindowListener {
+class MainAppState extends State<MainApp>
+    with WidgetsBindingObserver, WindowListener {
   bool _needsSetup = false;
   bool _isSetupComplete = false;
   PythonManager? pythonManager;
@@ -195,7 +199,7 @@ class MainAppState extends State<MainApp> with WidgetsBindingObserver, WindowLis
       }
     } catch (e) {
       // Log error but don't block startup
-      Logger().e("Auto-login failed", error: e);
+      AppLogger(null).e("Auto-login failed", error: e);
     }
   }
 
@@ -225,7 +229,7 @@ class MainAppState extends State<MainApp> with WidgetsBindingObserver, WindowLis
   Widget _initSplashScreen() {
     // Show splash screen
     () async {
-      await windowManager.setSize(const Size(800, 600));
+      await windowManager.setSize(const Size(900, 700));
       await windowManager.center();
       await windowManager.setTitle('MyData Tools - Loading...');
     }();

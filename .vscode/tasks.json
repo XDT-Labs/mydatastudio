@@ -4,13 +4,13 @@
         {
             "label": "clean app dir",
             "type": "shell",
-            "command": "rm -fr '/Users/mikenimer/Library/Application Support/mydata.tools'",
+            "command": "rm -fr '${env:HOME}/Library/Application Support/mydata.tools' && rm -fr client/app/*.zip",
             "problemMatcher": []
         },
         {
             "label": "Build aichat (macOS)",
             "type": "shell",
-            "command": "cd client/assets/python/aichat && python -m pip install -r requirements.txt && python -m PyInstaller main.spec --clean --noconfirm && cd dist && zip -r ../../../../app/aichat-macos.zip aichat",
+            "command": "cd client/assets/python/aichat && pdm install && python -m PyInstaller -y main.spec --clean --noconfirm && cd dist/aichat && zip -r ../../../../../app/aichat-macos.zip aichat",
             "problemMatcher": [],
             "group": "build"
         }

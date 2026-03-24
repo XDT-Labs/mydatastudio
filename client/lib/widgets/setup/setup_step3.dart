@@ -2,9 +2,9 @@ import 'dart:io';
 
 import 'package:mydatatools/helpers/encryption_form_validator.dart';
 import 'package:mydatatools/helpers/encryption_helper.dart';
+import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/models/tables/app_user.dart';
 import 'package:flutter/material.dart';
-import 'package:logger/logger.dart';
 import 'package:pointycastle/pointycastle.dart';
 import 'package:reactive_forms/reactive_forms.dart';
 
@@ -26,7 +26,7 @@ class SetupStep3 extends StatefulWidget {
 
 class _SetupStep3State extends State<SetupStep3> {
   final EncryptionHelper encHelper = EncryptionHelper();
-  final Logger logger = Logger();
+  final AppLogger logger = AppLogger(null);
 
   final encryptionForm = FormGroup(
     {

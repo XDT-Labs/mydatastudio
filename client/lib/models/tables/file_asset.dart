@@ -5,5 +5,6 @@ class FileAsset {
   late String parent;
   late DateTime dateCreated;
   late DateTime dateLastModified;
+  DateTime? lastScannedDate;
   late String collectionId;
 }

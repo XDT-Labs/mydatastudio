@@ -6,7 +6,7 @@ access to model instances, IDs, and synchronization locks. It ensures that
 model loading operations are coordinated across concurrent requests.
 """
 import asyncio
-from typing import Optional, Any, Tuple
+from typing import Optional, Any, Tuple, Dict, List
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.llms import LlamaCpp
@@ -163,3 +163,38 @@ def get_locks() -> Tuple[asyncio.Lock, asyncio.Lock]:
         ...     pass
     """
     return model_lock, embedding_lock
+
+
+class ConversationManager:
+    """
+    Manages conversation history for multiple sessions in memory.
+    """
+    def __init__(self):
+        self._histories: Dict[str, List[str]] = {}
+        self._lock = asyncio.Lock()
+
+    async def get_history(self, session_id: str) -> List[str]:
+        """Retrieve the conversation history for a session."""
+        async with self._lock:
+            return self._histories.get(session_id, [])
+
+    async def add_turn(self, session_id: str, user_prompt: str, model_response: str):
+        """Add a turn (user prompt + model response) to the session history."""
+        async with self._lock:
+            if session_id not in self._histories:
+                self._histories[session_id] = []
+            
+            # Store formatted turn
+            # Note: We store the raw text, formatting happens in routes.py or here if preferred.
+            # Storing pre-formatted turns makes reconstruction easier.
+            turn = f"<start_of_turn>user\n{user_prompt}<end_of_turn>\n<start_of_turn>model\n{model_response}<end_of_turn>\n"
+            self._histories[session_id].append(turn)
+
+    async def clear_history(self, session_id: str):
+        """Clear history for a session."""
+        async with self._lock:
+            if session_id in self._histories:
+                del self._histories[session_id]
+
+# Global conversation manager instance
+conversation_manager = ConversationManager()

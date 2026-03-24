@@ -31,7 +31,7 @@ class UserRepository {
       String privateFilePath = '$keyDir/private.pem';
       if (!File(publicFilePath).existsSync() &&
           !File(privateFilePath).existsSync()) {
-        throw Exception("Keys not found, stopping application");
+        throw Exception("Keys not found at $keyDir. Stopping application.");
       }
       // TODO: read/write from app /keys folder
       user.publicKey = File(publicFilePath).readAsStringSync();

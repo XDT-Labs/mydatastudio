@@ -11,8 +11,10 @@ class AuthDialogManager {
   void init() {
     GetCollectionsService.instance.sink.listen((value) {
       for (var c in value) {
-        if (c.needsReAuth && c.type == 'email' && c.oauthService == 'google') {
-          _showGoogleAuthDialog(c);
+        if (c.needsReAuth && c.type == 'email') {
+          if (c.oauthService == 'google') {
+            _showGoogleAuthDialog(c);
+          }
         }
       }
     });
@@ -42,7 +44,7 @@ class AuthDialogManager {
                   onPressed: () async {
                     await LoginProviderExtension.handleGoogleMail(
                       context,
-                      collection,
+                      existing: collection,
                     );
                     // TODO close dialog
                   },

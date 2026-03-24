@@ -14,7 +14,7 @@ pdm install
 hf download bartowski/google_gemma-3-4b-it-GGUF google_gemma-3-4b-it-Q4_K_M.gguf --local-dir models
 
 # 3. Compile the executable
-pdm run pyinstaller main.spec
+pdm run pyinstaller -y main.spec
 
 # 3. Zip the compiled output for Flutter
 cd dist/aichat
@@ -27,7 +27,7 @@ cp ./*.zip ~/Library/Application\ Support/mydata.tools/
 
 ## All in one
 ```
-clear && cd client/assets/python/aichat && pdm install && pdm run pyinstaller main.spec && cd dist/aichat && zip -r ../../../../../app/aichat-macos.zip . && cd ../../../../../app/ && cp ./*.zip ~/Library/Application\ Support/mydata.tools/ && cd ../..
+clear && cd client/assets/python/aichat && pdm install && pdm run pyinstaller -y main.spec && cd dist/aichat && zip -r ../../../../../app/aichat-macos.zip . && cd ../../../../../app/ && cp ./*.zip ~/Library/Application\ Support/mydata.tools/ && cd ../..
 ```
 
 

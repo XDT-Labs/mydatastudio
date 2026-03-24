@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 datas = []
@@ -17,10 +18,13 @@ hiddenimports = [
     'fastapi',
     'pydantic',
     'starlette',
-    'torch',
-    'transformers',
-    'sklearn.utils._typedefs', # Common missing import for scikit-learn/numpy
     'aichat.model_manager',
+    # langchain_community transitively imports transformers, which lazily
+    # imports sklearn.metrics.roc_curve — must be bundled explicitly.
+    'sklearn.metrics._ranking',
+    'sklearn.metrics._classification',
+    'sklearn.metrics._regression',
+    'sklearn.utils._typedefs',
 ]
 
 # Collect all for complex packages

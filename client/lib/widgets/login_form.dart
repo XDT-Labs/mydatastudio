@@ -171,48 +171,55 @@ class _LoginFormState extends State<LoginForm> {
       });
     }
 
-    String? pwd = values['password'];
-    bool remember = values['remember'] ?? false;
-    if (pwd != null) {
-      var algorithm = PBKDF2(
-        blockLength: 64,
-        iterationCount: 10000,
-        desiredKeyLength: 64,
-      );
-      var hash = Password.hash(pwd, algorithm);
-
-      var dbUser = await GetUserService.instance.invoke(
-        GetUserServiceCommand(hash),
-      );
-      if (dbUser != null) {
-        widget.onLoginSuccessful!();
-
-        // Save remember me preference
-        FlutterSecureStorage storage = const FlutterSecureStorage(
-          iOptions: IOSOptions(
-            groupId: AppConstants.appName,
-            synchronizable: true,
-            accessibility: KeychainAccessibility.first_unlock,
-          ),
+    try {
+      String? pwd = values['password'];
+      bool remember = values['remember'] ?? false;
+      if (pwd != null) {
+        var algorithm = PBKDF2(
+          blockLength: 64,
+          iterationCount: 10000,
+          desiredKeyLength: 64,
         );
-        await storage.write(
-          key: AppConstants.secureRememberMe,
-          value: remember.toString(),
-        );
+        var hash = Password.hash(pwd, algorithm);
 
-        if (remember) {
-          //save password to secure storage
-          await storage.write(key: AppConstants.securePassword, value: pwd);
+        var dbUser = await GetUserService.instance.invoke(
+          GetUserServiceCommand(hash),
+        );
+        if (dbUser != null) {
+          widget.onLoginSuccessful!();
+
+          // Save remember me preference
+          FlutterSecureStorage storage = const FlutterSecureStorage(
+            iOptions: IOSOptions(
+              groupId: AppConstants.appName,
+              synchronizable: true,
+              accessibility: KeychainAccessibility.first_unlock,
+            ),
+          );
+          await storage.write(
+            key: AppConstants.secureRememberMe,
+            value: remember.toString(),
+          );
+
+          if (remember) {
+            //save password to secure storage
+            await storage.write(key: AppConstants.securePassword, value: pwd);
+          } else {
+            //remove password from secure storage
+            await storage.delete(key: AppConstants.securePassword);
+          }
         } else {
-          //remove password from secure storage
-          await storage.delete(key: AppConstants.securePassword);
-        }
-      } else {
-        if (context != null && context.mounted) {
-          context.showToast("Wrong password");
+          if (context != null && context.mounted) {
+            context.showToast("Wrong password");
+          }
         }
       }
-
+    } catch (e) {
+      logger.e("Login error: $e");
+      if (context != null && context.mounted) {
+        context.showToast("Login error: ${e.toString()}");
+      }
+    } finally {
       if (context?.mounted ?? false) {
         setState(() {
           isSubmitting = false;

@@ -21,7 +21,7 @@ def get_local_path(model_id: str) -> str:
         model_id (str): Hugging Face model identifier (e.g., 'google/gemma-2-9b-it')
         
     Returns:
-        str: Local directory path (e.g., '../models/google-gemma-2-9b-it-local/')
+        str: Local directory path (e.g., './models/google-gemma-2-9b-it-local/')
         
     Example:
         >>> get_local_path("google/gemma-2-9b-it")

@@ -8,7 +8,10 @@
             "name": "client",
             "cwd": "client",
             "request": "launch",
-            "type": "dart"
+            "type": "dart",
+            "args": [
+                "--dart-define-from-file=config/secrets.json"
+            ]
         },
         {
             "name": "client (impeller)",
@@ -16,7 +19,8 @@
             "request": "launch",
             "type": "dart",
             "args": [
-                "--enable-impeller"
+                "--enable-impeller",
+                "--dart-define-from-file=config/secrets.json"
             ]
         },
         {
@@ -24,14 +28,20 @@
             "cwd": "client",
             "request": "launch",
             "type": "dart",
-            "flutterMode": "profile"
+            "flutterMode": "profile",
+            "args": [
+                "--dart-define-from-file=config/secrets.json"
+            ]
         },
         {
             "name": "client (release mode)",
             "cwd": "client",
             "request": "launch",
             "type": "dart",
-            "flutterMode": "release"
+            "flutterMode": "release",
+            "args": [
+                "--dart-define-from-file=config/secrets.json"
+            ]
         }
     ]
 }

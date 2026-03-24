@@ -69,7 +69,6 @@ class PythonManager {
     }
 
     logger.d('[python] Starting AI Chat service in `$_pythonDir`');
-    logger.d('[python] Starting AI Chat service in `$_pythonDir`');
 
     String executableName = 'aichat';
     if (Platform.isWindows) {
@@ -109,13 +108,14 @@ class PythonManager {
         },
       );
 
-      // Write new PID to file
       try {
         pidFile.writeAsStringSync('${_pythonProc!.pid}');
         logger.d('[python] Wrote PID ${_pythonProc!.pid} to ${pidFile.path}');
       } catch (e) {
         logger.d('[python] Failed to write PID file: $e');
       }
+
+      logger.d('[python] Service process started with PID: ${_pythonProc!.pid}');
 
       await _pipeOutput(_pythonProc!);
 
@@ -272,7 +272,7 @@ class PythonManager {
           ].map((s) => p.normalize(s)).toList();
 
       //logger.d('[python] Candidates: ${candidates.join(', ')}');
-      
+
       String? zipPath;
       for (final c in candidates) {
         if (File(c).existsSync()) {
@@ -288,19 +288,25 @@ class PythonManager {
         return;
       }
 
-      _stdoutController.add('Unzipping `$zipPath` -> `${destDir.path}`');
-      destDir.createSync(recursive: true);
+      final tempDir = Directory(p.join(supportDir.path, 'aichat_temp'));
+      if (tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+      tempDir.createSync(recursive: true);
+
+      _stdoutController.add('Unzipping `$zipPath` -> `${tempDir.path}`');
 
       if (Platform.isWindows) {
         // On Windows, use PowerShell to expand the archive
         final result = await Process.run('powershell', [
           '-command',
-          'Expand-Archive -Path "$zipPath" -DestinationPath "${destDir.path}" -Force',
+          'Expand-Archive -Path "$zipPath" -DestinationPath "${tempDir.path}" -Force',
         ]);
         if (result.exitCode != 0) {
           _stderrController.add(
             'Expand-Archive failed (exit ${result.exitCode}): ${result.stderr}',
           );
+          return;
         } else {
           _stdoutController.add('Unzip completed via PowerShell');
         }
@@ -310,16 +316,38 @@ class PythonManager {
           '-o',
           zipPath,
           '-d',
-          destDir.path,
+          tempDir.path,
         ]);
         if (result.exitCode != 0) {
           _stderrController.add(
             'unzip failed (exit ${result.exitCode}): ${result.stderr}',
           );
+          return;
         } else {
           final out = (result.stdout ?? '').toString();
           _stdoutController.add('Unzip completed: ${out.trim()}');
         }
+      }
+
+      // Check contents of tempDir
+      final contents =
+          tempDir.listSync().where((e) {
+            final name = p.basename(e.path);
+            return !name.startsWith('__') && !name.startsWith('.');
+          }).toList();
+
+      if (contents.length == 1 && contents.first is Directory) {
+        // It's a nested folder structure (e.g. aichat-macos/), move it to destDir
+        final nestedDir = contents.first as Directory;
+        _stdoutController.add(
+          'Moving nested folder `${nestedDir.path}` to `${destDir.path}`',
+        );
+        nestedDir.renameSync(destDir.path);
+        tempDir.deleteSync(recursive: true);
+      } else {
+        // Flat structure, rename tempDir to destDir
+        _stdoutController.add('Moving `${tempDir.path}` to `${destDir.path}`');
+        tempDir.renameSync(destDir.path);
       }
     } catch (e) {
       final msg = 'Exception while unzipping aichat bundle: $e';

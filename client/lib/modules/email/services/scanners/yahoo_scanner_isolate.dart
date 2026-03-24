@@ -1,0 +1,510 @@
+import 'dart:isolate';
+import 'package:enough_mail/enough_mail.dart';
+import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
+import 'package:mydatatools/app_logger.dart';
+import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatatools/models/tables/email.dart';
+import 'package:mydatatools/models/tables/email_folder.dart';
+import 'package:mydatatools/models/tables/file.dart' as db_file;
+import 'package:mydatatools/models/tables/folder.dart' as db_folder;
+import 'package:mydatatools/modules/email/services/get_emails_service.dart';
+import 'package:mydatatools/modules/files/files_constants.dart';
+import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
+import 'dart:io' as io;
+import 'package:mydatatools/database_manager.dart';
+import 'package:mydatatools/modules/email/services/email_repository.dart';
+import 'package:uuid/uuid.dart';
+
+class YahooScannerIsolate {
+  final RootIsolateToken? token;
+  final SendPort? dbWriterPort;
+  final String appDir;
+  Isolate? _isolate;
+  final AppLogger logger = AppLogger(null);
+
+  YahooScannerIsolate({
+    this.token,
+    this.dbWriterPort,
+    required this.appDir,
+  });
+
+  Future<void> start(
+    Collection collection, {
+    String? folderId,
+    bool force = false,
+    SendPort? statusPort,
+  }) async {
+    if (dbWriterPort == null) {
+      throw Exception("dbWriterPort is required for YahooScannerIsolate");
+    }
+
+    ReceivePort receivePort = ReceivePort("YahooScannerIsolateClient");
+
+    Map<String, dynamic> args = {
+      'token': token ?? RootIsolateToken.instance,
+      'port': receivePort.sendPort,
+      'dbWriterPort': dbWriterPort,
+      'collection': collection,
+      'folderId': folderId,
+      'appDir': appDir,
+    };
+
+    _isolate = await Isolate.spawn(YahooScannerIsolateWorker.worker, args);
+
+    bool isIsolateDone = false;
+    bool isCleanupInProgress = false;
+
+    void checkDone() {
+      if (isIsolateDone && !isCleanupInProgress) {
+        if (statusPort != null) {
+          statusPort.send({'status': 'done'});
+        }
+      }
+    }
+
+    receivePort.listen((message) {
+      if (message is Map) {
+        if (message['type'] == 'refresh') {
+          GetEmailsService.instance.invoke(
+            EmailServiceCommand(collection, sortColumn: "date", sortAsc: false, folderId: folderId),
+          );
+        } else if (message['type'] == 'cleanup_uids') {
+          final db = DatabaseManager.instance.appDatabase;
+          if (db != null) {
+            isCleanupInProgress = true;
+            final repo = EmailRepository(db);
+            repo.cleanupDeletedYahoo(
+              collection,
+              message['folder'],
+              (message['uids'] as List).cast<int>(),
+            ).then((_) {
+              isCleanupInProgress = false;
+              checkDone();
+            });
+          }
+        }
+
+        if (message['status'] == 'done') {
+          isIsolateDone = true;
+          checkDone();
+          return; // Don't send double done
+        }
+      }
+
+      // Relay all other messages to statusPort
+      if (statusPort != null) statusPort.send(message);
+    });
+
+    if (statusPort != null) {
+      statusPort.send({'status': 'scanning'});
+    }
+  }
+
+  Future<void> moveToTrash(
+    Collection collection, {
+    String? folderId,
+    required List<int> uids,
+    SendPort? statusPort,
+  }) async {
+    Map<String, dynamic> args = {
+      'token': token ?? RootIsolateToken.instance,
+      'dbWriterPort': dbWriterPort,
+      'collection': collection,
+      'folderId': folderId,
+      'uids': uids,
+      'type': 'move_to_trash',
+      'appDir': appDir,
+    };
+
+    // We use a fresh isolate for the move operation to avoid blocking or being blocked by long-running scans
+    await Isolate.spawn(YahooScannerIsolateWorker.worker, args);
+    
+    if (statusPort != null) {
+      statusPort.send("Remote delete request sent for ${uids.length} messages");
+    }
+  }
+
+  void stop() {
+    _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
+  }
+}
+
+class YahooScannerIsolateWorker {
+  static Future<void> worker(Map<String, dynamic> args) async {
+    final RootIsolateToken? token = args['token'];
+    final SendPort? clientPort = args['port'];
+    final SendPort dbWriterPort = args['dbWriterPort'];
+    final Collection collection = args['collection'];
+    final String? folderId = args['folderId'];
+    final String type = args['type'] ?? 'sync';
+    final List<int>? uidsToMove = args['uids'] != null ? (args['uids'] as List).cast<int>() : null;
+
+    if (token != null) {
+      BackgroundIsolateBinaryMessenger.ensureInitialized(token);
+    }
+
+    final AppLogger logger = AppLogger(clientPort);
+    final emailAddress = collection.userId!;
+    final appPassword = collection.accessToken!;
+
+    final client = ImapClient(isLogEnabled: false);
+    try {
+      logger.s("Connecting to Yahoo IMAP for $type...");
+      await client.connectToServer('imap.mail.yahoo.com', 993, isSecure: true);
+      await client.login(emailAddress, appPassword);
+
+      if (type == 'move_to_trash' && uidsToMove != null && uidsToMove.isNotEmpty) {
+        final mailboxes = await client.listMailboxes();
+        // Use flag-based discovery first, then fall back to common names
+        final trashMailbox = mailboxes.where((m) => m.isTrash).firstOrNull ?? 
+                           mailboxes.where((m) => m.name.toLowerCase() == 'trash' || m.name.toLowerCase() == 'archive').firstOrNull;
+        
+        final trashPath = trashMailbox?.name ?? 'Trash';
+        final targetFolder = folderId ?? 'INBOX';
+        
+        logger.s("Moving ${uidsToMove.length} messages to $trashPath from $targetFolder...");
+        await client.selectMailboxByPath(targetFolder);
+        
+        final sequence = MessageSequence();
+        for (final uid in uidsToMove) {
+          sequence.add(uid);
+        }
+        
+        try {
+          await client.uidMove(sequence, targetMailboxPath: trashPath);
+          logger.s("Cleanup: remote move to $trashPath complete.");
+        } catch (e) {
+          logger.e("Error during IMAP MOVE: $e. Attempting Copy/Delete fallback.");
+          // Fallback: Copy -> Delete -> Expunge
+          try {
+            await client.uidCopy(sequence, targetMailboxPath: trashPath);
+            await client.uidStore(sequence, [MessageFlags.deleted], action: StoreAction.add);
+            await client.uidExpunge(sequence);
+            logger.s("Cleanup: move to Trash completed via fallback.");
+          } catch (e2) {
+             logger.e("Fallback Copy/Delete failed: $e2");
+          }
+        }
+        
+        await client.logout();
+        return;
+      }
+
+      // 1. Sync Folders
+      logger.s("Syncing Yahoo folders...");
+      final mailboxes = await client.listMailboxes();
+      for (final mailbox in mailboxes) {
+        final folder = EmailFolder(
+          id: mailbox.name,
+          collectionId: collection.id,
+          name: mailbox.name,
+          type: _getFolderType(mailbox.name),
+        );
+        dbWriterPort.send({'type': 'email_folder', 'folder': folder});
+      }
+
+      // 2. Sync Emails
+      final targetFolder = folderId ?? 'INBOX';
+      logger.s("Syncing folder: $targetFolder");
+      await client.selectMailboxByPath(targetFolder);
+      
+      // Fetch ALL UIDs to detect deletions
+      List<int> allUids = [];
+      try {
+        final searchResult = await client.uidSearchMessages(searchCriteria: 'ALL');
+        allUids = searchResult.matchingSequence?.toList() ?? [];
+        clientPort?.send({
+          'type': 'cleanup_uids',
+          'folder': targetFolder,
+          'uids': allUids,
+        });
+      } catch (err) {
+        logger.e("Failed to fetch all UIDs for folder cleanup: $err");
+      }
+
+      if (allUids.isEmpty) {
+        logger.s("No messages found in $targetFolder.");
+      } else {
+        const int batchSize = 50;
+        final reversedUids = allUids.reversed.toList();
+        logger.s("Starting full sync of ${reversedUids.length} messages in $targetFolder...");
+        
+        for (int i = 0; i < reversedUids.length; i += batchSize) {
+          final end = (i + batchSize < reversedUids.length) ? i + batchSize : reversedUids.length;
+          final batchUids = reversedUids.sublist(i, end);
+          
+          logger.s("Fetching batch ${(i ~/ batchSize) + 1} (${batchUids.length} messages)...");
+          
+          final sequence = MessageSequence();
+          for (final uid in batchUids) {
+            sequence.add(uid);
+          }
+          
+          try {
+            final fetchResult = await client.uidFetchMessages(sequence, 'BODY.PEEK[]');
+            logger.s("Fetched ${fetchResult.messages.length} messages in batch.");
+            
+            List<Email> emailBatch = [];
+            for (final message in fetchResult.messages) {
+              final emailObj = await _parseAndProcessMessage(
+                message: message,
+                collection: collection,
+                targetFolder: targetFolder,
+                appDir: args['appDir'] as String,
+                dbWriterPort: dbWriterPort,
+                logger: logger,
+              );
+              emailBatch.add(emailObj);
+            }
+
+            if (emailBatch.isNotEmpty) {
+              dbWriterPort.send({'type': 'batch_email', 'emails': emailBatch});
+              clientPort?.send({'type': 'refresh'});
+            }
+          } catch (e) {
+            logger.e("Failed to fetch batch starting at $i: $e");
+          }
+        }
+      }
+
+      logger.s("Yahoo sync complete.");
+      clientPort?.send({'type': 'refresh', 'status': 'done'});
+    } catch (e, stack) {
+      logger.e("Error in Yahoo Isolate: $e", error: e, stackTrace: stack);
+    } finally {
+      if (client.isLoggedIn) {
+        await client.logout();
+      }
+      Isolate.exit(clientPort, {'status': 'done'});
+    }
+  }
+
+  /// Returns all MIME parts that have a filename (i.e. are attachments or
+  /// named inline parts). Uses enough_mail's built-in [allPartsFlat] so we
+  /// correctly traverse the whole MIME tree without reimplementing it.
+  static List<MimePart> _collectAttachmentParts(MimeMessage message) {
+    return message.allPartsFlat
+        .where((part) => part.decodeFileName() != null)
+        .toList();
+  }
+
+  static Future<List<db_file.File>> _downloadAttachments({
+    required Collection collection,
+    required String messageId,
+    required DateTime msgDate,
+    required List<MimePart> parts,
+    required String targetFolderPath,    // absolute path on disk
+    required String extractionRoot,       // absolute collection root → for relative-path computation
+    required SendPort dbWriterPort,
+    required AppLogger logger,
+  }) async {
+    List<db_file.File> files = [];
+    await io.Directory(targetFolderPath).create(recursive: true);
+
+    // SMTP Message-IDs often contain '<', '>', '@', '/' and other chars that
+    // are illegal in file-system paths. Strip everything unsafe.
+    final safeMessageId = messageId
+        .replaceAll(RegExp(r'[<>:/\\|?*\x00-\x1F]'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+
+    for (final part in parts) {
+      final fileName = part.decodeFileName();
+      if (fileName == null) continue;
+
+      Uint8List? content;
+      try {
+        content = part.decodeContentBinary();
+      } catch (e) {
+        // Malformed base64 / encoding errors — skip this attachment only.
+        logger.w('YahooScanner: Could not decode attachment $fileName (encoding error): $e');
+        continue;
+      }
+
+      try {
+        if (content != null && content.isNotEmpty) {
+          final file = io.File(p.join(targetFolderPath, '${safeMessageId}_$fileName'));
+          await file.writeAsBytes(content);
+
+          // Store relative paths so FilePathResolver + GetFileAndFoldersService
+          // can resolve them back to absolute using collection.localCopyPath.
+          final relPath   = ScannerPathHelper.relativePath(file.path, extractionRoot);
+          final relParent = ScannerPathHelper.relativeParent(file.path, extractionRoot);
+
+          final f = db_file.File(
+            id: const Uuid().v5(Namespace.url.value, 'file:email:${collection.id}:$messageId:$fileName'),
+            collectionId: collection.id,
+            name: fileName,
+            path: relPath,
+            parent: relParent,
+            dateCreated: msgDate,
+            dateLastModified: msgDate,
+            size: file.lengthSync(),
+            contentType: _mapMimeType(part.mediaType.text),
+            isDeleted: false,
+            emailId: messageId,
+          );
+          files.add(f);
+        }
+      } catch (e) {
+        logger.w('YahooScanner: Failed to save attachment $fileName: $e');
+      }
+    }
+    return files;
+  }
+
+  static Future<void> _ensureFolderHierarchy({
+    required SendPort dbWriterPort,
+    required Collection collection,
+    required String extractionRoot,
+    required String labelName,
+    required String year,
+    required DateTime msgDate,
+  }) async {
+    // Absolute paths are used only for the folder ID (stable UUID seed);
+    // path/parent stored in the DB are relative to extractionRoot.
+    final labelAbsPath = p.normalize(p.join(extractionRoot, labelName));
+    final yearAbsPath  = p.normalize(p.join(labelAbsPath, year));
+
+    dbWriterPort.send({
+      'type': 'folder',
+      'folder': _createFolderObj(
+        absPath: labelAbsPath,
+        extractionRoot: extractionRoot,
+        name: labelName,
+        collectionId: collection.id,
+        date: msgDate,
+      ),
+    });
+    dbWriterPort.send({
+      'type': 'folder',
+      'folder': _createFolderObj(
+        absPath: yearAbsPath,
+        extractionRoot: extractionRoot,
+        name: year,
+        collectionId: collection.id,
+        date: msgDate,
+      ),
+    });
+  }
+
+  /// Builds a [Folder] with relative path/parent so it matches the queries
+  /// in [GetFileAndFoldersService] that filter on the relative parent column.
+  static db_folder.Folder _createFolderObj({
+    required String absPath,
+    required String extractionRoot,
+    required String name,
+    required String collectionId,
+    required DateTime date,
+  }) {
+    final relPath   = ScannerPathHelper.relativePath(absPath, extractionRoot, isFolder: true);
+    final relParent = ScannerPathHelper.relativeParent(absPath, extractionRoot);
+    return db_folder.Folder(
+      id: const Uuid().v5(Namespace.url.value, 'folder:email:$collectionId:$absPath'),
+      collectionId: collectionId,
+      name: name,
+      path: relPath,
+      parent: relParent,
+      dateCreated: date,
+      dateLastModified: date,
+    );
+  }
+
+  static String _getFolderType(String name) {
+    final n = name.toUpperCase();
+    if (n == 'INBOX' || n == 'SENT' || n == 'TRASH' || n == 'SPAM' || n == 'DRAFTS') return 'system';
+    return 'user';
+  }
+
+  static Future<Email> _parseAndProcessMessage({
+    required MimeMessage message,
+    required Collection collection,
+    required String targetFolder,
+    required String appDir,
+    required SendPort dbWriterPort,
+    required AppLogger logger,
+  }) async {
+    final messageId = message.getHeaderValue('Message-ID');
+    int? uid;
+    try {
+      uid = (message as dynamic).uid;
+    } catch (_) {}
+
+    String emailId = messageId ?? 
+        const Uuid().v5(Namespace.url.value, 'email:yahoo:${collection.id}:$targetFolder:${uid ?? const Uuid().v4()}');
+    
+    final plainBody = message.decodeTextPlainPart();
+    final htmlBody = message.decodeTextHtmlPart();
+    final snippet = plainBody != null 
+        ? (plainBody.length > 200 ? plainBody.substring(0, 200) : plainBody)
+        : '';
+
+    final hasAttachments = message.hasAttachments();
+    final msgDate = message.decodeDate() ?? DateTime.now();
+
+    final emailObj = Email(
+      id: emailId,
+      uid: uid,
+      collectionId: collection.id,
+      date: msgDate,
+      from: message.from?.first.toString() ?? 'unknown',
+      to: message.to?.map((e) => e.toString()).toList() ?? [],
+      cc: message.cc?.map((e) => e.toString()).toList() ?? [],
+      subject: message.decodeSubject() ?? '(no subject)',
+      snippet: snippet,
+      plainBody: plainBody,
+      htmlBody: htmlBody,
+      folderId: targetFolder,
+      messageId: messageId,
+      isRead: false, 
+      hasAttachments: hasAttachments,
+      isDeleted: false,
+    );
+
+    if (hasAttachments && collection.downloadAttachments) {
+      final labelName = targetFolder;
+      final year = msgDate.year.toString();
+      // Use the app-managed extraction root (not collection.path which is an
+      // email address for Yahoo accounts) so paths are absolute on disk.
+      final extractionRoot = p.normalize(p.join(appDir, 'files', 'email', collection.id));
+      final absoluteYearPath = p.normalize(p.join(extractionRoot, labelName, year));
+
+      await _ensureFolderHierarchy(
+        dbWriterPort: dbWriterPort,
+        collection: collection,
+        extractionRoot: extractionRoot,
+        labelName: labelName,
+        year: year,
+        msgDate: msgDate,
+      );
+
+      final attachmentParts = _collectAttachmentParts(message);
+      final attachments = await _downloadAttachments(
+        collection: collection,
+        messageId: emailId,
+        msgDate: msgDate,
+        parts: attachmentParts,
+        targetFolderPath: absoluteYearPath,
+        extractionRoot: extractionRoot,   // ← pass root for relative-path computation
+        dbWriterPort: dbWriterPort,
+        logger: logger,
+      );
+      emailObj.attachments = attachments;
+      for (var file in attachments) {
+        dbWriterPort.send({'type': 'file', 'file': file});
+      }
+    }
+    return emailObj;
+  }
+
+  /// Maps a standard MIME type to the internal [FilesConstants] value.
+  static String _mapMimeType(String mimeType) {
+    if (mimeType.startsWith('image/')) return FilesConstants.mimeTypeImage;
+    if (mimeType.startsWith('video/')) return FilesConstants.mimeTypeMovie;
+    if (mimeType.startsWith('audio/')) return FilesConstants.mimeTypeMusic;
+    if (mimeType == 'application/pdf') return FilesConstants.mimeTypePdf;
+    return FilesConstants.mimeTypeUnKnown;
+  }
+}

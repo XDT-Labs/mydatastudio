@@ -8,9 +8,12 @@ import 'package:mydatatools/models/tables/folder.dart';
 import 'package:mydatatools/modules/files/files_constants.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
+import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
+import 'package:path/path.dart' as p;
+import 'package:logger/logger.dart';
 
 
-class LocalFileIsolate implements CollectionScanner {
+class LocalFileIsolate extends CollectionScanner {
   RootIsolateToken? token;
   SendPort? loggerIsolatePort;
   SendPort? dbWriterIsolatePort;
@@ -26,11 +29,26 @@ class LocalFileIsolate implements CollectionScanner {
       String? path,
       recursive,
       bool force,) async {
+    if (isScanning.value && !force) {
+      return 0;
+    }
+
+    if (force) {
+      stop();
+    }
+
+    isScanning.add(true);
     // A Stream that handles communication between isolates
     ReceivePort p = ReceivePort();
     RootIsolateToken? token = RootIsolateToken.instance;
     Map<String, dynamic> args = {
       'path': path,
+      // rootPath is ALWAYS the absolute collection root, regardless of which
+      // sub-directory is being scanned. This ensures that p.relative() in the
+      // worker produces paths relative to the collection root (e.g.
+      // "2026-01-01/photo.jpg"), not relative to the scanned sub-directory
+      // (which would incorrectly give "photo.jpg" with parent='').
+      'rootPath': collection.localCopyPath ?? collection.path,
       'recursive': recursive,
       'collectionId': collection.id,
     };
@@ -41,15 +59,33 @@ class LocalFileIsolate implements CollectionScanner {
     isolate!.addOnExitListener(p.sendPort);
 
     await for (var message in p) {
+      if (message == null) {
+        // Isolate exited
+        break;
+      }
       if (message is SendPort) {
-        // connected
+        // connected (heartbeat or discovery)
         logger?.s(message);
-      } else if (message == null) {
-        //logger.i("Scan Complete");
-        return Future(() => -1);
+      } else if (message is Map) {
+        final type = message['type'];
+        final msg = message['message'];
+        
+        if (type == 'log') {
+          final level = message['level'] as String;
+          switch (level) {
+            case 'info': logger?.i('[LocalScan] $msg'); break;
+            case 'error': logger?.e('[LocalScan] $msg', error: message['error'], stackTrace: message['stackTrace']); break;
+            case 'warning': logger?.w('[LocalScan] $msg'); break;
+            case 'debug': logger?.d('[LocalScan] $msg'); break;
+            default: logger?.i('[LocalScan] $msg');
+          }
+        } else if (type == 'status') {
+          logger?.s(msg);
+        }
       }
     }
 
+    isScanning.add(false);
     return Future(() => 0);
   }
 
@@ -74,6 +110,14 @@ class LocalFileIsolateWorker{
   SendPort? loggerPort;
   AppLogger? logger;
 
+  // TODO: add this list to a global config / UI page
+  final skipFolderRegex = RegExp(
+    r'/(go|node_modules|Pods|\.git)(/|$)',
+    multiLine: false,
+    caseSensitive: true,
+    unicode: true,
+  );
+
   //constructor
   LocalFileIsolateWorker(this.token, this.receiverPort, this.dbWriterPort, this.loggerPort){
     // Ensure the background binary messenger is initialized so plugins/platform channels work
@@ -82,20 +126,49 @@ class LocalFileIsolateWorker{
 
   // start scanning
   void _scan(Map<String, dynamic> args) async {
-    //print(args);
+    Logger.level = Level.debug;
     logger = AppLogger(loggerPort);
 
     String path = args['path'];
+    // Normalize path: Remove trailing slash if it exists (unless it's just '/')
+    if (path.length > 1 && path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    // rootPath is the absolute collection root used to compute relative paths.
+    String rootPath = args['rootPath'] as String? ?? path;
+    if (rootPath.length > 1 && rootPath.endsWith('/')) {
+      rootPath = rootPath.substring(0, rootPath.length - 1);
+    }
     bool recursive = args['recursive'];
     String collectionId = args['collectionId'];
 
     // start scanner on first directory
     logger?.i('Scanning: $path');
+    DateTime scanStartTime = DateTime.now();
+
     var fileCount = await _scanDir(
       collectionId,
       path,
+      rootPath,
       recursive,
+      scanStartTime,
     );
+
+    // Final cleanup — send the RELATIVE path so the repo can match stored records.
+    final cleanupRelPath = p.relative(path, from: rootPath);
+    final ReceivePort syncPort = ReceivePort();
+    dbWriterPort.send({
+      'type': 'cleanup_deleted',
+      'collectionId': collectionId,
+      'path': cleanupRelPath == '.' ? '' : cleanupRelPath,
+      'scanStartTime': scanStartTime,
+      'recursive': recursive,
+      'replyTo': syncPort.sendPort,
+    });
+
+    // Wait for the DB writer to finish the cleanup task
+    await syncPort.first;
+    syncPort.close();
 
     // return file count
     Isolate.exit(receiverPort, fileCount);
@@ -103,256 +176,169 @@ class LocalFileIsolateWorker{
 
   Future<int> _scanDir(
     String collectionId,
-    String path,
+    String path,       // absolute path used for filesystem operations
+    String rootPath,   // absolute collection root for computing relative paths
     recursive,
+    DateTime scanStartTime,
+    [List<File>? currentBatch]
   ) async {
     int count = 0;
+    List<File> fileBatch = currentBatch ?? [];
     AppLogger logger = AppLogger(loggerPort);
 
     var dir = io.Directory(path);
     logger.s('Scanning ${dir.path}');
 
-    var dirList = dir.listSync(recursive: false, followLinks: false);
+    var dirList = [];
+    try {
+      dirList = dir.listSync(recursive: false, followLinks: false);
+      logger.i('Found ${dirList.length} items in ${dir.path}');
+    } catch (e) {
+      logger.e('Failed to list directory ${dir.path}: $e');
+      return 0;
+    }
 
     for (var asset in dirList) {
       if (asset is io.File) {
-        logger.s('file: ${asset.path}');
         count++;
         //save file
-        File? file = _validateFile({}, collectionId, asset);
+        File? file = _validateFile(collectionId, asset, rootPath, scanStartTime);
         if( file != null ) {
-          dbWriterPort.send({
-            'type': 'file',
-            'file': file
-          });
+          logger.i('Found file: ${file.path}');
+          fileBatch.add(file);
+          if (fileBatch.length >= 100) {
+            dbWriterPort.send({
+              'type': 'batch_file',
+              'files': List.from(fileBatch)
+            });
+            fileBatch.clear();
+          }
         }
       } else if (asset is io.Directory) {
         //send status message back
         logger.s('Scanning: ${asset.path}');
         //save directory
-        Folder? folder = _validateFolder({}, collectionId, asset);
+        Folder? folder = _validateFolder(collectionId, asset, rootPath, scanStartTime);
         if( folder != null ) {
+          logger.i('Found folder: ${folder.path}');
           dbWriterPort.send({
             'type': 'folder',
             'folder': folder
           });
-        }
 
-        try {
-          if (recursive) {
-            int fileCount = await _scanDir(
-              collectionId,
-              asset.path,
-              recursive,
-            );
-            count += fileCount;
+          try {
+            if (recursive) {
+              int fileCount = await _scanDir(
+                collectionId,
+                asset.path, // absolute path for filesystem traversal
+                rootPath,
+                recursive,
+                scanStartTime,
+                fileBatch,
+              );
+              count += fileCount;
+            }
+          } catch (err) {
+            logger.w(err);
           }
-        } catch (err) {
-          logger.w(err);
         }
       } else {
         logger.w("unknown type");
       }
     }
 
+    if (currentBatch == null && fileBatch.isNotEmpty) {
+      dbWriterPort.send({
+        'type': 'batch_file',
+        'files': List.from(fileBatch)
+      });
+      fileBatch.clear();
+    }
+
     return Future(() => count);
   }
 
   //
-  // Future<int> _saveResults(
-  //   SendPort dbWriterPort,
-  //   String collectionId,
-  //   List<io.FileSystemEntity> files,
-  //   String parent,
-  // ) async {
-  //   int batchFolderSize = 100;
-  //   int batchFileSize = 100;
-  //   int count = 0;
-  //   //create repository & load list of all existing files
-  //   FileSystemRepository repo = FileSystemRepository();
-  //   Map<String, DateTime> existingFolders = {};
-  //   for (var e in (await repo.folders(collectionId, parent))) {
-  //     existingFolders.putIfAbsent(
-  //       '${e.collectionId}:${e.path}',
-  //       () => e.dateLastModified,
-  //     );
-  //   }
-  //
-  //   Map<String, DateTime> existingFiles = {};
-  //   for (var e in (await repo.files(collectionId, parent))) {
-  //     existingFiles.putIfAbsent(
-  //       '${e.collectionId}:${e.path}',
-  //       () => e.dateLastModified,
-  //     );
-  //   }
-  //
-  //   //First Save all the Directories
-  //   List<io.Directory> dirList = files.whereType<io.Directory>().toList();
-  //   while (dirList.isNotEmpty) {
-  //     //var start = DateTime.now().millisecondsSinceEpoch;
-  //     //pull out batch, so we don't lock ui trying to save too many folders
-  //     batchFolderSize = min(batchFolderSize, dirList.length);
-  //     List<io.Directory> range = dirList.sublist(0, batchFolderSize);
-  //     if (range.isEmpty) break;
-  //
-  //     //remove files from larger list
-  //     dirList.removeRange(0, batchFolderSize);
-  //
-  //     //valid files (not system, hidden, duplicates)
-  //     var validFolders = await _validateFolders(
-  //       existingFolders,
-  //       collectionId,
-  //       range,
-  //     );
-  //
-  //     //save files w/pause
-  //     if (validFolders.isNotEmpty) {
-  //       logger.s("Saving Directories");
-  //       int saveCount = await repo.addFolders(validFolders);
-  //       count += saveCount;
-  //     }
-  //     //logger.d('[${DateTime.now().millisecondsSinceEpoch - st1art}ms] Saving Dir Complete: ${validFolders.length}');
-  //   }
-  //
-  //   //Save Files
-  //   List<io.File> fileList = files.whereType<io.File>().toList();
-  //   int total = fileList.length;
-  //   int completed = 0;
-  //   while (fileList.isNotEmpty) {
-  //     //var start = DateTime.now().millisecondsSinceEpoch;
-  //     //pull out batch, so we don't lock ui trying to save too many files
-  //     batchFileSize = min(batchFileSize, fileList.length);
-  //     List<io.File> range = fileList.sublist(0, batchFileSize);
-  //     if (range.isEmpty) break;
-  //
-  //     //Future.delayed(const Duration(seconds: 10), () async {
-  //     //remove files from larger list
-  //     batchFileSize = min(batchFileSize, fileList.length);
-  //     fileList.removeRange(0, batchFileSize);
-  //
-  //     //valid files (not system, hidden, duplicates)
-  //     var validFiles = await _validateFiles(existingFiles, collectionId, range);
-  //     if (validFiles.isEmpty) break;
-  //
-  //     //save files w/pause
-  //     if (validFiles.isNotEmpty) {
-  //       completed += validFiles.length;
-  //       logger.s("Saving $completed / $total files");
-  //       int saveCount = await repo.addFiles(validFiles);
-  //       count += saveCount;
-  //     }
-  //     //logger.s('[${DateTime.now().millisecondsSinceEpoch - start}ms] Saving Files Complete: ${validFiles.length}');
-  //   }
-  //   logger.s(""); //clear status
-  //   return Future(() => count);
-  // }
 
-  /// Validate directories against the know paths we want to skip.
-  /// Convert dart.io to a local model object
+  /// Validate directories. Compute relative path for storage.
   Folder? _validateFolder(
-    Map<String, DateTime> existingFolders_,
     String collectionId_,
     io.Directory dir_,
+    String rootPath,
+    DateTime scanStartTime,
   ) {
-    final hiddenFolderRegex = RegExp(
-      '/[.].*/?',
-      multiLine: false,
-      caseSensitive: true,
-      unicode: true,
-    );
-
-    // TODO: add this list to a global config / UI page
-    final skipFolderRegex = RegExp(
-      '/(go|node_modules|Pods|.git)+/?',
-      multiLine: false,
-      caseSensitive: true,
-      unicode: true,
-    );
+    String absPath = dir_.path;
+    if (absPath.length > 1 && absPath.endsWith('/')) {
+      absPath = absPath.substring(0, absPath.length - 1);
+    }
+    String name = p.basename(absPath);
 
     //skip any hidden or system folders
-    bool hidden = hiddenFolderRegex.hasMatch(dir_.path);
-    bool skipFolder = skipFolderRegex.hasMatch(dir_.path);
+    bool hidden = name.startsWith('.');
+    bool skipFolder = skipFolderRegex.hasMatch('/$name/');
+
     if( hidden || skipFolder ){
+      logger?.i('Skipping folder (hidden=$hidden, skipFolder=$skipFolder): $absPath');
       return null;
     }
 
+    // Compute relative path for storage via the shared helper so this logic
+    // is unit-tested independently of the file system.
+    final relPath = ScannerPathHelper.relativePath(absPath, rootPath, isFolder: true);
+    final relParent = ScannerPathHelper.relativeParent(absPath, rootPath);
 
-    if (existingFolders_["$collectionId_:${dir_.path}"] == null) {
-      String name = dir_.path.split("/").last;
-      String parentPath = dir_.path
-          .split("/")
-          .sublist(0, dir_.path.split("/").length - 1)
-          .join("/");
-
-      return Folder(
-          id: '$collectionId_:${dir_.path.hashCode}',
-          name: name,
-          path: dir_.path,
-          parent: parentPath,
-          dateCreated: DateTime.now(),
-          dateLastModified: DateTime.now(),
-          collectionId: collectionId_,
-      );
-    }
-
-    return null;
+    return Folder(
+        id: ScannerPathHelper.buildId(collectionId_, relPath),
+        name: name,
+        path: relPath,
+        parent: relParent,
+        dateCreated: DateTime.now(),
+        dateLastModified: DateTime.now(),
+        lastScannedDate: scanStartTime,
+        collectionId: collectionId_,
+    );
   }
 
-  /// Validate directories against the know paths we want to skip.
-  /// Convert dart.io to a local model object
+  /// Validate files. Compute relative path for storage.
   File? _validateFile(
-    Map<String, DateTime> existingFiles_,
     String collectionId_,
     io.File file_,
+    String rootPath,
+    DateTime scanStartTime,
   ) {
-    final hiddenFolderRegex = RegExp(
-      '/[.].*/?',
-      multiLine: false,
-      caseSensitive: true,
-      unicode: true,
-    );
+    String absPath = file_.path;
+    if (absPath.length > 1 && absPath.endsWith('/')) {
+      absPath = absPath.substring(0, absPath.length - 1);
+    }
+    String name = p.basename(absPath);
 
-    // TODO: add this list to a global config / UI page
-    final skipFolderRegex = RegExp(
-      '/(go|node_modules|Pods|.git)+/?',
-      multiLine: false,
-      caseSensitive: true,
-      unicode: true,
-    );
-
-    //skip any fines in a hidden or system folder
-    bool hidden = hiddenFolderRegex.hasMatch(file_.path);
+    bool hidden = name.startsWith('.');
     bool skipFolder = skipFolderRegex.hasMatch(file_.path);
+
     if( hidden || skipFolder ){
+      logger?.i('Skipping file (hidden=$hidden, skipFolder=$skipFolder): $absPath');
       return null;
     }
 
-
-    //Check if it exists, skip it if it does
     DateTime lmDate = file_.lastModifiedSync();
-    //todo: add date check to if statement
-    if (existingFiles_["$collectionId_:${file_.path}"] == null) {
-      String name = file_.path.split("/").last;
-      String parentPath = file_.path
-          .split("/")
-          .sublist(0, file_.path.split("/").length - 1)
-          .join("/");
 
-      return File(
-        id: '$collectionId_:${file_.path.hashCode}',
-        collectionId: collectionId_,
-        name: name,
-        path: file_.path,
-        parent: parentPath,
-        dateCreated: lmDate,
-        dateLastModified: lmDate,
-        isDeleted: false,
-        size: file_.lengthSync(),
-        contentType: getMimeType(name),
-      );
-    }
+    // Compute relative path for storage via the shared helper.
+    final relPath = ScannerPathHelper.relativePath(absPath, rootPath);
+    final relParent = ScannerPathHelper.relativeParent(absPath, rootPath);
 
-    return null;
+    return File(
+      id: ScannerPathHelper.buildId(collectionId_, relPath),
+      collectionId: collectionId_,
+      name: name,
+      path: relPath,
+      parent: relParent,
+      dateCreated: lmDate,
+      dateLastModified: lmDate,
+      lastScannedDate: scanStartTime,
+      isDeleted: false,
+      size: file_.lengthSync(),
+      contentType: getMimeType(name),
+    );
   }
 
   String getMimeType(String name) {

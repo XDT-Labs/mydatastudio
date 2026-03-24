@@ -13,7 +13,7 @@ class FileUpsertService extends RxService<FileUpsertServiceCommand, File> {
   Future<File> invoke(FileUpsertServiceCommand command) async {
     isLoading.add(true);
 
-    FileDesktopRepository repo = FileDesktopRepository();
+    FileDesktopRepository repo = FileDesktopRepository(command.database);
 
     File? file;
     try {

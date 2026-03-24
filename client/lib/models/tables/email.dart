@@ -8,8 +8,10 @@ import 'package:drift/drift.dart';
 @UseRowClass(Email, constructor: 'fromDb')
 @TableIndex(name: 'email_id_idx', columns: {#id})
 @TableIndex(name: 'email_collectionid_idx', columns: {#collectionId})
+@TableIndex(name: 'email_folderid_idx', columns: {#folderId})
 @TableIndex(name: 'email_date_idx', columns: {#date})
 @TableIndex(name: 'email_from_idx', columns: {#from})
+@TableIndex(name: 'email_comp_sync_idx', columns: {#collectionId, #folderId, #date})
 class Emails extends Table {
   TextColumn get id => text()();
   TextColumn get collectionId => text()();
@@ -23,8 +25,13 @@ class Emails extends Table {
   TextColumn? get plainBody => text().nullable()();
   TextColumn get labels => text().map(const StringArrayConverter())();
   TextColumn? get headers => text().nullable()();
-  //List<File> attachments = [];
+  TextColumn get folderId => text().nullable()();
+  TextColumn get messageId => text().nullable()();
+  TextColumn get threadId => text().nullable()();
+  BoolColumn get isRead => boolean().withDefault(const Constant(false))();
+  BoolColumn get hasAttachments => boolean().withDefault(const Constant(false))();
   BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
+  IntColumn get uid => integer().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -44,6 +51,12 @@ class Email implements Insertable<Email> {
   List<String>? labels = [];
   String? headers;
   List<File>? attachments = [];
+  String? folderId;
+  String? messageId;
+  String? threadId;
+  int? uid;
+  bool isRead = false;
+  bool hasAttachments = false;
   bool isDeleted = false;
 
   //Not in db
@@ -63,6 +76,12 @@ class Email implements Insertable<Email> {
     this.labels,
     this.headers,
     this.attachments,
+    this.folderId,
+    this.messageId,
+    this.threadId,
+    this.uid,
+    this.isRead = false,
+    this.hasAttachments = false,
     required this.isDeleted,
     this.isSelected,
   });
@@ -80,7 +99,12 @@ class Email implements Insertable<Email> {
     this.plainBody,
     this.labels,
     this.headers,
-    //required this.attachments,
+    this.folderId,
+    this.messageId,
+    this.threadId,
+    this.uid,
+    required this.isRead,
+    required this.hasAttachments,
     required this.isDeleted,
   });
 
@@ -99,7 +123,13 @@ class Email implements Insertable<Email> {
       plainBody: Value(plainBody),
       labels: Value(labels ?? []),
       headers: Value(headers),
+      folderId: Value(folderId),
+      messageId: Value(messageId),
+      threadId: Value(threadId),
+      isRead: Value(isRead),
+      hasAttachments: Value(hasAttachments),
       isDeleted: Value(isDeleted),
+      uid: Value(uid),
     ).toColumns(nullToAbsent);
   }
 

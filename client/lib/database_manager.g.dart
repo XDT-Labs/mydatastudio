@@ -188,6 +188,7 @@ class $AppsTable extends Apps with TableInfo<$AppsTable, App> {
     );
   }
 
+  @override
   $AppsTable createAlias(String alias) {
     return $AppsTable(attachedDatabase, alias);
   }
@@ -725,6 +726,31 @@ class $CollectionsTable extends Collections
       'CHECK ("needs_re_auth" IN (0, 1))',
     ),
   );
+  static const VerificationMeta _downloadAttachmentsMeta =
+      const VerificationMeta('downloadAttachments');
+  @override
+  late final GeneratedColumn<bool> downloadAttachments = GeneratedColumn<bool>(
+    'download_attachments',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("download_attachments" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _localCopyPathMeta = const VerificationMeta(
+    'localCopyPath',
+  );
+  @override
+  late final GeneratedColumn<String> localCopyPath = GeneratedColumn<String>(
+    'local_copy_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -741,6 +767,8 @@ class $CollectionsTable extends Collections
     expiration,
     lastScanDate,
     needsReAuth,
+    downloadAttachments,
+    localCopyPath,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -864,6 +892,24 @@ class $CollectionsTable extends Collections
     } else if (isInserting) {
       context.missing(_needsReAuthMeta);
     }
+    if (data.containsKey('download_attachments')) {
+      context.handle(
+        _downloadAttachmentsMeta,
+        downloadAttachments.isAcceptableOrUnknown(
+          data['download_attachments']!,
+          _downloadAttachmentsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('local_copy_path')) {
+      context.handle(
+        _localCopyPathMeta,
+        localCopyPath.isAcceptableOrUnknown(
+          data['local_copy_path']!,
+          _localCopyPathMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -936,6 +982,15 @@ class $CollectionsTable extends Collections
             DriftSqlType.bool,
             data['${effectivePrefix}needs_re_auth'],
           )!,
+      downloadAttachments:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.bool,
+            data['${effectivePrefix}download_attachments'],
+          )!,
+      localCopyPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}local_copy_path'],
+      ),
     );
   }
 
@@ -960,6 +1015,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
   final Value<DateTime?> expiration;
   final Value<DateTime?> lastScanDate;
   final Value<bool> needsReAuth;
+  final Value<bool> downloadAttachments;
+  final Value<String?> localCopyPath;
   final Value<int> rowid;
   const CollectionsCompanion({
     this.id = const Value.absent(),
@@ -976,6 +1033,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     this.expiration = const Value.absent(),
     this.lastScanDate = const Value.absent(),
     this.needsReAuth = const Value.absent(),
+    this.downloadAttachments = const Value.absent(),
+    this.localCopyPath = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CollectionsCompanion.insert({
@@ -993,6 +1052,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     this.expiration = const Value.absent(),
     this.lastScanDate = const Value.absent(),
     required bool needsReAuth,
+    this.downloadAttachments = const Value.absent(),
+    this.localCopyPath = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -1016,6 +1077,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     Expression<DateTime>? expiration,
     Expression<DateTime>? lastScanDate,
     Expression<bool>? needsReAuth,
+    Expression<bool>? downloadAttachments,
+    Expression<String>? localCopyPath,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1033,6 +1096,9 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
       if (expiration != null) 'expiration': expiration,
       if (lastScanDate != null) 'last_scan_date': lastScanDate,
       if (needsReAuth != null) 'needs_re_auth': needsReAuth,
+      if (downloadAttachments != null)
+        'download_attachments': downloadAttachments,
+      if (localCopyPath != null) 'local_copy_path': localCopyPath,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1052,6 +1118,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     Value<DateTime?>? expiration,
     Value<DateTime?>? lastScanDate,
     Value<bool>? needsReAuth,
+    Value<bool>? downloadAttachments,
+    Value<String?>? localCopyPath,
     Value<int>? rowid,
   }) {
     return CollectionsCompanion(
@@ -1069,6 +1137,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
       expiration: expiration ?? this.expiration,
       lastScanDate: lastScanDate ?? this.lastScanDate,
       needsReAuth: needsReAuth ?? this.needsReAuth,
+      downloadAttachments: downloadAttachments ?? this.downloadAttachments,
+      localCopyPath: localCopyPath ?? this.localCopyPath,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1118,6 +1188,12 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     if (needsReAuth.present) {
       map['needs_re_auth'] = Variable<bool>(needsReAuth.value);
     }
+    if (downloadAttachments.present) {
+      map['download_attachments'] = Variable<bool>(downloadAttachments.value);
+    }
+    if (localCopyPath.present) {
+      map['local_copy_path'] = Variable<String>(localCopyPath.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1141,6 +1217,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
           ..write('expiration: $expiration, ')
           ..write('lastScanDate: $lastScanDate, ')
           ..write('needsReAuth: $needsReAuth, ')
+          ..write('downloadAttachments: $downloadAttachments, ')
+          ..write('localCopyPath: $localCopyPath, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1190,7 +1268,6 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
-  static const VerificationMeta _toMeta = const VerificationMeta('to');
   @override
   late final GeneratedColumnWithTypeConverter<List<String>, String> to =
       GeneratedColumn<String>(
@@ -1200,7 +1277,6 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
         type: DriftSqlType.string,
         requiredDuringInsert: true,
       ).withConverter<List<String>>($EmailsTable.$converterto);
-  static const VerificationMeta _ccMeta = const VerificationMeta('cc');
   @override
   late final GeneratedColumnWithTypeConverter<List<String>, String> cc =
       GeneratedColumn<String>(
@@ -1254,7 +1330,6 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
-  static const VerificationMeta _labelsMeta = const VerificationMeta('labels');
   @override
   late final GeneratedColumnWithTypeConverter<List<String>, String> labels =
       GeneratedColumn<String>(
@@ -1275,6 +1350,67 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _folderIdMeta = const VerificationMeta(
+    'folderId',
+  );
+  @override
+  late final GeneratedColumn<String> folderId = GeneratedColumn<String>(
+    'folder_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _messageIdMeta = const VerificationMeta(
+    'messageId',
+  );
+  @override
+  late final GeneratedColumn<String> messageId = GeneratedColumn<String>(
+    'message_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _threadIdMeta = const VerificationMeta(
+    'threadId',
+  );
+  @override
+  late final GeneratedColumn<String> threadId = GeneratedColumn<String>(
+    'thread_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _isReadMeta = const VerificationMeta('isRead');
+  @override
+  late final GeneratedColumn<bool> isRead = GeneratedColumn<bool>(
+    'is_read',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_read" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _hasAttachmentsMeta = const VerificationMeta(
+    'hasAttachments',
+  );
+  @override
+  late final GeneratedColumn<bool> hasAttachments = GeneratedColumn<bool>(
+    'has_attachments',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("has_attachments" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   static const VerificationMeta _isDeletedMeta = const VerificationMeta(
     'isDeleted',
   );
@@ -1290,6 +1426,15 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _uidMeta = const VerificationMeta('uid');
+  @override
+  late final GeneratedColumn<int> uid = GeneratedColumn<int>(
+    'uid',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1304,7 +1449,13 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
     plainBody,
     labels,
     headers,
+    folderId,
+    messageId,
+    threadId,
+    isRead,
+    hasAttachments,
     isDeleted,
+    uid,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1350,8 +1501,6 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
     } else if (isInserting) {
       context.missing(_fromMeta);
     }
-    context.handle(_toMeta, const VerificationResult.success());
-    context.handle(_ccMeta, const VerificationResult.success());
     if (data.containsKey('subject')) {
       context.handle(
         _subjectMeta,
@@ -1376,17 +1525,55 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
         plainBody.isAcceptableOrUnknown(data['plain_body']!, _plainBodyMeta),
       );
     }
-    context.handle(_labelsMeta, const VerificationResult.success());
     if (data.containsKey('headers')) {
       context.handle(
         _headersMeta,
         headers.isAcceptableOrUnknown(data['headers']!, _headersMeta),
       );
     }
+    if (data.containsKey('folder_id')) {
+      context.handle(
+        _folderIdMeta,
+        folderId.isAcceptableOrUnknown(data['folder_id']!, _folderIdMeta),
+      );
+    }
+    if (data.containsKey('message_id')) {
+      context.handle(
+        _messageIdMeta,
+        messageId.isAcceptableOrUnknown(data['message_id']!, _messageIdMeta),
+      );
+    }
+    if (data.containsKey('thread_id')) {
+      context.handle(
+        _threadIdMeta,
+        threadId.isAcceptableOrUnknown(data['thread_id']!, _threadIdMeta),
+      );
+    }
+    if (data.containsKey('is_read')) {
+      context.handle(
+        _isReadMeta,
+        isRead.isAcceptableOrUnknown(data['is_read']!, _isReadMeta),
+      );
+    }
+    if (data.containsKey('has_attachments')) {
+      context.handle(
+        _hasAttachmentsMeta,
+        hasAttachments.isAcceptableOrUnknown(
+          data['has_attachments']!,
+          _hasAttachmentsMeta,
+        ),
+      );
+    }
     if (data.containsKey('is_deleted')) {
       context.handle(
         _isDeletedMeta,
         isDeleted.isAcceptableOrUnknown(data['is_deleted']!, _isDeletedMeta),
+      );
+    }
+    if (data.containsKey('uid')) {
+      context.handle(
+        _uidMeta,
+        uid.isAcceptableOrUnknown(data['uid']!, _uidMeta),
       );
     }
     return context;
@@ -1456,6 +1643,32 @@ class $EmailsTable extends Emails with TableInfo<$EmailsTable, Email> {
         DriftSqlType.string,
         data['${effectivePrefix}headers'],
       ),
+      folderId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}folder_id'],
+      ),
+      messageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}message_id'],
+      ),
+      threadId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}thread_id'],
+      ),
+      uid: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}uid'],
+      ),
+      isRead:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.bool,
+            data['${effectivePrefix}is_read'],
+          )!,
+      hasAttachments:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.bool,
+            data['${effectivePrefix}has_attachments'],
+          )!,
       isDeleted:
           attachedDatabase.typeMapping.read(
             DriftSqlType.bool,
@@ -1490,7 +1703,13 @@ class EmailsCompanion extends UpdateCompanion<Email> {
   final Value<String?> plainBody;
   final Value<List<String>> labels;
   final Value<String?> headers;
+  final Value<String?> folderId;
+  final Value<String?> messageId;
+  final Value<String?> threadId;
+  final Value<bool> isRead;
+  final Value<bool> hasAttachments;
   final Value<bool> isDeleted;
+  final Value<int?> uid;
   final Value<int> rowid;
   const EmailsCompanion({
     this.id = const Value.absent(),
@@ -1505,7 +1724,13 @@ class EmailsCompanion extends UpdateCompanion<Email> {
     this.plainBody = const Value.absent(),
     this.labels = const Value.absent(),
     this.headers = const Value.absent(),
+    this.folderId = const Value.absent(),
+    this.messageId = const Value.absent(),
+    this.threadId = const Value.absent(),
+    this.isRead = const Value.absent(),
+    this.hasAttachments = const Value.absent(),
     this.isDeleted = const Value.absent(),
+    this.uid = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   EmailsCompanion.insert({
@@ -1521,7 +1746,13 @@ class EmailsCompanion extends UpdateCompanion<Email> {
     this.plainBody = const Value.absent(),
     required List<String> labels,
     this.headers = const Value.absent(),
+    this.folderId = const Value.absent(),
+    this.messageId = const Value.absent(),
+    this.threadId = const Value.absent(),
+    this.isRead = const Value.absent(),
+    this.hasAttachments = const Value.absent(),
     this.isDeleted = const Value.absent(),
+    this.uid = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        collectionId = Value(collectionId),
@@ -1543,7 +1774,13 @@ class EmailsCompanion extends UpdateCompanion<Email> {
     Expression<String>? plainBody,
     Expression<String>? labels,
     Expression<String>? headers,
+    Expression<String>? folderId,
+    Expression<String>? messageId,
+    Expression<String>? threadId,
+    Expression<bool>? isRead,
+    Expression<bool>? hasAttachments,
     Expression<bool>? isDeleted,
+    Expression<int>? uid,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1559,7 +1796,13 @@ class EmailsCompanion extends UpdateCompanion<Email> {
       if (plainBody != null) 'plain_body': plainBody,
       if (labels != null) 'labels': labels,
       if (headers != null) 'headers': headers,
+      if (folderId != null) 'folder_id': folderId,
+      if (messageId != null) 'message_id': messageId,
+      if (threadId != null) 'thread_id': threadId,
+      if (isRead != null) 'is_read': isRead,
+      if (hasAttachments != null) 'has_attachments': hasAttachments,
       if (isDeleted != null) 'is_deleted': isDeleted,
+      if (uid != null) 'uid': uid,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1577,7 +1820,13 @@ class EmailsCompanion extends UpdateCompanion<Email> {
     Value<String?>? plainBody,
     Value<List<String>>? labels,
     Value<String?>? headers,
+    Value<String?>? folderId,
+    Value<String?>? messageId,
+    Value<String?>? threadId,
+    Value<bool>? isRead,
+    Value<bool>? hasAttachments,
     Value<bool>? isDeleted,
+    Value<int?>? uid,
     Value<int>? rowid,
   }) {
     return EmailsCompanion(
@@ -1593,7 +1842,13 @@ class EmailsCompanion extends UpdateCompanion<Email> {
       plainBody: plainBody ?? this.plainBody,
       labels: labels ?? this.labels,
       headers: headers ?? this.headers,
+      folderId: folderId ?? this.folderId,
+      messageId: messageId ?? this.messageId,
+      threadId: threadId ?? this.threadId,
+      isRead: isRead ?? this.isRead,
+      hasAttachments: hasAttachments ?? this.hasAttachments,
       isDeleted: isDeleted ?? this.isDeleted,
+      uid: uid ?? this.uid,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1639,8 +1894,26 @@ class EmailsCompanion extends UpdateCompanion<Email> {
     if (headers.present) {
       map['headers'] = Variable<String>(headers.value);
     }
+    if (folderId.present) {
+      map['folder_id'] = Variable<String>(folderId.value);
+    }
+    if (messageId.present) {
+      map['message_id'] = Variable<String>(messageId.value);
+    }
+    if (threadId.present) {
+      map['thread_id'] = Variable<String>(threadId.value);
+    }
+    if (isRead.present) {
+      map['is_read'] = Variable<bool>(isRead.value);
+    }
+    if (hasAttachments.present) {
+      map['has_attachments'] = Variable<bool>(hasAttachments.value);
+    }
     if (isDeleted.present) {
       map['is_deleted'] = Variable<bool>(isDeleted.value);
+    }
+    if (uid.present) {
+      map['uid'] = Variable<int>(uid.value);
     }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
@@ -1663,7 +1936,341 @@ class EmailsCompanion extends UpdateCompanion<Email> {
           ..write('plainBody: $plainBody, ')
           ..write('labels: $labels, ')
           ..write('headers: $headers, ')
+          ..write('folderId: $folderId, ')
+          ..write('messageId: $messageId, ')
+          ..write('threadId: $threadId, ')
+          ..write('isRead: $isRead, ')
+          ..write('hasAttachments: $hasAttachments, ')
           ..write('isDeleted: $isDeleted, ')
+          ..write('uid: $uid, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $EmailFoldersTable extends EmailFolders
+    with TableInfo<$EmailFoldersTable, EmailFolder> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $EmailFoldersTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _collectionIdMeta = const VerificationMeta(
+    'collectionId',
+  );
+  @override
+  late final GeneratedColumn<String> collectionId = GeneratedColumn<String>(
+    'collection_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES collections (id)',
+    ),
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _typeMeta = const VerificationMeta('type');
+  @override
+  late final GeneratedColumn<String> type = GeneratedColumn<String>(
+    'type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('user'),
+  );
+  static const VerificationMeta _messagesTotalMeta = const VerificationMeta(
+    'messagesTotal',
+  );
+  @override
+  late final GeneratedColumn<int> messagesTotal = GeneratedColumn<int>(
+    'messages_total',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _messagesUnreadMeta = const VerificationMeta(
+    'messagesUnread',
+  );
+  @override
+  late final GeneratedColumn<int> messagesUnread = GeneratedColumn<int>(
+    'messages_unread',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _parentIdMeta = const VerificationMeta(
+    'parentId',
+  );
+  @override
+  late final GeneratedColumn<String> parentId = GeneratedColumn<String>(
+    'parent_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    collectionId,
+    name,
+    type,
+    messagesTotal,
+    messagesUnread,
+    parentId,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'email_folders';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<EmailFolder> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('collection_id')) {
+      context.handle(
+        _collectionIdMeta,
+        collectionId.isAcceptableOrUnknown(
+          data['collection_id']!,
+          _collectionIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_collectionIdMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('type')) {
+      context.handle(
+        _typeMeta,
+        type.isAcceptableOrUnknown(data['type']!, _typeMeta),
+      );
+    }
+    if (data.containsKey('messages_total')) {
+      context.handle(
+        _messagesTotalMeta,
+        messagesTotal.isAcceptableOrUnknown(
+          data['messages_total']!,
+          _messagesTotalMeta,
+        ),
+      );
+    }
+    if (data.containsKey('messages_unread')) {
+      context.handle(
+        _messagesUnreadMeta,
+        messagesUnread.isAcceptableOrUnknown(
+          data['messages_unread']!,
+          _messagesUnreadMeta,
+        ),
+      );
+    }
+    if (data.containsKey('parent_id')) {
+      context.handle(
+        _parentIdMeta,
+        parentId.isAcceptableOrUnknown(data['parent_id']!, _parentIdMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id, collectionId};
+  @override
+  EmailFolder map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return EmailFolder.fromDb(
+      id:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.string,
+            data['${effectivePrefix}id'],
+          )!,
+      collectionId:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.string,
+            data['${effectivePrefix}collection_id'],
+          )!,
+      name:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.string,
+            data['${effectivePrefix}name'],
+          )!,
+      type:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.string,
+            data['${effectivePrefix}type'],
+          )!,
+      messagesTotal: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}messages_total'],
+      ),
+      messagesUnread: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}messages_unread'],
+      ),
+      parentId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}parent_id'],
+      ),
+    );
+  }
+
+  @override
+  $EmailFoldersTable createAlias(String alias) {
+    return $EmailFoldersTable(attachedDatabase, alias);
+  }
+}
+
+class EmailFoldersCompanion extends UpdateCompanion<EmailFolder> {
+  final Value<String> id;
+  final Value<String> collectionId;
+  final Value<String> name;
+  final Value<String> type;
+  final Value<int?> messagesTotal;
+  final Value<int?> messagesUnread;
+  final Value<String?> parentId;
+  final Value<int> rowid;
+  const EmailFoldersCompanion({
+    this.id = const Value.absent(),
+    this.collectionId = const Value.absent(),
+    this.name = const Value.absent(),
+    this.type = const Value.absent(),
+    this.messagesTotal = const Value.absent(),
+    this.messagesUnread = const Value.absent(),
+    this.parentId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  EmailFoldersCompanion.insert({
+    required String id,
+    required String collectionId,
+    required String name,
+    this.type = const Value.absent(),
+    this.messagesTotal = const Value.absent(),
+    this.messagesUnread = const Value.absent(),
+    this.parentId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       collectionId = Value(collectionId),
+       name = Value(name);
+  static Insertable<EmailFolder> custom({
+    Expression<String>? id,
+    Expression<String>? collectionId,
+    Expression<String>? name,
+    Expression<String>? type,
+    Expression<int>? messagesTotal,
+    Expression<int>? messagesUnread,
+    Expression<String>? parentId,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (collectionId != null) 'collection_id': collectionId,
+      if (name != null) 'name': name,
+      if (type != null) 'type': type,
+      if (messagesTotal != null) 'messages_total': messagesTotal,
+      if (messagesUnread != null) 'messages_unread': messagesUnread,
+      if (parentId != null) 'parent_id': parentId,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  EmailFoldersCompanion copyWith({
+    Value<String>? id,
+    Value<String>? collectionId,
+    Value<String>? name,
+    Value<String>? type,
+    Value<int?>? messagesTotal,
+    Value<int?>? messagesUnread,
+    Value<String?>? parentId,
+    Value<int>? rowid,
+  }) {
+    return EmailFoldersCompanion(
+      id: id ?? this.id,
+      collectionId: collectionId ?? this.collectionId,
+      name: name ?? this.name,
+      type: type ?? this.type,
+      messagesTotal: messagesTotal ?? this.messagesTotal,
+      messagesUnread: messagesUnread ?? this.messagesUnread,
+      parentId: parentId ?? this.parentId,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (collectionId.present) {
+      map['collection_id'] = Variable<String>(collectionId.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (type.present) {
+      map['type'] = Variable<String>(type.value);
+    }
+    if (messagesTotal.present) {
+      map['messages_total'] = Variable<int>(messagesTotal.value);
+    }
+    if (messagesUnread.present) {
+      map['messages_unread'] = Variable<int>(messagesUnread.value);
+    }
+    if (parentId.present) {
+      map['parent_id'] = Variable<String>(parentId.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EmailFoldersCompanion(')
+          ..write('id: $id, ')
+          ..write('collectionId: $collectionId, ')
+          ..write('name: $name, ')
+          ..write('type: $type, ')
+          ..write('messagesTotal: $messagesTotal, ')
+          ..write('messagesUnread: $messagesUnread, ')
+          ..write('parentId: $parentId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1734,6 +2341,18 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
         type: DriftSqlType.dateTime,
         requiredDuringInsert: true,
       );
+  static const VerificationMeta _lastScannedDateMeta = const VerificationMeta(
+    'lastScannedDate',
+  );
+  @override
+  late final GeneratedColumn<DateTime> lastScannedDate =
+      GeneratedColumn<DateTime>(
+        'last_scanned_date',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _collectionIdMeta = const VerificationMeta(
     'collectionId',
   );
@@ -1791,6 +2410,28 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _downloadUrlMeta = const VerificationMeta(
+    'downloadUrl',
+  );
+  @override
+  late final GeneratedColumn<String> downloadUrl = GeneratedColumn<String>(
+    'download_url',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _emailIdMeta = const VerificationMeta(
+    'emailId',
+  );
+  @override
+  late final GeneratedColumn<String> emailId = GeneratedColumn<String>(
+    'email_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _latitudeMeta = const VerificationMeta(
     'latitude',
   );
@@ -1821,11 +2462,14 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
     parent,
     dateCreated,
     dateLastModified,
+    lastScannedDate,
     collectionId,
     contentType,
     size,
     isDeleted,
     thumbnail,
+    downloadUrl,
+    emailId,
     latitude,
     longitude,
   ];
@@ -1892,6 +2536,15 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
     } else if (isInserting) {
       context.missing(_dateLastModifiedMeta);
     }
+    if (data.containsKey('last_scanned_date')) {
+      context.handle(
+        _lastScannedDateMeta,
+        lastScannedDate.isAcceptableOrUnknown(
+          data['last_scanned_date']!,
+          _lastScannedDateMeta,
+        ),
+      );
+    }
     if (data.containsKey('collection_id')) {
       context.handle(
         _collectionIdMeta,
@@ -1932,6 +2585,21 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
       context.handle(
         _thumbnailMeta,
         thumbnail.isAcceptableOrUnknown(data['thumbnail']!, _thumbnailMeta),
+      );
+    }
+    if (data.containsKey('download_url')) {
+      context.handle(
+        _downloadUrlMeta,
+        downloadUrl.isAcceptableOrUnknown(
+          data['download_url']!,
+          _downloadUrlMeta,
+        ),
+      );
+    }
+    if (data.containsKey('email_id')) {
+      context.handle(
+        _emailIdMeta,
+        emailId.isAcceptableOrUnknown(data['email_id']!, _emailIdMeta),
       );
     }
     if (data.containsKey('latitude')) {
@@ -1985,6 +2653,10 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
             DriftSqlType.dateTime,
             data['${effectivePrefix}date_last_modified'],
           )!,
+      lastScannedDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_scanned_date'],
+      ),
       collectionId:
           attachedDatabase.typeMapping.read(
             DriftSqlType.string,
@@ -2008,6 +2680,14 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
       thumbnail: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}thumbnail'],
+      ),
+      downloadUrl: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}download_url'],
+      ),
+      emailId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}email_id'],
       ),
       latitude: attachedDatabase.typeMapping.read(
         DriftSqlType.double,
@@ -2033,11 +2713,14 @@ class FilesCompanion extends UpdateCompanion<File> {
   final Value<String> parent;
   final Value<DateTime> dateCreated;
   final Value<DateTime> dateLastModified;
+  final Value<DateTime?> lastScannedDate;
   final Value<String> collectionId;
   final Value<String> contentType;
   final Value<int> size;
   final Value<bool> isDeleted;
   final Value<String?> thumbnail;
+  final Value<String?> downloadUrl;
+  final Value<String?> emailId;
   final Value<double?> latitude;
   final Value<double?> longitude;
   final Value<int> rowid;
@@ -2048,11 +2731,14 @@ class FilesCompanion extends UpdateCompanion<File> {
     this.parent = const Value.absent(),
     this.dateCreated = const Value.absent(),
     this.dateLastModified = const Value.absent(),
+    this.lastScannedDate = const Value.absent(),
     this.collectionId = const Value.absent(),
     this.contentType = const Value.absent(),
     this.size = const Value.absent(),
     this.isDeleted = const Value.absent(),
     this.thumbnail = const Value.absent(),
+    this.downloadUrl = const Value.absent(),
+    this.emailId = const Value.absent(),
     this.latitude = const Value.absent(),
     this.longitude = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -2064,11 +2750,14 @@ class FilesCompanion extends UpdateCompanion<File> {
     required String parent,
     required DateTime dateCreated,
     required DateTime dateLastModified,
+    this.lastScannedDate = const Value.absent(),
     required String collectionId,
     required String contentType,
     required int size,
     this.isDeleted = const Value.absent(),
     this.thumbnail = const Value.absent(),
+    this.downloadUrl = const Value.absent(),
+    this.emailId = const Value.absent(),
     this.latitude = const Value.absent(),
     this.longitude = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -2088,11 +2777,14 @@ class FilesCompanion extends UpdateCompanion<File> {
     Expression<String>? parent,
     Expression<DateTime>? dateCreated,
     Expression<DateTime>? dateLastModified,
+    Expression<DateTime>? lastScannedDate,
     Expression<String>? collectionId,
     Expression<String>? contentType,
     Expression<int>? size,
     Expression<bool>? isDeleted,
     Expression<String>? thumbnail,
+    Expression<String>? downloadUrl,
+    Expression<String>? emailId,
     Expression<double>? latitude,
     Expression<double>? longitude,
     Expression<int>? rowid,
@@ -2104,11 +2796,14 @@ class FilesCompanion extends UpdateCompanion<File> {
       if (parent != null) 'parent': parent,
       if (dateCreated != null) 'date_created': dateCreated,
       if (dateLastModified != null) 'date_last_modified': dateLastModified,
+      if (lastScannedDate != null) 'last_scanned_date': lastScannedDate,
       if (collectionId != null) 'collection_id': collectionId,
       if (contentType != null) 'content_type': contentType,
       if (size != null) 'size': size,
       if (isDeleted != null) 'is_deleted': isDeleted,
       if (thumbnail != null) 'thumbnail': thumbnail,
+      if (downloadUrl != null) 'download_url': downloadUrl,
+      if (emailId != null) 'email_id': emailId,
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
       if (rowid != null) 'rowid': rowid,
@@ -2122,11 +2817,14 @@ class FilesCompanion extends UpdateCompanion<File> {
     Value<String>? parent,
     Value<DateTime>? dateCreated,
     Value<DateTime>? dateLastModified,
+    Value<DateTime?>? lastScannedDate,
     Value<String>? collectionId,
     Value<String>? contentType,
     Value<int>? size,
     Value<bool>? isDeleted,
     Value<String?>? thumbnail,
+    Value<String?>? downloadUrl,
+    Value<String?>? emailId,
     Value<double?>? latitude,
     Value<double?>? longitude,
     Value<int>? rowid,
@@ -2138,11 +2836,14 @@ class FilesCompanion extends UpdateCompanion<File> {
       parent: parent ?? this.parent,
       dateCreated: dateCreated ?? this.dateCreated,
       dateLastModified: dateLastModified ?? this.dateLastModified,
+      lastScannedDate: lastScannedDate ?? this.lastScannedDate,
       collectionId: collectionId ?? this.collectionId,
       contentType: contentType ?? this.contentType,
       size: size ?? this.size,
       isDeleted: isDeleted ?? this.isDeleted,
       thumbnail: thumbnail ?? this.thumbnail,
+      downloadUrl: downloadUrl ?? this.downloadUrl,
+      emailId: emailId ?? this.emailId,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       rowid: rowid ?? this.rowid,
@@ -2170,6 +2871,9 @@ class FilesCompanion extends UpdateCompanion<File> {
     if (dateLastModified.present) {
       map['date_last_modified'] = Variable<DateTime>(dateLastModified.value);
     }
+    if (lastScannedDate.present) {
+      map['last_scanned_date'] = Variable<DateTime>(lastScannedDate.value);
+    }
     if (collectionId.present) {
       map['collection_id'] = Variable<String>(collectionId.value);
     }
@@ -2184,6 +2888,12 @@ class FilesCompanion extends UpdateCompanion<File> {
     }
     if (thumbnail.present) {
       map['thumbnail'] = Variable<String>(thumbnail.value);
+    }
+    if (downloadUrl.present) {
+      map['download_url'] = Variable<String>(downloadUrl.value);
+    }
+    if (emailId.present) {
+      map['email_id'] = Variable<String>(emailId.value);
     }
     if (latitude.present) {
       map['latitude'] = Variable<double>(latitude.value);
@@ -2206,11 +2916,14 @@ class FilesCompanion extends UpdateCompanion<File> {
           ..write('parent: $parent, ')
           ..write('dateCreated: $dateCreated, ')
           ..write('dateLastModified: $dateLastModified, ')
+          ..write('lastScannedDate: $lastScannedDate, ')
           ..write('collectionId: $collectionId, ')
           ..write('contentType: $contentType, ')
           ..write('size: $size, ')
           ..write('isDeleted: $isDeleted, ')
           ..write('thumbnail: $thumbnail, ')
+          ..write('downloadUrl: $downloadUrl, ')
+          ..write('emailId: $emailId, ')
           ..write('latitude: $latitude, ')
           ..write('longitude: $longitude, ')
           ..write('rowid: $rowid')
@@ -2283,6 +2996,51 @@ class $FoldersTable extends Folders with TableInfo<$FoldersTable, Folder> {
         type: DriftSqlType.dateTime,
         requiredDuringInsert: true,
       );
+  static const VerificationMeta _lastScannedDateMeta = const VerificationMeta(
+    'lastScannedDate',
+  );
+  @override
+  late final GeneratedColumn<DateTime> lastScannedDate =
+      GeneratedColumn<DateTime>(
+        'last_scanned_date',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _thumbnailMeta = const VerificationMeta(
+    'thumbnail',
+  );
+  @override
+  late final GeneratedColumn<String> thumbnail = GeneratedColumn<String>(
+    'thumbnail',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _downloadUrlMeta = const VerificationMeta(
+    'downloadUrl',
+  );
+  @override
+  late final GeneratedColumn<String> downloadUrl = GeneratedColumn<String>(
+    'download_url',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _emailIdMeta = const VerificationMeta(
+    'emailId',
+  );
+  @override
+  late final GeneratedColumn<String> emailId = GeneratedColumn<String>(
+    'email_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _collectionIdMeta = const VerificationMeta(
     'collectionId',
   );
@@ -2302,6 +3060,10 @@ class $FoldersTable extends Folders with TableInfo<$FoldersTable, Folder> {
     parent,
     dateCreated,
     dateLastModified,
+    lastScannedDate,
+    thumbnail,
+    downloadUrl,
+    emailId,
     collectionId,
   ];
   @override
@@ -2367,6 +3129,36 @@ class $FoldersTable extends Folders with TableInfo<$FoldersTable, Folder> {
     } else if (isInserting) {
       context.missing(_dateLastModifiedMeta);
     }
+    if (data.containsKey('last_scanned_date')) {
+      context.handle(
+        _lastScannedDateMeta,
+        lastScannedDate.isAcceptableOrUnknown(
+          data['last_scanned_date']!,
+          _lastScannedDateMeta,
+        ),
+      );
+    }
+    if (data.containsKey('thumbnail')) {
+      context.handle(
+        _thumbnailMeta,
+        thumbnail.isAcceptableOrUnknown(data['thumbnail']!, _thumbnailMeta),
+      );
+    }
+    if (data.containsKey('download_url')) {
+      context.handle(
+        _downloadUrlMeta,
+        downloadUrl.isAcceptableOrUnknown(
+          data['download_url']!,
+          _downloadUrlMeta,
+        ),
+      );
+    }
+    if (data.containsKey('email_id')) {
+      context.handle(
+        _emailIdMeta,
+        emailId.isAcceptableOrUnknown(data['email_id']!, _emailIdMeta),
+      );
+    }
     if (data.containsKey('collection_id')) {
       context.handle(
         _collectionIdMeta,
@@ -2417,11 +3209,27 @@ class $FoldersTable extends Folders with TableInfo<$FoldersTable, Folder> {
             DriftSqlType.dateTime,
             data['${effectivePrefix}date_last_modified'],
           )!,
+      lastScannedDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_scanned_date'],
+      ),
       collectionId:
           attachedDatabase.typeMapping.read(
             DriftSqlType.string,
             data['${effectivePrefix}collection_id'],
           )!,
+      thumbnail: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}thumbnail'],
+      ),
+      downloadUrl: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}download_url'],
+      ),
+      emailId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}email_id'],
+      ),
     );
   }
 
@@ -2438,6 +3246,10 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
   final Value<String> parent;
   final Value<DateTime> dateCreated;
   final Value<DateTime> dateLastModified;
+  final Value<DateTime?> lastScannedDate;
+  final Value<String?> thumbnail;
+  final Value<String?> downloadUrl;
+  final Value<String?> emailId;
   final Value<String> collectionId;
   final Value<int> rowid;
   const FoldersCompanion({
@@ -2447,6 +3259,10 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
     this.parent = const Value.absent(),
     this.dateCreated = const Value.absent(),
     this.dateLastModified = const Value.absent(),
+    this.lastScannedDate = const Value.absent(),
+    this.thumbnail = const Value.absent(),
+    this.downloadUrl = const Value.absent(),
+    this.emailId = const Value.absent(),
     this.collectionId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -2457,6 +3273,10 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
     required String parent,
     required DateTime dateCreated,
     required DateTime dateLastModified,
+    this.lastScannedDate = const Value.absent(),
+    this.thumbnail = const Value.absent(),
+    this.downloadUrl = const Value.absent(),
+    this.emailId = const Value.absent(),
     required String collectionId,
     this.rowid = const Value.absent(),
   }) : id = Value(id),
@@ -2473,6 +3293,10 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
     Expression<String>? parent,
     Expression<DateTime>? dateCreated,
     Expression<DateTime>? dateLastModified,
+    Expression<DateTime>? lastScannedDate,
+    Expression<String>? thumbnail,
+    Expression<String>? downloadUrl,
+    Expression<String>? emailId,
     Expression<String>? collectionId,
     Expression<int>? rowid,
   }) {
@@ -2483,6 +3307,10 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
       if (parent != null) 'parent': parent,
       if (dateCreated != null) 'date_created': dateCreated,
       if (dateLastModified != null) 'date_last_modified': dateLastModified,
+      if (lastScannedDate != null) 'last_scanned_date': lastScannedDate,
+      if (thumbnail != null) 'thumbnail': thumbnail,
+      if (downloadUrl != null) 'download_url': downloadUrl,
+      if (emailId != null) 'email_id': emailId,
       if (collectionId != null) 'collection_id': collectionId,
       if (rowid != null) 'rowid': rowid,
     });
@@ -2495,6 +3323,10 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
     Value<String>? parent,
     Value<DateTime>? dateCreated,
     Value<DateTime>? dateLastModified,
+    Value<DateTime?>? lastScannedDate,
+    Value<String?>? thumbnail,
+    Value<String?>? downloadUrl,
+    Value<String?>? emailId,
     Value<String>? collectionId,
     Value<int>? rowid,
   }) {
@@ -2505,6 +3337,10 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
       parent: parent ?? this.parent,
       dateCreated: dateCreated ?? this.dateCreated,
       dateLastModified: dateLastModified ?? this.dateLastModified,
+      lastScannedDate: lastScannedDate ?? this.lastScannedDate,
+      thumbnail: thumbnail ?? this.thumbnail,
+      downloadUrl: downloadUrl ?? this.downloadUrl,
+      emailId: emailId ?? this.emailId,
       collectionId: collectionId ?? this.collectionId,
       rowid: rowid ?? this.rowid,
     );
@@ -2531,6 +3367,18 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
     if (dateLastModified.present) {
       map['date_last_modified'] = Variable<DateTime>(dateLastModified.value);
     }
+    if (lastScannedDate.present) {
+      map['last_scanned_date'] = Variable<DateTime>(lastScannedDate.value);
+    }
+    if (thumbnail.present) {
+      map['thumbnail'] = Variable<String>(thumbnail.value);
+    }
+    if (downloadUrl.present) {
+      map['download_url'] = Variable<String>(downloadUrl.value);
+    }
+    if (emailId.present) {
+      map['email_id'] = Variable<String>(emailId.value);
+    }
     if (collectionId.present) {
       map['collection_id'] = Variable<String>(collectionId.value);
     }
@@ -2549,6 +3397,10 @@ class FoldersCompanion extends UpdateCompanion<Folder> {
           ..write('parent: $parent, ')
           ..write('dateCreated: $dateCreated, ')
           ..write('dateLastModified: $dateLastModified, ')
+          ..write('lastScannedDate: $lastScannedDate, ')
+          ..write('thumbnail: $thumbnail, ')
+          ..write('downloadUrl: $downloadUrl, ')
+          ..write('emailId: $emailId, ')
           ..write('collectionId: $collectionId, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -2699,15 +3551,263 @@ class AlbumsCompanion extends UpdateCompanion<Album> {
   }
 }
 
+class $FilesEmbeddingsTable extends FilesEmbeddings
+    with TableInfo<$FilesEmbeddingsTable, FilesEmbedding> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $FilesEmbeddingsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _fileIdMeta = const VerificationMeta('fileId');
+  @override
+  late final GeneratedColumn<String> fileId = GeneratedColumn<String>(
+    'file_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  late final GeneratedColumnWithTypeConverter<List<double>?, Uint8List>
+  qwen3_8bEmbedding = GeneratedColumn<Uint8List>(
+    'qwen3_8b_embedding',
+    aliasedName,
+    true,
+    type: DriftSqlType.blob,
+    requiredDuringInsert: false,
+  ).withConverter<List<double>?>(
+    $FilesEmbeddingsTable.$converterqwen3_8bEmbeddingn,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [fileId, qwen3_8bEmbedding];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'files_embeddings';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<FilesEmbedding> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('file_id')) {
+      context.handle(
+        _fileIdMeta,
+        fileId.isAcceptableOrUnknown(data['file_id']!, _fileIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_fileIdMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {fileId};
+  @override
+  FilesEmbedding map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return FilesEmbedding(
+      fileId:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.string,
+            data['${effectivePrefix}file_id'],
+          )!,
+      qwen3_8bEmbedding: $FilesEmbeddingsTable.$converterqwen3_8bEmbeddingn
+          .fromSql(
+            attachedDatabase.typeMapping.read(
+              DriftSqlType.blob,
+              data['${effectivePrefix}qwen3_8b_embedding'],
+            ),
+          ),
+    );
+  }
+
+  @override
+  $FilesEmbeddingsTable createAlias(String alias) {
+    return $FilesEmbeddingsTable(attachedDatabase, alias);
+  }
+
+  static TypeConverter<List<double>, Uint8List> $converterqwen3_8bEmbedding =
+      const FloatListConverter();
+  static TypeConverter<List<double>?, Uint8List?> $converterqwen3_8bEmbeddingn =
+      NullAwareTypeConverter.wrap($converterqwen3_8bEmbedding);
+}
+
+class FilesEmbedding extends DataClass implements Insertable<FilesEmbedding> {
+  /// Primary key — matches the corresponding [Files.id].
+  final String fileId;
+
+  /// 2048-dimensional embedding from Qwen3-Embedding-8B (or Qwen3-VL variant).
+  /// Stored as a raw Float32 BLOB via [FloatListConverter].
+  final List<double>? qwen3_8bEmbedding;
+  const FilesEmbedding({required this.fileId, this.qwen3_8bEmbedding});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['file_id'] = Variable<String>(fileId);
+    if (!nullToAbsent || qwen3_8bEmbedding != null) {
+      map['qwen3_8b_embedding'] = Variable<Uint8List>(
+        $FilesEmbeddingsTable.$converterqwen3_8bEmbeddingn.toSql(
+          qwen3_8bEmbedding,
+        ),
+      );
+    }
+    return map;
+  }
+
+  FilesEmbeddingsCompanion toCompanion(bool nullToAbsent) {
+    return FilesEmbeddingsCompanion(
+      fileId: Value(fileId),
+      qwen3_8bEmbedding:
+          qwen3_8bEmbedding == null && nullToAbsent
+              ? const Value.absent()
+              : Value(qwen3_8bEmbedding),
+    );
+  }
+
+  factory FilesEmbedding.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return FilesEmbedding(
+      fileId: serializer.fromJson<String>(json['fileId']),
+      qwen3_8bEmbedding: serializer.fromJson<List<double>?>(
+        json['qwen3_8bEmbedding'],
+      ),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'fileId': serializer.toJson<String>(fileId),
+      'qwen3_8bEmbedding': serializer.toJson<List<double>?>(qwen3_8bEmbedding),
+    };
+  }
+
+  FilesEmbedding copyWith({
+    String? fileId,
+    Value<List<double>?> qwen3_8bEmbedding = const Value.absent(),
+  }) => FilesEmbedding(
+    fileId: fileId ?? this.fileId,
+    qwen3_8bEmbedding:
+        qwen3_8bEmbedding.present
+            ? qwen3_8bEmbedding.value
+            : this.qwen3_8bEmbedding,
+  );
+  FilesEmbedding copyWithCompanion(FilesEmbeddingsCompanion data) {
+    return FilesEmbedding(
+      fileId: data.fileId.present ? data.fileId.value : this.fileId,
+      qwen3_8bEmbedding:
+          data.qwen3_8bEmbedding.present
+              ? data.qwen3_8bEmbedding.value
+              : this.qwen3_8bEmbedding,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FilesEmbedding(')
+          ..write('fileId: $fileId, ')
+          ..write('qwen3_8bEmbedding: $qwen3_8bEmbedding')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(fileId, qwen3_8bEmbedding);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is FilesEmbedding &&
+          other.fileId == this.fileId &&
+          other.qwen3_8bEmbedding == this.qwen3_8bEmbedding);
+}
+
+class FilesEmbeddingsCompanion extends UpdateCompanion<FilesEmbedding> {
+  final Value<String> fileId;
+  final Value<List<double>?> qwen3_8bEmbedding;
+  final Value<int> rowid;
+  const FilesEmbeddingsCompanion({
+    this.fileId = const Value.absent(),
+    this.qwen3_8bEmbedding = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  FilesEmbeddingsCompanion.insert({
+    required String fileId,
+    this.qwen3_8bEmbedding = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : fileId = Value(fileId);
+  static Insertable<FilesEmbedding> custom({
+    Expression<String>? fileId,
+    Expression<Uint8List>? qwen3_8bEmbedding,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (fileId != null) 'file_id': fileId,
+      if (qwen3_8bEmbedding != null) 'qwen3_8b_embedding': qwen3_8bEmbedding,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  FilesEmbeddingsCompanion copyWith({
+    Value<String>? fileId,
+    Value<List<double>?>? qwen3_8bEmbedding,
+    Value<int>? rowid,
+  }) {
+    return FilesEmbeddingsCompanion(
+      fileId: fileId ?? this.fileId,
+      qwen3_8bEmbedding: qwen3_8bEmbedding ?? this.qwen3_8bEmbedding,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (fileId.present) {
+      map['file_id'] = Variable<String>(fileId.value);
+    }
+    if (qwen3_8bEmbedding.present) {
+      map['qwen3_8b_embedding'] = Variable<Uint8List>(
+        $FilesEmbeddingsTable.$converterqwen3_8bEmbeddingn.toSql(
+          qwen3_8bEmbedding.value,
+        ),
+      );
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FilesEmbeddingsCompanion(')
+          ..write('fileId: $fileId, ')
+          ..write('qwen3_8bEmbedding: $qwen3_8bEmbedding, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
+  $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $AppsTable apps = $AppsTable(this);
   late final $AppUsersTable appUsers = $AppUsersTable(this);
   late final $CollectionsTable collections = $CollectionsTable(this);
   late final $EmailsTable emails = $EmailsTable(this);
+  late final $EmailFoldersTable emailFolders = $EmailFoldersTable(this);
   late final $FilesTable files = $FilesTable(this);
   late final $FoldersTable folders = $FoldersTable(this);
   late final $AlbumsTable albums = $AlbumsTable(this);
+  late final $FilesEmbeddingsTable filesEmbeddings = $FilesEmbeddingsTable(
+    this,
+  );
   late final Index collectionsIdIdx = Index(
     'collections_id_idx',
     'CREATE INDEX collections_id_idx ON collections (id)',
@@ -2728,6 +3828,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'email_collectionid_idx',
     'CREATE INDEX email_collectionid_idx ON emails (collection_id)',
   );
+  late final Index emailFolderidIdx = Index(
+    'email_folderid_idx',
+    'CREATE INDEX email_folderid_idx ON emails (folder_id)',
+  );
   late final Index emailDateIdx = Index(
     'email_date_idx',
     'CREATE INDEX email_date_idx ON emails (date)',
@@ -2735,6 +3839,18 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final Index emailFromIdx = Index(
     'email_from_idx',
     'CREATE INDEX email_from_idx ON emails ("from")',
+  );
+  late final Index emailCompSyncIdx = Index(
+    'email_comp_sync_idx',
+    'CREATE INDEX email_comp_sync_idx ON emails (collection_id, folder_id, date)',
+  );
+  late final Index emailFoldersIdIdx = Index(
+    'email_folders_id_idx',
+    'CREATE INDEX email_folders_id_idx ON email_folders (id)',
+  );
+  late final Index emailFoldersCollectionidIdx = Index(
+    'email_folders_collectionid_idx',
+    'CREATE INDEX email_folders_collectionid_idx ON email_folders (collection_id)',
   );
   late final Index filePathIdx = Index(
     'file_path_idx',
@@ -2752,6 +3868,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'file_contenttype_idx',
     'CREATE INDEX file_contenttype_idx ON files (content_type)',
   );
+  late final Index fileEmailIdIdx = Index(
+    'file_email_id_idx',
+    'CREATE INDEX file_email_id_idx ON files (email_id)',
+  );
   late final Index folderPathIdx = Index(
     'folder_path_idx',
     'CREATE INDEX folder_path_idx ON folders (path)',
@@ -2764,6 +3884,14 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'folder_collection_id_idx',
     'CREATE INDEX folder_collection_id_idx ON folders (collection_id)',
   );
+  late final Index folderEmailIdIdx = Index(
+    'folder_email_id_idx',
+    'CREATE INDEX folder_email_id_idx ON folders (email_id)',
+  );
+  late final Index fileEmbeddingsFileIdIdx = Index(
+    'file_embeddings_file_id_idx',
+    'CREATE INDEX file_embeddings_file_id_idx ON files_embeddings (file_id)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2773,22 +3901,2918 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     appUsers,
     collections,
     emails,
+    emailFolders,
     files,
     folders,
     albums,
+    filesEmbeddings,
     collectionsIdIdx,
     collectionsPathIdx,
     collectionsTypeIdx,
     emailIdIdx,
     emailCollectionidIdx,
+    emailFolderidIdx,
     emailDateIdx,
     emailFromIdx,
+    emailCompSyncIdx,
+    emailFoldersIdIdx,
+    emailFoldersCollectionidIdx,
     filePathIdx,
     fileParentIdx,
     fileCollectionIdIdx,
     fileContenttypeIdx,
+    fileEmailIdIdx,
     folderPathIdx,
     folderParentIdx,
     folderCollectionIdIdx,
+    folderEmailIdIdx,
+    fileEmbeddingsFileIdIdx,
   ];
+}
+
+typedef $$AppsTableCreateCompanionBuilder =
+    AppsCompanion Function({
+      required String id,
+      required String name,
+      required String slug,
+      Value<String> group,
+      Value<int> order,
+      Value<int?> icon,
+      Value<String> route,
+      Value<int> rowid,
+    });
+typedef $$AppsTableUpdateCompanionBuilder =
+    AppsCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String> slug,
+      Value<String> group,
+      Value<int> order,
+      Value<int?> icon,
+      Value<String> route,
+      Value<int> rowid,
+    });
+
+class $$AppsTableFilterComposer extends Composer<_$AppDatabase, $AppsTable> {
+  $$AppsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get slug => $composableBuilder(
+    column: $table.slug,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get group => $composableBuilder(
+    column: $table.group,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get order => $composableBuilder(
+    column: $table.order,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get icon => $composableBuilder(
+    column: $table.icon,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get route => $composableBuilder(
+    column: $table.route,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$AppsTableOrderingComposer extends Composer<_$AppDatabase, $AppsTable> {
+  $$AppsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get slug => $composableBuilder(
+    column: $table.slug,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get group => $composableBuilder(
+    column: $table.group,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get order => $composableBuilder(
+    column: $table.order,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get icon => $composableBuilder(
+    column: $table.icon,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get route => $composableBuilder(
+    column: $table.route,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$AppsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $AppsTable> {
+  $$AppsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get slug =>
+      $composableBuilder(column: $table.slug, builder: (column) => column);
+
+  GeneratedColumn<String> get group =>
+      $composableBuilder(column: $table.group, builder: (column) => column);
+
+  GeneratedColumn<int> get order =>
+      $composableBuilder(column: $table.order, builder: (column) => column);
+
+  GeneratedColumn<int> get icon =>
+      $composableBuilder(column: $table.icon, builder: (column) => column);
+
+  GeneratedColumn<String> get route =>
+      $composableBuilder(column: $table.route, builder: (column) => column);
+}
+
+class $$AppsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $AppsTable,
+          App,
+          $$AppsTableFilterComposer,
+          $$AppsTableOrderingComposer,
+          $$AppsTableAnnotationComposer,
+          $$AppsTableCreateCompanionBuilder,
+          $$AppsTableUpdateCompanionBuilder,
+          (App, BaseReferences<_$AppDatabase, $AppsTable, App>),
+          App,
+          PrefetchHooks Function()
+        > {
+  $$AppsTableTableManager(_$AppDatabase db, $AppsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () => $$AppsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$AppsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer:
+              () => $$AppsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> slug = const Value.absent(),
+                Value<String> group = const Value.absent(),
+                Value<int> order = const Value.absent(),
+                Value<int?> icon = const Value.absent(),
+                Value<String> route = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AppsCompanion(
+                id: id,
+                name: name,
+                slug: slug,
+                group: group,
+                order: order,
+                icon: icon,
+                route: route,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                required String slug,
+                Value<String> group = const Value.absent(),
+                Value<int> order = const Value.absent(),
+                Value<int?> icon = const Value.absent(),
+                Value<String> route = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AppsCompanion.insert(
+                id: id,
+                name: name,
+                slug: slug,
+                group: group,
+                order: order,
+                icon: icon,
+                route: route,
+                rowid: rowid,
+              ),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          BaseReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$AppsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $AppsTable,
+      App,
+      $$AppsTableFilterComposer,
+      $$AppsTableOrderingComposer,
+      $$AppsTableAnnotationComposer,
+      $$AppsTableCreateCompanionBuilder,
+      $$AppsTableUpdateCompanionBuilder,
+      (App, BaseReferences<_$AppDatabase, $AppsTable, App>),
+      App,
+      PrefetchHooks Function()
+    >;
+typedef $$AppUsersTableCreateCompanionBuilder =
+    AppUsersCompanion Function({
+      required String id,
+      required String name,
+      required String email,
+      required String password,
+      required String localStoragePath,
+      Value<int> rowid,
+    });
+typedef $$AppUsersTableUpdateCompanionBuilder =
+    AppUsersCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String> email,
+      Value<String> password,
+      Value<String> localStoragePath,
+      Value<int> rowid,
+    });
+
+class $$AppUsersTableFilterComposer
+    extends Composer<_$AppDatabase, $AppUsersTable> {
+  $$AppUsersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get email => $composableBuilder(
+    column: $table.email,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get password => $composableBuilder(
+    column: $table.password,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get localStoragePath => $composableBuilder(
+    column: $table.localStoragePath,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$AppUsersTableOrderingComposer
+    extends Composer<_$AppDatabase, $AppUsersTable> {
+  $$AppUsersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get email => $composableBuilder(
+    column: $table.email,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get password => $composableBuilder(
+    column: $table.password,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get localStoragePath => $composableBuilder(
+    column: $table.localStoragePath,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$AppUsersTableAnnotationComposer
+    extends Composer<_$AppDatabase, $AppUsersTable> {
+  $$AppUsersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get email =>
+      $composableBuilder(column: $table.email, builder: (column) => column);
+
+  GeneratedColumn<String> get password =>
+      $composableBuilder(column: $table.password, builder: (column) => column);
+
+  GeneratedColumn<String> get localStoragePath => $composableBuilder(
+    column: $table.localStoragePath,
+    builder: (column) => column,
+  );
+}
+
+class $$AppUsersTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $AppUsersTable,
+          AppUser,
+          $$AppUsersTableFilterComposer,
+          $$AppUsersTableOrderingComposer,
+          $$AppUsersTableAnnotationComposer,
+          $$AppUsersTableCreateCompanionBuilder,
+          $$AppUsersTableUpdateCompanionBuilder,
+          (AppUser, BaseReferences<_$AppDatabase, $AppUsersTable, AppUser>),
+          AppUser,
+          PrefetchHooks Function()
+        > {
+  $$AppUsersTableTableManager(_$AppDatabase db, $AppUsersTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () => $$AppUsersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$AppUsersTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer:
+              () => $$AppUsersTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> email = const Value.absent(),
+                Value<String> password = const Value.absent(),
+                Value<String> localStoragePath = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AppUsersCompanion(
+                id: id,
+                name: name,
+                email: email,
+                password: password,
+                localStoragePath: localStoragePath,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                required String email,
+                required String password,
+                required String localStoragePath,
+                Value<int> rowid = const Value.absent(),
+              }) => AppUsersCompanion.insert(
+                id: id,
+                name: name,
+                email: email,
+                password: password,
+                localStoragePath: localStoragePath,
+                rowid: rowid,
+              ),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          BaseReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$AppUsersTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $AppUsersTable,
+      AppUser,
+      $$AppUsersTableFilterComposer,
+      $$AppUsersTableOrderingComposer,
+      $$AppUsersTableAnnotationComposer,
+      $$AppUsersTableCreateCompanionBuilder,
+      $$AppUsersTableUpdateCompanionBuilder,
+      (AppUser, BaseReferences<_$AppDatabase, $AppUsersTable, AppUser>),
+      AppUser,
+      PrefetchHooks Function()
+    >;
+typedef $$CollectionsTableCreateCompanionBuilder =
+    CollectionsCompanion Function({
+      required String id,
+      required String name,
+      required String path,
+      required String type,
+      required String scanner,
+      required String scanStatus,
+      Value<String?> oauthService,
+      Value<String?> accessToken,
+      Value<String?> refreshToken,
+      Value<String?> idToken,
+      Value<String?> userId,
+      Value<DateTime?> expiration,
+      Value<DateTime?> lastScanDate,
+      required bool needsReAuth,
+      Value<bool> downloadAttachments,
+      Value<String?> localCopyPath,
+      Value<int> rowid,
+    });
+typedef $$CollectionsTableUpdateCompanionBuilder =
+    CollectionsCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String> path,
+      Value<String> type,
+      Value<String> scanner,
+      Value<String> scanStatus,
+      Value<String?> oauthService,
+      Value<String?> accessToken,
+      Value<String?> refreshToken,
+      Value<String?> idToken,
+      Value<String?> userId,
+      Value<DateTime?> expiration,
+      Value<DateTime?> lastScanDate,
+      Value<bool> needsReAuth,
+      Value<bool> downloadAttachments,
+      Value<String?> localCopyPath,
+      Value<int> rowid,
+    });
+
+final class $$CollectionsTableReferences
+    extends BaseReferences<_$AppDatabase, $CollectionsTable, Collection> {
+  $$CollectionsTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static MultiTypedResultKey<$EmailFoldersTable, List<EmailFolder>>
+  _emailFoldersRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.emailFolders,
+    aliasName: $_aliasNameGenerator(
+      db.collections.id,
+      db.emailFolders.collectionId,
+    ),
+  );
+
+  $$EmailFoldersTableProcessedTableManager get emailFoldersRefs {
+    final manager = $$EmailFoldersTableTableManager(
+      $_db,
+      $_db.emailFolders,
+    ).filter((f) => f.collectionId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_emailFoldersRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+}
+
+class $$CollectionsTableFilterComposer
+    extends Composer<_$AppDatabase, $CollectionsTable> {
+  $$CollectionsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get path => $composableBuilder(
+    column: $table.path,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get scanner => $composableBuilder(
+    column: $table.scanner,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get scanStatus => $composableBuilder(
+    column: $table.scanStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get oauthService => $composableBuilder(
+    column: $table.oauthService,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get accessToken => $composableBuilder(
+    column: $table.accessToken,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get refreshToken => $composableBuilder(
+    column: $table.refreshToken,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get idToken => $composableBuilder(
+    column: $table.idToken,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get expiration => $composableBuilder(
+    column: $table.expiration,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastScanDate => $composableBuilder(
+    column: $table.lastScanDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get needsReAuth => $composableBuilder(
+    column: $table.needsReAuth,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get downloadAttachments => $composableBuilder(
+    column: $table.downloadAttachments,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get localCopyPath => $composableBuilder(
+    column: $table.localCopyPath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  Expression<bool> emailFoldersRefs(
+    Expression<bool> Function($$EmailFoldersTableFilterComposer f) f,
+  ) {
+    final $$EmailFoldersTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.emailFolders,
+      getReferencedColumn: (t) => t.collectionId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$EmailFoldersTableFilterComposer(
+            $db: $db,
+            $table: $db.emailFolders,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$CollectionsTableOrderingComposer
+    extends Composer<_$AppDatabase, $CollectionsTable> {
+  $$CollectionsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get path => $composableBuilder(
+    column: $table.path,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get scanner => $composableBuilder(
+    column: $table.scanner,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get scanStatus => $composableBuilder(
+    column: $table.scanStatus,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get oauthService => $composableBuilder(
+    column: $table.oauthService,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get accessToken => $composableBuilder(
+    column: $table.accessToken,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get refreshToken => $composableBuilder(
+    column: $table.refreshToken,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get idToken => $composableBuilder(
+    column: $table.idToken,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get expiration => $composableBuilder(
+    column: $table.expiration,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get lastScanDate => $composableBuilder(
+    column: $table.lastScanDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get needsReAuth => $composableBuilder(
+    column: $table.needsReAuth,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get downloadAttachments => $composableBuilder(
+    column: $table.downloadAttachments,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get localCopyPath => $composableBuilder(
+    column: $table.localCopyPath,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CollectionsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CollectionsTable> {
+  $$CollectionsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get path =>
+      $composableBuilder(column: $table.path, builder: (column) => column);
+
+  GeneratedColumn<String> get type =>
+      $composableBuilder(column: $table.type, builder: (column) => column);
+
+  GeneratedColumn<String> get scanner =>
+      $composableBuilder(column: $table.scanner, builder: (column) => column);
+
+  GeneratedColumn<String> get scanStatus => $composableBuilder(
+    column: $table.scanStatus,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get oauthService => $composableBuilder(
+    column: $table.oauthService,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get accessToken => $composableBuilder(
+    column: $table.accessToken,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get refreshToken => $composableBuilder(
+    column: $table.refreshToken,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get idToken =>
+      $composableBuilder(column: $table.idToken, builder: (column) => column);
+
+  GeneratedColumn<String> get userId =>
+      $composableBuilder(column: $table.userId, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get expiration => $composableBuilder(
+    column: $table.expiration,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get lastScanDate => $composableBuilder(
+    column: $table.lastScanDate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get needsReAuth => $composableBuilder(
+    column: $table.needsReAuth,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get downloadAttachments => $composableBuilder(
+    column: $table.downloadAttachments,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get localCopyPath => $composableBuilder(
+    column: $table.localCopyPath,
+    builder: (column) => column,
+  );
+
+  Expression<T> emailFoldersRefs<T extends Object>(
+    Expression<T> Function($$EmailFoldersTableAnnotationComposer a) f,
+  ) {
+    final $$EmailFoldersTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.emailFolders,
+      getReferencedColumn: (t) => t.collectionId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$EmailFoldersTableAnnotationComposer(
+            $db: $db,
+            $table: $db.emailFolders,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$CollectionsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CollectionsTable,
+          Collection,
+          $$CollectionsTableFilterComposer,
+          $$CollectionsTableOrderingComposer,
+          $$CollectionsTableAnnotationComposer,
+          $$CollectionsTableCreateCompanionBuilder,
+          $$CollectionsTableUpdateCompanionBuilder,
+          (Collection, $$CollectionsTableReferences),
+          Collection,
+          PrefetchHooks Function({bool emailFoldersRefs})
+        > {
+  $$CollectionsTableTableManager(_$AppDatabase db, $CollectionsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () => $$CollectionsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$CollectionsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer:
+              () =>
+                  $$CollectionsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> path = const Value.absent(),
+                Value<String> type = const Value.absent(),
+                Value<String> scanner = const Value.absent(),
+                Value<String> scanStatus = const Value.absent(),
+                Value<String?> oauthService = const Value.absent(),
+                Value<String?> accessToken = const Value.absent(),
+                Value<String?> refreshToken = const Value.absent(),
+                Value<String?> idToken = const Value.absent(),
+                Value<String?> userId = const Value.absent(),
+                Value<DateTime?> expiration = const Value.absent(),
+                Value<DateTime?> lastScanDate = const Value.absent(),
+                Value<bool> needsReAuth = const Value.absent(),
+                Value<bool> downloadAttachments = const Value.absent(),
+                Value<String?> localCopyPath = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CollectionsCompanion(
+                id: id,
+                name: name,
+                path: path,
+                type: type,
+                scanner: scanner,
+                scanStatus: scanStatus,
+                oauthService: oauthService,
+                accessToken: accessToken,
+                refreshToken: refreshToken,
+                idToken: idToken,
+                userId: userId,
+                expiration: expiration,
+                lastScanDate: lastScanDate,
+                needsReAuth: needsReAuth,
+                downloadAttachments: downloadAttachments,
+                localCopyPath: localCopyPath,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                required String path,
+                required String type,
+                required String scanner,
+                required String scanStatus,
+                Value<String?> oauthService = const Value.absent(),
+                Value<String?> accessToken = const Value.absent(),
+                Value<String?> refreshToken = const Value.absent(),
+                Value<String?> idToken = const Value.absent(),
+                Value<String?> userId = const Value.absent(),
+                Value<DateTime?> expiration = const Value.absent(),
+                Value<DateTime?> lastScanDate = const Value.absent(),
+                required bool needsReAuth,
+                Value<bool> downloadAttachments = const Value.absent(),
+                Value<String?> localCopyPath = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CollectionsCompanion.insert(
+                id: id,
+                name: name,
+                path: path,
+                type: type,
+                scanner: scanner,
+                scanStatus: scanStatus,
+                oauthService: oauthService,
+                accessToken: accessToken,
+                refreshToken: refreshToken,
+                idToken: idToken,
+                userId: userId,
+                expiration: expiration,
+                lastScanDate: lastScanDate,
+                needsReAuth: needsReAuth,
+                downloadAttachments: downloadAttachments,
+                localCopyPath: localCopyPath,
+                rowid: rowid,
+              ),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          $$CollectionsTableReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: ({emailFoldersRefs = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [if (emailFoldersRefs) db.emailFolders],
+              addJoins: null,
+              getPrefetchedDataCallback: (items) async {
+                return [
+                  if (emailFoldersRefs)
+                    await $_getPrefetchedData<
+                      Collection,
+                      $CollectionsTable,
+                      EmailFolder
+                    >(
+                      currentTable: table,
+                      referencedTable: $$CollectionsTableReferences
+                          ._emailFoldersRefsTable(db),
+                      managerFromTypedResult:
+                          (p0) =>
+                              $$CollectionsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).emailFoldersRefs,
+                      referencedItemsForCurrentItem:
+                          (item, referencedItems) => referencedItems.where(
+                            (e) => e.collectionId == item.id,
+                          ),
+                      typedResults: items,
+                    ),
+                ];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$CollectionsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CollectionsTable,
+      Collection,
+      $$CollectionsTableFilterComposer,
+      $$CollectionsTableOrderingComposer,
+      $$CollectionsTableAnnotationComposer,
+      $$CollectionsTableCreateCompanionBuilder,
+      $$CollectionsTableUpdateCompanionBuilder,
+      (Collection, $$CollectionsTableReferences),
+      Collection,
+      PrefetchHooks Function({bool emailFoldersRefs})
+    >;
+typedef $$EmailsTableCreateCompanionBuilder =
+    EmailsCompanion Function({
+      required String id,
+      required String collectionId,
+      required DateTime date,
+      required String from,
+      required List<String> to,
+      required List<String> cc,
+      Value<String?> subject,
+      Value<String?> snippet,
+      Value<String?> htmlBody,
+      Value<String?> plainBody,
+      required List<String> labels,
+      Value<String?> headers,
+      Value<String?> folderId,
+      Value<String?> messageId,
+      Value<String?> threadId,
+      Value<bool> isRead,
+      Value<bool> hasAttachments,
+      Value<bool> isDeleted,
+      Value<int?> uid,
+      Value<int> rowid,
+    });
+typedef $$EmailsTableUpdateCompanionBuilder =
+    EmailsCompanion Function({
+      Value<String> id,
+      Value<String> collectionId,
+      Value<DateTime> date,
+      Value<String> from,
+      Value<List<String>> to,
+      Value<List<String>> cc,
+      Value<String?> subject,
+      Value<String?> snippet,
+      Value<String?> htmlBody,
+      Value<String?> plainBody,
+      Value<List<String>> labels,
+      Value<String?> headers,
+      Value<String?> folderId,
+      Value<String?> messageId,
+      Value<String?> threadId,
+      Value<bool> isRead,
+      Value<bool> hasAttachments,
+      Value<bool> isDeleted,
+      Value<int?> uid,
+      Value<int> rowid,
+    });
+
+class $$EmailsTableFilterComposer
+    extends Composer<_$AppDatabase, $EmailsTable> {
+  $$EmailsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get collectionId => $composableBuilder(
+    column: $table.collectionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get date => $composableBuilder(
+    column: $table.date,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get from => $composableBuilder(
+    column: $table.from,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnWithTypeConverterFilters<List<String>, List<String>, String> get to =>
+      $composableBuilder(
+        column: $table.to,
+        builder: (column) => ColumnWithTypeConverterFilters(column),
+      );
+
+  ColumnWithTypeConverterFilters<List<String>, List<String>, String> get cc =>
+      $composableBuilder(
+        column: $table.cc,
+        builder: (column) => ColumnWithTypeConverterFilters(column),
+      );
+
+  ColumnFilters<String> get subject => $composableBuilder(
+    column: $table.subject,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get snippet => $composableBuilder(
+    column: $table.snippet,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get htmlBody => $composableBuilder(
+    column: $table.htmlBody,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get plainBody => $composableBuilder(
+    column: $table.plainBody,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnWithTypeConverterFilters<List<String>, List<String>, String>
+  get labels => $composableBuilder(
+    column: $table.labels,
+    builder: (column) => ColumnWithTypeConverterFilters(column),
+  );
+
+  ColumnFilters<String> get headers => $composableBuilder(
+    column: $table.headers,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get folderId => $composableBuilder(
+    column: $table.folderId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get threadId => $composableBuilder(
+    column: $table.threadId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isRead => $composableBuilder(
+    column: $table.isRead,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get hasAttachments => $composableBuilder(
+    column: $table.hasAttachments,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isDeleted => $composableBuilder(
+    column: $table.isDeleted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get uid => $composableBuilder(
+    column: $table.uid,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$EmailsTableOrderingComposer
+    extends Composer<_$AppDatabase, $EmailsTable> {
+  $$EmailsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get collectionId => $composableBuilder(
+    column: $table.collectionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get date => $composableBuilder(
+    column: $table.date,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get from => $composableBuilder(
+    column: $table.from,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get to => $composableBuilder(
+    column: $table.to,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get cc => $composableBuilder(
+    column: $table.cc,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get subject => $composableBuilder(
+    column: $table.subject,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get snippet => $composableBuilder(
+    column: $table.snippet,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get htmlBody => $composableBuilder(
+    column: $table.htmlBody,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get plainBody => $composableBuilder(
+    column: $table.plainBody,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get labels => $composableBuilder(
+    column: $table.labels,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get headers => $composableBuilder(
+    column: $table.headers,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get folderId => $composableBuilder(
+    column: $table.folderId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get threadId => $composableBuilder(
+    column: $table.threadId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isRead => $composableBuilder(
+    column: $table.isRead,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get hasAttachments => $composableBuilder(
+    column: $table.hasAttachments,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isDeleted => $composableBuilder(
+    column: $table.isDeleted,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get uid => $composableBuilder(
+    column: $table.uid,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$EmailsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $EmailsTable> {
+  $$EmailsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get collectionId => $composableBuilder(
+    column: $table.collectionId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get date =>
+      $composableBuilder(column: $table.date, builder: (column) => column);
+
+  GeneratedColumn<String> get from =>
+      $composableBuilder(column: $table.from, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<List<String>, String> get to =>
+      $composableBuilder(column: $table.to, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<List<String>, String> get cc =>
+      $composableBuilder(column: $table.cc, builder: (column) => column);
+
+  GeneratedColumn<String> get subject =>
+      $composableBuilder(column: $table.subject, builder: (column) => column);
+
+  GeneratedColumn<String> get snippet =>
+      $composableBuilder(column: $table.snippet, builder: (column) => column);
+
+  GeneratedColumn<String> get htmlBody =>
+      $composableBuilder(column: $table.htmlBody, builder: (column) => column);
+
+  GeneratedColumn<String> get plainBody =>
+      $composableBuilder(column: $table.plainBody, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<List<String>, String> get labels =>
+      $composableBuilder(column: $table.labels, builder: (column) => column);
+
+  GeneratedColumn<String> get headers =>
+      $composableBuilder(column: $table.headers, builder: (column) => column);
+
+  GeneratedColumn<String> get folderId =>
+      $composableBuilder(column: $table.folderId, builder: (column) => column);
+
+  GeneratedColumn<String> get messageId =>
+      $composableBuilder(column: $table.messageId, builder: (column) => column);
+
+  GeneratedColumn<String> get threadId =>
+      $composableBuilder(column: $table.threadId, builder: (column) => column);
+
+  GeneratedColumn<bool> get isRead =>
+      $composableBuilder(column: $table.isRead, builder: (column) => column);
+
+  GeneratedColumn<bool> get hasAttachments => $composableBuilder(
+    column: $table.hasAttachments,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get isDeleted =>
+      $composableBuilder(column: $table.isDeleted, builder: (column) => column);
+
+  GeneratedColumn<int> get uid =>
+      $composableBuilder(column: $table.uid, builder: (column) => column);
+}
+
+class $$EmailsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $EmailsTable,
+          Email,
+          $$EmailsTableFilterComposer,
+          $$EmailsTableOrderingComposer,
+          $$EmailsTableAnnotationComposer,
+          $$EmailsTableCreateCompanionBuilder,
+          $$EmailsTableUpdateCompanionBuilder,
+          (Email, BaseReferences<_$AppDatabase, $EmailsTable, Email>),
+          Email,
+          PrefetchHooks Function()
+        > {
+  $$EmailsTableTableManager(_$AppDatabase db, $EmailsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () => $$EmailsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$EmailsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer:
+              () => $$EmailsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> collectionId = const Value.absent(),
+                Value<DateTime> date = const Value.absent(),
+                Value<String> from = const Value.absent(),
+                Value<List<String>> to = const Value.absent(),
+                Value<List<String>> cc = const Value.absent(),
+                Value<String?> subject = const Value.absent(),
+                Value<String?> snippet = const Value.absent(),
+                Value<String?> htmlBody = const Value.absent(),
+                Value<String?> plainBody = const Value.absent(),
+                Value<List<String>> labels = const Value.absent(),
+                Value<String?> headers = const Value.absent(),
+                Value<String?> folderId = const Value.absent(),
+                Value<String?> messageId = const Value.absent(),
+                Value<String?> threadId = const Value.absent(),
+                Value<bool> isRead = const Value.absent(),
+                Value<bool> hasAttachments = const Value.absent(),
+                Value<bool> isDeleted = const Value.absent(),
+                Value<int?> uid = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EmailsCompanion(
+                id: id,
+                collectionId: collectionId,
+                date: date,
+                from: from,
+                to: to,
+                cc: cc,
+                subject: subject,
+                snippet: snippet,
+                htmlBody: htmlBody,
+                plainBody: plainBody,
+                labels: labels,
+                headers: headers,
+                folderId: folderId,
+                messageId: messageId,
+                threadId: threadId,
+                isRead: isRead,
+                hasAttachments: hasAttachments,
+                isDeleted: isDeleted,
+                uid: uid,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String collectionId,
+                required DateTime date,
+                required String from,
+                required List<String> to,
+                required List<String> cc,
+                Value<String?> subject = const Value.absent(),
+                Value<String?> snippet = const Value.absent(),
+                Value<String?> htmlBody = const Value.absent(),
+                Value<String?> plainBody = const Value.absent(),
+                required List<String> labels,
+                Value<String?> headers = const Value.absent(),
+                Value<String?> folderId = const Value.absent(),
+                Value<String?> messageId = const Value.absent(),
+                Value<String?> threadId = const Value.absent(),
+                Value<bool> isRead = const Value.absent(),
+                Value<bool> hasAttachments = const Value.absent(),
+                Value<bool> isDeleted = const Value.absent(),
+                Value<int?> uid = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EmailsCompanion.insert(
+                id: id,
+                collectionId: collectionId,
+                date: date,
+                from: from,
+                to: to,
+                cc: cc,
+                subject: subject,
+                snippet: snippet,
+                htmlBody: htmlBody,
+                plainBody: plainBody,
+                labels: labels,
+                headers: headers,
+                folderId: folderId,
+                messageId: messageId,
+                threadId: threadId,
+                isRead: isRead,
+                hasAttachments: hasAttachments,
+                isDeleted: isDeleted,
+                uid: uid,
+                rowid: rowid,
+              ),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          BaseReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$EmailsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $EmailsTable,
+      Email,
+      $$EmailsTableFilterComposer,
+      $$EmailsTableOrderingComposer,
+      $$EmailsTableAnnotationComposer,
+      $$EmailsTableCreateCompanionBuilder,
+      $$EmailsTableUpdateCompanionBuilder,
+      (Email, BaseReferences<_$AppDatabase, $EmailsTable, Email>),
+      Email,
+      PrefetchHooks Function()
+    >;
+typedef $$EmailFoldersTableCreateCompanionBuilder =
+    EmailFoldersCompanion Function({
+      required String id,
+      required String collectionId,
+      required String name,
+      Value<String> type,
+      Value<int?> messagesTotal,
+      Value<int?> messagesUnread,
+      Value<String?> parentId,
+      Value<int> rowid,
+    });
+typedef $$EmailFoldersTableUpdateCompanionBuilder =
+    EmailFoldersCompanion Function({
+      Value<String> id,
+      Value<String> collectionId,
+      Value<String> name,
+      Value<String> type,
+      Value<int?> messagesTotal,
+      Value<int?> messagesUnread,
+      Value<String?> parentId,
+      Value<int> rowid,
+    });
+
+final class $$EmailFoldersTableReferences
+    extends BaseReferences<_$AppDatabase, $EmailFoldersTable, EmailFolder> {
+  $$EmailFoldersTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $CollectionsTable _collectionIdTable(_$AppDatabase db) =>
+      db.collections.createAlias(
+        $_aliasNameGenerator(db.emailFolders.collectionId, db.collections.id),
+      );
+
+  $$CollectionsTableProcessedTableManager get collectionId {
+    final $_column = $_itemColumn<String>('collection_id')!;
+
+    final manager = $$CollectionsTableTableManager(
+      $_db,
+      $_db.collections,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_collectionIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$EmailFoldersTableFilterComposer
+    extends Composer<_$AppDatabase, $EmailFoldersTable> {
+  $$EmailFoldersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get messagesTotal => $composableBuilder(
+    column: $table.messagesTotal,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get messagesUnread => $composableBuilder(
+    column: $table.messagesUnread,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get parentId => $composableBuilder(
+    column: $table.parentId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$CollectionsTableFilterComposer get collectionId {
+    final $$CollectionsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.collectionId,
+      referencedTable: $db.collections,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$CollectionsTableFilterComposer(
+            $db: $db,
+            $table: $db.collections,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$EmailFoldersTableOrderingComposer
+    extends Composer<_$AppDatabase, $EmailFoldersTable> {
+  $$EmailFoldersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get messagesTotal => $composableBuilder(
+    column: $table.messagesTotal,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get messagesUnread => $composableBuilder(
+    column: $table.messagesUnread,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get parentId => $composableBuilder(
+    column: $table.parentId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$CollectionsTableOrderingComposer get collectionId {
+    final $$CollectionsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.collectionId,
+      referencedTable: $db.collections,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$CollectionsTableOrderingComposer(
+            $db: $db,
+            $table: $db.collections,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$EmailFoldersTableAnnotationComposer
+    extends Composer<_$AppDatabase, $EmailFoldersTable> {
+  $$EmailFoldersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get type =>
+      $composableBuilder(column: $table.type, builder: (column) => column);
+
+  GeneratedColumn<int> get messagesTotal => $composableBuilder(
+    column: $table.messagesTotal,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get messagesUnread => $composableBuilder(
+    column: $table.messagesUnread,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get parentId =>
+      $composableBuilder(column: $table.parentId, builder: (column) => column);
+
+  $$CollectionsTableAnnotationComposer get collectionId {
+    final $$CollectionsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.collectionId,
+      referencedTable: $db.collections,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$CollectionsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.collections,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$EmailFoldersTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $EmailFoldersTable,
+          EmailFolder,
+          $$EmailFoldersTableFilterComposer,
+          $$EmailFoldersTableOrderingComposer,
+          $$EmailFoldersTableAnnotationComposer,
+          $$EmailFoldersTableCreateCompanionBuilder,
+          $$EmailFoldersTableUpdateCompanionBuilder,
+          (EmailFolder, $$EmailFoldersTableReferences),
+          EmailFolder,
+          PrefetchHooks Function({bool collectionId})
+        > {
+  $$EmailFoldersTableTableManager(_$AppDatabase db, $EmailFoldersTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () => $$EmailFoldersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$EmailFoldersTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer:
+              () =>
+                  $$EmailFoldersTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> collectionId = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> type = const Value.absent(),
+                Value<int?> messagesTotal = const Value.absent(),
+                Value<int?> messagesUnread = const Value.absent(),
+                Value<String?> parentId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EmailFoldersCompanion(
+                id: id,
+                collectionId: collectionId,
+                name: name,
+                type: type,
+                messagesTotal: messagesTotal,
+                messagesUnread: messagesUnread,
+                parentId: parentId,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String collectionId,
+                required String name,
+                Value<String> type = const Value.absent(),
+                Value<int?> messagesTotal = const Value.absent(),
+                Value<int?> messagesUnread = const Value.absent(),
+                Value<String?> parentId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EmailFoldersCompanion.insert(
+                id: id,
+                collectionId: collectionId,
+                name: name,
+                type: type,
+                messagesTotal: messagesTotal,
+                messagesUnread: messagesUnread,
+                parentId: parentId,
+                rowid: rowid,
+              ),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          $$EmailFoldersTableReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: ({collectionId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins: <
+                T extends TableManagerState<
+                  dynamic,
+                  dynamic,
+                  dynamic,
+                  dynamic,
+                  dynamic,
+                  dynamic,
+                  dynamic,
+                  dynamic,
+                  dynamic,
+                  dynamic,
+                  dynamic
+                >
+              >(state) {
+                if (collectionId) {
+                  state =
+                      state.withJoin(
+                            currentTable: table,
+                            currentColumn: table.collectionId,
+                            referencedTable: $$EmailFoldersTableReferences
+                                ._collectionIdTable(db),
+                            referencedColumn:
+                                $$EmailFoldersTableReferences
+                                    ._collectionIdTable(db)
+                                    .id,
+                          )
+                          as T;
+                }
+
+                return state;
+              },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$EmailFoldersTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $EmailFoldersTable,
+      EmailFolder,
+      $$EmailFoldersTableFilterComposer,
+      $$EmailFoldersTableOrderingComposer,
+      $$EmailFoldersTableAnnotationComposer,
+      $$EmailFoldersTableCreateCompanionBuilder,
+      $$EmailFoldersTableUpdateCompanionBuilder,
+      (EmailFolder, $$EmailFoldersTableReferences),
+      EmailFolder,
+      PrefetchHooks Function({bool collectionId})
+    >;
+typedef $$FilesTableCreateCompanionBuilder =
+    FilesCompanion Function({
+      required String id,
+      required String name,
+      required String path,
+      required String parent,
+      required DateTime dateCreated,
+      required DateTime dateLastModified,
+      Value<DateTime?> lastScannedDate,
+      required String collectionId,
+      required String contentType,
+      required int size,
+      Value<bool> isDeleted,
+      Value<String?> thumbnail,
+      Value<String?> downloadUrl,
+      Value<String?> emailId,
+      Value<double?> latitude,
+      Value<double?> longitude,
+      Value<int> rowid,
+    });
+typedef $$FilesTableUpdateCompanionBuilder =
+    FilesCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String> path,
+      Value<String> parent,
+      Value<DateTime> dateCreated,
+      Value<DateTime> dateLastModified,
+      Value<DateTime?> lastScannedDate,
+      Value<String> collectionId,
+      Value<String> contentType,
+      Value<int> size,
+      Value<bool> isDeleted,
+      Value<String?> thumbnail,
+      Value<String?> downloadUrl,
+      Value<String?> emailId,
+      Value<double?> latitude,
+      Value<double?> longitude,
+      Value<int> rowid,
+    });
+
+class $$FilesTableFilterComposer extends Composer<_$AppDatabase, $FilesTable> {
+  $$FilesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get path => $composableBuilder(
+    column: $table.path,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get parent => $composableBuilder(
+    column: $table.parent,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get dateCreated => $composableBuilder(
+    column: $table.dateCreated,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get dateLastModified => $composableBuilder(
+    column: $table.dateLastModified,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastScannedDate => $composableBuilder(
+    column: $table.lastScannedDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get collectionId => $composableBuilder(
+    column: $table.collectionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get contentType => $composableBuilder(
+    column: $table.contentType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get size => $composableBuilder(
+    column: $table.size,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isDeleted => $composableBuilder(
+    column: $table.isDeleted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get thumbnail => $composableBuilder(
+    column: $table.thumbnail,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get emailId => $composableBuilder(
+    column: $table.emailId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get latitude => $composableBuilder(
+    column: $table.latitude,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get longitude => $composableBuilder(
+    column: $table.longitude,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$FilesTableOrderingComposer
+    extends Composer<_$AppDatabase, $FilesTable> {
+  $$FilesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get path => $composableBuilder(
+    column: $table.path,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get parent => $composableBuilder(
+    column: $table.parent,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get dateCreated => $composableBuilder(
+    column: $table.dateCreated,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get dateLastModified => $composableBuilder(
+    column: $table.dateLastModified,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get lastScannedDate => $composableBuilder(
+    column: $table.lastScannedDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get collectionId => $composableBuilder(
+    column: $table.collectionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get contentType => $composableBuilder(
+    column: $table.contentType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get size => $composableBuilder(
+    column: $table.size,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isDeleted => $composableBuilder(
+    column: $table.isDeleted,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get thumbnail => $composableBuilder(
+    column: $table.thumbnail,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get emailId => $composableBuilder(
+    column: $table.emailId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get latitude => $composableBuilder(
+    column: $table.latitude,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get longitude => $composableBuilder(
+    column: $table.longitude,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$FilesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $FilesTable> {
+  $$FilesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get path =>
+      $composableBuilder(column: $table.path, builder: (column) => column);
+
+  GeneratedColumn<String> get parent =>
+      $composableBuilder(column: $table.parent, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get dateCreated => $composableBuilder(
+    column: $table.dateCreated,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get dateLastModified => $composableBuilder(
+    column: $table.dateLastModified,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get lastScannedDate => $composableBuilder(
+    column: $table.lastScannedDate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get collectionId => $composableBuilder(
+    column: $table.collectionId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get contentType => $composableBuilder(
+    column: $table.contentType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get size =>
+      $composableBuilder(column: $table.size, builder: (column) => column);
+
+  GeneratedColumn<bool> get isDeleted =>
+      $composableBuilder(column: $table.isDeleted, builder: (column) => column);
+
+  GeneratedColumn<String> get thumbnail =>
+      $composableBuilder(column: $table.thumbnail, builder: (column) => column);
+
+  GeneratedColumn<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get emailId =>
+      $composableBuilder(column: $table.emailId, builder: (column) => column);
+
+  GeneratedColumn<double> get latitude =>
+      $composableBuilder(column: $table.latitude, builder: (column) => column);
+
+  GeneratedColumn<double> get longitude =>
+      $composableBuilder(column: $table.longitude, builder: (column) => column);
+}
+
+class $$FilesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $FilesTable,
+          File,
+          $$FilesTableFilterComposer,
+          $$FilesTableOrderingComposer,
+          $$FilesTableAnnotationComposer,
+          $$FilesTableCreateCompanionBuilder,
+          $$FilesTableUpdateCompanionBuilder,
+          (File, BaseReferences<_$AppDatabase, $FilesTable, File>),
+          File,
+          PrefetchHooks Function()
+        > {
+  $$FilesTableTableManager(_$AppDatabase db, $FilesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () => $$FilesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$FilesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer:
+              () => $$FilesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> path = const Value.absent(),
+                Value<String> parent = const Value.absent(),
+                Value<DateTime> dateCreated = const Value.absent(),
+                Value<DateTime> dateLastModified = const Value.absent(),
+                Value<DateTime?> lastScannedDate = const Value.absent(),
+                Value<String> collectionId = const Value.absent(),
+                Value<String> contentType = const Value.absent(),
+                Value<int> size = const Value.absent(),
+                Value<bool> isDeleted = const Value.absent(),
+                Value<String?> thumbnail = const Value.absent(),
+                Value<String?> downloadUrl = const Value.absent(),
+                Value<String?> emailId = const Value.absent(),
+                Value<double?> latitude = const Value.absent(),
+                Value<double?> longitude = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FilesCompanion(
+                id: id,
+                name: name,
+                path: path,
+                parent: parent,
+                dateCreated: dateCreated,
+                dateLastModified: dateLastModified,
+                lastScannedDate: lastScannedDate,
+                collectionId: collectionId,
+                contentType: contentType,
+                size: size,
+                isDeleted: isDeleted,
+                thumbnail: thumbnail,
+                downloadUrl: downloadUrl,
+                emailId: emailId,
+                latitude: latitude,
+                longitude: longitude,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                required String path,
+                required String parent,
+                required DateTime dateCreated,
+                required DateTime dateLastModified,
+                Value<DateTime?> lastScannedDate = const Value.absent(),
+                required String collectionId,
+                required String contentType,
+                required int size,
+                Value<bool> isDeleted = const Value.absent(),
+                Value<String?> thumbnail = const Value.absent(),
+                Value<String?> downloadUrl = const Value.absent(),
+                Value<String?> emailId = const Value.absent(),
+                Value<double?> latitude = const Value.absent(),
+                Value<double?> longitude = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FilesCompanion.insert(
+                id: id,
+                name: name,
+                path: path,
+                parent: parent,
+                dateCreated: dateCreated,
+                dateLastModified: dateLastModified,
+                lastScannedDate: lastScannedDate,
+                collectionId: collectionId,
+                contentType: contentType,
+                size: size,
+                isDeleted: isDeleted,
+                thumbnail: thumbnail,
+                downloadUrl: downloadUrl,
+                emailId: emailId,
+                latitude: latitude,
+                longitude: longitude,
+                rowid: rowid,
+              ),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          BaseReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$FilesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $FilesTable,
+      File,
+      $$FilesTableFilterComposer,
+      $$FilesTableOrderingComposer,
+      $$FilesTableAnnotationComposer,
+      $$FilesTableCreateCompanionBuilder,
+      $$FilesTableUpdateCompanionBuilder,
+      (File, BaseReferences<_$AppDatabase, $FilesTable, File>),
+      File,
+      PrefetchHooks Function()
+    >;
+typedef $$FoldersTableCreateCompanionBuilder =
+    FoldersCompanion Function({
+      required String id,
+      required String name,
+      required String path,
+      required String parent,
+      required DateTime dateCreated,
+      required DateTime dateLastModified,
+      Value<DateTime?> lastScannedDate,
+      Value<String?> thumbnail,
+      Value<String?> downloadUrl,
+      Value<String?> emailId,
+      required String collectionId,
+      Value<int> rowid,
+    });
+typedef $$FoldersTableUpdateCompanionBuilder =
+    FoldersCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String> path,
+      Value<String> parent,
+      Value<DateTime> dateCreated,
+      Value<DateTime> dateLastModified,
+      Value<DateTime?> lastScannedDate,
+      Value<String?> thumbnail,
+      Value<String?> downloadUrl,
+      Value<String?> emailId,
+      Value<String> collectionId,
+      Value<int> rowid,
+    });
+
+class $$FoldersTableFilterComposer
+    extends Composer<_$AppDatabase, $FoldersTable> {
+  $$FoldersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get path => $composableBuilder(
+    column: $table.path,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get parent => $composableBuilder(
+    column: $table.parent,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get dateCreated => $composableBuilder(
+    column: $table.dateCreated,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get dateLastModified => $composableBuilder(
+    column: $table.dateLastModified,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastScannedDate => $composableBuilder(
+    column: $table.lastScannedDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get thumbnail => $composableBuilder(
+    column: $table.thumbnail,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get emailId => $composableBuilder(
+    column: $table.emailId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get collectionId => $composableBuilder(
+    column: $table.collectionId,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$FoldersTableOrderingComposer
+    extends Composer<_$AppDatabase, $FoldersTable> {
+  $$FoldersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get path => $composableBuilder(
+    column: $table.path,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get parent => $composableBuilder(
+    column: $table.parent,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get dateCreated => $composableBuilder(
+    column: $table.dateCreated,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get dateLastModified => $composableBuilder(
+    column: $table.dateLastModified,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get lastScannedDate => $composableBuilder(
+    column: $table.lastScannedDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get thumbnail => $composableBuilder(
+    column: $table.thumbnail,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get emailId => $composableBuilder(
+    column: $table.emailId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get collectionId => $composableBuilder(
+    column: $table.collectionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$FoldersTableAnnotationComposer
+    extends Composer<_$AppDatabase, $FoldersTable> {
+  $$FoldersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get path =>
+      $composableBuilder(column: $table.path, builder: (column) => column);
+
+  GeneratedColumn<String> get parent =>
+      $composableBuilder(column: $table.parent, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get dateCreated => $composableBuilder(
+    column: $table.dateCreated,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get dateLastModified => $composableBuilder(
+    column: $table.dateLastModified,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get lastScannedDate => $composableBuilder(
+    column: $table.lastScannedDate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get thumbnail =>
+      $composableBuilder(column: $table.thumbnail, builder: (column) => column);
+
+  GeneratedColumn<String> get downloadUrl => $composableBuilder(
+    column: $table.downloadUrl,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get emailId =>
+      $composableBuilder(column: $table.emailId, builder: (column) => column);
+
+  GeneratedColumn<String> get collectionId => $composableBuilder(
+    column: $table.collectionId,
+    builder: (column) => column,
+  );
+}
+
+class $$FoldersTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $FoldersTable,
+          Folder,
+          $$FoldersTableFilterComposer,
+          $$FoldersTableOrderingComposer,
+          $$FoldersTableAnnotationComposer,
+          $$FoldersTableCreateCompanionBuilder,
+          $$FoldersTableUpdateCompanionBuilder,
+          (Folder, BaseReferences<_$AppDatabase, $FoldersTable, Folder>),
+          Folder,
+          PrefetchHooks Function()
+        > {
+  $$FoldersTableTableManager(_$AppDatabase db, $FoldersTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () => $$FoldersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$FoldersTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer:
+              () => $$FoldersTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> path = const Value.absent(),
+                Value<String> parent = const Value.absent(),
+                Value<DateTime> dateCreated = const Value.absent(),
+                Value<DateTime> dateLastModified = const Value.absent(),
+                Value<DateTime?> lastScannedDate = const Value.absent(),
+                Value<String?> thumbnail = const Value.absent(),
+                Value<String?> downloadUrl = const Value.absent(),
+                Value<String?> emailId = const Value.absent(),
+                Value<String> collectionId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FoldersCompanion(
+                id: id,
+                name: name,
+                path: path,
+                parent: parent,
+                dateCreated: dateCreated,
+                dateLastModified: dateLastModified,
+                lastScannedDate: lastScannedDate,
+                thumbnail: thumbnail,
+                downloadUrl: downloadUrl,
+                emailId: emailId,
+                collectionId: collectionId,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                required String path,
+                required String parent,
+                required DateTime dateCreated,
+                required DateTime dateLastModified,
+                Value<DateTime?> lastScannedDate = const Value.absent(),
+                Value<String?> thumbnail = const Value.absent(),
+                Value<String?> downloadUrl = const Value.absent(),
+                Value<String?> emailId = const Value.absent(),
+                required String collectionId,
+                Value<int> rowid = const Value.absent(),
+              }) => FoldersCompanion.insert(
+                id: id,
+                name: name,
+                path: path,
+                parent: parent,
+                dateCreated: dateCreated,
+                dateLastModified: dateLastModified,
+                lastScannedDate: lastScannedDate,
+                thumbnail: thumbnail,
+                downloadUrl: downloadUrl,
+                emailId: emailId,
+                collectionId: collectionId,
+                rowid: rowid,
+              ),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          BaseReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$FoldersTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $FoldersTable,
+      Folder,
+      $$FoldersTableFilterComposer,
+      $$FoldersTableOrderingComposer,
+      $$FoldersTableAnnotationComposer,
+      $$FoldersTableCreateCompanionBuilder,
+      $$FoldersTableUpdateCompanionBuilder,
+      (Folder, BaseReferences<_$AppDatabase, $FoldersTable, Folder>),
+      Folder,
+      PrefetchHooks Function()
+    >;
+typedef $$AlbumsTableCreateCompanionBuilder =
+    AlbumsCompanion Function({
+      required String id,
+      required String name,
+      Value<int> rowid,
+    });
+typedef $$AlbumsTableUpdateCompanionBuilder =
+    AlbumsCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<int> rowid,
+    });
+
+class $$AlbumsTableFilterComposer
+    extends Composer<_$AppDatabase, $AlbumsTable> {
+  $$AlbumsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$AlbumsTableOrderingComposer
+    extends Composer<_$AppDatabase, $AlbumsTable> {
+  $$AlbumsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$AlbumsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $AlbumsTable> {
+  $$AlbumsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+}
+
+class $$AlbumsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $AlbumsTable,
+          Album,
+          $$AlbumsTableFilterComposer,
+          $$AlbumsTableOrderingComposer,
+          $$AlbumsTableAnnotationComposer,
+          $$AlbumsTableCreateCompanionBuilder,
+          $$AlbumsTableUpdateCompanionBuilder,
+          (Album, BaseReferences<_$AppDatabase, $AlbumsTable, Album>),
+          Album,
+          PrefetchHooks Function()
+        > {
+  $$AlbumsTableTableManager(_$AppDatabase db, $AlbumsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () => $$AlbumsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$AlbumsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer:
+              () => $$AlbumsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AlbumsCompanion(id: id, name: name, rowid: rowid),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                Value<int> rowid = const Value.absent(),
+              }) => AlbumsCompanion.insert(id: id, name: name, rowid: rowid),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          BaseReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$AlbumsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $AlbumsTable,
+      Album,
+      $$AlbumsTableFilterComposer,
+      $$AlbumsTableOrderingComposer,
+      $$AlbumsTableAnnotationComposer,
+      $$AlbumsTableCreateCompanionBuilder,
+      $$AlbumsTableUpdateCompanionBuilder,
+      (Album, BaseReferences<_$AppDatabase, $AlbumsTable, Album>),
+      Album,
+      PrefetchHooks Function()
+    >;
+typedef $$FilesEmbeddingsTableCreateCompanionBuilder =
+    FilesEmbeddingsCompanion Function({
+      required String fileId,
+      Value<List<double>?> qwen3_8bEmbedding,
+      Value<int> rowid,
+    });
+typedef $$FilesEmbeddingsTableUpdateCompanionBuilder =
+    FilesEmbeddingsCompanion Function({
+      Value<String> fileId,
+      Value<List<double>?> qwen3_8bEmbedding,
+      Value<int> rowid,
+    });
+
+class $$FilesEmbeddingsTableFilterComposer
+    extends Composer<_$AppDatabase, $FilesEmbeddingsTable> {
+  $$FilesEmbeddingsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get fileId => $composableBuilder(
+    column: $table.fileId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnWithTypeConverterFilters<List<double>?, List<double>, Uint8List>
+  get qwen3_8bEmbedding => $composableBuilder(
+    column: $table.qwen3_8bEmbedding,
+    builder: (column) => ColumnWithTypeConverterFilters(column),
+  );
+}
+
+class $$FilesEmbeddingsTableOrderingComposer
+    extends Composer<_$AppDatabase, $FilesEmbeddingsTable> {
+  $$FilesEmbeddingsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get fileId => $composableBuilder(
+    column: $table.fileId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<Uint8List> get qwen3_8bEmbedding => $composableBuilder(
+    column: $table.qwen3_8bEmbedding,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$FilesEmbeddingsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $FilesEmbeddingsTable> {
+  $$FilesEmbeddingsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get fileId =>
+      $composableBuilder(column: $table.fileId, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<List<double>?, Uint8List>
+  get qwen3_8bEmbedding => $composableBuilder(
+    column: $table.qwen3_8bEmbedding,
+    builder: (column) => column,
+  );
+}
+
+class $$FilesEmbeddingsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $FilesEmbeddingsTable,
+          FilesEmbedding,
+          $$FilesEmbeddingsTableFilterComposer,
+          $$FilesEmbeddingsTableOrderingComposer,
+          $$FilesEmbeddingsTableAnnotationComposer,
+          $$FilesEmbeddingsTableCreateCompanionBuilder,
+          $$FilesEmbeddingsTableUpdateCompanionBuilder,
+          (
+            FilesEmbedding,
+            BaseReferences<
+              _$AppDatabase,
+              $FilesEmbeddingsTable,
+              FilesEmbedding
+            >,
+          ),
+          FilesEmbedding,
+          PrefetchHooks Function()
+        > {
+  $$FilesEmbeddingsTableTableManager(
+    _$AppDatabase db,
+    $FilesEmbeddingsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () =>
+                  $$FilesEmbeddingsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$FilesEmbeddingsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer:
+              () => $$FilesEmbeddingsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> fileId = const Value.absent(),
+                Value<List<double>?> qwen3_8bEmbedding = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FilesEmbeddingsCompanion(
+                fileId: fileId,
+                qwen3_8bEmbedding: qwen3_8bEmbedding,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String fileId,
+                Value<List<double>?> qwen3_8bEmbedding = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FilesEmbeddingsCompanion.insert(
+                fileId: fileId,
+                qwen3_8bEmbedding: qwen3_8bEmbedding,
+                rowid: rowid,
+              ),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          BaseReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$FilesEmbeddingsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $FilesEmbeddingsTable,
+      FilesEmbedding,
+      $$FilesEmbeddingsTableFilterComposer,
+      $$FilesEmbeddingsTableOrderingComposer,
+      $$FilesEmbeddingsTableAnnotationComposer,
+      $$FilesEmbeddingsTableCreateCompanionBuilder,
+      $$FilesEmbeddingsTableUpdateCompanionBuilder,
+      (
+        FilesEmbedding,
+        BaseReferences<_$AppDatabase, $FilesEmbeddingsTable, FilesEmbedding>,
+      ),
+      FilesEmbedding,
+      PrefetchHooks Function()
+    >;
+
+class $AppDatabaseManager {
+  final _$AppDatabase _db;
+  $AppDatabaseManager(this._db);
+  $$AppsTableTableManager get apps => $$AppsTableTableManager(_db, _db.apps);
+  $$AppUsersTableTableManager get appUsers =>
+      $$AppUsersTableTableManager(_db, _db.appUsers);
+  $$CollectionsTableTableManager get collections =>
+      $$CollectionsTableTableManager(_db, _db.collections);
+  $$EmailsTableTableManager get emails =>
+      $$EmailsTableTableManager(_db, _db.emails);
+  $$EmailFoldersTableTableManager get emailFolders =>
+      $$EmailFoldersTableTableManager(_db, _db.emailFolders);
+  $$FilesTableTableManager get files =>
+      $$FilesTableTableManager(_db, _db.files);
+  $$FoldersTableTableManager get folders =>
+      $$FoldersTableTableManager(_db, _db.folders);
+  $$AlbumsTableTableManager get albums =>
+      $$AlbumsTableTableManager(_db, _db.albums);
+  $$FilesEmbeddingsTableTableManager get filesEmbeddings =>
+      $$FilesEmbeddingsTableTableManager(_db, _db.filesEmbeddings);
 }

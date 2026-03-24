@@ -14,14 +14,14 @@ class GetCollectionsService
     isLoading.add(true);
     currentCommand = command;
     CollectionRepository repo = CollectionRepository();
-    if (command.type == null) {
-      sink.add(await repo.collections());
-    } else {
-      sink.add(await repo.collectionsByType(command.type!));
-    }
+    
+    // Always push all collections to the sink. 
+    // Observers can then filter by type (file, email) as needed.
+    final allCollections = await repo.collections();
+    sink.add(allCollections);
+    
     isLoading.add(false);
-
-    return Future(() => repo.collections());
+    return Future(() => allCollections);
   }
 
   void addCollection(Collection c) {

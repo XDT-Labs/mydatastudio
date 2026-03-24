@@ -4,17 +4,31 @@ run-name: ${{ github.actor }} is building and releasing (to github) the mac,wind
 
 on:
   push:
-    branches: [ "main", "develop", "feature/cicd" ]
-    
+    branches: [ "feature/cicd" ] #"main", "develop", 
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   download-assets:
     runs-on: ubuntu-latest
     steps:
       - name: Create models directory
         run: mkdir -p client/app/models
-      - name: Download Model
+      - name: Install huggingface-cli
+        run: pip install huggingface-hub
+      - name: Download GGUF Model from Hugging Face
+        env:
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          curl -L -o client/app/models/google-gemma-3-4b-it https://gcs-file-downloader-10805446439.us-central1.run.app/download/google-gemma-3-4b-it
+          python -c "
+          from huggingface_hub import hf_hub_download
+          hf_hub_download(
+              repo_id='bartowski/google_gemma-3-4b-it-GGUF',
+              filename='google_gemma-3-4b-it-Q4_K_M.gguf',
+              local_dir='client/app/models'
+          )
+          "
       - name: Upload models artifact
         uses: actions/upload-artifact@v4
         with:
@@ -22,26 +36,43 @@ jobs:
           path: client/app/models
 
   build-aichat-macos:
+    needs: [download-assets]
     runs-on: macos-latest
     defaults:
       run:
         working-directory: ./client
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+
+      - name: Download models artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: models
+          path: client/assets/python/aichat/models
       
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          
+
+      - name: Install PDM
+        uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Build Tools
+        run: brew install cmake ninja
+
       - name: Install Python dependencies
-        run: |
-          pip install -r assets/python/aichat/requirements.txt
-          pip install pyinstaller
+        working-directory: ./client/assets/python/aichat
+        run: pdm install --dev
+        env:
+          FORCE_CMAKE: "1"
+          CMAKE_ARGS: "-DGGML_METAL=on -DGGML_NATIVE=off"
           
       - name: Build Python Server
+        working-directory: ./client/assets/python/aichat
         run: |
-          cd assets/python/aichat
-          python -m PyInstaller main.spec --clean --noconfirm
+          pdm run pyinstaller -y main.spec
           mkdir -p ../../../app
           cd dist/aichat && zip -r ../../../../../app/aichat-macos.zip .
 
@@ -59,7 +90,7 @@ jobs:
         working-directory: ./client
     steps:
       # Checks-out our repository under $GITHUB_WORKSPACE, so our job can access it
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Download models artifact
         uses: actions/download-artifact@v4
@@ -290,7 +321,7 @@ jobs:
           path: artifacts
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/macos-release/*.dmg

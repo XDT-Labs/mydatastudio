@@ -16,7 +16,7 @@ class FolderUpsertService
 
     isLoading.add(true);
 
-    FolderDesktopRepository repo = FolderDesktopRepository();
+    FolderDesktopRepository repo = FolderDesktopRepository(command.database);
 
     Folder? folder;
     try {
@@ -24,6 +24,7 @@ class FolderUpsertService
       if (folder == null) {
         folder = await repo.create(command.folder);
       } else {
+        command.folder.id = folder.id; // Preserve existing database ID
         folder = await repo.update(command.folder);
       }
       sink.add(folder);

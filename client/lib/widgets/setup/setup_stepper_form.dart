@@ -16,8 +16,8 @@ import 'package:mydatatools/widgets/setup/setup_step3.dart';
 import 'package:flutter/material.dart'
     as material; //create alias because Padding is in multiple widgets
 import 'package:flutter/material.dart';
+import 'package:mydatatools/app_logger.dart';
 import 'package:go_router/go_router.dart';
-import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
@@ -29,7 +29,7 @@ class SetupStepperForm extends StatefulWidget {
 }
 
 class _SetupStepperFormState extends State<SetupStepperForm> {
-  final Logger logger = Logger();
+  final AppLogger logger = AppLogger(null);
   final windowManager = WindowManager.instance;
   final encHelper = EncryptionHelper();
   SendPort? dbWriterPort;

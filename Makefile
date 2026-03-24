@@ -1,86 +1,119 @@
 # ==============================================================================
-# Makefile for building and deploying a Cloud Run service via Cloud Build
+# Makefile for mydatatools-desktop
 #
 # Usage:
-#   1. make init       # Sets the required gcloud project ID
-#   2. make deploy     # Builds and deploys the GCS file downloader service
-#   3. make deploy-all # FUTURE: Deploys multiple services iteratively
+#   make all            - Build everything (models, python, client)
+#   make models         - Download GGUF models from Hugging Face
+#   make build-python   - Build and zip the Python aichat service
+#   make build-client   - Build the Flutter Desktop client (macOS release)
+#   make clean          - Remove all build artifacts
 # ==============================================================================
 
-# --- Global Configuration (Goal 1: Set Project ID) ---
+# --- Variables ---
 PROJECT_ID = mydata-tools
-
-# --- Service Configuration for GCS Downloader ---
-SERVICE_NAME = gcs-file-downloader
 REGION = us-central1
-IMAGE_REPO = cloud-run-source-deploy # <- This is the Artifact Registry Repository Name
+SERVICE_NAME = gcs-file-downloader
+IMAGE_REPO = cloud-run-source-deploy
 
+# Python/AI Chat Config
+PYTHON_DIR = client/assets/python/aichat
+APP_DIR = client/app
+APP_ZIP_NAME = aichat-macos.zip
+APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
+HF_MODEL = bartowski/google_gemma-3-4b-it-GGUF
+HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
+HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
+HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
 
-# !! IMPORTANT: CUSTOMIZE THESE VALUES !!
-GCS_BUCKET = mydata-tools_downloads # e.g., my-secure-storage-bucket
-GCS_PREFIX = local-llm-models/ # e.g., data/client-uploads/ (must include trailing slash)
+# Flutter Config
+FLUTTER_DIR = client
 
 # --- Targets ---
 
+.PHONY: all
+all: models build-python local-install-python build-client
 
-help:
-	@echo "Available targets:"
-	@echo "  init                  - Set gcloud project ID and configure environment"
-	@echo "  build-aichat          - Build the aichat.zip package"
-	@echo "  deploy-download-service - Build and deploy the GCS file downloader service"
-	@echo "  clean                 - Remove generated build artifacts"
+.PHONY: dev
+dev: models build-python local-install-python
 
-
-# Default target runs init and deploy
-all: init deploy-download-service
-
-# Project Initialization Target (Goal 1)
+# Project Initialization
 .PHONY: init
 init:
-	@echo "--- 🛠️  Setting gcloud project ID to $(PROJECT_ID) ---"
+	@echo "--- 🛠️ Setting gcloud project ID to $(PROJECT_ID) ---"
 	gcloud auth application-default set-quota-project $(PROJECT_ID)
 	gcloud config set project $(PROJECT_ID)
-	@echo "Project configuration complete. Service is ready to deploy."
+	@echo "Project configuration complete."
+
+# 1. Download Models
+.PHONY: models
+models:
+	@echo "--- 📥 Checking/Downloading models ---"
+	@mkdir -p $(PYTHON_DIR)/models
+	@if [ ! -f $(PYTHON_DIR)/models/$(HF_FILE) ]; then \
+		echo "Downloading $(HF_FILE)..."; \
+		hf download $(HF_MODEL) $(HF_FILE) --local-dir $(PYTHON_DIR)/models; \
+	else \
+		echo "$(HF_FILE) already exists, skipping download."; \
+	fi
+	@if [ ! -d $(HF_SIGLIP_DIR) ]; then \
+		echo "Downloading SigLip 2 embedding model (Transformers)..."; \
+		hf download $(HF_SIGLIP_MODEL) --local-dir $(HF_SIGLIP_DIR); \
+	else \
+		echo "SigLip 2 embedding model already exists, skipping download."; \
+	fi
+
+	
 
 
-# Build the aichat.zip package
-build-aichat-macos:
-	@echo "Building aichat-macos.zip..."
-	cd client/assets/python/aichat && python -m pip install -r requirements.txt && python -m PyInstaller main.spec --clean --noconfirm && cd dist && zip -r ../../../../app/aichat-macos.zip aichat
-	@echo "Build complete: app/aichat-macos.zip"
+# 2. Build Python Service
+.PHONY: build-python
+build-python:
+	@echo "--- 🐍 Building Python aichat service ---"
+	@cd $(PYTHON_DIR) && \
+		pdm install && \
+		FORCE_CMAKE=1 CMAKE_ARGS="-DGGML_METAL=on -DGGML_NATIVE=off" pdm run pyinstaller -y main.spec && \
+		mkdir -p ../../../app && \
+		rm -f ../../../app/$(APP_ZIP_NAME) && \
+		cd dist/aichat && \
+		zip -r ../../../../../app/$(APP_ZIP_NAME) .
+	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
 
+# 3. Build Flutter Desktop Client
+.PHONY: build-client
+build-client:
+	@echo "--- 🚀 Building Flutter Desktop client (macOS) ---"
+	@cd $(FLUTTER_DIR) && \
+		flutter pub get && \
+		flutter build macos --release --no-tree-shake-icons
+	@echo "--- ✅ Flutter build complete ---"
 
-# Deployment Single Service (Current Service)
-# This target uses the cloudbuild.yaml in the root directory.
+# Local Install (Testing)
+.PHONY: local-install-python
+local-install-python: build-python
+	@echo "--- 💾 Installing service for local testing ---"
+	@mkdir -p ~/Library/Application\ Support/mydata.tools/
+	rm -fr ~/Library/Application\ Support/mydata.tools/*.zip
+	rm -fr ~/Library/Application\ Support/mydata.tools/aichat
+	cp $(APP_ZIP_PATH) ~/Library/Application\ Support/mydata.tools/
+	@echo "--- ✅ Copy complete ---"
+
+# Cloud Run Deployment
 .PHONY: deploy-download-service
-download-service-deploy: init grant-permissions
-	@echo "--- 🚀 Deploying $(SERVICE_NAME) to Cloud Run in $(REGION) ---"
-	@echo "Source Bucket: $(GCS_BUCKET) | Prefix: $(GCS_PREFIX)"
-	# EXECUTES GCLOUD BUILD SUBMIT COMMAND
+deploy-download-service: init
+	@echo "--- 🚀 Deploying $(SERVICE_NAME) to Cloud Run ---"
 	cd services/download-models && gcloud builds submit . \
 		--config cloudbuild.yaml \
 		--region=$(REGION) \
-		--substitutions _SERVICE_NAME=$(SERVICE_NAME),_REGION=$(REGION),_GCS_BUCKET=$(GCS_BUCKET),_GCS_FOLDER_PREFIX=$(GCS_PREFIX),_REPO_NAME=$(IMAGE_REPO)
-	@echo "--- ✅ Deployment initiated. Check Cloud Build and Cloud Run logs. ---"
+		--substitutions _SERVICE_NAME=$(SERVICE_NAME),_REGION=$(REGION),_GCS_BUCKET=mydata-tools_downloads,_GCS_FOLDER_PREFIX=local-llm-models/,_REPO_NAME=$(IMAGE_REPO)
 
 
-# Grant Permissions Target
-.PHONY: download-service-permissions
-download-service-permissions:
-	@echo "--- 🔐 Granting 'Service Account Token Creator' role to the default Compute service account ---"
-	PROJECT_NUMBER=$$(gcloud projects describe $(PROJECT_ID) --format='value(projectNumber)') && \
-	gcloud projects add-iam-policy-binding $(PROJECT_ID) \
-		--member="serviceAccount:$${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-		--role="roles/iam.serviceAccountTokenCreator" \
-		--condition=None
-	@echo "--- ✅ Permissions granted to default Compute service account. ---"
-
-
-# 4. Cleanup Target
+# Cleanup
 .PHONY: clean
 clean:
-	@echo "--- Cleaning up local temporary files ---"
+	@echo "--- 🧹 Cleaning up build artifacts ---"
+	rm -rf $(PYTHON_DIR)/build $(PYTHON_DIR)/dist $(PYTHON_DIR)/models
+	rm -f $(APP_ZIP_PATH)
+	cd $(FLUTTER_DIR) && flutter clean
 	@find . -type f -name "*.pyc" -delete
-	@find . -type d -name "__pycache__" -exec rm -r {} +
-	@echo "Clean complete."
-
+	@find . -type d -name "__pycache__" -exec rm -rf {} +
+	@echo "--- ✅ Clean complete ---"

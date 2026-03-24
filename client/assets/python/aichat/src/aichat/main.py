@@ -19,8 +19,9 @@ import os
 from fastapi import FastAPI
 from typing import Optional
 
-from .config import DEFAULT_LOCAL_MODEL, API_TITLE, API_DESCRIPTION
+from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, API_TITLE, API_DESCRIPTION
 from .models import ChatRequest, StartSessionRequest, EmbeddingRequest
+from .utils import get_local_path, find_local_model
 from . import routes
 
 
@@ -35,9 +36,12 @@ app = FastAPI(
 
 # Register API route handlers
 app.get("/", summary="Health Check")(routes.health_check)
-app.post("/start-session", summary="Dynamically load a Hugging Face model for chat")(routes.start_session)
+app.post("/start-session", summary="Load a local GGUF model for chat")(routes.start_session)
+app.post("/download-model", summary="Download a GGUF model from Hugging Face Hub")(routes.download_model)
 app.post("/chat", summary="Generate a chat response using the currently loaded model")(routes.generate_chat_response)
 app.post("/embedding", summary="Generate embeddings for text or image using Gemma-3-4B")(routes.generate_embedding)
+app.post("/import/pst", summary="Import and parse an Outlook PST file")(routes.import_pst)
+
 
 
 def main() -> None:
@@ -57,6 +61,31 @@ def main() -> None:
 
     # make a local directory for models
     os.makedirs("models", exist_ok=True)
+
+    # Initialize default model at startup
+    print(f"[STARTUP] Initializing default model: {DEFAULT_LOCAL_MODEL}")
+    local_path = get_local_path(DEFAULT_LOCAL_MODEL)
+    
+    # Locate the model file locally — never auto-download at startup
+    model_path = find_local_model(DEFAULT_GGUF_FILE, local_path)
+    
+    if model_path:
+        try:
+            print(f"[STARTUP] Loading model {DEFAULT_LOCAL_MODEL}...")
+            # Import here to avoid circular imports if any
+            from .model_manager import load_local_model
+            from .state import set_llm_instance, set_current_model_id
+            
+            llm = load_local_model(model_name=DEFAULT_LOCAL_MODEL, model_path=model_path)
+            set_llm_instance(llm)
+            set_current_model_id(DEFAULT_LOCAL_MODEL)
+            print(f"[STARTUP] Model loaded successfully.")
+        except Exception as e:
+            print(f"[STARTUP] Failed to load model: {e}")
+            # We continue to start the server so the client can at least connect,
+            # but the model won't be loaded.
+    else:
+        print(f"[STARTUP] Model file '{DEFAULT_GGUF_FILE}' not found locally. Skipping auto-load.")
     
     # Run the server
     import uvicorn

@@ -1,0 +1,14 @@
+{
+  "inherits": [
+    {
+      "path": "./skills",
+      "exclude": []
+    }
+  ],
+  "entries": [
+    {
+      "path": "./skills",
+      "exclude": []
+    }
+  ]
+}

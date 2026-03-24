@@ -1,24 +1,23 @@
 """
 Model loading and management functionality.
 
-This module handles all model-related operations including loading models from disk,
-managing HuggingFace pipelines, generating embeddings, and processing images.
-It provides the core functionality for both chat and embedding models.
+This module handles loading and managing GGUF models via LlamaCpp and
+Google Gemini API models. It provides the core functionality for both
+chat and embedding models.
 """
 import os
 import torch
-from typing import Any, List, Tuple
 from PIL import Image
 import base64
-from io import BytesIO
+import io
+from typing import Any, List, Optional
+from transformers import AutoModel, AutoProcessor
+from qwen_vl_utils import process_vision_info
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.llms import LlamaCpp
 
-from transformers import AutoModelForCausalLM, AutoProcessor
-
 from .config import MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE
-from .utils import get_local_path, download_gguf_model_if_needed
 
 
 def load_gemini_model() -> ChatGoogleGenerativeAI:
@@ -57,34 +56,27 @@ def load_gemini_model() -> ChatGoogleGenerativeAI:
     return llm
 
 
-def load_local_model(model_name: str, filename: str, local_dir: str) -> LlamaCpp:
+def load_local_model(model_name: str, model_path: str) -> LlamaCpp:
     """
     Load a language model from disk into a LangChain LlamaCpp object.
     
-    This function ensures the required GGUF file is available locally,
-    then initializes the llama-cpp-python binding wrapped in LangChain.
-    
     Args:
-        model_name (str): HF repo ID or custom name
-        filename (str): The specific GGUF file name
-        local_dir (str): Path to the directory for storing/checking model files
+        model_name (str): HF repo ID or display name (used for logging only)
+        model_path (str): Full absolute path to the .gguf file
         
     Returns:
         LlamaCpp: Wrapped pipeline ready for text generation
         
     Raises:
-        Exception: If model loading fails due to missing files or corrupted architecture.
+        Exception: If model loading fails.
 
     Example:
-        >>> llm = load_local_model("bartowski/gemma", "gemma-3-4b.gguf", "./models")
+        >>> llm = load_local_model("bartowski/gemma", "/path/to/gemma-3-4b.gguf")
         >>> response = llm.invoke("Hi!")
     """
-    print(f"[LOADER] Attempting to load GGUF model: {model_name}/{filename}")
+    print(f"[LOADER] Attempting to load GGUF model: {model_name} from {model_path}")
     
-    # 1. Download or locate the GGUF file
-    model_path = download_gguf_model_if_needed(model_name, filename, local_dir)
-    
-    # 2. Initialize LlamaCpp
+    # Initialize LlamaCpp directly from the resolved path
     print(f"[LOADER] Initializing LlamaCpp from {model_path}...")
     llm = LlamaCpp(
         model_path=model_path,
@@ -98,29 +90,22 @@ def load_local_model(model_name: str, filename: str, local_dir: str) -> LlamaCpp
     return llm
 
 
-def load_embedding_model(model_id: str, filename: str, local_dir: str) -> LlamaCpp:
+def load_embedding_model(model_id: str, filename: str, local_dir: str) -> Any:
     """
-    Load a model specifically configured for embedding generation using LlamaCpp.
-    
-    Downloads (if needed) and loads a GGUF model that can generate text embeddings.
-    
-    Args:
-        model_id (str): HuggingFace model identifier.
-        filename (str): The specific GGUF file name
-        local_dir (str): Path to the directory for storing/checking model files
-        
-    Returns:
-        tuple[LlamaCpp, None]: LlamaCpp object initialized with embedding capabilities and a None placeholder for processor.
-        
-    Raises:
-        Exception: If model download or loading fails.
-
-    Example:
-        >>> embed_model, _ = load_embedding_model("bartowski/gemma", "gemma-embedding.gguf", "./models")
+    Load an embedding model, choosing between LlamaCpp (GGUF) and Transformers.
     """
-    print(f"[EMBEDDING] Attempting to load embedding model: {model_id}/{filename}")
+    print(f"[EMBEDDING] Attempting to load embedding model: {model_id}")
     
-    model_path = download_gguf_model_if_needed(model_id, filename, local_dir)
+    # Check if it's the Qwen-VL Transformers model
+    if "Qwen3-VL-Embedding" in model_id:
+        return load_transformers_embedding_model(model_id, local_dir)
+    
+    # Default to LlamaCpp for GGUF models
+    from .utils import find_local_model, download_gguf_model
+    model_path = find_local_model(filename, local_dir)
+    if not model_path:
+        print(f"[EMBEDDING] Model not found locally, downloading: {model_id}/{filename}")
+        model_path = download_gguf_model(model_id, filename, local_dir)
     
     print(f"[EMBEDDING] Initializing LlamaCpp for embeddings from {model_path}...")
     llm = LlamaCpp(
@@ -131,123 +116,129 @@ def load_embedding_model(model_id: str, filename: str, local_dir: str) -> LlamaC
         verbose=False,
     )
     
-    print(f"[EMBEDDING] Embedding model {model_id} loaded successfully.")
-    return llm, None  # Returning None for processor as LlamaCpp doesn't use one in the same way
+    print(f"[EMBEDDING] GGUF Embedding model loaded successfully.")
+    return llm, None
+
+
+def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
+    """
+    Load a Qwen-VL Embedding model using Transformers.
+    """
+    print(f"[EMBEDDING] Loading Transformers model: {model_id} from {local_dir}")
+    
+    device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[EMBEDDING] Using device: {device}")
+    
+    # The Makefile downloads the full repo into models/<org>/<model_name>/
+    # so local_dir is already the parent, just use it directly.
+    model_path = local_dir
+    if not os.path.isdir(model_path):
+        # Fallback to model_id for HF Hub auto-download
+        model_path = model_id
+
+    print(f"[EMBEDDING] Loading from {model_path}...")
+    model = AutoModel.from_pretrained(
+        model_path, 
+        trust_remote_code=True,
+        dtype=torch.float16 if device != "cpu" else torch.float32
+    ).to(device)
+    
+    processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+    
+    print(f"[EMBEDDING] Transformers model {model_id} loaded successfully.")
+    return model, processor
+
+
+def generate_embedding(
+    model: Any, 
+    processor: Any, 
+    text: Optional[str] = None, 
+    image_base64: Optional[str] = None
+) -> List[float]:
+    """
+    Universal embedding generator that handles both LlamaCpp and Transformers.
+    """
+    if hasattr(model, 'client') and hasattr(model.client, 'embed'):
+        # LlamaCpp path (Text only)
+        print("[EMBEDDING] Route: LlamaCpp")
+        if image_base64:
+            raise ValueError("LlamaCpp does not support image embeddings in this implementation.")
+        return generate_text_embedding(text, model, processor)
+    
+    # Transformers path
+    print(f"[EMBEDDING] Route: Transformers (Multimodal)")
+    return generate_transformers_multimodal_embedding(model, processor, text, image_base64)
+
+
+def generate_transformers_multimodal_embedding(
+    model: Any, 
+    processor: Any, 
+    text: Optional[str] = None, 
+    image_base64: Optional[str] = None
+) -> List[float]:
+    """
+    Generate embeddings using Qwen-VL Transformers model.
+    """
+    device = next(model.parameters()).device
+    
+    content = []
+    if image_base64:
+        # Normalize base64 to data URI or just use bytes
+        if not image_base64.startswith("data:image"):
+            image_base64 = f"data:image/jpeg;base64,{image_base64}"
+        content.append({"type": "image", "image": image_base64})
+    
+    if text:
+        content.append({"type": "text", "text": text})
+    
+    messages = [{"role": "user", "content": content}]
+    
+    # Prepare inputs using Qwen-VL utilities and processor
+    image_inputs, video_inputs = process_vision_info(messages)
+    
+    # Use chat template to ensure multimodal tokens (<|image_pad|>, etc.) are correctly inserted
+    prompt = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    
+    inputs = processor(
+        text=[prompt],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt"
+    ).to(device)
+    
+    with torch.no_grad():
+        print(f"[EMBEDDING] Performing inference on device: {device}")
+        outputs = model(**inputs)
+        # Last Token Pooling ([EOS]) as per research
+        # Qwen3-VL-Embedding returns the embedding in the last hidden state of the [EOS] token
+        embeddings = outputs.last_hidden_state[:, -1, :]
+        print(f"[EMBEDDING] Raw embedding shape: {embeddings.shape}")
+        
+        # Normalize the embedding
+        embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+        print(f"[EMBEDDING] Normalized embedding head: {embeddings[0, :5].tolist()}...")
+        
+    return embeddings[0].tolist()
 
 
 def generate_text_embedding(text: str, model: Any, processor: Any) -> List[float]:
     """
     Generate embeddings for text input using a loaded model.
-    
-    Processes text through the LlamaCpp model to extract high-dimensional vector
-    representations.
-    
-    Args:
-        text (str): Input text to generate embeddings for
-        model (Any): Loaded language model with embedding capabilities (LlamaCpp)
-        processor (Any): Not used for LlamaCpp
-        
-    Returns:
-        List[float]: A list of float values representing the text embedding.
-        
-    Raises:
-        ValueError: If the provided model instance lacks embedding capabilities.
-
-    Example:
-        >>> embed_model, processor = load_embedding_model("repo", "filename", "./models")
-        >>> vector = generate_text_embedding("Some text", embed_model, processor)
-        >>> print(len(vector))
     """
-    from langchain_community.embeddings import LlamaCppEmbeddings
     # If using LlamaCpp directly (from LangChain's LLM), we can use the underlying client
     if hasattr(model, 'client') and hasattr(model.client, 'embed'):
+        print(f"[EMBEDDING] Generating text embedding (LlamaCpp) for: {text[:50]}...")
         result = model.client.embed(text)
-        # Handle different return formats from llama-cpp-python versions
         if isinstance(result, list) and len(result) > 0:
             if isinstance(result[0], list):
+                print(f"[EMBEDDING] result[0] is list, len={len(result[0])}")
                 return result[0]
-            elif hasattr(result[0], 'embedding'): # Check for Embedding output object
+            elif hasattr(result[0], 'embedding'):
+                print(f"[EMBEDDING] result[0] has .embedding, len={len(result[0].embedding)}")
                 return result[0].embedding
+        print(f"[EMBEDDING] result type: {type(result)} len={len(result)}")
         return result
     else:
-        # Fallback if the underlying method isn't available easily
         raise ValueError("Provided model does not support LlamaCpp embedding generation correctly")
 
-
-def generate_image_embedding(image: Image.Image, model: Any, processor: Any) -> List[float]:
-    """
-    Generate embeddings for image input using a loaded multimodal model.
-    
-    Processes images through a multimodal model to extract high-dimensional
-    vector representations. Similar to text embeddings but handles visual data.
-    
-    Args:
-        image (PIL.Image.Image): Input image to generate embeddings for
-        model (Any): Loaded multimodal model with image processing capabilities
-        processor (Any): Model processor for handling image inputs
-        
-    Returns:
-        List[float]: A list of float values representing the image embedding
-        
-    Example:
-        >>> from PIL import Image
-        >>> image = Image.open("photo.jpg")
-        >>> embedding = generate_image_embedding(image, model, processor)
-        >>> print(f"Image embedding dimension: {len(embedding)}")
-    """
-    # Prepare image input
-    inputs = processor(images=image, return_tensors="pt")
-    
-    # Move inputs to same device as model
-    device = next(model.parameters()).device
-    inputs = {k: v.to(device) for k, v in inputs.items()}
-    
-    with torch.no_grad():
-        # Get hidden states from the model
-        outputs = model(**inputs, output_hidden_states=True)
-        # Use the last hidden state and average pool across sequence length
-        last_hidden_state = outputs.hidden_states[-1]  # [batch_size, seq_len, hidden_dim]
-        # Average pooling across the sequence dimension
-        embeddings = torch.mean(last_hidden_state, dim=1)  # [batch_size, hidden_dim]
-        
-    return embeddings.squeeze().cpu().numpy().tolist()
-
-
-def decode_base64_image(base64_string: str) -> Image.Image:
-    """
-    Decode a base64-encoded string into a PIL Image object.
-    
-    Handles base64 image data, including data URLs with prefixes like
-    'data:image/png;base64,'. Automatically converts images to RGB format
-    for consistent processing.
-    
-    Args:
-        base64_string (str): Base64-encoded image data, optionally with data URL prefix
-        
-    Returns:
-        PIL.Image.Image: Decoded image in RGB format
-        
-    Raises:
-        ValueError: If the base64 string is invalid or cannot be decoded as an image
-        
-    Example:
-        >>> base64_data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
-        >>> image = decode_base64_image(base64_data)
-        >>> print(f"Image size: {image.size}")
-    """
-    try:
-        # Remove data URL prefix if present (e.g., "data:image/png;base64,")
-        if base64_string.startswith('data:image'):
-            base64_string = base64_string.split(',')[1]
-        
-        # Decode base64 data to bytes
-        image_data = base64.b64decode(base64_string)
-        
-        # Create PIL Image from bytes
-        image = Image.open(BytesIO(image_data))
-        
-        # Ensure consistent RGB format for processing
-        return image.convert('RGB')
-        
-    except Exception as e:
-        raise ValueError(f"Invalid base64 image data: {e}")

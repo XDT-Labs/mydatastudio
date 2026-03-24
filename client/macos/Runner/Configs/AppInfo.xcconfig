@@ -8,7 +8,7 @@
 PRODUCT_NAME = mydatatools
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.mydatatools
+PRODUCT_BUNDLE_IDENTIFIER = mydata.tools
 
 
 // The copyright displayed in application information

@@ -26,31 +26,49 @@ class FamilyDamApp extends StatelessWidget {
           foregroundColor: Colors.black87,
           elevation: 0,
         ),
-        textTheme: GoogleFonts.robotoTextTheme(Theme.of(context).textTheme).copyWith(
-          titleLarge: GoogleFonts.roboto(
+        textTheme: GoogleFonts.interTextTheme(
+          Theme.of(context).textTheme,
+        ).copyWith(
+          titleLarge: GoogleFonts.inter(
             fontSize: 20,
-            fontWeight: FontWeight.w500,
+            fontWeight: FontWeight.w400,
             color: Colors.black87,
           ),
-          bodyMedium: GoogleFonts.roboto(
-            fontSize: 14,
-            fontWeight: FontWeight.normal,
+          titleMedium: GoogleFonts.inter(
+            fontSize: 16,
+            fontWeight: FontWeight.w400,
             color: Colors.black87,
           ),
-          labelSmall: GoogleFonts.roboto(
+          titleSmall: GoogleFonts.inter(
+            fontSize: 15,
+            fontWeight: FontWeight.w400,
+            color: Colors.black87,
+          ),
+          bodyLarge: GoogleFonts.inter(
+            fontSize: 15,
+            fontWeight: FontWeight.w200,
+            color: Colors.black87,
+          ),
+          bodyMedium: GoogleFonts.inter(
+            fontSize: 15,
+            fontWeight: FontWeight.w200,
+            color: Colors.black87,
+          ),
+          labelSmall: GoogleFonts.inter(
             fontSize: 12,
-            fontWeight: FontWeight.w500,
+            fontWeight: FontWeight.w400,
             color: Colors.black54,
           ),
         ),
-        cardTheme: const CardTheme(
-          surfaceTintColor: Colors.white,
-          color: Colors.white,
-          elevation: 1, // subtle shadow like GCP
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(8.0)),
-          ),
-        ).data,
+        cardTheme:
+            const CardTheme(
+              surfaceTintColor: Colors.white,
+              color: Colors.white,
+              elevation: 1, // subtle shadow like GCP
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(8.0)),
+              ),
+            ).data,
       ),
     );
   }

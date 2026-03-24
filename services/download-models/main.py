@@ -12,8 +12,7 @@ logger = logging.getLogger(__name__)
 # Hardcoded map of URL-friendly keys to full service names
 # We use keys here to allow service names containing '/' to be mapped to clean URL paths.
 AVAILABLE_SERVICES_MAP = {
-    'google-gemma-3-4b-it': 'google-gemma-3-4b-it-local.tar.gz',
-    'google-gemma-3-270m': 'google-gemma-3-270m-local.tar.gz'
+    'google-gemma-3-4b-it': 'google_gemma-3-4b-it-Q4_K_M.gguf'
 }
 # The list for the /services endpoint is derived from the map values (the full service names)
 AVAILABLE_SERVICES = list(AVAILABLE_SERVICES_MAP.keys())

@@ -60,3 +60,9 @@ app.*.map.json
 /android/app/release
 client/app/aichat.zip
 client/app/aichat-*.zip
+
+# Secrets and Local Config
+secrets.json
+client/config/secrets.json
+**/config/secrets/*.json
+.env

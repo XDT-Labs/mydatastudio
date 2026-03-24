@@ -1,9 +1,10 @@
 name: Build and Release
 
 on:
-  push:
-    branches:
-      - develop
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   build_python_and_flutter:
@@ -49,11 +50,12 @@ jobs:
         run: |
           pdm install
           mkdir -p models
-          huggingface-cli download bartowski/gemma-3-4b-it-GGUF gemma-3-4b-it-Q4_K_M.gguf --local-dir models --local-dir-use-symlinks False
-          pdm run pyinstaller main.spec
+          huggingface-cli download bartowski/google_gemma-3-4b-it-GGUF google_gemma-3-4b-it-Q4_K_M.gguf --local-dir models 
+          pdm run pyinstaller -y main.spec
         env:
           FORCE_CMAKE: "1"
-          CMAKE_ARGS: ${{ matrix.os == 'macos-latest' && '-DGGML_METAL=on -DGGML_BLAS=on -DGGML_BLAS_VENDOR=OpenBLAS' || '' }}
+          CMAKE_ARGS: ${{ matrix.os == 'macos-latest' && '-DGGML_METAL=on -DGGML_NATIVE=off' || '' }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
 
       - name: Zip Python Executable (macOS/Linux)
         if: matrix.os != 'windows-latest'

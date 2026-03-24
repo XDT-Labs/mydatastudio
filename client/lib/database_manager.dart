@@ -12,16 +12,23 @@ import 'package:path/path.dart' as p;
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:mydatatools/main.dart';
+import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
+import 'package:sqlite_vector/sqlite_vector.dart';
 import 'package:mydatatools/models/tables/album.dart';
 import 'package:mydatatools/models/tables/app.dart';
 import 'package:mydatatools/models/tables/app_user.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/converters/string_array_convertor.dart';
+import 'package:mydatatools/models/tables/converters/float_list_converter.dart';
 import 'package:mydatatools/models/tables/email.dart';
+import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatatools/models/tables/file_embedding.dart';
 import 'package:mydatatools/models/tables/folder.dart';
+import 'package:flutter/services.dart';
+import 'package:mydatatools/modules/files/services/embedding_isolate.dart';
 import 'package:uuid/uuid.dart';
 
 part 'database_manager.g.dart';
@@ -37,16 +44,23 @@ class DatabaseManager {
 
   /// Flag to determine if an in-memory database should be used (for testing)
   bool useMemoryDb = false;
+  String? storagePath;
   AppDatabase? appDatabase;
   DbIsolateWriterClient? _writerIsolateClient;
   SendPort? _writerPort;
+  EmbeddingIsolate? _embeddingIsolate;
   DatabaseRepository? _repository;
+  final AppLogger logger = AppLogger(null);
 
   DatabaseManager._();
 
   /// Returns the [DatabaseRepository] instance
   DatabaseRepository? get repository {
     return _repository;
+  }
+
+  DbIsolateWriterClient? get writerIsolateClient {
+    return _writerIsolateClient;
   }
 
   /// Returns the [AppDatabase] instance
@@ -76,7 +90,11 @@ class DatabaseManager {
   Future<AppDatabase> initializeDatabase() async {
     io.File file = io.File(await _getConfigPath());
     var config = jsonDecode(file.readAsStringSync());
-    String path = config['path'];
+    storagePath = config['path'];
+    String path = storagePath!;
+
+    // Ensure the global appDataDirectory subject has the value
+    MainApp.appDataDirectory.add(path);
 
     // start database
     appDatabase = await _openDatabase(path);
@@ -89,6 +107,9 @@ class DatabaseManager {
 
     // start scanners
     await _startScanners();
+
+    // start embedding isolate
+    await _startEmbeddingIsolate(path);
 
     isInitializedNotifier.value = true;
     return appDatabase!;
@@ -117,12 +138,12 @@ class DatabaseManager {
         AppConstants.dbName,
         useMemoryDb,
       );
-      print("DB Started | schema version=${database.schemaVersion}");
+      logger.i("DB Started | schema version=${database.schemaVersion}");
 
       return database;
     } catch (err) {
       //unknown error
-      print(err);
+      logger.e(err);
       throw Exception(err);
     }
   }
@@ -138,6 +159,16 @@ class DatabaseManager {
       useMemoryDb: false,
     );
     _writerPort = _writerIsolateClient!.getSendPort();
+  }
+
+  Future<void> _startEmbeddingIsolate(String storagePath) async {
+    _embeddingIsolate = EmbeddingIsolate();
+    await _embeddingIsolate!.start(
+      storagePath,
+      AppConstants.dbName,
+      _writerPort!,
+      RootIsolateToken.instance!,
+    );
   }
 
   /// Returns the [SendPort] for the writer isolate
@@ -162,12 +193,24 @@ class DatabaseManager {
   }
 
   Future<void> _startScanners() async {
-    //ScannerManager.instance.startScanners();
+    ScannerManager sm = ScannerManager(appDatabase!);
+    MainApp.scannerManager = sm;
+    sm.startScanners();
   }
 }
 
 @DriftDatabase(
-  tables: [Apps, AppUsers, Collections, Emails, Files, Folders, Albums],
+  tables: [
+    Apps,
+    AppUsers,
+    Collections,
+    Emails,
+    EmailFolders,
+    Files,
+    Folders,
+    Albums,
+    FilesEmbeddings,
+  ],
 )
 class AppDatabase extends _$AppDatabase {
   final AppLogger logger = AppLogger(null);
@@ -183,27 +226,226 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration {
     return MigrationStrategy(
       onCreate: (Migrator m) async {
-        print("Creating all Tables");
+        logger.i("Creating all Tables");
         await m.createAll();
-        print("Load initial data");
+        logger.i("Load initial data");
         await _loadInitialData(m);
+        // Initialize the vector index for qwen3_8b embeddings (2048-dim Float32)
+        logger.i("Initializing vector index for files_embeddings");
+        await _initVectorIndex();
       },
       onUpgrade: (Migrator m, int from, int to) async {
         if (from < 2) {
-          print("Upgrade to v2");
+          logger.i(
+            "Upgrade to v2: Adding last_scanned_date to Files and Folders",
+          );
+          await m.addColumn(files, files.lastScannedDate);
+          await m.addColumn(folders, folders.lastScannedDate);
         }
         if (from < 3) {
-          print("Upgrade tables to v3");
+          logger.i(
+            "Upgrade to v3: Adding download_url to Files and Folders, thumbnail to Folders",
+          );
+          await m.addColumn(files, files.downloadUrl);
+          await m.addColumn(folders, folders.thumbnail);
+          await m.addColumn(folders, folders.downloadUrl);
         }
-        //continue
+        if (from < 4) {
+          logger.i(
+            "Upgrade to v4: Adding files_embeddings table and vector index",
+          );
+          await m.createTable(filesEmbeddings);
+          await _initVectorIndex();
+        }
+        if (from < 5) {
+          logger.i(
+            "Upgrade to v5: Re-initializing vector index for sqlite_vector",
+          );
+          await _initVectorIndex();
+        }
+        if (from < 6) {
+          logger.i(
+            "Upgrade to v6: Adding EmailFolders table and folder/metadata columns to Emails",
+          );
+          await m.createTable(emailFolders);
+          await m.addColumn(emails, emails.folderId);
+          await m.addColumn(emails, emails.messageId);
+          await m.addColumn(emails, emails.threadId);
+          await m.addColumn(emails, emails.isRead);
+          await m.addColumn(emails, emails.hasAttachments);
+        }
+        if (from < 7) {
+          logger.i("Upgrade to v7: Adding emailId column to Files table");
+          await m.addColumn(files, files.emailId);
+        }
+        if (from < 10) {
+          logger.i("Upgrade to v10: Adding uid column to Emails table");
+          try {
+            await m.addColumn(emails, emails.uid);
+          } catch (e) {
+            if (e.toString().contains('duplicate column name')) {
+              logger.w("uid column already exists in Emails table, skipping.");
+            } else {
+              rethrow;
+            }
+          }
+        }
+        if (from < 11) {
+          logger.i(
+            "Upgrade to v11: Adding composite indexes for faster email lookups",
+          );
+          try {
+            await m.createIndex(
+              Index(
+                'email_folderid_idx',
+                'CREATE INDEX email_folderid_idx ON emails (folder_id)',
+              ),
+            );
+            await m.createIndex(
+              Index(
+                'email_comp_sync_idx',
+                'CREATE INDEX email_comp_sync_idx ON emails (collection_id, folder_id, date)',
+              ),
+            );
+          } catch (e) {
+            logger.w("Indexes already exist in Emails table, skipping.");
+          }
+        }
+        if (from < 12) {
+          logger.i(
+            'Upgrade to v12: Adding localCopyPath to Collections '
+            'and migrating files/folders to relative paths',
+          );
+          await m.addColumn(collections, collections.localCopyPath);
+
+          // Data migration using raw SQL — the Drift table accessors are not
+          // available inside onUpgrade (m.database is GeneratedDatabase, not
+          // AppDatabase). We use customStatement / m.database.customSelect
+          // to do the data work safely.
+          //
+          // Step 1: For each collection, set local_copy_path = path.
+          await m.database.customStatement(
+            'UPDATE collections SET local_copy_path = path WHERE path IS NOT NULL AND path != \'\'',
+          );
+
+          // Step 2: Strip absolute prefix from files.path, files.parent.
+          // We do this in Dart by loading rows and updating them.
+          final colRows = await m.database
+              .customSelect('SELECT id, path FROM collections WHERE path IS NOT NULL AND path != \'\'')
+              .get();
+
+          for (final colRow in colRows) {
+            final colId = colRow.read<String>('id');
+            final root = colRow.read<String>('path');
+            final prefix = root.endsWith('/') ? root : '$root/';
+
+            // Update files — only migrate rows whose path still contains
+            // the absolute prefix (not yet migrated). Rows already using
+            // a relative path are left untouched.
+            final fileRows = await m.database
+                .customSelect(
+                  'SELECT id, path, parent FROM files WHERE collection_id = ? AND path LIKE ?',
+                  variables: [
+                    Variable.withString(colId),
+                    Variable.withString('$prefix%'),
+                  ],
+                )
+                .get();
+            for (final row in fileRows) {
+              final oldId = row.read<String>('id');
+              final oldPath = row.read<String>('path');
+              final oldParent = row.read<String>('parent');
+              final relPath = oldPath.substring(prefix.length);
+              final relParent = oldParent.startsWith(prefix)
+                  ? oldParent.substring(prefix.length)
+                  : (oldParent == root ? '' : oldParent);
+              final newId = '$colId:$relPath';
+              if (newId == oldId) continue; // already migrated, skip
+              // Delete any conflicting row with the new id first so we don't
+              // hit the UNIQUE constraint.
+              await m.database.customStatement(
+                'DELETE FROM files WHERE id = ? AND id != ?',
+                [newId, oldId],
+              );
+              await m.database.customStatement(
+                'UPDATE files SET id = ?, path = ?, parent = ? WHERE id = ?',
+                [newId, relPath, relParent, oldId],
+              );
+            }
+
+            // Update folders — same idempotent logic.
+            final folderRows = await m.database
+                .customSelect(
+                  'SELECT id, path, parent FROM folders WHERE collection_id = ? AND path LIKE ?',
+                  variables: [
+                    Variable.withString(colId),
+                    Variable.withString('$prefix%'),
+                  ],
+                )
+                .get();
+            for (final row in folderRows) {
+              final oldId = row.read<String>('id');
+              final oldPath = row.read<String>('path');
+              final oldParent = row.read<String>('parent');
+              final relPath = oldPath.substring(prefix.length);
+              final relParent = oldParent.startsWith(prefix)
+                  ? oldParent.substring(prefix.length)
+                  : (oldParent == root ? '' : oldParent);
+              final newId = '$colId:$relPath';
+              if (newId == oldId) continue;
+              await m.database.customStatement(
+                'DELETE FROM folders WHERE id = ? AND id != ?',
+                [newId, oldId],
+              );
+              await m.database.customStatement(
+                'UPDATE folders SET id = ?, path = ?, parent = ? WHERE id = ?',
+                [newId, relPath, relParent, oldId],
+              );
+            }
+          }
+          logger.i('v12 data migration complete');
+        }
+      },
+      beforeOpen: (OpeningDetails details) async {
+        // WAL (Write-Ahead Logging) allows the DbIsolateWriter to bulk-write
+        // while the main connection reads concurrently. Without WAL, a write
+        // transaction blocks ALL readers at the SQLite level, even if they're
+        // on separate connections/isolates.
+        //
+        // These PRAGMAs are connection-scoped and safe to re-apply on every open.
+        await customStatement('PRAGMA journal_mode=WAL;');
+
+        // Allow up to 5 seconds of retry before returning SQLITE_BUSY.
+        // Prevents sporadic errors when the writer and reader briefly contend
+        // (e.g. during PST bulk import).
+        await customStatement('PRAGMA busy_timeout=5000;');
+
+        logger.i('Database opened: journal_mode=WAL, busy_timeout=5000ms');
       },
     );
+  }
+
+  /// Initializes the sqlite_vector ANN index on the qwen3_8b_embedding column.
+  ///
+  /// sqlite_vector uses a regular BLOB column + a side-car index created via
+  /// `vector_init()`. This is different from the old vec0 virtual table.
+  /// The index persists in the database file after first creation.
+  ///
+  /// Gracefully no-ops if the extension is not loaded (tests without native lib).
+  Future<void> _initVectorIndex() async {
+    try {
+      await customStatement(
+        "SELECT vector_init('files_embeddings', 'qwen3_8b_embedding', 'type=FLOAT32,dimension=2048')",
+      );
+    } catch (e) {
+      logger.w('Could not initialize vector index (extension not loaded?): $e');
+    }
   }
 
   /// Make sure each app is in database
@@ -298,37 +540,60 @@ class AppDatabase extends _$AppDatabase {
   }
 }
 
+/// Returns a configured [Sqlite3] instance with the sqlite_vector extension
+/// loaded. Used as the `sqlite3:` factory for [NativeDatabase].
+///
+/// sqlite_vector handles bundling the native library for all platforms
+/// automatically via Dart native assets — no manual dylib copying needed.
+///
+/// Gracefully no-ops (with a warning) if the extension fails to load so
+/// dev/test builds without native assets still work.
+Sqlite3 _loadExtensions() {
+  try {
+    sqlite3.loadSqliteVectorExtension();
+    AppLogger(null).d('sqlite_vector extension loaded');
+  } catch (e) {
+    AppLogger(
+      null,
+    ).w('sqlite_vector not loaded (vector search unavailable): $e');
+  }
+  return sqlite3;
+}
+
 LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb) {
-  if (path == null || name == null) {
+  if (!useMemoryDb && (path == null || name == null)) {
     throw ("Path or Name not provided, can not start scanner");
   }
+
   // the LazyDatabase util lets us find the right location for the file async.
   return LazyDatabase(() async {
-    print('Initialize Database | path=$path');
-    //check app startup initialization
-    io.File file = io.File(p.join(path!, 'data', name));
-    path = file.path;
+    AppLogger(null).i('Initialize Database | path=$path');
 
-    // Make sqlite3 pick a more suitable location for temporary files - the
-    // one from the system may be inaccessible due to ios/mac app sandbox.
-    // We can't access /tmp on Android, which sqlite3 would try by default.
-    // Explicitly tell it about the correct temporary directory.
-    sqlite3.tempDirectory = (await getTemporaryDirectory()).path;
-
-    print("Opening Database | $path");
     if (!useMemoryDb) {
-      return NativeDatabase(
+      // check app startup initialization
+      io.File file = io.File(p.join(path!, 'data', name));
+      path = file.path;
+
+      // Make sqlite3 pick a more suitable location for temporary files - the
+      // one from the system may be inaccessible due to ios/mac app sandbox.
+      sqlite3.tempDirectory = (await getTemporaryDirectory()).path;
+
+      AppLogger(null).i("Opening Database | $path");
+      // createInBackground moves all SQLite I/O to a dedicated background
+      // isolate managed by Drift. This prevents any DB query from blocking
+      // frames on the main UI thread, fixing jank during email queries and
+      // PST imports.
+      return NativeDatabase.createInBackground(
         file,
-        logStatements: true,
+        logStatements: false,
         cachePreparedStatements: true,
-        setup: null,
+        sqlite3: _loadExtensions,
       );
-      //return NativeDatabase.createInBackground(file, logStatements: true, cachePreparedStatements: true, setup: null);
     } else {
       return NativeDatabase.memory(
-        logStatements: true,
-        setup: null,
+        logStatements: false,
         cachePreparedStatements: false,
+        sqlite3: _loadExtensions,
       );
     }
   });

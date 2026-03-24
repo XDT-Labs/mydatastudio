@@ -10,6 +10,7 @@ import 'package:drift/drift.dart';
 @TableIndex(name: 'file_parent_idx', columns: {#parent})
 @TableIndex(name: 'file_collection_id_idx', columns: {#collectionId})
 @TableIndex(name: 'file_contenttype_idx', columns: {#contentType})
+@TableIndex(name: 'file_email_id_idx', columns: {#emailId})
 class Files extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
@@ -17,11 +18,14 @@ class Files extends Table {
   TextColumn get parent => text()();
   DateTimeColumn get dateCreated => dateTime()();
   DateTimeColumn get dateLastModified => dateTime()();
+  DateTimeColumn get lastScannedDate => dateTime().nullable()();
   TextColumn get collectionId => text()();
   TextColumn get contentType => text()();
   IntColumn get size => integer()();
   BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
   TextColumn get thumbnail => text().nullable()();
+  TextColumn get downloadUrl => text().nullable()();
+  TextColumn get emailId => text().nullable()();
   RealColumn get latitude => real().nullable()();
   RealColumn get longitude => real().nullable()();
 
@@ -43,11 +47,15 @@ class File implements FileAsset, Insertable<File> {
   @override
   DateTime dateLastModified;
   @override
+  DateTime? lastScannedDate;
+  @override
   String collectionId;
   String contentType; //mime/type
   int size;
   bool isDeleted;
   String? thumbnail;
+  String? downloadUrl;
+  String? emailId;
   double? latitude;
   double? longitude;
 
@@ -58,11 +66,14 @@ class File implements FileAsset, Insertable<File> {
     required this.parent,
     required this.dateCreated,
     required this.dateLastModified,
+    this.lastScannedDate,
     required this.collectionId,
     required this.contentType,
     required this.size,
     required this.isDeleted,
     this.thumbnail,
+    this.downloadUrl,
+    this.emailId,
     this.latitude,
     this.longitude,
   });
@@ -74,11 +85,14 @@ class File implements FileAsset, Insertable<File> {
     required this.parent,
     required this.dateCreated,
     required this.dateLastModified,
+    this.lastScannedDate,
     required this.collectionId,
     required this.contentType,
     required this.size,
     required this.isDeleted,
     this.thumbnail,
+    this.downloadUrl,
+    this.emailId,
     this.latitude,
     this.longitude,
   });
@@ -92,11 +106,14 @@ class File implements FileAsset, Insertable<File> {
       parent: Value(parent),
       dateCreated: Value(dateCreated),
       dateLastModified: Value(dateLastModified),
+      lastScannedDate: Value(lastScannedDate),
       collectionId: Value(collectionId),
       contentType: Value(contentType),
       size: Value(size),
       isDeleted: Value(isDeleted),
       thumbnail: Value(thumbnail),
+      downloadUrl: Value(downloadUrl),
+      emailId: Value(emailId),
       latitude: Value(latitude),
       longitude: Value(longitude),
     ).toColumns(nullToAbsent);

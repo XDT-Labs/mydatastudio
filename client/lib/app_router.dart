@@ -28,7 +28,7 @@ class AppRouter {
   static GlobalKey<NavigatorState> rootNavigatorKey =
       GlobalKey<NavigatorState>();
 
-  static get instance => GoRouter(
+  static final GoRouter instance = GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: '/',
     refreshListenable: DatabaseManager.isInitializedNotifier,
@@ -85,9 +85,8 @@ class AppRouter {
           GoRoute(
             path: '/',
             pageBuilder: (context, state) {
-              return RoutePage(
-                key: UniqueKey(),
-                body: const NavigationWrapper(body: HomePage()),
+              return const RoutePage(
+                body: NavigationWrapper(body: HomePage()),
               );
             },
           ),
@@ -97,9 +96,8 @@ class AppRouter {
             path: '/files',
             pageBuilder: (context, state) {
               //build method will load "new collection form" if needed
-              return RoutePage(
-                key: UniqueKey(),
-                body: const NavigationWrapper(
+              return const RoutePage(
+                body: NavigationWrapper(
                   body: RxFilesPage(),
                   drawer: FileDrawer(),
                 ),
@@ -109,9 +107,8 @@ class AppRouter {
               GoRoute(
                 path: 'add',
                 pageBuilder:
-                    (context, state) => RoutePage(
-                      key: UniqueKey(),
-                      body: const NavigationWrapper(
+                    (context, state) => const RoutePage(
+                      body: NavigationWrapper(
                         body: NewFileCollectionPage(),
                         drawer: FileDrawer(),
                       ),
@@ -124,9 +121,8 @@ class AppRouter {
           GoRoute(
             path: '/aichat',
             pageBuilder:
-                (context, state) => RoutePage(
-                  key: UniqueKey(),
-                  body: const NavigationWrapper(
+                (context, state) => const RoutePage(
+                  body: NavigationWrapper(
                     body: AichatPage(),
                     drawer: AiChatDrawer(),
                   ),
@@ -137,9 +133,8 @@ class AppRouter {
           GoRoute(
             path: '/photos',
             pageBuilder:
-                (context, state) => RoutePage(
-                  key: UniqueKey(),
-                  body: const NavigationWrapper(
+                (context, state) => const RoutePage(
+                  body: NavigationWrapper(
                     body: PhotosApp(),
                     drawer: PhotoDrawer(),
                   ),
@@ -150,9 +145,8 @@ class AppRouter {
           GoRoute(
             path: '/email',
             pageBuilder: (context, state) {
-              return RoutePage(
-                key: UniqueKey(),
-                body: const NavigationWrapper(
+              return const RoutePage(
+                body: NavigationWrapper(
                   body: EmailPage(),
                   drawer: EmailDrawer(),
                 ),
@@ -162,9 +156,8 @@ class AppRouter {
               GoRoute(
                 path: 'add',
                 pageBuilder:
-                    (context, state) => RoutePage(
-                      key: UniqueKey(),
-                      body: const NavigationWrapper(
+                    (context, state) => const RoutePage(
+                      body: NavigationWrapper(
                         body: NewEmailPage(),
                         drawer: EmailDrawer(),
                       ),
@@ -177,9 +170,8 @@ class AppRouter {
           GoRoute(
             path: '/social',
             pageBuilder: (context, state) {
-              return RoutePage(
-                key: UniqueKey(),
-                body: const NavigationWrapper(
+              return const RoutePage(
+                body: NavigationWrapper(
                   body: NewSocialPage(),
                   drawer: SocialDrawer(),
                 ),
@@ -189,16 +181,14 @@ class AppRouter {
               GoRoute(
                 path: 'add',
                 pageBuilder:
-                    (context, state) => RoutePage(
-                      key: UniqueKey(),
-                      body: const NavigationWrapper(body: NewSocialPage()),
+                    (context, state) => const RoutePage(
+                      body: NavigationWrapper(body: NewSocialPage()),
                     ),
               ),
               GoRoute(
                 path: 'facebook/:id',
                 pageBuilder: (context, state) {
                   return RoutePage(
-                    key: UniqueKey(),
                     body: NavigationWrapper(
                       body: FacebookPage(id: state.pathParameters['id']!),
                       drawer: const SocialDrawer(),
@@ -210,7 +200,6 @@ class AppRouter {
                 path: 'twitter/:id',
                 pageBuilder: (context, state) {
                   return RoutePage(
-                    key: UniqueKey(),
                     body: NavigationWrapper(
                       body: TwitterPage(id: state.pathParameters['id']!),
                       drawer: const SocialDrawer(),
@@ -222,7 +211,6 @@ class AppRouter {
                 path: 'instagram/:id',
                 pageBuilder: (context, state) {
                   return RoutePage(
-                    key: UniqueKey(),
                     body: NavigationWrapper(
                       body: InstagramPage(id: state.pathParameters["id"]!),
                       drawer: const SocialDrawer(),

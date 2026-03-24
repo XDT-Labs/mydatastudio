@@ -5,20 +5,21 @@ This module contains all the FastAPI route handler functions that implement
 the business logic for the API endpoints. Each function corresponds to a
 specific API endpoint and handles request processing, validation, and response generation.
 """
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Generator
 from fastapi import HTTPException
-from PIL import Image
+from fastapi.responses import StreamingResponse
+import json
 
+from .models import ChatRequest, StartSessionRequest, EmbeddingRequest, PstImportRequest
+from .pst_parser import PstParser
 
-from .models import ChatRequest, StartSessionRequest, EmbeddingRequest
 from .model_manager import (
     load_local_model,
     load_embedding_model,
-    generate_text_embedding,
-    generate_image_embedding,
-    decode_base64_image, load_gemini_model
+    generate_embedding as gen_emb_fn,
+    load_gemini_model
 )
-from .utils import get_local_path, download_gguf_model_if_needed
+from .utils import get_local_path, find_local_model, download_gguf_model
 from .state import (
     get_llm_instance, set_llm_instance,
     get_current_model_id, set_current_model_id,
@@ -114,15 +115,14 @@ async def start_session(request: StartSessionRequest) -> Dict[str, Any]:
         if get_current_model_id() == model_id:
             return {"status": "success", "message": f"Session already active with model: {model_id}", "model": model_id}
         
-        # 2. Download files if necessary
+        # 2. Locate the model file — no automatic download
         if model_id != "gemini":
-            try:
-                download_gguf_model_if_needed(model_id, filename, local_path)
-            except Exception as e:
-                print(f"[STARTUP] Error downloading model {model_id}/{filename}: {e}")
+            model_path = find_local_model(request.filename, get_local_path(model_id))
+            if model_path is None:
                 raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to download model files for {model_id}/{filename}. Check logs and Hugging Face authentication."
+                    status_code=404,
+                    detail=f"Model file '{request.filename}' not found locally. "
+                           f"Use the /download-model endpoint to download it first."
                 )
         
         # 3. Load the model
@@ -146,7 +146,7 @@ async def start_session(request: StartSessionRequest) -> Dict[str, Any]:
                 else:
                     new_llm = load_gemini_model()
             else:
-                new_llm = load_local_model(model_name=model_id, filename=filename, local_dir=local_path)
+                new_llm = load_local_model(model_name=model_id, model_path=model_path)
             
             set_llm_instance(new_llm)
             set_current_model_id(model_id)
@@ -183,6 +183,7 @@ async def generate_chat_response(request: ChatRequest) -> Dict[str, Any]:
     - Includes optional system instructions
     - Strips input prompt from model output
     - Handles response formatting and cleanup
+    - Optionally wraps response in GenUI JSON format
     
     Args:
         request (ChatRequest): Request containing the user prompt and optional system instruction
@@ -209,16 +210,30 @@ async def generate_chat_response(request: ChatRequest) -> Dict[str, Any]:
         )
 
     try:
-        # Gemma 2 uses a specific instruction format (BOS/EOS tokens).
-        # We manually construct the prompt to include the system instruction and user query.
+        # Import GenUI helpers and ConversationManager
+        from .genui_schema import GENUI_SYSTEM_PROMPT
+        from .state import conversation_manager
         
-        # A common instruction format for Gemma 2
-        full_prompt = f"<start_of_turn>user\n\n"
-        if request.system_instruction:
-            full_prompt += f"System Instruction: {request.system_instruction}\n\n"
+        # Retrieve history for this session
+        history_turns = await conversation_manager.get_history(request.session_id)
+        history_text = "".join(history_turns)
         
-        full_prompt += f"{request.prompt}<end_of_turn>\n\n<start_of_turn>model\n"
+        # Build system instruction
+        system_inst = request.system_instruction or ""
+        if request.use_genui:
+            # Add GenUI instructions to system prompt
+            system_inst = f"{system_inst}\n\n{GENUI_SYSTEM_PROMPT}" if system_inst else GENUI_SYSTEM_PROMPT
+        
+        # Construct the new turn
+        new_turn = f"<start_of_turn>user\n"
+        if system_inst and not history_text: # Only add system instruction to the very first turn
+             new_turn += f"System Instruction: {system_inst}\n\n"
+        new_turn += f"{request.prompt}<end_of_turn>\n<start_of_turn>model\n"
 
+        # Combine history and new turn
+        full_prompt = history_text + new_turn
+
+        print(f"[DEBUG] Full prompt: {full_prompt}")
         # The LangChain LlamaCpp wrapper takes a single string input
         response_text = llm_instance.invoke(full_prompt)
         ai_response = response_text.strip()
@@ -235,6 +250,7 @@ async def generate_chat_response(request: ChatRequest) -> Dict[str, Any]:
             status_code=500,
             detail=f"Failed to generate response: {e}"
         )
+
 
 
 async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
@@ -281,12 +297,7 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
             detail="Either 'text' or 'image_base64' must be provided."
         )
     
-    if request.text and request.image_base64:
-        raise HTTPException(
-            status_code=400,
-            detail="Please provide either 'text' or 'image_base64', not both."
-        )
-    
+
     # Load embedding model if not already loaded
     async with embedding_lock:
         embedding_model, embedding_processor = get_embedding_model()
@@ -309,14 +320,27 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
     try:
         embedding_model, embedding_processor = get_embedding_model()
         
-        if request.text:
-            # Generate text embedding
-            embedding = generate_text_embedding(request.text, embedding_model, embedding_processor)
-            input_type = "text"
-            input_content = request.text
-        else:
-            # Generate image embedding
-            raise HTTPException(status_code=400, detail="Image embedding is not natively supported by LlamaCpp without experimental mmproj builds. Please use text embeddings or configure a multimodal huggingface model.")
+        # Use the universal generate_embedding function from model_manager
+        try:
+            print(f"[EMBEDDING] Generating embedding for input_type: {'text' if request.text else 'image'}")
+            embedding = gen_emb_fn(
+                model=embedding_model,
+                processor=embedding_processor,
+                text=request.text,
+                image_base64=request.image_base64
+            )
+            if request.text and request.image_base64:
+                input_type = "multimodal"
+            elif request.text:
+                input_type = "text"
+            else:
+                input_type = "image"
+            input_content = request.text if request.text else f"base64_image({len(request.image_base64)})"
+            
+            print(f"[EMBEDDING] Success! Generated embedding with dimension: {len(embedding)}")
+        except ValueError as ve:
+             print(f"[EMBEDDING] [ERROR] Validation error: {ve}")
+             raise HTTPException(status_code=400, detail=str(ve))
             
         return {
             "embedding": embedding,
@@ -329,11 +353,81 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
     except HTTPException:
         raise
     except ValueError as ve:
+        print(f"[EMBEDDING] [ERROR] Value error: {ve}")
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
-        print(f"[ERROR] Failed to generate embedding: {e}")
+        print(f"[EMBEDDING] [ERROR] Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to generate embedding: {e}"
         )
+
+
+async def download_model(request: StartSessionRequest) -> Dict[str, Any]:
+    """
+    Download a GGUF model from Hugging Face Hub.
+
+    This endpoint handles model downloads explicitly — start_session will never
+    trigger a download automatically. Call this from the settings panel when a
+    user wants to add a new model.
+
+    Args:
+        request (StartSessionRequest): Request containing model_name and filename
+
+    Returns:
+        Dict[str, Any]: Success response with the local path to the downloaded file
+
+    Raises:
+        HTTPException: If the download fails
+    """
+    model_id = request.model_name
+    filename = request.filename
+    local_path = get_local_path(model_id)
+
+    print(f"[DOWNLOAD] Request to download {model_id}/{filename}")
+
+    # Check if already present before downloading
+    existing = find_local_model(filename, local_path)
+    if existing:
+        return {
+            "status": "success",
+            "message": f"Model '{filename}' already exists locally.",
+            "model_path": existing
+        }
+
+    try:
+        downloaded_path = download_gguf_model(model_id, filename, local_path)
+        return {
+            "status": "success",
+            "message": f"Model '{filename}' downloaded successfully.",
+            "model_path": downloaded_path
+        }
+    except Exception as e:
+        print(f"[ERROR] Download failed for {model_id}/{filename}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to download model '{filename}' from '{model_id}': {e}"
+        )
+
+
+async def import_pst(request: PstImportRequest):
+    """
+    Import and parse an Outlook PST file.
+    
+    Streams JSON objects representing folders, emails, and attachments found in the PST.
+    Attachments are extracted to the specified output directory.
+    """
+    def event_stream() -> Generator[str, None, None]:
+        parser = PstParser(request.file_path, request.output_dir)
+        try:
+            parser.open()
+            for item in parser.walk():
+                yield json.dumps(item) + "\n"
+            parser.close()
+        except Exception as e:
+            yield json.dumps({"type": "error", "message": str(e)}) + "\n"
+
+    return StreamingResponse(event_stream(), media_type="application/x-json-stream")
 

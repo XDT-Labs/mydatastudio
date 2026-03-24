@@ -20,18 +20,30 @@ class ChatRequest(BaseModel):
     Attributes:
         prompt (str): The user's input message or question
         system_instruction (Optional[str]): Optional system prompt to guide model behavior
+        use_genui (bool): Whether to return response in GenUI JSON format
     """
     prompt: str = Field(..., description="The user's input message or question", min_length=1)
     system_instruction: Optional[str] = Field(
         None, 
         description="Optional system prompt to guide the model's behavior and response style"
     )
+    use_genui: bool = Field(
+        default=True,
+        description="If True, wrap response in GenUI JSON format for rich UI rendering"
+    )
+    
+    session_id: str = Field(
+        ...,
+        description="Unique identifier for the chat session to maintain history"
+    )
     
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "prompt": "Explain what the difference between a list and a tuple is in Python.",
-                "system_instruction": "You are a concise programming tutor."
+                "system_instruction": "You are a concise programming tutor.",
+                "use_genui": True,
+                "session_id": "123e4567-e89b-12d3-a456-426614174000"
             }
         }
     )
@@ -91,23 +103,38 @@ class EmbeddingRequest(BaseModel):
     )
     image_base64: Optional[str] = Field(
         None, 
-        description="Base64-encoded image data (PNG, JPEG, etc.). NOTE: LlamaCpp does not natively support mmproj image embeddings out of the box with the basic LangChain wrapper without specific builds. Proceed with caution."
+        description="Base64-encoded image data (PNG, JPEG, etc.). Supported via Transformers (Qwen-VL)."
     )
+
+    #https://huggingface.co/Qwen/Qwen3-Embedding-8B-GGUF
+    #https://huggingface.co/DevQuasar/Qwen.Qwen3-VL-Embedding-2B-GGUF/tree/main
     model_name: str = Field(
         default=DEFAULT_LOCAL_MODEL,
-        description="Hugging Face model identifier (e.g., 'bartowski/gemma-3-4b-it-GGUF')"
+        description="Hugging Face model identifier (e.g., 'Qwen/Qwen3-Embedding-8B-GGUF')" #DevQuasar/Qwen.Qwen3-VL-Embedding-2B-GGUF
     )
     filename: Optional[str] = Field(
         default=DEFAULT_GGUF_FILE,
-        description="The GGUF filename to use (e.g., 'gemma-3-4b-it-Q4_K_M.gguf')"
+        description="The GGUF filename to use (e.g., 'Qwen3-Embedding-8B-Q4_K_M.gguf')" #Qwen.Qwen3-VL-Embedding-2B.Q4_K_M.gguf
     )
     
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "text": "This is a sample text to generate embeddings for.",
-                "model_name": "bartowski/gemma-3-4b-it-GGUF",
-                "filename": "gemma-3-4b-it-Q4_K_M.gguf"
+                "model_name": "Qwen/Qwen3-Embedding-8B-GGUF",
+                "filename": "Qwen3-Embedding-8B-Q4_K_M.gguf"
             }
         }
     )
+
+
+class PstImportRequest(BaseModel):
+    """
+    Request model for PST file import.
+    
+    Attributes:
+        file_path (str): Absolute path to the .pst file on the local machine
+        output_dir (str): Directory where attachments should be extracted
+    """
+    file_path: str = Field(..., description="Path to the PST file on the local machine")
+    output_dir: str = Field(..., description="Directory to save extracted attachments")

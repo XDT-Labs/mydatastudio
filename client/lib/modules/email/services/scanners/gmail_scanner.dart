@@ -8,16 +8,22 @@ import 'package:flutter/services.dart';
 
 // TODO
 //@see https://pub.dev/packages/driven
-class GmailScanner implements CollectionScanner {
-  String dbPath;
+class GmailScanner extends CollectionScanner {
+  final SendPort? dbWriterPort;
+  final String dbPath;
   final Collection collection;
-  late String appDir;
+  final String appDir;
   GmailScannerIsolate? isolate;
   bool isStopped = false;
 
   final AppLogger logger = AppLogger(null);
 
-  GmailScanner(this.dbPath, this.collection, this.appDir);
+  GmailScanner({
+    required this.dbPath,
+    required this.collection,
+    required this.appDir,
+    this.dbWriterPort,
+  });
 
   @override
   Future<int> start(
@@ -30,6 +36,12 @@ class GmailScanner implements CollectionScanner {
     if (!force && collection.lastScanDate != null) return Future(() => 0);
     // TODO: add a date range check to rerun scan
 
+    // If scanning already, don't restart.
+    if (isScanning.value) return 0;
+    
+    isScanning.add(true);
+    logger.i("Gmail sync started for ${collection.name}");
+
     //start full scan in isolate
     ReceivePort receivePort = ReceivePort();
     receivePort.listen((message) {
@@ -37,24 +49,39 @@ class GmailScanner implements CollectionScanner {
       if (message is String && message.isNotEmpty) {
         logger.s(message);
       }
+      if (message is Map && message['status'] == 'done') {
+        isScanning.add(false);
+      }
     });
+
+    // If the path looks like a local file path (e.g., from the Files module), 
+    // we don't want to pass it to Gmail as a label ID. 
+    String? labelId;
+    if (path != null && !path.startsWith('/') && !path.contains(appDir)) {
+      labelId = path;
+    }
 
     //start isolate
     RootIsolateToken? token = RootIsolateToken.instance;
-    isolate = GmailScannerIsolate(token, receivePort.sendPort, dbPath, appDir);
-    int count = await isolate!.start(
+    isolate = GmailScannerIsolate(
+      token: token,
+      dbWriterPort: dbWriterPort,
+      appDir: appDir,
+    );
+    await isolate!.start(
       collection,
-      path ?? collection.path,
-      recursive,
-      force,
+      folderId: labelId,
+      force: force,
+      statusPort: receivePort.sendPort,
     );
 
-    return Future(() => count);
+    return 0;
   }
 
   @override
   void stop() async {
     isStopped = true;
     isolate?.stop();
+    isScanning.add(false);
   }
 }
