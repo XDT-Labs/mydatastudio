@@ -66,6 +66,16 @@ class DatabaseManager {
 
   Future<String> _getConfigPath() async {
     var supportPath = await getApplicationSupportDirectory();
+
+    // macOS path_provider quirk: ensure the directory matches our realm name if on develop
+    if (io.Platform.isMacOS && AppConstants.realmName.endsWith('.dev')) {
+      if (!supportPath.path.endsWith(AppConstants.realmName)) {
+        // Adjust path to use the .dev version
+        final parent = supportPath.parent.path;
+        supportPath = io.Directory(p.join(parent, AppConstants.realmName));
+      }
+    }
+
     MainApp.supportDirectory.add(supportPath);
 
     // Look for config file with user selected path for DB and Files

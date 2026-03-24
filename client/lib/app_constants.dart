@@ -1,5 +1,5 @@
 class AppConstants {
-  static const String realmName = "mydata.tools";
+  static const String realmName = String.fromEnvironment('REALM_NAME', defaultValue: "mydata.tools");
   static const String appName = "MyDataTools";
   static const String configFileName = "config.json";
   static const String dbName = "mydata.db"; //sqlite
