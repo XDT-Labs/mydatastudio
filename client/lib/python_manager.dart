@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import 'package:flutter/foundation.dart';
+import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/main.dart';
 import 'package:path/path.dart' as p;
@@ -47,8 +48,14 @@ class PythonManager {
     logger.d('[python] Ensuring aichat assets are available');
     await ensureAichatUnzipped().then((_) => completer.complete());
 
-    final supportDir = await getApplicationSupportDirectory();
-    _pythonDir = p.join(supportDir.path, "aichat");
+    var supportPath = (await getApplicationSupportDirectory()).path;
+    if (Platform.isMacOS && AppConstants.realmName.endsWith('.dev')) {
+      if (!supportPath.endsWith(AppConstants.realmName)) {
+        final parent = Directory(supportPath).parent.path;
+        supportPath = p.join(parent, AppConstants.realmName);
+      }
+    }
+    _pythonDir = p.join(supportPath, "aichat");
 
     // Check for existing PID file and kill previous process if it exists
     final pidFile = File(p.join(_pythonDir!, 'aichat.pid'));
@@ -115,7 +122,9 @@ class PythonManager {
         logger.d('[python] Failed to write PID file: $e');
       }
 
-      logger.d('[python] Service process started with PID: ${_pythonProc!.pid}');
+      logger.d(
+        '[python] Service process started with PID: ${_pythonProc!.pid}',
+      );
 
       await _pipeOutput(_pythonProc!);
 
@@ -225,8 +234,14 @@ class PythonManager {
   /// If the destination directory already exists, this is a no-op.
   Future<void> ensureAichatUnzipped() async {
     try {
-      final supportDir = await getApplicationSupportDirectory();
-      final destDir = Directory(p.join(supportDir.path, 'aichat'));
+      var supportPath = (await getApplicationSupportDirectory()).path;
+      if (Platform.isMacOS && AppConstants.realmName.endsWith('.dev')) {
+        if (!supportPath.endsWith(AppConstants.realmName)) {
+          final parent = Directory(supportPath).parent.path;
+          supportPath = p.join(parent, AppConstants.realmName);
+        }
+      }
+      final destDir = Directory(p.join(supportPath, 'aichat'));
 
       if (destDir.existsSync()) {
         _stdoutController.add(
@@ -288,7 +303,7 @@ class PythonManager {
         return;
       }
 
-      final tempDir = Directory(p.join(supportDir.path, 'aichat_temp'));
+      final tempDir = Directory(p.join(supportPath, 'aichat_temp'));
       if (tempDir.existsSync()) {
         tempDir.deleteSync(recursive: true);
       }

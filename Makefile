@@ -25,8 +25,20 @@ HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
 HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
 HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
 
+# Python/AI Chat Config
+PYTHON_DIR = client/assets/python/aichat
+APP_DIR = client/app
+APP_ZIP_NAME = aichat-macos.zip
+APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
+HF_MODEL = bartowski/google_gemma-3-4b-it-GGUF
+HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
+HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
+HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
+
 # Flutter Config
 FLUTTER_DIR = client
+# Default realm name, overridden in set-bundle-id
+REALM_NAME = mydata.tools
 
 # --- Targets ---
 
@@ -78,23 +90,38 @@ build-python:
 		zip -r ../../../../../app/$(APP_ZIP_NAME) .
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
 
+.PHONY: set-bundle-id
+set-bundle-id:
+	@echo "--- 🆔 Setting Bundle ID for macOS ---"
+	@BRANCH=$$(git branch --show-current); \
+	if [ "$$BRANCH" = "develop" ]; then \
+		echo "Detected branch: develop. Using Bundle ID: mydata.tools.dev"; \
+		sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = mydata.tools.dev/' client/macos/Runner/Configs/AppInfo.xcconfig; \
+		echo "REALM_NAME=mydata.tools.dev" > .realm_name; \
+	else \
+		echo "Detected branch: $$BRANCH. Using Bundle ID: mydata.tools"; \
+		sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = mydata.tools/' client/macos/Runner/Configs/AppInfo.xcconfig; \
+		echo "REALM_NAME=mydata.tools" > .realm_name; \
+	fi
+
 # 3. Build Flutter Desktop Client
 .PHONY: build-client
-build-client:
+build-client: set-bundle-id
 	@echo "--- 🚀 Building Flutter Desktop client (macOS) ---"
-	@cd $(FLUTTER_DIR) && \
+	@REALM=$$(cat .realm_name | cut -d= -f2); \
+	cd $(FLUTTER_DIR) && \
 		flutter pub get && \
-		flutter build macos --release --no-tree-shake-icons
+		flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
 	@echo "--- ✅ Flutter build complete ---"
 
 # Local Install (Testing)
 .PHONY: local-install-python
 local-install-python: build-python
 	@echo "--- 💾 Installing service for local testing ---"
-	@mkdir -p ~/Library/Application\ Support/mydata.tools/
-	rm -fr ~/Library/Application\ Support/mydata.tools/*.zip
-	rm -fr ~/Library/Application\ Support/mydata.tools/aichat
-	cp $(APP_ZIP_PATH) ~/Library/Application\ Support/mydata.tools/
+	@REALM=$$(cat .realm_name | cut -d= -f2 || echo "mydata.tools"); \
+	mkdir -p ~/Library/Application\ Support/$$REALM/ && \
+	cp $(APP_ZIP_PATH) ~/Library/Application\ Support/$$REALM/ && \
+	rm -fr ~/Library/Application\ Support/$$REALM/aichat
 	@echo "--- ✅ Copy complete ---"
 
 # Cloud Run Deployment
@@ -116,4 +143,7 @@ clean:
 	cd $(FLUTTER_DIR) && flutter clean
 	@find . -type f -name "*.pyc" -delete
 	@find . -type d -name "__pycache__" -exec rm -rf {} +
+	@echo "--- 🧼 Restoring default Bundle ID ---"
+	@sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = mydata.tools.dev/PRODUCT_BUNDLE_IDENTIFIER = mydata.tools/' client/macos/Runner/Configs/AppInfo.xcconfig
+	@rm -f .realm_name
 	@echo "--- ✅ Clean complete ---"

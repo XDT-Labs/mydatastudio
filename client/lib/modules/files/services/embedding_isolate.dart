@@ -63,10 +63,17 @@ class EmbeddingIsolate {
               logger.i('[EmbeddingIsolate] $msg');
               break;
             case 'error':
+              final stData = data['stackTrace'];
+              final st =
+                  stData == null
+                      ? null
+                      : (stData is StackTrace
+                          ? stData
+                          : StackTrace.fromString(stData.toString()));
               logger.e(
                 '[EmbeddingIsolate] $msg',
                 error: data['error'],
-                stackTrace: data['stackTrace'],
+                stackTrace: st,
               );
               break;
             case 'warning':
@@ -281,8 +288,8 @@ class EmbeddingIsolate {
         Uri.parse("$serviceUrl/embedding"),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'model_name': 'mradermacher/Qwen3-Embedding-8B-GGUF',
-          'filename': 'Qwen3-Embedding-8B-Q4_K_M.gguf',
+          'model_name': 'google/siglip2-so400m-patch16-naflex',
+          'filename': '',
           'image_base64': base64Image,
         }),
       );

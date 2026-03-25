@@ -22,11 +22,7 @@ class GmailScannerIsolate {
   Isolate? _isolate;
   final AppLogger logger = AppLogger(null);
 
-  GmailScannerIsolate({
-    this.token,
-    this.dbWriterPort,
-    required this.appDir,
-  });
+  GmailScannerIsolate({this.token, this.dbWriterPort, required this.appDir});
 
   Future<void> start(
     Collection collection, {
@@ -35,11 +31,11 @@ class GmailScannerIsolate {
     SendPort? statusPort, // Added statusPort to forward worker messages
   }) async {
     if (dbWriterPort == null) {
-       throw Exception("dbWriterPort is required for GmailScannerIsolate");
+      throw Exception("dbWriterPort is required for GmailScannerIsolate");
     }
 
     ReceivePort receivePort = ReceivePort("GmailScannerIsolateClient");
-    
+
     Map<String, dynamic> args = {
       'token': token ?? RootIsolateToken.instance,
       'port': receivePort.sendPort,
@@ -60,7 +56,12 @@ class GmailScannerIsolate {
       if (message is Map) {
         if (message['type'] == 'refresh') {
           GetEmailsService.instance.invoke(
-            EmailServiceCommand(collection, sortColumn: "date", sortAsc: false, folderId: folderId),
+            EmailServiceCommand(
+              collection,
+              sortColumn: "date",
+              sortAsc: false,
+              folderId: folderId,
+            ),
           );
         }
       }
@@ -116,7 +117,7 @@ class GmailScannerIsolateWorker {
       logger.s("Syncing Gmail labels...");
       final labelsResponse = await gmailApi.users.labels.list('me');
       final labels = labelsResponse.labels ?? [];
-      
+
       for (var label in labels) {
         final folder = mapLabelToFolder(label, collection.id);
         dbWriterPort.send({'type': 'email_folder', 'folder': folder});
@@ -171,7 +172,7 @@ class GmailScannerIsolateWorker {
     String? pageToken,
   }) async {
     final logger = AppLogger(clientPort);
-    
+
     final response = await gmailApi.users.messages.list(
       'me',
       labelIds: labelId != null ? [labelId] : null,
@@ -185,12 +186,18 @@ class GmailScannerIsolateWorker {
     List<Email> emailBatch = [];
 
     final labelsResponse = await gmailApi.users.labels.list('me');
-    final labelMap = {for (var l in labelsResponse.labels ?? []) l.id!: l.name ?? 'unknown'};
+    final labelMap = {
+      for (var l in labelsResponse.labels ?? []) l.id!: l.name ?? 'unknown',
+    };
 
     for (var msgRef in messages) {
       try {
-        final m = await gmailApi.users.messages.get('me', msgRef.id!, format: 'full');
-        
+        final m = await gmailApi.users.messages.get(
+          'me',
+          msgRef.id!,
+          format: 'full',
+        );
+
         DateTime msgDate = DateTime.fromMillisecondsSinceEpoch(
           int.parse(m.internalDate!),
         );
@@ -201,12 +208,16 @@ class GmailScannerIsolateWorker {
         String? ccRaw = _getHeader(m.payload?.headers, 'cc');
         String? messageId = _getHeader(m.payload?.headers, 'message-id');
 
-        String? plainBody = _parseBodyParts(m.payload?.parts ?? [], 'text/plain');
+        String? plainBody = _parseBodyParts(
+          m.payload?.parts ?? [],
+          'text/plain',
+        );
         String? htmlBody = _parseBodyParts(m.payload?.parts ?? [], 'text/html');
 
         // Note: Gmail API doesn't provide a simple "hasAttachments" flag in list view.
         // We check if there are parts with attachmentId or if mimeType is multipart/mixed.
-        bool hasAttachments = m.payload != null && _checkAttachments(m.payload!);
+        bool hasAttachments =
+            m.payload != null && _checkAttachments(m.payload!);
 
         final email = Email(
           id: m.id!,
@@ -233,12 +244,16 @@ class GmailScannerIsolateWorker {
         if (hasAttachments) {
           final labelName = labelMap[labelId] ?? 'Email';
           final year = msgDate.year.toString();
-          
+
           final rootPathNormalized = p.normalize(collection.path);
           final relativeYearPath = p.join(labelName, year);
-          final absoluteYearPath = p.normalize(p.join(rootPathNormalized, relativeYearPath));
+          final absoluteYearPath = p.normalize(
+            p.join(rootPathNormalized, relativeYearPath),
+          );
 
-          logger.s("GmailScanner: Processing email ${email.id} with attachments. Target: $absoluteYearPath");
+          logger.s(
+            "GmailScanner: Processing email ${email.id} with attachments. Target: $absoluteYearPath",
+          );
 
           // 1. Ensure folder hierarchy (Collection -> Label -> Year)
           await _ensureFolderHierarchy(
@@ -267,7 +282,6 @@ class GmailScannerIsolateWorker {
             dbWriterPort.send({'type': 'file', 'file': file});
           }
         }
-
       } catch (e) {
         logger.w("Failed to fetch/parse message ${msgRef.id}: $e");
       }
@@ -331,13 +345,16 @@ class GmailScannerIsolateWorker {
     String appDir,
     String messageId,
     DateTime msgDate,
-    List<MessagePart> parts,
-    {SendPort? dbWriterPort, String? targetFolderPath, AppLogger? logger}
-  ) async {
+    List<MessagePart> parts, {
+    SendPort? dbWriterPort,
+    String? targetFolderPath,
+    AppLogger? logger,
+  }) async {
     List<File> files = [];
     final sep = io.Platform.pathSeparator;
     // Use the provided year folder path or default to messageId under root
-    final effectiveFolderPath = targetFolderPath ?? p.normalize('${collection.path}${sep}$messageId');
+    final effectiveFolderPath =
+        targetFolderPath ?? p.normalize('${collection.path}$sep$messageId');
 
     // Ensure folder exists on disk
     await io.Directory(effectiveFolderPath).create(recursive: true);
@@ -358,7 +375,10 @@ class GmailScannerIsolateWorker {
           await file.writeAsBytes(base64Url.decode(attachment.data!));
 
           final f = File(
-            id: const Uuid().v5(Uuid.NAMESPACE_URL, 'file:email:${collection.id}:$messageId:$originalFileName'),
+            id: const Uuid().v5(
+              Namespace.url.value,
+              'file:email:${collection.id}:$messageId:$fileName',
+            ),
             collectionId: collection.id,
             name: originalFileName,
             path: file.path,
@@ -370,25 +390,29 @@ class GmailScannerIsolateWorker {
             isDeleted: false,
             emailId: messageId,
           );
-          
-          logger?.s("GmailScanner: Sending attachment '${f.name}' to DB (Parent: ${f.parent})");
+
+          logger?.s(
+            "GmailScanner: Sending attachment '${f.name}' to DB (Parent: ${f.parent})",
+          );
           files.add(f);
         } catch (e) {
           logger?.w("GmailScanner: Failed to download/save attachment: $e");
         }
       }
       if (part.parts != null) {
-        files.addAll(await _downloadAttachments(
-          gmailApi,
-          collection,
-          appDir,
-          messageId,
-          msgDate,
-          part.parts!,
-          dbWriterPort: dbWriterPort,
-          targetFolderPath: effectiveFolderPath,
-          logger: logger,
-        ));
+        files.addAll(
+          await _downloadAttachments(
+            gmailApi,
+            collection,
+            appDir,
+            messageId,
+            msgDate,
+            part.parts!,
+            dbWriterPort: dbWriterPort,
+            targetFolderPath: effectiveFolderPath,
+            logger: logger,
+          ),
+        );
       }
     }
     return files;
@@ -402,19 +426,47 @@ class GmailScannerIsolateWorker {
     required DateTime msgDate,
   }) async {
     final rootPath = collection.path;
-    
+
     // 1. Label Folder
     final labelPath = p.normalize(p.join(rootPath, labelName));
-    dbWriterPort.send({'type': 'folder', 'folder': _createFolderObj(labelPath, rootPath, labelName, collection.id, msgDate)});
-    
+    dbWriterPort.send({
+      'type': 'folder',
+      'folder': _createFolderObj(
+        labelPath,
+        rootPath,
+        labelName,
+        collection.id,
+        msgDate,
+      ),
+    });
+
     // 2. Year Folder
     final yearPath = p.normalize(p.join(labelPath, year));
-    dbWriterPort.send({'type': 'folder', 'folder': _createFolderObj(yearPath, labelPath, year, collection.id, msgDate)});
+    dbWriterPort.send({
+      'type': 'folder',
+      'folder': _createFolderObj(
+        yearPath,
+        labelPath,
+        year,
+        collection.id,
+        msgDate,
+      ),
+    });
   }
 
-  static Folder _createFolderObj(String path, String parent, String name, String collectionId, DateTime date, {String? emailId}) {
+  static Folder _createFolderObj(
+    String path,
+    String parent,
+    String name,
+    String collectionId,
+    DateTime date, {
+    String? emailId,
+  }) {
     return Folder(
-      id: const Uuid().v5(Uuid.NAMESPACE_URL, 'folder:email:$collectionId:$path'),
+      id: const Uuid().v5(
+        Namespace.url.value,
+        'folder:email:$collectionId:$path',
+      ),
       collectionId: collectionId,
       name: name,
       path: path,

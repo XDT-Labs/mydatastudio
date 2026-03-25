@@ -5,9 +5,10 @@ import 'package:mydatatools/modules/files/services/repositories/file_repository.
 import 'package:mydatatools/services/rx_service.dart';
 import 'package:flutter/material.dart';
 
-class BatchFileUpsertService extends RxService<BatchFileUpsertServiceCommand, List<File>> {
+class BatchFileUpsertService
+    extends RxService<BatchFileUpsertServiceCommand, List<File>> {
   static final BatchFileUpsertService _singleton = BatchFileUpsertService();
-  static get instance => _singleton;
+  static BatchFileUpsertService get instance => _singleton;
 
   @override
   Future<List<File>> invoke(BatchFileUpsertServiceCommand command) async {
@@ -21,7 +22,7 @@ class BatchFileUpsertService extends RxService<BatchFileUpsertServiceCommand, Li
     } catch (err) {
       debugPrint("Batch upsert failed: ${err.toString()}");
     }
-    
+
     isLoading.add(false);
     return Future(() => command.files);
   }

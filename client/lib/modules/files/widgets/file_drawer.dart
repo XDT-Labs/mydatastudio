@@ -10,6 +10,8 @@ import 'package:mydatatools/app_constants.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+enum AccordionSection { files, email, social }
+
 class FileDrawer extends StatefulWidget {
   const FileDrawer({super.key});
 
@@ -36,8 +38,6 @@ class _FileDrawer extends State<FileDrawer> {
         });
       }
     });
-
-
 
     _selectedCollectionSub = RxFilesPage.selectedCollection.listen((value) {
       if (mounted) {
@@ -78,120 +78,90 @@ class _FileDrawer extends State<FileDrawer> {
     return null;
   }
 
-  String _getGroupName(Collection c) {
-    switch (c.scanner) {
-      case AppConstants.scannerFileLocal:
-        return 'Local';
-      case AppConstants.scannerFileGDrive:
-        return 'Google Drive';
-      case AppConstants.scannerFileDropbox:
-        return 'Dropbox';
-      case AppConstants.scannerFileOneDrive:
-        return 'OneDrive';
-      case AppConstants.scannerEmailGmail:
-        return 'Gmail';
-      case AppConstants.scannerEmailOutlook:
-        return 'Outlook';
-      default:
-        return 'Other';
-    }
-  }
-
-  int _getGroupOrder(String scanner) {
-    switch (scanner) {
-      case AppConstants.scannerFileLocal:
-        return 0;
-      case AppConstants.scannerFileGDrive:
-        return 1;
-      case AppConstants.scannerFileDropbox:
-        return 2;
-      case AppConstants.scannerFileOneDrive:
-        return 3;
-      case AppConstants.scannerEmailGmail:
-        return 4;
-      case AppConstants.scannerEmailOutlook:
-        return 5;
-      default:
-        return 6;
-    }
-  }
+  AccordionSection _expandedSection = AccordionSection.files;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // 1. Filter: Include both file and email collections
-    final List<Collection> filesC = collections.where((element) => 
-      element.type == 'file' || element.type == 'email').toList();
+    final List<Collection> filtered =
+        collections
+            .where(
+              (element) =>
+                  element.type == 'file' ||
+                  element.type == 'email' ||
+                  element.type == 'social' ||
+                  element.type == 'album',
+            )
+            .toList();
 
-    // 2. Grouping
-    final Map<String, List<Collection>> grouped = {};
-    for (var c in filesC) {
-      final groupName = _getGroupName(c);
-      grouped.putIfAbsent(groupName, () => []).add(c);
-    }
+    // Grouping logic for the requested hierarchy
+    final List<Collection> localFiles =
+        filtered
+            .where((c) => c.scanner == AppConstants.scannerFileLocal)
+            .toList();
+    final List<Collection> gdriveFiles =
+        filtered
+            .where((c) => c.scanner == AppConstants.scannerFileGDrive)
+            .toList();
+    final List<Collection> dropboxFiles =
+        filtered
+            .where((c) => c.scanner == AppConstants.scannerFileDropbox)
+            .toList();
+    final List<Collection> onedriveFiles =
+        filtered
+            .where((c) => c.scanner == AppConstants.scannerFileOneDrive)
+            .toList();
 
-    // 3. Sort groups by their defined order
-    final sortedGroupNames = grouped.keys.toList()
-      ..sort((a, b) {
-        final orderA = _getGroupOrder(grouped[a]!.first.scanner);
-        final orderB = _getGroupOrder(grouped[b]!.first.scanner);
-        return orderA.compareTo(orderB);
-      });
+    final List<Collection> gmailEmails =
+        filtered
+            .where((c) => c.scanner == AppConstants.scannerEmailGmail)
+            .toList();
+    final List<Collection> yahooEmails =
+        filtered
+            .where((c) => c.scanner == AppConstants.scannerEmailYahoo)
+            .toList();
+    final List<Collection> pstEmails =
+        filtered
+            .where((c) => c.scanner == AppConstants.scannerEmailOutlookPst)
+            .toList();
 
-    // 4. Flatten into a list with headers for the ListView
-    final List<dynamic> flatList = [];
-    for (final groupName in sortedGroupNames) {
-      flatList.add(groupName); // Add the group header
-      
-      final groupItems = grouped[groupName]!;
-      // Sort within the group alphabetically by display name
-      groupItems.sort((a, b) {
-        final nameA = _getDisplayName(a).toLowerCase();
-        final nameB = _getDisplayName(b).toLowerCase();
-        int cmp = nameA.compareTo(nameB);
-        if (cmp == 0) {
-          // If display names are identical, fall back to the full name
-          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-        }
-        return cmp;
-      });
-      flatList.addAll(groupItems);
-    }
+    final List<Collection> facebookSocial =
+        filtered
+            .where((c) => c.scanner.toLowerCase().contains('facebook'))
+            .toList();
+    final List<Collection> twitterSocial =
+        filtered
+            .where((c) => c.scanner.toLowerCase().contains('twitter'))
+            .toList();
+    final List<Collection> tiktokSocial =
+        filtered
+            .where((c) => c.scanner.toLowerCase().contains('tiktok'))
+            .toList();
 
     return SizedBox.expand(
       child: Container(
-        color: Colors.transparent,
-        padding: const EdgeInsets.all(8),
+        color: Colors.white,
         child: Scaffold(
           backgroundColor: Colors.transparent,
           floatingActionButton: FloatingActionButton(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              side: const BorderSide(color: Colors.grey, width: 1),
-              borderRadius: BorderRadius.circular(16),
-            ),
             tooltip: "Add Source",
-            onPressed: () {
-              GoRouter.of(context).go("/files/add");
-            },
-            child: const Icon(Icons.add, color: Colors.grey),
+            onPressed: () => GoRouter.of(context).go("/files/add"),
+            child: const Icon(Icons.add),
           ),
           body: Column(
             children: [
-              const SizedBox(height: 8),
               const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8.0),
+                padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12),
                 child: Align(
                   alignment: Alignment.topLeft,
                   child: Text(
                     "SOURCES",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 12,
+                      fontSize: 11,
                       color: Colors.grey,
-                      letterSpacing: 1.2,
+                      letterSpacing: 1.5,
                     ),
                   ),
                 ),
@@ -210,113 +180,253 @@ class _FileDrawer extends State<FileDrawer> {
                   return const SizedBox.shrink();
                 },
               ),
+              const SizedBox(height: 4),
               Expanded(
-                child: ListView.builder(
-                  padding: EdgeInsets.zero,
-                  itemCount: flatList.length,
-                  itemBuilder: (context, index) {
-                    final item = flatList[index];
-
-                    if (item is String) {
-                      // Render Group Header
-                      return Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 16, 8, 4),
-                        child: Text(
-                          item.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.primary.withOpacity(0.8),
-                            letterSpacing: 1.0,
-                          ),
-                        ),
-                      );
-                    }
-
-                    // Render Collection Tile
-                    final col = item as Collection;
-                    final isSelected = collection?.id == col.id;
-                    final subTitle = _getSubtitle(col);
-                    
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 1.0),
-                      child: ListTile(
-                        dense: subTitle != null,
-                        selected: isSelected,
-                        selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.3),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        title: Text(
-                          _getDisplayName(col),
-                          style: TextStyle(
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                          ),
-                        ),
-                        subtitle: subTitle != null 
-                          ? Text(
-                              subTitle,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: Colors.grey,
-                                fontSize: 11,
+                child: Column(
+                  children: [
+                    // --- FILES ---
+                    _buildAccordionHeader(
+                      theme,
+                      AccordionSection.files,
+                      "Files",
+                      Icons.folder_outlined,
+                    ),
+                    if (_expandedSection == AccordionSection.files)
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildSubHeader(theme, "Local Sources"),
+                              ...localFiles.map(
+                                (c) => _buildCollectionTile(context, theme, c),
                               ),
-                            ) 
-                          : null,
-                        trailing: PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_vert),
-                          onSelected: (String value) {
-                            if (value == 'sync') {
-                              ScannerManager.getInstance()
-                                  .getScanner(col)
-                                  ?.start(
-                                    col,
-                                    col.path,
-                                    true,
-                                    true,
-                                  );
-                            } else if (value == 'settings') {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Settings coming soon'),
-                                ),
-                              );
-                            } else if (value == 'delete') {
-                              _showDeleteConfirmationDialog(
-                                context,
-                                col,
-                              );
-                            }
-                          },
-                          itemBuilder:
-                              (BuildContext context) => <PopupMenuEntry<String>>[
-                                const PopupMenuItem<String>(
-                                  value: 'sync',
-                                  child: Text('Sync'),
-                                ),
-                                const PopupMenuItem<String>(
-                                  value: 'settings',
-                                  enabled: false,
-                                  child: Text('Settings'),
-                                ),
-                                const PopupMenuItem<String>(
-                                  value: 'delete',
-                                  child: Text('Delete'),
+                              _buildSubHeader(theme, "Google Drive"),
+                              ...gdriveFiles.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
+                              _buildSubHeader(theme, "DropBox (future)"),
+                              ...dropboxFiles.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
+                              if (onedriveFiles.isNotEmpty) ...[
+                                _buildSubHeader(theme, "OneDrive"),
+                                ...onedriveFiles.map(
+                                  (c) =>
+                                      _buildCollectionTile(context, theme, c),
                                 ),
                               ],
+                            ],
+                          ),
                         ),
-                        onTap: () {
-                          RxFilesPage.selectedCollection.add(col);
-                          RxFilesPage.selectedPath.add(col.path);
-                          GoRouter.of(context).go('/files');
-                        },
                       ),
-                    );
-                  },
+
+                    // --- EMAIL ATTACHMENTS ---
+                    _buildAccordionHeader(
+                      theme,
+                      AccordionSection.email,
+                      "Email Attachments",
+                      Icons.email_outlined,
+                    ),
+                    if (_expandedSection == AccordionSection.email)
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildSubHeader(theme, "GMail"),
+                              ...gmailEmails.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
+                              _buildSubHeader(theme, "Yahoo Mail"),
+                              ...yahooEmails.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
+                              _buildSubHeader(theme, "PST Backups"),
+                              ...pstEmails.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                    // --- SOCIAL MEDIA ---
+                    _buildAccordionHeader(
+                      theme,
+                      AccordionSection.social,
+                      "Social Media",
+                      Icons.share_outlined,
+                    ),
+                    if (_expandedSection == AccordionSection.social)
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildSubHeader(theme, "Facebook"),
+                              ...facebookSocial.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
+                              _buildSubHeader(theme, "Twitter"),
+                              ...twitterSocial.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
+                              _buildSubHeader(theme, "Tiktok"),
+                              ...tiktokSocial.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildAccordionHeader(
+    ThemeData theme,
+    AccordionSection section,
+    String title,
+    IconData icon,
+  ) {
+    final isExpanded = _expandedSection == section;
+    return GestureDetector(
+      onTap: () => setState(() => _expandedSection = section),
+      child: Container(
+        margin: const EdgeInsets.symmetric(
+          vertical: 0.5,
+        ), // Tiny separator space
+        decoration: BoxDecoration(
+          color:
+              isExpanded
+                  ? theme.colorScheme.primaryContainer
+                  : theme.colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.zero,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color:
+                  isExpanded
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontWeight: isExpanded ? FontWeight.bold : FontWeight.w500,
+                  fontSize: 14,
+                  color:
+                      isExpanded
+                          ? theme.colorScheme.onPrimaryContainer
+                          : theme.colorScheme.onSurface,
+                ),
+              ),
+            ),
+            Icon(
+              isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+              size: 18,
+              color:
+                  isExpanded
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.onSurfaceVariant,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubHeader(ThemeData theme, String title) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
+      ),
+      child: Text(
+        title.toUpperCase(),
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+          fontWeight: FontWeight.w800,
+          letterSpacing: 1.0,
+          fontSize: 9,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCollectionTile(
+    BuildContext context,
+    ThemeData theme,
+    Collection col,
+  ) {
+    final isSelected = collection?.id == col.id;
+    final subTitle = _getSubtitle(col);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 1.0),
+      child: ListTile(
+        dense: true,
+        selected: isSelected,
+        selectedTileColor: theme.colorScheme.primaryContainer.withValues(
+          alpha: 0.3,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        title: Text(
+          _getDisplayName(col),
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+        subtitle:
+            subTitle != null
+                ? Text(
+                  subTitle,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: Colors.grey,
+                    fontSize: 11,
+                  ),
+                )
+                : null,
+        trailing: PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert, size: 18),
+          onSelected: (String value) {
+            if (value == 'sync') {
+              ScannerManager.getInstance()
+                  .getScanner(col)
+                  ?.start(col, col.path, true, true);
+            } else if (value == 'delete') {
+              _showDeleteConfirmationDialog(context, col);
+            }
+          },
+          itemBuilder:
+              (BuildContext context) => <PopupMenuEntry<String>>[
+                const PopupMenuItem<String>(value: 'sync', child: Text('Sync')),
+                const PopupMenuItem<String>(
+                  value: 'delete',
+                  child: Text('Delete'),
+                ),
+              ],
+        ),
+        onTap: () {
+          RxFilesPage.selectedCollection.add(col);
+          RxFilesPage.selectedPath.add(col.path);
+          GoRouter.of(context).go('/files');
+        },
       ),
     );
   }
@@ -347,6 +457,10 @@ class _FileDrawer extends State<FileDrawer> {
 
                 final db = DatabaseManager.instance.database;
                 if (db != null) {
+                  // Capture context-dependent objects before async gap
+                  final router = GoRouter.of(context);
+                  final messenger = ScaffoldMessenger.of(context);
+
                   // Delete the collection and all related metadata (files, folders, etc.)
                   await CollectionRepository().deleteCollection(collection.id);
 
@@ -357,12 +471,10 @@ class _FileDrawer extends State<FileDrawer> {
 
                   // If the deleted collection was the current one, go home
                   if (this.collection?.id == collection.id) {
-                    GoRouter.of(context).go('/files');
-                    // We might need to refresh the page state or selected collection here
-                    // RxFilesPage.selectedCollection.add(null); // Would need to handle null in UI if allowed
+                    router.go('/files');
                   }
 
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  messenger.showSnackBar(
                     SnackBar(
                       content: Text('Collection "${collection.name}" deleted'),
                     ),

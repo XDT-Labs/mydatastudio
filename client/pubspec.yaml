@@ -34,6 +34,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  meta: ^1.11.0
 
 
   localization: ^2.1.0

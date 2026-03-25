@@ -20,9 +20,6 @@ class AdaptiveAppBar extends StatelessWidget implements PreferredSizeWidget {
       child: Container(
         decoration: BoxDecoration(
           color: themeData.scaffoldBackgroundColor, // Match the gray background
-          border: const Border(
-             bottom: BorderSide(color: Colors.black12, width: 1.0),
-          )
         ),
         child: AppBar(
           toolbarHeight: 64,

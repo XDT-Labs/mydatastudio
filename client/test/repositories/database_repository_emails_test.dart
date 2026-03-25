@@ -6,15 +6,15 @@ import 'package:mydatatools/models/tables/email.dart' as m;
 import 'package:collection/collection.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/repositories/database_repository.dart';
+
 import 'package:path_provider/path_provider.dart';
-import 'package:uuid/uuid.dart';
+
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('DatabaseRepository', () {
-    late DatabaseRepository databaseRepository;
+
     io.Directory? path;
     String dbName = 'test-${DateTime.now().millisecondsSinceEpoch}.sqlite';
 
@@ -60,15 +60,7 @@ void main() {
     });
 
     test("Delete Email", () async {
-      m.Email email = m.Email(
-        id: const Uuid().v4().toString(),
-        collectionId: const Uuid().v4().toString(),
-        date: DateTime.now(),
-        from: 'blah@blah.com',
-        to: ['foo@foo.com'],
-        subject: "test email",
-        isDeleted: false,
-      );
+
       //var db = DatabaseManager.instance.database;
       //await db?.into(db?.emails).insert(email);
 
@@ -83,17 +75,7 @@ void main() {
     });
 
     test("check all properties are saved", () async {
-      m.Email email = m.Email(
-        id: const Uuid().v4().toString(),
-        collectionId: const Uuid().v4().toString(),
-        date: DateTime.now(),
-        from: 'blah@blah.com',
-        to: ['foo-a@foo.com', 'foo-b@foo.com'],
-        cc: ['foo-1-cc@foo.com', 'foo-2-cc@foo.com'],
-        labels: ['label-1', 'label-2'],
-        subject: "test email",
-        isDeleted: false,
-      );
+
 
       //var db = DatabaseManager.instance.database;
       //await db?.into(db?.emails).insert(email);
@@ -114,33 +96,7 @@ void main() {
     });
 
     test("Insert multiple files", () async {
-      m.Email email1 = m.Email(
-        id: const Uuid().v4().toString(),
-        collectionId: const Uuid().v4().toString(),
-        date: DateTime.now(),
-        from: 'blah@blah.com',
-        to: ['foo@foo.com'],
-        subject: "test email",
-        isDeleted: false,
-      );
-      m.Email email2 = m.Email(
-        id: const Uuid().v4().toString(),
-        collectionId: const Uuid().v4().toString(),
-        date: DateTime.now(),
-        from: 'blah@blah.com',
-        to: ['foo@foo.com'],
-        subject: "test email",
-        isDeleted: false,
-      );
-      m.Email email3 = m.Email(
-        id: const Uuid().v4().toString(),
-        collectionId: const Uuid().v4().toString(),
-        date: DateTime.now(),
-        from: 'blah@blah.com',
-        to: ['foo@foo.com'],
-        subject: "test email",
-        isDeleted: false,
-      );
+
 
       // var db = await databaseRepository.database;
       // await db.into(db.emails).insert(email1);

@@ -51,7 +51,7 @@ void main() {
 
     //Apps, AppUsers, Collections, Emails, Files, Folders
     test('check Apps tables exists', () async {
-      var tables = (await databaseManager.database)?.allTables;
+      var tables = DatabaseManager.instance.database?.allTables;
 
       var t = tables?.firstWhereOrNull((e) {
         return e is m.Apps;

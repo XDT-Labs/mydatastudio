@@ -5,26 +5,35 @@ import 'package:rxdart/rxdart.dart';
 import 'package:path/path.dart' as p;
 
 class ConcisePrinter extends LogPrinter {
-  final PrettyPrinter _errorPrinter = PrettyPrinter(methodCount: 8, errorMethodCount: 8, lineLength: 120, colors: true, printEmojis: true, printTime: false);
+  final PrettyPrinter _errorPrinter = PrettyPrinter(
+    methodCount: 8,
+    errorMethodCount: 8,
+    lineLength: 120,
+    colors: true,
+    printEmojis: true,
+    dateTimeFormat: DateTimeFormat.none,
+  );
 
   static final levelEmojis = {
-    Level.verbose: '🐱',
+    Level.trace: '🐱',
     Level.debug: '🐛',
     Level.info: '💡',
     Level.warning: '⚠️',
     Level.error: '⛔',
-    Level.wtf: '👾',
+    Level.fatal: '👾',
   };
 
   @override
   List<String> log(LogEvent event) {
-    if (event.level == Level.error || event.level == Level.warning || event.level == Level.wtf) {
+    if (event.level == Level.error ||
+        event.level == Level.warning ||
+        event.level == Level.fatal) {
       return _errorPrinter.log(event);
     }
 
     final String emoji = levelEmojis[event.level] ?? '';
     final String message = event.message.toString();
-    
+
     // Extract call site
     String callSite = "";
     try {
@@ -33,7 +42,8 @@ class ConcisePrinter extends LogPrinter {
       // We need to find the first frame outside of logger/app_logger
       for (var frame in stackTrace) {
         // print('FRAME: $frame');
-        if (!frame.contains('app_logger.dart') && !frame.contains('package:logger')) {
+        if (!frame.contains('app_logger.dart') &&
+            !frame.contains('package:logger')) {
           // Format of frame is usually: #N   ClassName.MethodName (package:path/to/file.dart:line:col) or (file:///path/to/file.dart:line:col)
           final match = RegExp(r'\(((?:package|file):.*)\)').firstMatch(frame);
           if (match != null) {
@@ -42,7 +52,7 @@ class ConcisePrinter extends LogPrinter {
             if (callSite.contains('package:mydatatools/')) {
               callSite = callSite.replaceAll('package:mydatatools/', '');
             } else if (callSite.contains('file:///')) {
-               callSite = p.basename(callSite);
+              callSite = p.basename(callSite);
             }
             break;
           }
@@ -59,11 +69,12 @@ class ConcisePrinter extends LogPrinter {
 class AppLogger extends Logger {
   SendPort? sendPort;
 
-  AppLogger(this.sendPort, {LogFilter? filter})
-      : super(printer: ConcisePrinter(), filter: filter);
+  AppLogger(this.sendPort, {super.filter}) : super(printer: ConcisePrinter());
 
   @override
-  void log(Level level, dynamic message, {
+  void log(
+    Level level,
+    dynamic message, {
     DateTime? time,
     Object? error,
     StackTrace? stackTrace,

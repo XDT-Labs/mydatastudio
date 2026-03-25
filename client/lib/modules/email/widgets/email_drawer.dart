@@ -113,10 +113,10 @@ class _EmailDrawer extends State<EmailDrawer> {
     return SizedBox.expand(
       child: Container(
         height: double.infinity,
-        color: Colors.transparent,
+        color: Colors.white,
         padding: const EdgeInsets.all(8),
         child: Scaffold(
-          backgroundColor: Colors.transparent,
+          backgroundColor: Colors.white,
           floatingActionButton: FloatingActionButton(
             tooltip: "Add Email",
             backgroundColor: Colors.white,
@@ -162,7 +162,9 @@ class _EmailDrawer extends State<EmailDrawer> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.primary.withOpacity(0.8),
+                            color: theme.colorScheme.onSurface.withValues(
+                              alpha: 0.1,
+                            ),
                             letterSpacing: 1.0,
                           ),
                         ),
@@ -537,7 +539,9 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
                 )
                 : null,
         selected: isSelected,
-        selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.3),
+        selectedTileColor: theme.colorScheme.primaryContainer.withValues(
+          alpha: 0.3,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         onTap: () => widget.onFolderTap(f.id),
       ),

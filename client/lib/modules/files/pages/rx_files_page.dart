@@ -144,19 +144,21 @@ class _RxFilesPage extends State<RxFilesPage> {
     if (col == null || currentPath == null) return;
     _isLoadingMore = true;
     _fileOffset += kFilesPageSize;
-    _filesAndFoldersService!.invoke(
-      GetFileAndFoldersServiceCommand(
-        col,
-        currentPath,
-        offset: _fileOffset,
-      ),
-    ).then((results) {
-      if (!mounted) return;
-      setState(() {
-        _isLoadingMore = false;
-        if (results.length < kFilesPageSize) _hasMoreFiles = false;
-      });
-    });
+    _filesAndFoldersService!
+        .invoke(
+          GetFileAndFoldersServiceCommand(
+            col,
+            currentPath,
+            offset: _fileOffset,
+          ),
+        )
+        .then((results) {
+          if (!mounted) return;
+          setState(() {
+            _isLoadingMore = false;
+            if (results.length < kFilesPageSize) _hasMoreFiles = false;
+          });
+        });
   }
 
   /// Wires the scroll controller to trigger load-more at 80% scroll depth.
@@ -172,6 +174,7 @@ class _RxFilesPage extends State<RxFilesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     //final size = MediaQuery.of(context).size;
 
     if (collections.isEmpty) {
@@ -184,13 +187,13 @@ class _RxFilesPage extends State<RxFilesPage> {
     //parse path into a breadcrumb
 
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         centerTitle: false,
         title: getBreadcrumb(collection!, path ?? collection!.path),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1.0),
-          child: Container(height: 1.0, color: Colors.grey.shade300),
-        ),
         actions: <Widget>[
           IconButton(
             icon: const Icon(Icons.add, color: Colors.black, weight: 200),
@@ -211,10 +214,7 @@ class _RxFilesPage extends State<RxFilesPage> {
               if (collection != null) {
                 logger.s("refresh file list");
                 _filesAndFoldersService!.invoke(
-                  GetFileAndFoldersServiceCommand(
-                    collection!,
-                    path ?? '',
-                  ),
+                  GetFileAndFoldersServiceCommand(collection!, path ?? ''),
                 );
               }
             },
@@ -257,6 +257,7 @@ class _RxFilesPage extends State<RxFilesPage> {
                       NotificationListener<FiledNotification>(
                         child: FileTable(
                           data: filesAndFolders,
+                          collection: collection,
                           scrollController: _scrollController,
                         ),
                         onNotification: (FiledNotification n) {
@@ -332,7 +333,9 @@ class _RxFilesPage extends State<RxFilesPage> {
                         builder: (context, snapshot) {
                           if (snapshot.data == true) {
                             return Container(
-                              color: Colors.white.withOpacity(0.3),
+                              color: theme.colorScheme.onSurface.withValues(
+                                alpha: 0.1,
+                              ),
                               child: const Center(
                                 child: CircularProgressIndicator(),
                               ),

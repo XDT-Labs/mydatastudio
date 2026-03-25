@@ -32,7 +32,7 @@ class SetupStep1 extends StatelessWidget {
     validators: [Validators.mustMatch('password', 'confirmPassword')],
   );
 
-  onStepContinueHandler(BuildContext context) {
+  void onStepContinueHandler(BuildContext context) {
     if (infoForm.valid) {
       //Create User
       var name = infoForm.findControl('firstName')?.value;

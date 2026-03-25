@@ -14,7 +14,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('DatabaseRepository', () {
-    late DatabaseManager databaseManager;
+
     io.Directory? path;
     String dbName = 'test-${DateTime.now().millisecondsSinceEpoch}.sqllite';
 

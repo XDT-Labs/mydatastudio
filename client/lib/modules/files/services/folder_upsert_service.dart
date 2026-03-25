@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 class FolderUpsertService
     extends RxService<FolderUpsertServiceCommand, Folder?> {
   static final FolderUpsertService _singleton = FolderUpsertService();
-  static get instance => _singleton;
+  static FolderUpsertService get instance => _singleton;
 
   @override
   Future<Folder?> invoke(FolderUpsertServiceCommand command) async {

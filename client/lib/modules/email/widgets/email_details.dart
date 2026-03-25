@@ -61,16 +61,18 @@ class _EmailDetails extends State<EmailDetails> {
   void _loadEmailContent() {
     final htmlBody = widget.email.htmlBody;
     final plainBody = widget.email.plainBody;
-    
+
     String html;
     if (htmlBody != null && htmlBody.trim().isNotEmpty) {
       html = htmlBody;
     } else if (plainBody != null && plainBody.trim().isNotEmpty) {
-      html = '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">$plainBody</body></html>';
+      html =
+          '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">$plainBody</body></html>';
     } else {
-      html = '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">(No content)</body></html>';
+      html =
+          '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">(No content)</body></html>';
     }
-    
+
     _controller.loadHtmlString(html);
   }
 
@@ -79,10 +81,7 @@ class _EmailDetails extends State<EmailDetails> {
     final theme = Theme.of(context);
 
     return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        border: Border(left: BorderSide(color: Colors.grey.shade300, width: 1)),
-      ),
+      decoration: BoxDecoration(color: theme.colorScheme.surface),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -90,9 +89,7 @@ class _EmailDetails extends State<EmailDetails> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: Colors.grey.shade200, width: 1),
-              ),
+              color: theme.colorScheme.surfaceContainerHigh,
             ),
             child: Row(
               children: [
@@ -127,10 +124,8 @@ class _EmailDetails extends State<EmailDetails> {
             ),
           ),
           // Content
-          Expanded(
-            child: WebViewWidget(controller: _controller),
-          ),
-          
+          Expanded(child: WebViewWidget(controller: _controller)),
+
           // Attachments Row
           if (_attachments.isNotEmpty) _buildAttachmentsSection(),
         ],
@@ -139,11 +134,9 @@ class _EmailDetails extends State<EmailDetails> {
   }
 
   Widget _buildAttachmentsSection() {
+    final theme = Theme.of(context);
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        border: Border(top: BorderSide(color: Colors.grey.shade200, width: 1)),
-      ),
+      decoration: BoxDecoration(color: theme.colorScheme.surfaceContainerHigh),
       padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -152,7 +145,10 @@ class _EmailDetails extends State<EmailDetails> {
             children: [
               Text(
                 '${_attachments.length} Attachments',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
               ),
             ],
           ),
@@ -175,7 +171,8 @@ class _EmailDetails extends State<EmailDetails> {
 
   Widget _buildAttachmentThumbnail(model.File file) {
     final isImage = file.contentType.startsWith('image/');
-    
+    final theme = Theme.of(context);
+
     return GestureDetector(
       onTap: () async {
         if (await io.File(file.path).exists()) {
@@ -186,13 +183,12 @@ class _EmailDetails extends State<EmailDetails> {
         width: 120,
         margin: const EdgeInsets.only(right: 8),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: theme.colorScheme.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: Colors.grey.shade300),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 2,
+              color: theme.colorScheme.shadow,
+              blurRadius: 4,
               offset: const Offset(0, 1),
             ),
           ],
@@ -202,27 +198,34 @@ class _EmailDetails extends State<EmailDetails> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: isImage
-                  ? Image.file(
-                      io.File(file.path),
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) =>
-                          const Icon(Icons.broken_image, color: Colors.grey),
-                    )
-                  : Center(
-                      child: Icon(
-                        _getIconForType(file.contentType),
-                        size: 32,
-                        color: Colors.grey.shade400,
+              child:
+                  isImage
+                      ? Image.file(
+                        io.File(file.path),
+                        fit: BoxFit.cover,
+                        errorBuilder:
+                            (context, error, stackTrace) => const Icon(
+                              Icons.broken_image,
+                              color: Colors.grey,
+                            ),
+                      )
+                      : Center(
+                        child: Icon(
+                          _getIconForType(file.contentType),
+                          size: 32,
+                          color: Colors.grey.shade400,
+                        ),
                       ),
-                    ),
             ),
             Container(
               padding: const EdgeInsets.all(6),
               color: Colors.grey.shade50,
               child: Text(
                 file.name,
-                style: const TextStyle(fontSize: 10, overflow: TextOverflow.ellipsis),
+                style: const TextStyle(
+                  fontSize: 10,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 maxLines: 1,
               ),
             ),

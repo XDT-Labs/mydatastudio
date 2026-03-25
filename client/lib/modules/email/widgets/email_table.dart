@@ -71,7 +71,6 @@ class _EmailTable extends State<EmailTable> {
     }
   }
 
-
   void _onScroll() {
     if (widget.onLoadMore == null) return;
     final pos = _verticalScrollController.position;
@@ -93,7 +92,7 @@ class _EmailTable extends State<EmailTable> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.grey.shade50,
+      color: Colors.white,
       constraints: const BoxConstraints.expand(),
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
@@ -117,6 +116,7 @@ class _EmailTable extends State<EmailTable> {
                 dataRowMaxHeight: 40,
                 dataRowMinHeight: 40,
                 headingRowHeight: 40,
+                headingRowColor: WidgetStateProperty.all(Colors.white),
                 rows: getRows(context, widget.emails, constraints.maxWidth),
               ),
             ),

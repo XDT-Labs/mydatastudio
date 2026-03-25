@@ -96,8 +96,8 @@ def load_embedding_model(model_id: str, filename: str, local_dir: str) -> Any:
     """
     print(f"[EMBEDDING] Attempting to load embedding model: {model_id}")
     
-    # Check if it's the Qwen-VL Transformers model
-    if "Qwen3-VL-Embedding" in model_id:
+    # Check if it's the Qwen-VL or SigLIP Transformers model
+    if "Qwen3-VL-Embedding" in model_id or "siglip" in model_id.lower():
         return load_transformers_embedding_model(model_id, local_dir)
     
     # Default to LlamaCpp for GGUF models
@@ -170,6 +170,71 @@ def generate_embedding(
     return generate_transformers_multimodal_embedding(model, processor, text, image_base64)
 
 
+def _generate_siglip_embedding(
+    model: Any, 
+    processor: Any, 
+    text: Optional[str] = None, 
+    image_base64: Optional[str] = None
+) -> List[float]:
+    import base64
+    import io
+    from PIL import Image
+
+    device = next(model.parameters()).device
+    
+    images = []
+    if image_base64:
+        if image_base64.startswith("data:image"):
+            image_base64 = image_base64.split(",")[1]
+        try:
+            image_bytes = base64.b64decode(image_base64)
+            images.append(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
+        except Exception as e:
+            print(f"[EMBEDDING] Failed to parse image_base64: {e}")
+            raise ValueError("Invalid image_base64 format provided.")
+            
+    texts = [text] if text else None
+    
+    if images and texts:
+        inputs = processor(text=texts, images=images, padding="max_length", return_tensors="pt").to(device)
+        with torch.no_grad():
+            image_kwargs = {"pixel_values": inputs.pixel_values}
+            if "pixel_attention_mask" in inputs:
+                image_kwargs["attention_mask"] = inputs.pixel_attention_mask
+            if "spatial_shapes" in inputs:
+                image_kwargs["spatial_shapes"] = inputs.spatial_shapes
+            image_features = model.get_image_features(**image_kwargs)
+            text_kwargs = {"input_ids": inputs.input_ids}
+            if "attention_mask" in inputs:
+                text_kwargs["attention_mask"] = inputs.attention_mask
+            text_features = model.get_text_features(**text_kwargs)
+            image_embeds = torch.nn.functional.normalize(image_features, p=2, dim=1)
+            text_embeds = torch.nn.functional.normalize(text_features, p=2, dim=1)
+            embeddings = torch.nn.functional.normalize(image_embeds + text_embeds, p=2, dim=1)
+    elif images:
+        inputs = processor(images=images, padding="max_length", return_tensors="pt").to(device)
+        with torch.no_grad():
+            image_kwargs = {"pixel_values": inputs.pixel_values}
+            if "pixel_attention_mask" in inputs:
+                image_kwargs["attention_mask"] = inputs.pixel_attention_mask
+            if "spatial_shapes" in inputs:
+                image_kwargs["spatial_shapes"] = inputs.spatial_shapes
+            image_features = model.get_image_features(**image_kwargs)
+            embeddings = torch.nn.functional.normalize(image_features, p=2, dim=1)
+    elif texts:
+        inputs = processor(text=texts, padding="max_length", return_tensors="pt").to(device)
+        with torch.no_grad():
+            text_kwargs = {"input_ids": inputs.input_ids}
+            if "attention_mask" in inputs:
+                text_kwargs["attention_mask"] = inputs.attention_mask
+            text_features = model.get_text_features(**text_kwargs)
+            embeddings = torch.nn.functional.normalize(text_features, p=2, dim=1)
+    else:
+        raise ValueError("Either text or image_base64 must be provided.")
+        
+    return embeddings[0].tolist()
+
+
 def generate_transformers_multimodal_embedding(
     model: Any, 
     processor: Any, 
@@ -177,8 +242,13 @@ def generate_transformers_multimodal_embedding(
     image_base64: Optional[str] = None
 ) -> List[float]:
     """
-    Generate embeddings using Qwen-VL Transformers model.
+    Generate embeddings using Qwen-VL or SigLIP Transformers model.
     """
+    model_type = getattr(getattr(model, 'config', object()), 'model_type', '')
+    model_name = getattr(getattr(model, 'config', object()), '_name_or_path', '')
+    if 'siglip' in model_type.lower() or 'siglip' in model_name.lower():
+        return _generate_siglip_embedding(model, processor, text, image_base64)
+        
     device = next(model.parameters()).device
     
     content = []

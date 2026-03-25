@@ -70,6 +70,16 @@ class DatabaseManager {
 
   Future<String> _getConfigPath() async {
     var supportPath = await getApplicationSupportDirectory();
+
+    // macOS path_provider quirk: ensure the directory matches our realm name if on develop
+    if (io.Platform.isMacOS && AppConstants.realmName.endsWith('.dev')) {
+      if (!supportPath.path.endsWith(AppConstants.realmName)) {
+        // Adjust path to use the .dev version
+        final parent = supportPath.parent.path;
+        supportPath = io.Directory(p.join(parent, AppConstants.realmName));
+      }
+    }
+
     MainApp.supportDirectory.add(supportPath);
 
     // Look for config file with user selected path for DB and Files
@@ -336,9 +346,12 @@ class AppDatabase extends _$AppDatabase {
 
           // Step 2: Strip absolute prefix from files.path, files.parent.
           // We do this in Dart by loading rows and updating them.
-          final colRows = await m.database
-              .customSelect('SELECT id, path FROM collections WHERE path IS NOT NULL AND path != \'\'')
-              .get();
+          final colRows =
+              await m.database
+                  .customSelect(
+                    'SELECT id, path FROM collections WHERE path IS NOT NULL AND path != \'\'',
+                  )
+                  .get();
 
           for (final colRow in colRows) {
             final colId = colRow.read<String>('id');
@@ -348,23 +361,25 @@ class AppDatabase extends _$AppDatabase {
             // Update files — only migrate rows whose path still contains
             // the absolute prefix (not yet migrated). Rows already using
             // a relative path are left untouched.
-            final fileRows = await m.database
-                .customSelect(
-                  'SELECT id, path, parent FROM files WHERE collection_id = ? AND path LIKE ?',
-                  variables: [
-                    Variable.withString(colId),
-                    Variable.withString('$prefix%'),
-                  ],
-                )
-                .get();
+            final fileRows =
+                await m.database
+                    .customSelect(
+                      'SELECT id, path, parent FROM files WHERE collection_id = ? AND path LIKE ?',
+                      variables: [
+                        Variable.withString(colId),
+                        Variable.withString('$prefix%'),
+                      ],
+                    )
+                    .get();
             for (final row in fileRows) {
               final oldId = row.read<String>('id');
               final oldPath = row.read<String>('path');
               final oldParent = row.read<String>('parent');
               final relPath = oldPath.substring(prefix.length);
-              final relParent = oldParent.startsWith(prefix)
-                  ? oldParent.substring(prefix.length)
-                  : (oldParent == root ? '' : oldParent);
+              final relParent =
+                  oldParent.startsWith(prefix)
+                      ? oldParent.substring(prefix.length)
+                      : (oldParent == root ? '' : oldParent);
               final newId = '$colId:$relPath';
               if (newId == oldId) continue; // already migrated, skip
               // Delete any conflicting row with the new id first so we don't
@@ -380,23 +395,25 @@ class AppDatabase extends _$AppDatabase {
             }
 
             // Update folders — same idempotent logic.
-            final folderRows = await m.database
-                .customSelect(
-                  'SELECT id, path, parent FROM folders WHERE collection_id = ? AND path LIKE ?',
-                  variables: [
-                    Variable.withString(colId),
-                    Variable.withString('$prefix%'),
-                  ],
-                )
-                .get();
+            final folderRows =
+                await m.database
+                    .customSelect(
+                      'SELECT id, path, parent FROM folders WHERE collection_id = ? AND path LIKE ?',
+                      variables: [
+                        Variable.withString(colId),
+                        Variable.withString('$prefix%'),
+                      ],
+                    )
+                    .get();
             for (final row in folderRows) {
               final oldId = row.read<String>('id');
               final oldPath = row.read<String>('path');
               final oldParent = row.read<String>('parent');
               final relPath = oldPath.substring(prefix.length);
-              final relParent = oldParent.startsWith(prefix)
-                  ? oldParent.substring(prefix.length)
-                  : (oldParent == root ? '' : oldParent);
+              final relParent =
+                  oldParent.startsWith(prefix)
+                      ? oldParent.substring(prefix.length)
+                      : (oldParent == root ? '' : oldParent);
               final newId = '$colId:$relPath';
               if (newId == oldId) continue;
               await m.database.customStatement(
@@ -586,7 +603,10 @@ LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb) {
       return NativeDatabase.createInBackground(
         file,
         logStatements: false,
-        cachePreparedStatements: true,
+        setup: (db) {
+          db.execute('PRAGMA busy_timeout=5000;');
+          db.execute('PRAGMA journal_mode=WAL;');
+        },
         sqlite3: _loadExtensions,
       );
     } else {

@@ -10,7 +10,7 @@
             "request": "launch",
             "type": "dart",
             "args": [
-                "--dart-define-from-file=config/secrets.json"
+                "--dart-define-from-file=config/secrets-dev.json"
             ]
         },
         {
@@ -20,7 +20,7 @@
             "type": "dart",
             "args": [
                 "--enable-impeller",
-                "--dart-define-from-file=config/secrets.json"
+                "--dart-define-from-file=config/secrets-dev.json"
             ]
         },
         {
@@ -30,7 +30,7 @@
             "type": "dart",
             "flutterMode": "profile",
             "args": [
-                "--dart-define-from-file=config/secrets.json"
+                "--dart-define-from-file=config/secrets-dev.json"
             ]
         },
         {

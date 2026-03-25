@@ -15,13 +15,12 @@ const int kFilesPageSize = 200;
 
 class GetFileAndFoldersService
     extends RxService<GetFileAndFoldersServiceCommand, List<FileAsset>> {
-  static final GetFileAndFoldersService _singleton =
-      GetFileAndFoldersService();
-  static get instance => _singleton;
+  static final GetFileAndFoldersService _singleton = GetFileAndFoldersService();
+  static GetFileAndFoldersService get instance => _singleton;
   AppLogger logger = AppLogger(null);
 
   /// Tracks the accumulated pages so load-more can append without reading
-  /// the sink (which is typed as Subject<R> and has no valueOrNull).
+  /// the sink (which is typed as `Subject<R>` and has no valueOrNull).
   List<FileAsset> _currentItems = [];
 
   @override
@@ -42,39 +41,48 @@ class GetFileAndFoldersService
     // absolutePath is used for filesystem operations (scanner start).
     String absolutePath;
 
-    const _emailScanners = {
+    const emailScanners = {
       AppConstants.scannerEmailOutlookPst,
       AppConstants.scannerEmailYahoo,
       AppConstants.scannerEmailGmail,
     };
 
-    if (_emailScanners.contains(command.collection.scanner)) {
+    if (emailScanners.contains(command.collection.scanner)) {
       // Email collections use a computed extraction root; files are stored
       // relative to this root in the database.
       final storagePath = DatabaseManager.instance.storagePath;
       if (storagePath != null) {
         final extractionRoot = p.join(
-          storagePath, 'files', 'email', command.collection.id,
+          storagePath,
+          'files',
+          'email',
+          command.collection.id,
         );
         // command.path is always a relative path (e.g. "" / "INBOX" / "INBOX/2022").
         // The only legacy case where it could be wrong is if an absolute path
         // that is NOT under the extraction root was stored (e.g. the old
         // email-address string). Reset to root only in that case.
-        if (p.isAbsolute(command.path) && !command.path.startsWith(extractionRoot)) {
+        if (p.isAbsolute(command.path) &&
+            !command.path.startsWith(extractionRoot)) {
           relativePath = '';
         }
         // Build the absolute path for the scanner from the (possibly corrected) relativePath.
-        absolutePath = relativePath.isEmpty
-            ? extractionRoot
-            : p.join(extractionRoot, relativePath);
+        absolutePath =
+            relativePath.isEmpty
+                ? extractionRoot
+                : p.join(extractionRoot, relativePath);
       } else {
         absolutePath = FilePathResolver.absoluteFromPath(
-            relativePath, command.collection);
+          relativePath,
+          command.collection,
+        );
       }
     } else {
       // Local/cloud collections: resolve absolute path from localCopyPath.
       absolutePath = FilePathResolver.absoluteFromPath(
-          relativePath, command.collection);
+        relativePath,
+        command.collection,
+      );
       if (absolutePath.isEmpty) absolutePath = command.collection.path;
     }
 
@@ -86,9 +94,13 @@ class GetFileAndFoldersService
     }
 
     // Folders always load fully; only files paginate.
-    final List<FileAsset> folders = command.offset == 0
-        ? await folderRepo.getByParentPath(command.collection.id, relativePath)
-        : [];
+    final List<FileAsset> folders =
+        command.offset == 0
+            ? await folderRepo.getByParentPath(
+              command.collection.id,
+              relativePath,
+            )
+            : [];
 
     final List<FileAsset> files = await fileRepo.getByParentPath(
       command.collection.id,
@@ -113,6 +125,8 @@ class GetFileAndFoldersService
 
 class GetFileAndFoldersServiceCommand implements RxCommand {
   Collection collection;
+
+  /// Loads all files and folders for `path`. `path` can be a `Folder.ID` or `null` for the root of the collection.
   String path;
   bool refreshOnly;
 
@@ -130,5 +144,3 @@ class GetFileAndFoldersServiceCommand implements RxCommand {
     this.pageSize = kFilesPageSize,
   });
 }
-
-

@@ -364,8 +364,9 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
       // Start the one-time scan isolate immediately
       final writerPort = await DatabaseManager.instance.writerPort;
       final serverUrl = MainApp.llmServiceUrl.value;
-      if (serverUrl == null)
+      if (serverUrl == null) {
         throw Exception('LLM Service url is not configured');
+      }
 
       final pstIsolate = OutlookPstScannerIsolate(
         token: RootIsolateToken.instance,
@@ -513,7 +514,6 @@ class _YahooTabState extends State<_YahooTab> {
     'appPassword': FormControl<String>(
       validators: [Validators.required, Validators.minLength(16)],
     ),
-    'downloadAttachments': FormControl<bool>(value: true),
   });
 
   static const Color _yahooPurple = Color(0xFF6001D2);
@@ -536,9 +536,10 @@ class _YahooTabState extends State<_YahooTab> {
       // Create collection manually (App Password approach)
       final collectionId = const Uuid().v4();
       final appDataDir = MainApp.appDataDirectory.valueOrNull;
-      final extractionRoot = appDataDir != null
-          ? p.join(appDataDir, 'files', 'email', collectionId)
-          : null;
+      final extractionRoot =
+          appDataDir != null
+              ? p.join(appDataDir, 'files', 'email', collectionId)
+              : null;
       final c = Collection(
         id: collectionId,
         name: email,
@@ -551,8 +552,7 @@ class _YahooTabState extends State<_YahooTab> {
         accessToken: appPassword, // Store app password in accessToken field
         userId: email,
         needsReAuth: false,
-        downloadAttachments:
-            _form.control('downloadAttachments').value as bool? ?? false,
+        downloadAttachments: true,
       );
 
       GetCollectionsService.instance.addCollection(c);
@@ -706,16 +706,6 @@ class _YahooTabState extends State<_YahooTab> {
                   'minLength':
                       (error) => 'App password should be 16 characters',
                 },
-              ),
-              const SizedBox(height: 24),
-              ReactiveCheckboxListTile(
-                formControlName: 'downloadAttachments',
-                title: const Text('Save a local copy of all attachments'),
-                subtitle: const Text(
-                  'Downloaded attachments will be indexed for search',
-                ),
-                controlAffinity: ListTileControlAffinity.leading,
-                contentPadding: EdgeInsets.zero,
               ),
               const SizedBox(height: 24),
               SizedBox(

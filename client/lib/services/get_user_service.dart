@@ -5,7 +5,7 @@ import 'package:mydatatools/services/rx_service.dart';
 
 class GetUserService extends RxService<GetUserServiceCommand, AppUser?> {
   static final GetUserService _singleton = GetUserService();
-  static get instance => _singleton;
+  static GetUserService get instance => _singleton;
 
   @override
   Future<AppUser?> invoke(GetUserServiceCommand command) async {

@@ -71,7 +71,7 @@ class _SetupStep3State extends State<SetupStep3> {
     return appUser;
   }
 
-  onResetKeysHandler() {
+  void onResetKeysHandler() {
     encryptionForm.findControl('publicKey')?.value = '';
     encryptionForm.findControl('privateKey')?.value = '';
 
@@ -83,7 +83,7 @@ class _SetupStep3State extends State<SetupStep3> {
         .encodePrivateKeyToPemPKCS1(keys.privateKey);
   }
 
-  onStepContinueHandler(BuildContext context, AppUser user) {
+  void onStepContinueHandler(BuildContext context, AppUser user) {
     //Do something with this information
     logger.d('setup step 3 is complete');
 
