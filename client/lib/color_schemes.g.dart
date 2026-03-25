@@ -40,37 +40,4 @@ const lightColorScheme = ColorScheme(
   surfaceContainerHighest: Color(0xFFDCE1E4),
 );
 
-// We keep dark scheme relatively close to the default mapped for dark mode, 
-// using the same primary hue but adapted for dark surfaces, to ensure it doesn't break if system is dark.
-const darkColorScheme = ColorScheme(
-  brightness: Brightness.dark,
-  primary: Color(0xFF607BFE),
-  onPrimary: Color(0xFFFFFFFF),
-  primaryContainer: Color(0xFF3452D4),
-  onPrimaryContainer: Color(0xFFDFE1F9),
-  secondary: Color(0xFFCAC4D0),
-  onSecondary: Color(0xFF332D41),
-  secondaryContainer: Color(0xFF4A4458),
-  onSecondaryContainer: Color(0xFFE8DEF8),
-  tertiary: Color(0xFFEFB8C8),
-  onTertiary: Color(0xFF492532),
-  tertiaryContainer: Color(0xFF633B48),
-  onTertiaryContainer: Color(0xFFFFD8E4),
-  error: Color(0xFFF2B8B5),
-  onError: Color(0xFF601410),
-  errorContainer: Color(0xFF8C1D18),
-  onErrorContainer: Color(0xFFF9DEDC),
-  outline: Color(0xFF938F99),
-  outlineVariant: Color(0x33CAC4D0),
 
-  surface: Color(0xFF1C1B1F),
-  onSurface: Color(0xFFE6E1E5),
-
-  onSurfaceVariant: Color(0xFFCAC4D0),
-  inverseSurface: Color(0xFFE6E1E5),
-  onInverseSurface: Color(0xFF313033),
-  inversePrimary: Color(0xFF3452D4),
-  shadow: Color(0x0A000000),
-  surfaceTint: Color(0xFF607BFE),
-  scrim: Color(0xFF000000),
-);

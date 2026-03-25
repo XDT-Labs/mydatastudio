@@ -141,30 +141,27 @@ class _FileDrawer extends State<FileDrawer> {
 
     return SizedBox.expand(
       child: Container(
-        padding: const EdgeInsets.all(8),
+        color: Colors.white,
         child: Scaffold(
           backgroundColor: Colors.transparent,
           floatingActionButton: FloatingActionButton(
             tooltip: "Add Source",
-            onPressed: () {
-              GoRouter.of(context).go("/files/add");
-            },
+            onPressed: () => GoRouter.of(context).go("/files/add"),
             child: const Icon(Icons.add),
           ),
           body: Column(
             children: [
-              const SizedBox(height: 8),
               const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8.0),
+                padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12),
                 child: Align(
                   alignment: Alignment.topLeft,
                   child: Text(
                     "SOURCES",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 12,
+                      fontSize: 11,
                       color: Colors.grey,
-                      letterSpacing: 1.2,
+                      letterSpacing: 1.5,
                     ),
                   ),
                 ),
@@ -183,95 +180,66 @@ class _FileDrawer extends State<FileDrawer> {
                   return const SizedBox.shrink();
                 },
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               Expanded(
                 child: Column(
                   children: [
                     // --- FILES ---
-                    _buildAccordionHeader(
-                      theme,
-                      AccordionSection.files,
-                      "Files",
-                      Icons.folder_outlined,
-                    ),
+                    _buildAccordionHeader(theme, AccordionSection.files, "Files", Icons.folder_outlined),
                     if (_expandedSection == AccordionSection.files)
                       Expanded(
                         child: SingleChildScrollView(
-                          padding: EdgeInsets.zero,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildSubHeader(theme, "Local Sources"),
-                              ...localFiles.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
-
+                              ...localFiles.map((c) => _buildCollectionTile(context, theme, c)),
                               _buildSubHeader(theme, "Google Drive"),
-                              ...gdriveFiles.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
+                              ...gdriveFiles.map((c) => _buildCollectionTile(context, theme, c)),
+                              _buildSubHeader(theme, "DropBox (future)"),
+                              ...dropboxFiles.map((c) => _buildCollectionTile(context, theme, c)),
+                              if (onedriveFiles.isNotEmpty) ...[
+                                _buildSubHeader(theme, "OneDrive"),
+                                ...onedriveFiles.map((c) => _buildCollectionTile(context, theme, c)),
+                              ],
                             ],
                           ),
                         ),
                       ),
 
                     // --- EMAIL ATTACHMENTS ---
-                    _buildAccordionHeader(
-                      theme,
-                      AccordionSection.email,
-                      "Email Attachments",
-                      Icons.email_outlined,
-                    ),
+                    _buildAccordionHeader(theme, AccordionSection.email, "Email Attachments", Icons.email_outlined),
                     if (_expandedSection == AccordionSection.email)
                       Expanded(
                         child: SingleChildScrollView(
-                          padding: EdgeInsets.zero,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildSubHeader(theme, "GMail"),
-                              ...gmailEmails.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
+                              ...gmailEmails.map((c) => _buildCollectionTile(context, theme, c)),
                               _buildSubHeader(theme, "Yahoo Mail"),
-                              ...yahooEmails.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
+                              ...yahooEmails.map((c) => _buildCollectionTile(context, theme, c)),
                               _buildSubHeader(theme, "PST Backups"),
-                              ...pstEmails.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
+                              ...pstEmails.map((c) => _buildCollectionTile(context, theme, c)),
                             ],
                           ),
                         ),
                       ),
 
                     // --- SOCIAL MEDIA ---
-                    _buildAccordionHeader(
-                      theme,
-                      AccordionSection.social,
-                      "Social Media",
-                      Icons.share_outlined,
-                    ),
+                    _buildAccordionHeader(theme, AccordionSection.social, "Social Media", Icons.share_outlined),
                     if (_expandedSection == AccordionSection.social)
                       Expanded(
                         child: SingleChildScrollView(
-                          padding: EdgeInsets.zero,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildSubHeader(theme, "Facebook"),
-                              ...facebookSocial.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
+                              ...facebookSocial.map((c) => _buildCollectionTile(context, theme, c)),
                               _buildSubHeader(theme, "Twitter"),
-                              ...twitterSocial.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
+                              ...twitterSocial.map((c) => _buildCollectionTile(context, theme, c)),
                               _buildSubHeader(theme, "Tiktok"),
-                              ...tiktokSocial.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
+                              ...tiktokSocial.map((c) => _buildCollectionTile(context, theme, c)),
                             ],
                           ),
                         ),
@@ -296,17 +264,15 @@ class _FileDrawer extends State<FileDrawer> {
     return GestureDetector(
       onTap: () => setState(() => _expandedSection = section),
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 2),
+        margin: const EdgeInsets.symmetric(vertical: 0.5), // Tiny separator space
         decoration: BoxDecoration(
           color:
               isExpanded
-                  ? theme.colorScheme.primaryContainer.withValues(alpha: 0.4)
-                  : theme.colorScheme.surfaceContainerHigh.withValues(
-                    alpha: 0.5,
-                  ),
+                  ? theme.colorScheme.primaryContainer
+                  : theme.colorScheme.surfaceContainerHigh,
           borderRadius: BorderRadius.zero,
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
             Icon(
@@ -346,17 +312,19 @@ class _FileDrawer extends State<FileDrawer> {
   }
 
   Widget _buildSubHeader(ThemeData theme, String title) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          title.toUpperCase(),
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.primary.withValues(alpha: 0.6),
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.5,
-          ),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
+      ),
+      child: Text(
+        title.toUpperCase(),
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+          fontWeight: FontWeight.w800,
+          letterSpacing: 1.0,
+          fontSize: 9,
         ),
       ),
     );

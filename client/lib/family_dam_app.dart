@@ -62,6 +62,9 @@ class FamilyDamApp extends StatelessWidget {
       dataTableTheme: DataTableThemeData(
         dividerThickness: 0, // "The No-Line Rule"
         dataRowColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected) || states.contains(WidgetState.pressed)) {
+            return colorScheme.primaryContainer.withValues(alpha: 0.2);
+          }
           if (states.contains(WidgetState.hovered)) {
             return colorScheme.surfaceContainerHigh;
           }
@@ -104,8 +107,7 @@ class FamilyDamApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       routerConfig: AppRouter.instance,
       theme: _buildTheme(lightColorScheme, context),
-      darkTheme: _buildTheme(darkColorScheme, context),
-      themeMode: ThemeMode.system,
+      themeMode: ThemeMode.light,
     );
   }
 }

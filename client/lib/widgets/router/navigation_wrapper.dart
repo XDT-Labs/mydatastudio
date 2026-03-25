@@ -41,7 +41,7 @@ class _NavigationWrapperState extends State<NavigationWrapper> {
                           ? Container(
                               width: 250, 
                               decoration: BoxDecoration(
-                                color: theme.colorScheme.surfaceContainerLow,
+                                color: Colors.white,
                               ),
                               child: widget.drawer,
                             )

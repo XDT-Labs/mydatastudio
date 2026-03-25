@@ -71,6 +71,7 @@ class _FileTable extends State<FileTable> {
               dataRowMaxHeight: 40,
               dataRowMinHeight: 40,
               headingRowHeight: 40,
+              headingRowColor: WidgetStateProperty.all(Colors.white),
               columnSpacing: spacing,
               horizontalMargin: 12,
               showCheckboxColumn: true,

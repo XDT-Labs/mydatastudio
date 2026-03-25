@@ -266,7 +266,11 @@ class _EmailPage extends State<EmailPage> {
       return const NewEmailPage();
     }
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         centerTitle: false,
         title:
             isSearching
@@ -282,21 +286,16 @@ class _EmailPage extends State<EmailPage> {
                   },
                 )
                 : getBreadcrumb(collection, selectedFolderName),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(2.0),
-          child: Column(
-            children: [
-              if (isScanning || _isLoadingMore)
-                const LinearProgressIndicator(
+        bottom: (isScanning || _isLoadingMore)
+            ? const PreferredSize(
+                preferredSize: Size.fromHeight(2.0),
+                child: LinearProgressIndicator(
                   minHeight: 2,
                   backgroundColor: Colors.transparent,
                   valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                )
-              else
-                Container(height: 2.0, color: Colors.grey.shade300),
-            ],
-          ),
-        ),
+                ),
+              )
+            : null,
         actions: <Widget>[
           if (isSearching)
             IconButton(

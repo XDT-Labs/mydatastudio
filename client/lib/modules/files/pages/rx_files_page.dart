@@ -185,13 +185,13 @@ class _RxFilesPage extends State<RxFilesPage> {
     //parse path into a breadcrumb
 
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         centerTitle: false,
         title: getBreadcrumb(collection!, path ?? collection!.path),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1.0),
-          child: Container(height: 1.0, color: Colors.grey.shade300),
-        ),
         actions: <Widget>[
           IconButton(
             icon: const Icon(Icons.add, color: Colors.black, weight: 200),
