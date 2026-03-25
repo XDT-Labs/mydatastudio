@@ -142,7 +142,8 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         if (file.path.startsWith('gdrive://')) {
           final bytes = await _getGDriveFileBytes(file);
           if (bytes != null) {
-            final uint8bytes = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+            final uint8bytes =
+                bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
             doc = await PdfDocument.openData(uint8bytes);
           } else {
             throw 'Failed to download PDF bytes from Google Drive';
@@ -228,7 +229,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       // Prefer direct API media download URL if it's a gdrive:// path
       if (file.path.startsWith('gdrive://')) {
         final fileId = file.path.replaceFirst('gdrive://', '');
-        uri = Uri.parse('https://www.googleapis.com/drive/v3/files/$fileId?alt=media');
+        uri = Uri.parse(
+          'https://www.googleapis.com/drive/v3/files/$fileId?alt=media',
+        );
       } else if (file.downloadUrl != null) {
         uri = Uri.parse(file.downloadUrl!);
         final queryParams = Map<String, String>.from(uri.queryParameters);
@@ -290,9 +293,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     final tabCount = isImage ? 3 : 1;
 
     return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-      ),
+      decoration: BoxDecoration(color: theme.colorScheme.surface),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -427,14 +428,19 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         return _previewContainer(child: _buildGenericIcon(asset.contentType));
       }
     } else if (asset is Folder) {
-      final child = asset.thumbnail != null
-          ? _buildThumbnailWidget(asset.thumbnail!)
-          : const Center(child: Icon(Icons.folder, size: 80, color: Colors.amber));
+      final child =
+          asset.thumbnail != null
+              ? _buildThumbnailWidget(asset.thumbnail!)
+              : const Center(
+                child: Icon(Icons.folder, size: 80, color: Colors.amber),
+              );
       return _previewContainer(child: child);
     }
 
     return _previewContainer(
-      child: const Center(child: Icon(Icons.folder, size: 80, color: Colors.amber)),
+      child: const Center(
+        child: Icon(Icons.folder, size: 80, color: Colors.amber),
+      ),
     );
   }
 
@@ -450,7 +456,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     } catch (_) {}
     return _buildGenericIcon(file.contentType);
   }
-  
+
   Widget _buildVideoPreview(File file) {
     return _previewContainer(
       background: Colors.grey.shade900,
@@ -492,33 +498,41 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
             // ─── PDF viewer ──────────────────────────────────
             SizedBox(
               height: _previewHeight,
-              child: _pdfError != null
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.error_outline, color: Colors.red, size: 32),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Error loading PDF: $_pdfError',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 12, color: Colors.red),
-                            ),
-                          ],
+              child:
+                  _pdfError != null
+                      ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.error_outline,
+                                color: Colors.red,
+                                size: 32,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Error loading PDF: $_pdfError',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.red,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    )
-                  : (_loadingPdf || _pdfController == null)
+                      )
+                      : (_loadingPdf || _pdfController == null)
                       ? const Center(child: CircularProgressIndicator())
                       : PdfView(
-                          controller: _pdfController!,
-                          scrollDirection: Axis.horizontal,
-                          onPageChanged: (page) {
-                            if (mounted) setState(() => _pdfCurrentPage = page);
-                          },
-                        ),
+                        controller: _pdfController!,
+                        scrollDirection: Axis.horizontal,
+                        onPageChanged: (page) {
+                          if (mounted) setState(() => _pdfCurrentPage = page);
+                        },
+                      ),
             ),
 
             // ─── Page navigation bar ─────────────────────────

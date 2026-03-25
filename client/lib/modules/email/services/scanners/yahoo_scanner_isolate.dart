@@ -123,7 +123,6 @@ class YahooScannerIsolate {
 
     // We use a fresh isolate for the move operation to avoid blocking or being blocked by long-running scans
     await Isolate.spawn(YahooScannerIsolateWorker.worker, args);
-
     if (statusPort != null) {
       statusPort.send("Remote delete request sent for ${uids.length} messages");
     }
@@ -187,7 +186,6 @@ class YahooScannerIsolateWorker {
         for (final uid in uidsToMove) {
           sequence.add(uid);
         }
-
         try {
           await client.uidMove(sequence, targetMailboxPath: trashPath);
           logger.s("Cleanup: remote move to $trashPath complete.");

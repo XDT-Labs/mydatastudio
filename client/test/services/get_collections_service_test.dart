@@ -38,21 +38,15 @@ void main() {
       expect(identical(a, b), isTrue);
     });
 
-    test(
-      'GetCollectionsServiceCommand stores type correctly',
-      () {
-        final cmd = GetCollectionsServiceCommand('email');
-        expect(cmd.type, equals('email'));
-      },
-    );
+    test('GetCollectionsServiceCommand stores type correctly', () {
+      final cmd = GetCollectionsServiceCommand('email');
+      expect(cmd.type, equals('email'));
+    });
 
-    test(
-      'GetCollectionsServiceCommand nullable type is allowed',
-      () {
-        final cmd = GetCollectionsServiceCommand(null);
-        expect(cmd.type, isNull);
-      },
-    );
+    test('GetCollectionsServiceCommand nullable type is allowed', () {
+      final cmd = GetCollectionsServiceCommand(null);
+      expect(cmd.type, isNull);
+    });
   });
 }
 

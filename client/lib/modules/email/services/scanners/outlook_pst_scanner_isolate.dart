@@ -16,7 +16,6 @@ import 'package:uuid/uuid.dart';
 
 import 'package:http/http.dart' as http;
 
-
 class OutlookPstScannerIsolate {
   final RootIsolateToken? token;
   final SendPort? dbWriterPort;
@@ -48,7 +47,6 @@ class OutlookPstScannerIsolate {
       'serverUrl': serverUrl,
     };
 
-
     _isolate = await Isolate.spawn(OutlookPstScannerIsolateWorker.worker, args);
 
     receivePort.listen((message) {
@@ -78,13 +76,12 @@ class OutlookPstScannerIsolateWorker {
     final String appDir = workerArgs['appDir'];
     final String? serverUrl = workerArgs['serverUrl'];
 
-    
     if (token != null) {
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
     }
 
     final AppLogger logger = AppLogger(clientPort);
-    
+
     // 1. Prepare extraction root for attachments
     // Using a folder relative to the collection name in the storage workspace
     final extractionRoot = p.join(appDir, 'files', 'email', collection.id);
@@ -92,16 +89,18 @@ class OutlookPstScannerIsolateWorker {
       io.Directory(extractionRoot).createSync(recursive: true);
     }
 
-    logger.i("PST Scanner: Started parsing ${collection.path} -> $extractionRoot");
+    logger.i(
+      "PST Scanner: Started parsing ${collection.path} -> $extractionRoot",
+    );
 
     if (serverUrl == null) {
-       logger.e("PST Scanner: serverUrl is missing!");
-       Isolate.exit(clientPort, {'error': 'missing_server_url'});
+      logger.e("PST Scanner: serverUrl is missing!");
+      Isolate.exit(clientPort, {'error': 'missing_server_url'});
     }
 
     // 2. Call FastAPI endpoint
     logger.i("PST Scanner: Calling AI Chat API at $serverUrl/import/pst");
-    
+
     final client = http.Client();
     final request = http.Request('POST', Uri.parse("$serverUrl/import/pst"));
     request.headers['Content-Type'] = 'application/json';
@@ -111,7 +110,7 @@ class OutlookPstScannerIsolateWorker {
     });
 
     final response = await client.send(request);
-    
+
     if (response.statusCode != 200) {
       logger.e("PST Scanner: API failed with status ${response.statusCode}");
       Isolate.exit(clientPort, {'error': 'api_failed'});
@@ -128,110 +127,124 @@ class OutlookPstScannerIsolateWorker {
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
-      try {
-        if (line.trim().isEmpty) return;
-        final data = jsonDecode(line);
+          try {
+            if (line.trim().isEmpty) return;
+            final data = jsonDecode(line);
 
+            if (data['type'] == 'folder') {
+              final folderId = const Uuid().v4();
+              folderPathToId[data['path']] = folderId;
 
-        if (data['type'] == 'folder') {
-          final folderId = const Uuid().v4();
-          folderPathToId[data['path']] = folderId;
-
-          logger.d("PST Folder: ${data['name']} (Path: ${data['path']}, Messages: ${data['count']})");
-
-          final folder = EmailFolder(
-            id: folderId,
-            collectionId: collection.id,
-            name: data['name'],
-            type: 'user',
-            parentId: p.dirname(data['path']) == "" || p.dirname(data['path']) == "." 
-                ? null 
-                : folderPathToId[p.dirname(data['path'])], 
-          );
-          
-          dbWriterPort.send({'type': 'email_folder', 'folder': folder});
-        } 
-        else if (data['type'] == 'email') {
-          final emailId = const Uuid().v4();
-          final folderId = folderPathToId[data['folder']] ?? 'INBOX';
-
-          final email = Email(
-            id: emailId,
-            collectionId: collection.id,
-            date: DateTime.tryParse(data['date'] ?? "") ?? DateTime.now(),
-            from: data['sender'] ?? "Unknown",
-            to: (data['to'] as List?)?.map((e) => e.toString()).toList() ?? [], 
-            cc: (data['cc'] as List?)?.map((e) => e.toString()).toList() ?? [],
-            subject: data['subject'] ?? "(No Subject)",
-            plainBody: data['body'] ?? "",
-            htmlBody: data['html_body'] ?? "",
-            folderId: folderId,
-            isRead: true,
-            hasAttachments: (data['attachments'] as List?)?.isNotEmpty ?? false,
-            isDeleted: false,
-          );
-
-          dbWriterPort.send({'type': 'batch_email', 'emails': [email]});
-
-          // Process attachments — also emit Folder records so the file module
-          // can navigate the directory tree (e.g., INBOX → 2010 → files).
-          for (var att in data['attachments']) {
-            final fileId = const Uuid().v4();
-            final attPath = att['path'] as String? ?? '';
-
-            // Ensure every directory level from extractionRoot down to the
-            // attachment's parent has a Folder record in the file module DB.
-            if (attPath.isNotEmpty) {
-              _ensureFolderPath(
-                attPath: attPath,
-                extractionRoot: extractionRoot,
-                collectionId: collection.id,
-                emailDate: email.date,
-                emittedFolderPaths: emittedFolderPaths,
-                dbWriterPort: dbWriterPort,
+              logger.d(
+                "PST Folder: ${data['name']} (Path: ${data['path']}, Messages: ${data['count']})",
               );
+
+              final folder = EmailFolder(
+                id: folderId,
+                collectionId: collection.id,
+                name: data['name'],
+                type: 'user',
+                parentId:
+                    p.dirname(data['path']) == "" ||
+                            p.dirname(data['path']) == "."
+                        ? null
+                        : folderPathToId[p.dirname(data['path'])],
+              );
+
+              dbWriterPort.send({'type': 'email_folder', 'folder': folder});
+            } else if (data['type'] == 'email') {
+              final emailId = const Uuid().v4();
+              final folderId = folderPathToId[data['folder']] ?? 'INBOX';
+
+              final email = Email(
+                id: emailId,
+                collectionId: collection.id,
+                date: DateTime.tryParse(data['date'] ?? "") ?? DateTime.now(),
+                from: data['sender'] ?? "Unknown",
+                to:
+                    (data['to'] as List?)?.map((e) => e.toString()).toList() ??
+                    [],
+                cc:
+                    (data['cc'] as List?)?.map((e) => e.toString()).toList() ??
+                    [],
+                subject: data['subject'] ?? "(No Subject)",
+                plainBody: data['body'] ?? "",
+                htmlBody: data['html_body'] ?? "",
+                folderId: folderId,
+                isRead: true,
+                hasAttachments:
+                    (data['attachments'] as List?)?.isNotEmpty ?? false,
+                isDeleted: false,
+              );
+
+              dbWriterPort.send({
+                'type': 'batch_email',
+                'emails': [email],
+              });
+
+              // Process attachments — also emit Folder records so the file module
+              // can navigate the directory tree (e.g., INBOX → 2010 → files).
+              for (var att in data['attachments']) {
+                final fileId = const Uuid().v4();
+                final attPath = att['path'] as String? ?? '';
+
+                // Ensure every directory level from extractionRoot down to the
+                // attachment's parent has a Folder record in the file module DB.
+                if (attPath.isNotEmpty) {
+                  _ensureFolderPath(
+                    attPath: attPath,
+                    extractionRoot: extractionRoot,
+                    collectionId: collection.id,
+                    emailDate: email.date,
+                    emittedFolderPaths: emittedFolderPaths,
+                    dbWriterPort: dbWriterPort,
+                  );
+                }
+
+                final file = File(
+                  id: fileId,
+                  name: att['name'],
+                  path: attPath,
+                  // Use p.dirname(attPath) so the file lives under its
+                  // INBOX/2010 sub-folder within the extraction root.
+                  // This makes it browsable when the file module opens at
+                  // extractionRoot.
+                  parent:
+                      attPath.isNotEmpty ? p.dirname(attPath) : extractionRoot,
+                  dateCreated: email.date,
+                  dateLastModified: email.date,
+                  collectionId: collection.id,
+                  contentType: _mapMimeType(
+                    att['contentType'] as String? ?? 'application/octet-stream',
+                  ),
+                  size: (att['size'] as num).toInt(),
+                  isDeleted: false,
+                  emailId: emailId,
+                );
+                dbWriterPort.send({'type': 'file', 'file': file});
+              }
+
+              count++;
+              if (count % 50 == 0) {
+                // Refresh rate of 50 emails keeps UI updates visible without
+                // hammering the main thread with DB queries.
+                clientPort.send({'type': 'refresh'});
+              }
+            } else if (data['type'] == 'debug') {
+              logger.d("PST Parser Debug: ${data['message']}");
+            } else if (data['type'] == 'error') {
+              logger.e("PST Parser Error: ${data['message']}");
             }
-
-            final file = File(
-              id: fileId,
-              name: att['name'],
-              path: attPath,
-              // Use p.dirname(attPath) so the file lives under its
-              // INBOX/2010 sub-folder within the extraction root.
-              // This makes it browsable when the file module opens at
-              // extractionRoot.
-              parent: attPath.isNotEmpty ? p.dirname(attPath) : extractionRoot,
-              dateCreated: email.date,
-              dateLastModified: email.date,
-              collectionId: collection.id,
-              contentType: _mapMimeType(att['contentType'] as String? ?? 'application/octet-stream'),
-              size: (att['size'] as num).toInt(),
-              isDeleted: false,
-              emailId: emailId,
-            );
-            dbWriterPort.send({'type': 'file', 'file': file});
+          } catch (e) {
+            logger.e("PST Isolate: Failed to parse line: $line. Error: $e");
           }
-
-          count++;
-          if (count % 50 == 0) {
-            // Refresh rate of 50 emails keeps UI updates visible without
-            // hammering the main thread with DB queries.
-            clientPort.send({'type': 'refresh'});
-          }
-        } 
-        else if (data['type'] == 'debug') {
-          logger.d("PST Parser Debug: ${data['message']}");
-        }
-        else if (data['type'] == 'error') {
-          logger.e("PST Parser Error: ${data['message']}");
-        }
-      } catch (e) {
-        logger.e("PST Isolate: Failed to parse line: $line. Error: $e");
-      }
-    }).asFuture();
+        })
+        .asFuture();
 
     // 4. Cleanup
-    logger.i("PST Scanner: Finished processing stream. Processed $count emails.");
+    logger.i(
+      "PST Scanner: Finished processing stream. Processed $count emails.",
+    );
 
     // Update collection status
     dbWriterPort.send({
@@ -305,4 +318,3 @@ class OutlookPstScannerIsolateWorker {
     }
   }
 }
-

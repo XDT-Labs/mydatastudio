@@ -21,7 +21,12 @@ import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class FileTable extends StatefulWidget {
-  const FileTable({super.key, required this.data, this.collection, this.scrollController});
+  const FileTable({
+    super.key,
+    required this.data,
+    this.collection,
+    this.scrollController,
+  });
   final List<FileAsset> data;
   final Collection? collection;
   final ScrollController? scrollController;
@@ -43,19 +48,26 @@ class _FileTable extends State<FileTable> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final totalWidth = constraints.maxWidth;
-        
+
         // Define fixed widths for other columns + spacers
-        const checkboxWidth = 48.0; 
+        const checkboxWidth = 48.0;
         const typeWidth = 80.0;
         const sizeWidth = 80.0;
         const dateWidth = 140.0;
-        const actionsWidth = 130.0; 
+        const actionsWidth = 130.0;
         const spacing = 20.0;
         const margin = 24.0; // 12 on each side
-        
+
         // Total width occupied by other columns and spacing
-        final fixedWidths = checkboxWidth + typeWidth + sizeWidth + dateWidth + actionsWidth + (4 * spacing) + margin;
-        
+        final fixedWidths =
+            checkboxWidth +
+            typeWidth +
+            sizeWidth +
+            dateWidth +
+            actionsWidth +
+            (4 * spacing) +
+            margin;
+
         // Remaining space for Name column
         final nameWidth = max(200.0, totalWidth - fixedWidths);
 
@@ -112,7 +124,10 @@ class _FileTable extends State<FileTable> {
   List<DataColumn> getColumns(BuildContext context) {
     return <DataColumn>[
       DataColumn(
-        label: const Text('Name', style: TextStyle(fontWeight: FontWeight.bold)),
+        label: const Text(
+          'Name',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
           sortColumn = 'name';
@@ -122,7 +137,10 @@ class _FileTable extends State<FileTable> {
       ),
       DataColumn(
         numeric: true,
-        label: const Text('Type', style: TextStyle(fontWeight: FontWeight.normal)),
+        label: const Text(
+          'Type',
+          style: TextStyle(fontWeight: FontWeight.normal),
+        ),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
           sortColumn = 'contentType';
@@ -132,7 +150,10 @@ class _FileTable extends State<FileTable> {
       ),
       DataColumn(
         numeric: true,
-        label: const Text('Size', style: TextStyle(fontWeight: FontWeight.normal)),
+        label: const Text(
+          'Size',
+          style: TextStyle(fontWeight: FontWeight.normal),
+        ),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
           sortColumn = 'size';
@@ -165,7 +186,11 @@ class _FileTable extends State<FileTable> {
     ];
   }
 
-  List<DataRow> getRows(BuildContext context, List<FileAsset> assets, double nameWidth) {
+  List<DataRow> getRows(
+    BuildContext context,
+    List<FileAsset> assets,
+    double nameWidth,
+  ) {
     List<DataRow> rows = [];
 
     //Create a row for every item returns from DB
@@ -184,20 +209,18 @@ class _FileTable extends State<FileTable> {
             cells: [
               DataCell(
                 ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: nameWidth,
-                  ),
+                  constraints: BoxConstraints(maxWidth: nameWidth),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
                       (f.thumbnail == null && !isImage)
                           ? SizedBox(
-                              width: 50,
-                              height: 32,
-                              child: Center(
-                                child: Icon(getIconForMimeType(f.contentType)),
-                              ),
-                            )
+                            width: 50,
+                            height: 32,
+                            child: Center(
+                              child: Icon(getIconForMimeType(f.contentType)),
+                            ),
+                          )
                           : getImageComponent(f),
                       const SizedBox(width: 8),
                       Expanded(
@@ -212,9 +235,7 @@ class _FileTable extends State<FileTable> {
               ),
               DataCell(
                 ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 80,
-                  ),
+                  constraints: const BoxConstraints(maxWidth: 80),
                   child: Text(
                     f.contentType.split("/").last,
                     overflow: TextOverflow.ellipsis,
@@ -223,9 +244,7 @@ class _FileTable extends State<FileTable> {
               ),
               DataCell(
                 ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 80,
-                  ),
+                  constraints: const BoxConstraints(maxWidth: 80),
                   child: Text(
                     _formatBytes(f.size),
                     overflow: TextOverflow.ellipsis,
@@ -235,11 +254,10 @@ class _FileTable extends State<FileTable> {
               ),
               DataCell(
                 ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 140,
-                  ),
+                  constraints: const BoxConstraints(maxWidth: 140),
                   child: Tooltip(
-                    message: '${f.dateCreated.toLocal().toString()} and ${assets.length - 1} more',
+                    message:
+                        '${f.dateCreated.toLocal().toString()} and ${assets.length - 1} more',
                     child: Text(
                       moment.fromNowPrecise(
                         form: Abbreviation.full,
@@ -254,9 +272,7 @@ class _FileTable extends State<FileTable> {
               ),
               DataCell(
                 ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 130,
-                  ),
+                  constraints: const BoxConstraints(maxWidth: 130),
                   child: Row(
                     children: [
                       IconButton(
@@ -272,7 +288,8 @@ class _FileTable extends State<FileTable> {
                         onPressed: () async {
                           if (f.path.startsWith('gdrive://')) {
                             final id = f.path.substring(9);
-                            final url = 'https://drive.google.com/file/d/$id/view';
+                            final url =
+                                'https://drive.google.com/file/d/$id/view';
                             await launchUrl(Uri.parse(url));
                           } else {
                             await OpenFilex.open(f.path);
@@ -282,7 +299,8 @@ class _FileTable extends State<FileTable> {
                       IconButton(
                         icon: const Icon(Icons.delete),
                         tooltip: 'Delete',
-                        onPressed: () => _showDeleteConfirmationDialog(context, f),
+                        onPressed:
+                            () => _showDeleteConfirmationDialog(context, f),
                       ),
                     ],
                   ),
@@ -309,9 +327,7 @@ class _FileTable extends State<FileTable> {
             cells: [
               DataCell(
                 ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: nameWidth,
-                  ),
+                  constraints: BoxConstraints(maxWidth: nameWidth),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
@@ -360,11 +376,15 @@ class _FileTable extends State<FileTable> {
   }
 
   void _notifySelectionChanged(BuildContext context) {
-    final selectedItems = widget.data.where((f) => selectedRows.contains(f.path)).toList();
+    final selectedItems =
+        widget.data.where((f) => selectedRows.contains(f.path)).toList();
     SelectionChangedNotification(selectedItems).dispatch(context);
   }
 
-  Future<void> _showDeleteConfirmationDialog(BuildContext context, File file) async {
+  Future<void> _showDeleteConfirmationDialog(
+    BuildContext context,
+    File file,
+  ) async {
     return showDialog<void>(
       context: context,
       barrierDismissible: false, // user must tap button!
@@ -376,7 +396,10 @@ class _FileTable extends State<FileTable> {
               children: <Widget>[
                 Text('Are you sure you want to delete "${file.name}"?'),
                 const SizedBox(height: 8),
-                const Text('This will permanently remove the file from your computer and the database.', style: TextStyle(color: Colors.red)),
+                const Text(
+                  'This will permanently remove the file from your computer and the database.',
+                  style: TextStyle(color: Colors.red),
+                ),
               ],
             ),
           ),
@@ -411,21 +434,26 @@ class _FileTable extends State<FileTable> {
       // 2. Delete from database
       final db = DatabaseManager.instance.database;
       if (db != null) {
-        await DeleteFileService.instance.invoke(DeleteFileServiceCommand(file, db));
+        await DeleteFileService.instance.invoke(
+          DeleteFileServiceCommand(file, db),
+        );
       }
 
       // 3. Notify parent to refresh
       if (context.mounted) {
         const FileDeletedNotification().dispatch(context);
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Deleted "${file.name}"')),
-        );
+
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Deleted "${file.name}"')));
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting file: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error deleting file: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -435,14 +463,18 @@ class _FileTable extends State<FileTable> {
     try {
       final ImageProvider provider;
       if (file.thumbnail != null) {
-        provider = file.thumbnail!.startsWith('http')
-            ? NetworkImage(file.thumbnail!)
-            : MemoryImage(base64Decode(file.thumbnail!));
+        provider =
+            file.thumbnail!.startsWith('http')
+                ? NetworkImage(file.thumbnail!)
+                : MemoryImage(base64Decode(file.thumbnail!));
       } else {
         // Use the resolver to handle relative paths (e.g., from email attachments)
         final collection = widget.collection;
         if (collection != null) {
-          final absPath = FilePathResolver.absoluteFromPath(file.path, collection);
+          final absPath = FilePathResolver.absoluteFromPath(
+            file.path,
+            collection,
+          );
           provider = FileImage(io.File(absPath));
         } else {
           provider = FileImage(io.File(file.path));
@@ -456,13 +488,11 @@ class _FileTable extends State<FileTable> {
           child: Padding(
             padding: const EdgeInsets.all(2),
             child: Image(
-              image: ResizeImage(
-                provider,
-                height: 32,
-              ),
+              image: ResizeImage(provider, height: 32),
               fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) =>
-                  Icon(getIconForMimeType(file.contentType)),
+              errorBuilder:
+                  (context, error, stackTrace) =>
+                      Icon(getIconForMimeType(file.contentType)),
             ),
           ),
         ),

@@ -15,8 +15,7 @@ const int kFilesPageSize = 200;
 
 class GetFileAndFoldersService
     extends RxService<GetFileAndFoldersServiceCommand, List<FileAsset>> {
-  static final GetFileAndFoldersService _singleton =
-      GetFileAndFoldersService();
+  static final GetFileAndFoldersService _singleton = GetFileAndFoldersService();
   static GetFileAndFoldersService get instance => _singleton;
   AppLogger logger = AppLogger(null);
 
@@ -54,27 +53,36 @@ class GetFileAndFoldersService
       final storagePath = DatabaseManager.instance.storagePath;
       if (storagePath != null) {
         final extractionRoot = p.join(
-          storagePath, 'files', 'email', command.collection.id,
+          storagePath,
+          'files',
+          'email',
+          command.collection.id,
         );
         // command.path is always a relative path (e.g. "" / "INBOX" / "INBOX/2022").
         // The only legacy case where it could be wrong is if an absolute path
         // that is NOT under the extraction root was stored (e.g. the old
         // email-address string). Reset to root only in that case.
-        if (p.isAbsolute(command.path) && !command.path.startsWith(extractionRoot)) {
+        if (p.isAbsolute(command.path) &&
+            !command.path.startsWith(extractionRoot)) {
           relativePath = '';
         }
         // Build the absolute path for the scanner from the (possibly corrected) relativePath.
-        absolutePath = relativePath.isEmpty
-            ? extractionRoot
-            : p.join(extractionRoot, relativePath);
+        absolutePath =
+            relativePath.isEmpty
+                ? extractionRoot
+                : p.join(extractionRoot, relativePath);
       } else {
         absolutePath = FilePathResolver.absoluteFromPath(
-            relativePath, command.collection);
+          relativePath,
+          command.collection,
+        );
       }
     } else {
       // Local/cloud collections: resolve absolute path from localCopyPath.
       absolutePath = FilePathResolver.absoluteFromPath(
-          relativePath, command.collection);
+        relativePath,
+        command.collection,
+      );
       if (absolutePath.isEmpty) absolutePath = command.collection.path;
     }
 
@@ -86,9 +94,13 @@ class GetFileAndFoldersService
     }
 
     // Folders always load fully; only files paginate.
-    final List<FileAsset> folders = command.offset == 0
-        ? await folderRepo.getByParentPath(command.collection.id, relativePath)
-        : [];
+    final List<FileAsset> folders =
+        command.offset == 0
+            ? await folderRepo.getByParentPath(
+              command.collection.id,
+              relativePath,
+            )
+            : [];
 
     final List<FileAsset> files = await fileRepo.getByParentPath(
       command.collection.id,

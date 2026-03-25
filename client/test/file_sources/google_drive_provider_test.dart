@@ -37,14 +37,18 @@ void main() {
 
     test('returns true for Google Sheets', () {
       expect(
-        provider.isGoogleNativeFormat('application/vnd.google-apps.spreadsheet'),
+        provider.isGoogleNativeFormat(
+          'application/vnd.google-apps.spreadsheet',
+        ),
         isTrue,
       );
     });
 
     test('returns true for Google Slides', () {
       expect(
-        provider.isGoogleNativeFormat('application/vnd.google-apps.presentation'),
+        provider.isGoogleNativeFormat(
+          'application/vnd.google-apps.presentation',
+        ),
         isTrue,
       );
     });
@@ -115,7 +119,10 @@ void main() {
       expect(result.createdAt, equals(created));
       expect(result.modifiedAt, equals(modified));
       expect(result.isFolder, isFalse);
-      expect(result.webViewLink, equals('https://drive.google.com/file/d/abc123/view'));
+      expect(
+        result.webViewLink,
+        equals('https://drive.google.com/file/d/abc123/view'),
+      );
     });
 
     test('maps a folder correctly — isFolder true, size null', () {
@@ -134,9 +141,10 @@ void main() {
     });
 
     test('uses Untitled when drive file has no name', () {
-      final driveFile = drive.File()
-        ..id = 'x'
-        ..mimeType = 'application/pdf';
+      final driveFile =
+          drive.File()
+            ..id = 'x'
+            ..mimeType = 'application/pdf';
       // name intentionally not set
 
       final result = provider.toFileSourceFile(driveFile, parentId: 'p');
@@ -144,9 +152,10 @@ void main() {
     });
 
     test('uses application/octet-stream when mimeType is null', () {
-      final driveFile = drive.File()
-        ..id = 'x'
-        ..name = 'binary.bin';
+      final driveFile =
+          drive.File()
+            ..id = 'x'
+            ..name = 'binary.bin';
       // mimeType intentionally not set
 
       final result = provider.toFileSourceFile(driveFile, parentId: 'p');

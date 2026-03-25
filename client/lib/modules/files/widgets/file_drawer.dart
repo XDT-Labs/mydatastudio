@@ -185,7 +185,12 @@ class _FileDrawer extends State<FileDrawer> {
                 child: Column(
                   children: [
                     // --- FILES ---
-                    _buildAccordionHeader(theme, AccordionSection.files, "Files", Icons.folder_outlined),
+                    _buildAccordionHeader(
+                      theme,
+                      AccordionSection.files,
+                      "Files",
+                      Icons.folder_outlined,
+                    ),
                     if (_expandedSection == AccordionSection.files)
                       Expanded(
                         child: SingleChildScrollView(
@@ -193,14 +198,23 @@ class _FileDrawer extends State<FileDrawer> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildSubHeader(theme, "Local Sources"),
-                              ...localFiles.map((c) => _buildCollectionTile(context, theme, c)),
+                              ...localFiles.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
                               _buildSubHeader(theme, "Google Drive"),
-                              ...gdriveFiles.map((c) => _buildCollectionTile(context, theme, c)),
+                              ...gdriveFiles.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
                               _buildSubHeader(theme, "DropBox (future)"),
-                              ...dropboxFiles.map((c) => _buildCollectionTile(context, theme, c)),
+                              ...dropboxFiles.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
                               if (onedriveFiles.isNotEmpty) ...[
                                 _buildSubHeader(theme, "OneDrive"),
-                                ...onedriveFiles.map((c) => _buildCollectionTile(context, theme, c)),
+                                ...onedriveFiles.map(
+                                  (c) =>
+                                      _buildCollectionTile(context, theme, c),
+                                ),
                               ],
                             ],
                           ),
@@ -208,7 +222,12 @@ class _FileDrawer extends State<FileDrawer> {
                       ),
 
                     // --- EMAIL ATTACHMENTS ---
-                    _buildAccordionHeader(theme, AccordionSection.email, "Email Attachments", Icons.email_outlined),
+                    _buildAccordionHeader(
+                      theme,
+                      AccordionSection.email,
+                      "Email Attachments",
+                      Icons.email_outlined,
+                    ),
                     if (_expandedSection == AccordionSection.email)
                       Expanded(
                         child: SingleChildScrollView(
@@ -216,18 +235,29 @@ class _FileDrawer extends State<FileDrawer> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildSubHeader(theme, "GMail"),
-                              ...gmailEmails.map((c) => _buildCollectionTile(context, theme, c)),
+                              ...gmailEmails.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
                               _buildSubHeader(theme, "Yahoo Mail"),
-                              ...yahooEmails.map((c) => _buildCollectionTile(context, theme, c)),
+                              ...yahooEmails.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
                               _buildSubHeader(theme, "PST Backups"),
-                              ...pstEmails.map((c) => _buildCollectionTile(context, theme, c)),
+                              ...pstEmails.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
                             ],
                           ),
                         ),
                       ),
 
                     // --- SOCIAL MEDIA ---
-                    _buildAccordionHeader(theme, AccordionSection.social, "Social Media", Icons.share_outlined),
+                    _buildAccordionHeader(
+                      theme,
+                      AccordionSection.social,
+                      "Social Media",
+                      Icons.share_outlined,
+                    ),
                     if (_expandedSection == AccordionSection.social)
                       Expanded(
                         child: SingleChildScrollView(
@@ -235,11 +265,17 @@ class _FileDrawer extends State<FileDrawer> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildSubHeader(theme, "Facebook"),
-                              ...facebookSocial.map((c) => _buildCollectionTile(context, theme, c)),
+                              ...facebookSocial.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
                               _buildSubHeader(theme, "Twitter"),
-                              ...twitterSocial.map((c) => _buildCollectionTile(context, theme, c)),
+                              ...twitterSocial.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
                               _buildSubHeader(theme, "Tiktok"),
-                              ...tiktokSocial.map((c) => _buildCollectionTile(context, theme, c)),
+                              ...tiktokSocial.map(
+                                (c) => _buildCollectionTile(context, theme, c),
+                              ),
                             ],
                           ),
                         ),
@@ -264,7 +300,9 @@ class _FileDrawer extends State<FileDrawer> {
     return GestureDetector(
       onTap: () => setState(() => _expandedSection = section),
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 0.5), // Tiny separator space
+        margin: const EdgeInsets.symmetric(
+          vertical: 0.5,
+        ), // Tiny separator space
         decoration: BoxDecoration(
           color:
               isExpanded

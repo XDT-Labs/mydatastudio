@@ -536,9 +536,10 @@ class _YahooTabState extends State<_YahooTab> {
       // Create collection manually (App Password approach)
       final collectionId = const Uuid().v4();
       final appDataDir = MainApp.appDataDirectory.valueOrNull;
-      final extractionRoot = appDataDir != null
-          ? p.join(appDataDir, 'files', 'email', collectionId)
-          : null;
+      final extractionRoot =
+          appDataDir != null
+              ? p.join(appDataDir, 'files', 'email', collectionId)
+              : null;
       final c = Collection(
         id: collectionId,
         name: email,

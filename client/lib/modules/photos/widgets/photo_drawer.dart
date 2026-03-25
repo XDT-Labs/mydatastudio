@@ -59,19 +59,23 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
               child: ListView.builder(
                 itemCount: collections.length,
                 itemBuilder: (context, index) {
-                  final isSelected = GoRouterState.of(context).uri.path.contains(collections[index].id);
+                  final isSelected = GoRouterState.of(
+                    context,
+                  ).uri.path.contains(collections[index].id);
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 2.0),
                     child: ListTile(
                       selected: isSelected,
-                      selectedTileColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+                      selectedTileColor: theme.colorScheme.primaryContainer
+                          .withValues(alpha: 0.3),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                       title: Text(
                         collections[index].name,
                         style: TextStyle(
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.normal,
                         ),
                       ),
                       onTap: () {

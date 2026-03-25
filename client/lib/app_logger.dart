@@ -25,13 +25,15 @@ class ConcisePrinter extends LogPrinter {
 
   @override
   List<String> log(LogEvent event) {
-    if (event.level == Level.error || event.level == Level.warning || event.level == Level.fatal) {
+    if (event.level == Level.error ||
+        event.level == Level.warning ||
+        event.level == Level.fatal) {
       return _errorPrinter.log(event);
     }
 
     final String emoji = levelEmojis[event.level] ?? '';
     final String message = event.message.toString();
-    
+
     // Extract call site
     String callSite = "";
     try {
@@ -40,7 +42,8 @@ class ConcisePrinter extends LogPrinter {
       // We need to find the first frame outside of logger/app_logger
       for (var frame in stackTrace) {
         // print('FRAME: $frame');
-        if (!frame.contains('app_logger.dart') && !frame.contains('package:logger')) {
+        if (!frame.contains('app_logger.dart') &&
+            !frame.contains('package:logger')) {
           // Format of frame is usually: #N   ClassName.MethodName (package:path/to/file.dart:line:col) or (file:///path/to/file.dart:line:col)
           final match = RegExp(r'\(((?:package|file):.*)\)').firstMatch(frame);
           if (match != null) {
@@ -49,7 +52,7 @@ class ConcisePrinter extends LogPrinter {
             if (callSite.contains('package:mydatatools/')) {
               callSite = callSite.replaceAll('package:mydatatools/', '');
             } else if (callSite.contains('file:///')) {
-               callSite = p.basename(callSite);
+              callSite = p.basename(callSite);
             }
             break;
           }
@@ -66,11 +69,12 @@ class ConcisePrinter extends LogPrinter {
 class AppLogger extends Logger {
   SendPort? sendPort;
 
-  AppLogger(this.sendPort, {super.filter})
-      : super(printer: ConcisePrinter());
+  AppLogger(this.sendPort, {super.filter}) : super(printer: ConcisePrinter());
 
   @override
-  void log(Level level, dynamic message, {
+  void log(
+    Level level,
+    dynamic message, {
     DateTime? time,
     Object? error,
     StackTrace? stackTrace,

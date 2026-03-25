@@ -144,19 +144,21 @@ class _RxFilesPage extends State<RxFilesPage> {
     if (col == null || currentPath == null) return;
     _isLoadingMore = true;
     _fileOffset += kFilesPageSize;
-    _filesAndFoldersService!.invoke(
-      GetFileAndFoldersServiceCommand(
-        col,
-        currentPath,
-        offset: _fileOffset,
-      ),
-    ).then((results) {
-      if (!mounted) return;
-      setState(() {
-        _isLoadingMore = false;
-        if (results.length < kFilesPageSize) _hasMoreFiles = false;
-      });
-    });
+    _filesAndFoldersService!
+        .invoke(
+          GetFileAndFoldersServiceCommand(
+            col,
+            currentPath,
+            offset: _fileOffset,
+          ),
+        )
+        .then((results) {
+          if (!mounted) return;
+          setState(() {
+            _isLoadingMore = false;
+            if (results.length < kFilesPageSize) _hasMoreFiles = false;
+          });
+        });
   }
 
   /// Wires the scroll controller to trigger load-more at 80% scroll depth.
@@ -212,10 +214,7 @@ class _RxFilesPage extends State<RxFilesPage> {
               if (collection != null) {
                 logger.s("refresh file list");
                 _filesAndFoldersService!.invoke(
-                  GetFileAndFoldersServiceCommand(
-                    collection!,
-                    path ?? '',
-                  ),
+                  GetFileAndFoldersServiceCommand(collection!, path ?? ''),
                 );
               }
             },
@@ -334,7 +333,9 @@ class _RxFilesPage extends State<RxFilesPage> {
                         builder: (context, snapshot) {
                           if (snapshot.data == true) {
                             return Container(
-                                color: theme.colorScheme.onSurface.withValues(alpha: 0.1),
+                              color: theme.colorScheme.onSurface.withValues(
+                                alpha: 0.1,
+                              ),
                               child: const Center(
                                 child: CircularProgressIndicator(),
                               ),

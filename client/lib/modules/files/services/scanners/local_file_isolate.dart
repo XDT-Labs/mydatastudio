@@ -13,7 +13,6 @@ import 'package:path/path.dart' as p;
 import 'package:logger/logger.dart';
 import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
 
-
 class LocalFileIsolate extends CollectionScanner {
   RootIsolateToken? token;
   SendPort? loggerIsolatePort;
@@ -26,10 +25,12 @@ class LocalFileIsolate extends CollectionScanner {
   }
 
   @override
-  Future<int> start(Collection collection,
-      String? path,
-      recursive,
-      bool force,) async {
+  Future<int> start(
+    Collection collection,
+    String? path,
+    recursive,
+    bool force,
+  ) async {
     if (isScanning.value && !force) {
       return 0;
     }
@@ -55,7 +56,12 @@ class LocalFileIsolate extends CollectionScanner {
     };
 
     //// Invoked the _scan() method in an isolate thread
-    LocalFileIsolateWorker worker = LocalFileIsolateWorker(token!, p.sendPort, dbWriterIsolatePort!, loggerIsolatePort);
+    LocalFileIsolateWorker worker = LocalFileIsolateWorker(
+      token!,
+      p.sendPort,
+      dbWriterIsolatePort!,
+      loggerIsolatePort,
+    );
     isolate = await Isolate.spawn<Map<String, dynamic>>(worker._scan, args);
     isolate!.addOnExitListener(p.sendPort);
 
@@ -70,15 +76,28 @@ class LocalFileIsolate extends CollectionScanner {
       } else if (message is Map) {
         final type = message['type'];
         final msg = message['message'];
-        
+
         if (type == 'log') {
           final level = message['level'] as String;
           switch (level) {
-            case 'info': logger?.i('[LocalScan] $msg'); break;
-            case 'error': logger?.e('[LocalScan] $msg', error: message['error'], stackTrace: message['stackTrace']); break;
-            case 'warning': logger?.w('[LocalScan] $msg'); break;
-            case 'debug': logger?.d('[LocalScan] $msg'); break;
-            default: logger?.i('[LocalScan] $msg');
+            case 'info':
+              logger?.i('[LocalScan] $msg');
+              break;
+            case 'error':
+              logger?.e(
+                '[LocalScan] $msg',
+                error: message['error'],
+                stackTrace: message['stackTrace'],
+              );
+              break;
+            case 'warning':
+              logger?.w('[LocalScan] $msg');
+              break;
+            case 'debug':
+              logger?.d('[LocalScan] $msg');
+              break;
+            default:
+              logger?.i('[LocalScan] $msg');
           }
         } else if (type == 'status') {
           logger?.s(msg);
@@ -100,11 +119,8 @@ class LocalFileIsolate extends CollectionScanner {
   }
 }
 
-
-
 //// Method will run in Isolate
-class LocalFileIsolateWorker{
-
+class LocalFileIsolateWorker {
   RootIsolateToken token;
   SendPort receiverPort;
   SendPort dbWriterPort;
@@ -120,7 +136,12 @@ class LocalFileIsolateWorker{
   );
 
   //constructor
-  LocalFileIsolateWorker(this.token, this.receiverPort, this.dbWriterPort, this.loggerPort){
+  LocalFileIsolateWorker(
+    this.token,
+    this.receiverPort,
+    this.dbWriterPort,
+    this.loggerPort,
+  ) {
     // Ensure the background binary messenger is initialized so plugins/platform channels work
     BackgroundIsolateBinaryMessenger.ensureInitialized(token);
   }
@@ -177,12 +198,12 @@ class LocalFileIsolateWorker{
 
   Future<int> _scanDir(
     String collectionId,
-    String path,       // absolute path used for filesystem operations
-    String rootPath,   // absolute collection root for computing relative paths
+    String path, // absolute path used for filesystem operations
+    String rootPath, // absolute collection root for computing relative paths
     recursive,
-    DateTime scanStartTime,
-    [List<File>? currentBatch]
-  ) async {
+    DateTime scanStartTime, [
+    List<File>? currentBatch,
+  ]) async {
     int count = 0;
     List<File> fileBatch = currentBatch ?? [];
     AppLogger logger = AppLogger(loggerPort);
@@ -203,14 +224,19 @@ class LocalFileIsolateWorker{
       if (asset is io.File) {
         count++;
         //save file
-        File? file = await _validateFile(collectionId, asset, rootPath, scanStartTime);
-        if( file != null ) {
+        File? file = await _validateFile(
+          collectionId,
+          asset,
+          rootPath,
+          scanStartTime,
+        );
+        if (file != null) {
           logger.i('Found file: ${file.path}');
           fileBatch.add(file);
           if (fileBatch.length >= 100) {
             dbWriterPort.send({
               'type': 'batch_file',
-              'files': List.from(fileBatch)
+              'files': List.from(fileBatch),
             });
             fileBatch.clear();
           }
@@ -219,13 +245,15 @@ class LocalFileIsolateWorker{
         //send status message back
         logger.s('Scanning: ${asset.path}');
         //save directory
-        Folder? folder = _validateFolder(collectionId, asset, rootPath, scanStartTime);
-        if( folder != null ) {
+        Folder? folder = _validateFolder(
+          collectionId,
+          asset,
+          rootPath,
+          scanStartTime,
+        );
+        if (folder != null) {
           logger.i('Found folder: ${folder.path}');
-          dbWriterPort.send({
-            'type': 'folder',
-            'folder': folder
-          });
+          dbWriterPort.send({'type': 'folder', 'folder': folder});
 
           try {
             if (recursive) {
@@ -249,10 +277,7 @@ class LocalFileIsolateWorker{
     }
 
     if (currentBatch == null && fileBatch.isNotEmpty) {
-      dbWriterPort.send({
-        'type': 'batch_file',
-        'files': List.from(fileBatch)
-      });
+      dbWriterPort.send({'type': 'batch_file', 'files': List.from(fileBatch)});
       fileBatch.clear();
     }
 
@@ -278,25 +303,31 @@ class LocalFileIsolateWorker{
     bool hidden = name.startsWith('.');
     bool skipFolder = skipFolderRegex.hasMatch('/$name/');
 
-    if( hidden || skipFolder ){
-      logger?.i('Skipping folder (hidden=$hidden, skipFolder=$skipFolder): $absPath');
+    if (hidden || skipFolder) {
+      logger?.i(
+        'Skipping folder (hidden=$hidden, skipFolder=$skipFolder): $absPath',
+      );
       return null;
     }
 
     // Compute relative path for storage via the shared helper so this logic
     // is unit-tested independently of the file system.
-    final relPath = ScannerPathHelper.relativePath(absPath, rootPath, isFolder: true);
+    final relPath = ScannerPathHelper.relativePath(
+      absPath,
+      rootPath,
+      isFolder: true,
+    );
     final relParent = ScannerPathHelper.relativeParent(absPath, rootPath);
 
     return Folder(
-        id: ScannerPathHelper.buildId(collectionId_, relPath),
-        name: name,
-        path: relPath,
-        parent: relParent,
-        dateCreated: DateTime.now(),
-        dateLastModified: DateTime.now(),
-        lastScannedDate: scanStartTime,
-        collectionId: collectionId_,
+      id: ScannerPathHelper.buildId(collectionId_, relPath),
+      name: name,
+      path: relPath,
+      parent: relParent,
+      dateCreated: DateTime.now(),
+      dateLastModified: DateTime.now(),
+      lastScannedDate: scanStartTime,
+      collectionId: collectionId_,
     );
   }
 
@@ -316,8 +347,10 @@ class LocalFileIsolateWorker{
     bool hidden = name.startsWith('.');
     bool skipFolder = skipFolderRegex.hasMatch(file_.path);
 
-    if( hidden || skipFolder ){
-      logger?.i('Skipping file (hidden=$hidden, skipFolder=$skipFolder): $absPath');
+    if (hidden || skipFolder) {
+      logger?.i(
+        'Skipping file (hidden=$hidden, skipFolder=$skipFolder): $absPath',
+      );
       return null;
     }
 
@@ -334,9 +367,14 @@ class LocalFileIsolateWorker{
       try {
         // Thumbnail generation can be slow, but this is a background isolate.
         // We use the absolute path for generation.
-        thumbnail = await ThumbnailGenerator().pathImageToBase64(absPath, mimeType);
+        thumbnail = await ThumbnailGenerator().pathImageToBase64(
+          absPath,
+          mimeType,
+        );
       } catch (e) {
-        logger?.w('LocalScanner: Failed to generate thumbnail for $absPath: $e');
+        logger?.w(
+          'LocalScanner: Failed to generate thumbnail for $absPath: $e',
+        );
       }
     }
 
@@ -379,7 +417,6 @@ class LocalFileIsolateWorker{
         return FilesConstants.mimeTypeUnKnown;
     }
   }
-
 }
 
 /** TODO map extra types and move to helper class

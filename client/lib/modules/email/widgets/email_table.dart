@@ -71,7 +71,6 @@ class _EmailTable extends State<EmailTable> {
     }
   }
 
-
   void _onScroll() {
     if (widget.onLoadMore == null) return;
     final pos = _verticalScrollController.position;

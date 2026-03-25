@@ -26,8 +26,7 @@ class GoogleDriveProvider implements FileSourceProvider {
   static final AppLogger _logger = AppLogger(null);
 
   /// MIME type Google Drive uses to represent folders in its API.
-  static const String _folderMimeType =
-      'application/vnd.google-apps.folder';
+  static const String _folderMimeType = 'application/vnd.google-apps.folder';
 
   /// Fields to request from the Drive API when listing files.
   /// Keeping this minimal reduces payload size and latency.
@@ -56,7 +55,8 @@ class GoogleDriveProvider implements FileSourceProvider {
     String? folderId,
   }) async {
     final api = await _buildApi(collection);
-    final parentId = folderId ?? collection.path; // fall back to collection root
+    final parentId =
+        folderId ?? collection.path; // fall back to collection root
 
     final List<FileSourceFile> results = [];
     String? pageToken;
@@ -108,10 +108,12 @@ class GoogleDriveProvider implements FileSourceProvider {
     final api = await _buildApi(collection);
 
     // Drive v3 media download: pass DownloadOptions.fullMedia
-    final media = await api.files.get(
-      file.id,
-      downloadOptions: drive.DownloadOptions.fullMedia,
-    ) as drive.Media;
+    final media =
+        await api.files.get(
+              file.id,
+              downloadOptions: drive.DownloadOptions.fullMedia,
+            )
+            as drive.Media;
 
     final destFile = io.File(destPath);
     await destFile.parent.create(recursive: true);
@@ -140,10 +142,7 @@ class GoogleDriveProvider implements FileSourceProvider {
       final api = await _buildApi(collection);
 
       // Update the `trashed` field to move to trash rather than permanently delete
-      await api.files.update(
-        drive.File()..trashed = true,
-        file.id,
-      );
+      await api.files.update(drive.File()..trashed = true, file.id);
 
       _logger.i('File "${file.name}" moved to Drive trash');
       return true;
@@ -159,8 +158,8 @@ class GoogleDriveProvider implements FileSourceProvider {
   /// If there is no web view link (rare), falls back to the Drive file URL.
   @override
   Future<void> openFile(Collection collection, FileSourceFile file) async {
-    final url = file.webViewLink ??
-        'https://drive.google.com/file/d/${file.id}/view';
+    final url =
+        file.webViewLink ?? 'https://drive.google.com/file/d/${file.id}/view';
 
     if (await canLaunchUrlString(url)) {
       await launchUrlString(url);
@@ -178,8 +177,9 @@ class GoogleDriveProvider implements FileSourceProvider {
   /// Uses [GoogleDriveAuthService] to obtain a valid (auto-refreshed if needed)
   /// access token, then wraps it in a [GoogleAuthClient].
   Future<drive.DriveApi> _buildApi(Collection collection) async {
-    final accessToken =
-        await GoogleDriveAuthService.getValidAccessToken(collection);
+    final accessToken = await GoogleDriveAuthService.getValidAccessToken(
+      collection,
+    );
 
     final authHttpClient = GoogleAuthClient({
       'Authorization': 'Bearer $accessToken',

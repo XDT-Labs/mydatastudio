@@ -25,6 +25,15 @@ HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
 HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
 HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
 
+# Python/AI Chat Config
+PYTHON_DIR = client/assets/python/aichat
+APP_DIR = client/app
+APP_ZIP_NAME = aichat-macos.zip
+APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
+HF_MODEL = bartowski/google_gemma-3-4b-it-GGUF
+HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
+HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
+HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
 
 # Flutter Config
 FLUTTER_DIR = client

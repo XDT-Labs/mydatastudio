@@ -132,7 +132,11 @@ void main() {
     final loginButton = tester.widget<MaterialButton>(
       find.widgetWithText(MaterialButton, 'Login'),
     );
-    expect(loginButton.onPressed, isNotNull, reason: 'Button should be re-enabled after error');
+    expect(
+      loginButton.onPressed,
+      isNotNull,
+      reason: 'Button should be re-enabled after error',
+    );
   });
 
   testWidgets('LoginForm login failure test', (WidgetTester tester) async {

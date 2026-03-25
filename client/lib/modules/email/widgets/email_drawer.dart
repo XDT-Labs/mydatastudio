@@ -119,7 +119,13 @@ class _EmailDrawer extends State<EmailDrawer> {
           backgroundColor: Colors.white,
           floatingActionButton: FloatingActionButton(
             tooltip: "Add Email",
-            child: const Icon(Icons.add),
+            backgroundColor: Colors.white,
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              side: const BorderSide(color: Colors.grey, width: 1),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.add, color: Colors.grey),
             onPressed: () {
               GoRouter.of(context).go("/email/add");
             },
@@ -156,7 +162,9 @@ class _EmailDrawer extends State<EmailDrawer> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onSurface.withValues(alpha: 0.1),
+                            color: theme.colorScheme.onSurface.withValues(
+                              alpha: 0.1,
+                            ),
                             letterSpacing: 1.0,
                           ),
                         ),
@@ -531,7 +539,9 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
                 )
                 : null,
         selected: isSelected,
-        selectedTileColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+        selectedTileColor: theme.colorScheme.primaryContainer.withValues(
+          alpha: 0.3,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         onTap: () => widget.onFolderTap(f.id),
       ),
