@@ -11,6 +11,7 @@ import 'package:mydatatools/scanners/collection_scanner.dart';
 import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
 import 'package:path/path.dart' as p;
 import 'package:logger/logger.dart';
+import 'package:mydatatools/main.dart';
 import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
 
 class LocalFileIsolate extends CollectionScanner {
@@ -45,14 +46,10 @@ class LocalFileIsolate extends CollectionScanner {
     RootIsolateToken? token = RootIsolateToken.instance;
     Map<String, dynamic> args = {
       'path': path,
-      // rootPath is ALWAYS the absolute collection root, regardless of which
-      // sub-directory is being scanned. This ensures that p.relative() in the
-      // worker produces paths relative to the collection root (e.g.
-      // "2026-01-01/photo.jpg"), not relative to the scanned sub-directory
-      // (which would incorrectly give "photo.jpg" with parent='').
       'rootPath': collection.localCopyPath ?? collection.path,
       'recursive': recursive,
       'collectionId': collection.id,
+      'llmServiceUrl': MainApp.llmServiceUrl.value,
     };
 
     //// Invoked the _scan() method in an isolate thread
@@ -163,6 +160,7 @@ class LocalFileIsolateWorker {
     }
     bool recursive = args['recursive'];
     String collectionId = args['collectionId'];
+    String? llmServiceUrl = args['llmServiceUrl'];
 
     // start scanner on first directory
     logger?.i('Scanning: $path');
@@ -174,6 +172,7 @@ class LocalFileIsolateWorker {
       rootPath,
       recursive,
       scanStartTime,
+      llmServiceUrl: llmServiceUrl,
     );
 
     // Final cleanup — send the RELATIVE path so the repo can match stored records.
@@ -201,9 +200,10 @@ class LocalFileIsolateWorker {
     String path, // absolute path used for filesystem operations
     String rootPath, // absolute collection root for computing relative paths
     recursive,
-    DateTime scanStartTime, [
+    DateTime scanStartTime, {
     List<File>? currentBatch,
-  ]) async {
+    String? llmServiceUrl,
+  }) async {
     int count = 0;
     List<File> fileBatch = currentBatch ?? [];
     AppLogger logger = AppLogger(loggerPort);
@@ -229,6 +229,7 @@ class LocalFileIsolateWorker {
           asset,
           rootPath,
           scanStartTime,
+          llmServiceUrl: llmServiceUrl,
         );
         if (file != null) {
           fileBatch.add(file);
@@ -263,7 +264,8 @@ class LocalFileIsolateWorker {
                 rootPath,
                 recursive,
                 scanStartTime,
-                fileBatch,
+                currentBatch: fileBatch,
+                llmServiceUrl: llmServiceUrl,
               );
               count += fileCount;
             }
@@ -337,8 +339,9 @@ class LocalFileIsolateWorker {
     String collectionId_,
     io.File file_,
     String rootPath,
-    DateTime scanStartTime,
-  ) async {
+    DateTime scanStartTime, {
+    String? llmServiceUrl,
+  }) async {
     String absPath = file_.path;
     if (absPath.length > 1 && absPath.endsWith('/')) {
       absPath = absPath.substring(0, absPath.length - 1);
@@ -371,6 +374,7 @@ class LocalFileIsolateWorker {
         thumbnail = await ThumbnailGenerator().pathImageToBase64(
           absPath,
           mimeType,
+          llmServiceUrl: llmServiceUrl,
         );
       } catch (e) {
         logger?.w(
@@ -404,6 +408,7 @@ class LocalFileIsolateWorker {
       case 'png':
       case 'tif':
       case 'psd':
+      case 'nef':
         return FilesConstants.mimeTypeImage;
       case 'pdf':
         return FilesConstants.mimeTypePdf;

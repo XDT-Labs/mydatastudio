@@ -8,11 +8,12 @@ specific API endpoint and handles request processing, validation, and response g
 from typing import Optional, Dict, Any, Generator
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
+import os
 import json
+from PIL import Image
 
-from .models import ChatRequest, StartSessionRequest, EmbeddingRequest, PstImportRequest
+from .models import ChatRequest, StartSessionRequest, EmbeddingRequest, PstImportRequest, ThumbnailRequest
 from .pst_parser import PstParser
-
 from .model_manager import (
     load_local_model,
     load_embedding_model,
@@ -27,6 +28,53 @@ from .state import (
     get_embedding_model_id, set_embedding_model_id,
     get_locks
 )
+
+async def generate_thumbnail(request: ThumbnailRequest) -> Dict[str, Any]:
+    """
+    Generate a thumbnail for an image file, including RAW formats like NEF.
+    
+    Args:
+        request (ThumbnailRequest): File path and target dimensions
+        
+    Returns:
+        Dict[str, Any]: Base64 encoded thumbnail image (JPEG)
+    """
+    if not os.path.exists(request.file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        ext = os.path.splitext(request.file_path)[1].lower()
+        
+        # Handle RAW formats with rawpy
+        if ext in ['.nef', '.cr2', '.arw', '.dng', '.orf', '.sr2']:
+            import rawpy
+            with rawpy.imread(request.file_path) as raw:
+                # postprocess decodes the raw image into an RGB array
+                rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True, bright=1.0)
+                img = Image.fromarray(rgb)
+        else:
+            # Handle standard formats with Pillow
+            img = Image.open(request.file_path)
+
+        # Generate thumbnail
+        img.thumbnail((request.width, request.height))
+        
+        # Save to buffer
+        import io
+        import base64
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        base64_thumb = base64.b64encode(buf.getvalue()).decode('utf-8')
+        
+        return {
+            "thumbnail": base64_thumb,
+            "width": img.width,
+            "height": img.height,
+            "format": "JPEG"
+        }
+    except Exception as e:
+        print(f"[ERROR] Thumbnail generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate thumbnail: {e}")
 
 
 async def health_check() -> Dict[str, Any]:
