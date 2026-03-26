@@ -9,7 +9,6 @@ import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/main.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 class PythonManager {
   Process? _pythonProc;
@@ -48,13 +47,7 @@ class PythonManager {
     logger.d('[python] Ensuring aichat assets are available');
     await ensureAichatUnzipped().then((_) => completer.complete());
 
-    var supportPath = (await getApplicationSupportDirectory()).path;
-    if (Platform.isMacOS && AppConstants.realmName.endsWith('.dev')) {
-      if (!supportPath.endsWith(AppConstants.realmName)) {
-        final parent = Directory(supportPath).parent.path;
-        supportPath = p.join(parent, AppConstants.realmName);
-      }
-    }
+    var supportPath = MainApp.appDataDirectory.value!;
     _pythonDir = p.join(supportPath, "aichat");
 
     // Check for existing PID file and kill previous process if it exists
@@ -234,13 +227,7 @@ class PythonManager {
   /// If the destination directory already exists, this is a no-op.
   Future<void> ensureAichatUnzipped() async {
     try {
-      var supportPath = (await getApplicationSupportDirectory()).path;
-      if (Platform.isMacOS && AppConstants.realmName.endsWith('.dev')) {
-        if (!supportPath.endsWith(AppConstants.realmName)) {
-          final parent = Directory(supportPath).parent.path;
-          supportPath = p.join(parent, AppConstants.realmName);
-        }
-      }
+      var supportPath = MainApp.appDataDirectory.value!;
       final destDir = Directory(p.join(supportPath, 'aichat'));
 
       if (destDir.existsSync()) {

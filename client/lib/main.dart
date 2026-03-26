@@ -132,6 +132,7 @@ class MainAppState extends State<MainApp>
     } else {
       // 1. Initialize local Database
       var dbFuture = DatabaseManager.instance.initializeDatabase();
+      await dbFuture;
 
       // 2. Initialize Python Manager
       final pythonFuture =
@@ -141,7 +142,7 @@ class MainAppState extends State<MainApp>
             return pythonMgr;
           })();
 
-      // Wait for both to finish
+      // Wait for both to finish (db is already done)
       await Future.wait([pythonFuture, dbFuture]);
 
       // set database repository

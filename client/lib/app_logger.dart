@@ -1,8 +1,11 @@
 import 'dart:isolate';
 
+import 'dart:io';
+
 import 'package:logger/logger.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:path/path.dart' as p;
+import 'package:mydatatools/main.dart';
 
 class ConcisePrinter extends LogPrinter {
   final PrettyPrinter _errorPrinter = PrettyPrinter(
@@ -11,7 +14,7 @@ class ConcisePrinter extends LogPrinter {
     lineLength: 120,
     colors: true,
     printEmojis: true,
-    dateTimeFormat: DateTimeFormat.none,
+    dateTimeFormat: DateTimeFormat.dateAndTime,
   );
 
   static final levelEmojis = {
@@ -62,14 +65,70 @@ class ConcisePrinter extends LogPrinter {
       // ignore
     }
 
-    return ['│ $emoji [$callSite] $message'];
+    final String timeStr = DateTime.now().toIso8601String().split('.').first;
+    return ['$timeStr │ $emoji [$callSite] $message'];
+  }
+}
+
+class CustomLogOutput extends LogOutput {
+  final ConsoleOutput consoleOutput = ConsoleOutput();
+  File? _logFile;
+  bool _initialized = false;
+  String _currentDateStr = '';
+
+  @override
+  Future<void> init() async {
+    await consoleOutput.init();
+    await super.init();
+  }
+
+  @override
+  void output(OutputEvent event) {
+    consoleOutput.output(event);
+
+    try {
+      final dateStr = DateTime.now().toIso8601String().split('T').first;
+      if (!_initialized || _currentDateStr != dateStr) {
+        // Safe to check because in isolates, this subject is empty.
+        if (MainApp.appDataDirectory.hasValue &&
+            MainApp.appDataDirectory.value != null) {
+          final logDir = Directory(
+            p.join(MainApp.appDataDirectory.value!, 'logs'),
+          );
+          if (!logDir.existsSync()) {
+            logDir.createSync(recursive: true);
+          }
+          _logFile = File(p.join(logDir.path, 'app_$dateStr.log'));
+          _initialized = true;
+          _currentDateStr = dateStr;
+        }
+      }
+
+      if (_logFile != null) {
+        // Strip ANSI color codes
+        final parsedLines = event.lines
+            .map((l) => l.replaceAll(RegExp(r'\x1B\[[0-?]*[ -/]*[@-~]'), ''))
+            .join('\n');
+        final text = '$parsedLines\n';
+        _logFile!.writeAsStringSync(text, mode: FileMode.append);
+      }
+    } catch (_) {
+      // Ignore file writing errors
+    }
+  }
+
+  @override
+  Future<void> destroy() async {
+    await consoleOutput.destroy();
+    await super.destroy();
   }
 }
 
 class AppLogger extends Logger {
   SendPort? sendPort;
 
-  AppLogger(this.sendPort, {super.filter}) : super(printer: ConcisePrinter());
+  AppLogger(this.sendPort, {super.filter})
+    : super(printer: ConcisePrinter(), output: CustomLogOutput());
 
   @override
   void log(

@@ -113,6 +113,10 @@ build-client: set-bundle-id
 		flutter pub get && \
 		flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
 	@echo "--- ✅ Flutter build complete ---"
+	@if [ "$$BRANCH" = "main" ]; then \
+		echo "--- 🚀 Copy release build to Applications folder ---"; \
+		cp -r $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyData.app /Applications/MyData.app; \
+	fi
 
 # Local Install (Testing)
 .PHONY: local-install-python

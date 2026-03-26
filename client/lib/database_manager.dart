@@ -11,6 +11,8 @@ import 'package:mydatatools/repositories/db_isolate_writer.dart';
 import 'package:path/path.dart' as p;
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
+import 'package:mydatatools/custom_path_provider.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
@@ -68,16 +70,24 @@ class DatabaseManager {
     return appDatabase;
   }
 
-  Future<String> _getConfigPath() async {
-    var supportPath = await getApplicationSupportDirectory();
+  static String? _originalSupportPath;
 
-    // macOS path_provider quirk: ensure the directory matches our realm name if on develop
-    if (io.Platform.isMacOS && AppConstants.realmName.endsWith('.dev')) {
-      if (!supportPath.path.endsWith(AppConstants.realmName)) {
-        // Adjust path to use the .dev version
-        final parent = supportPath.parent.path;
-        supportPath = io.Directory(p.join(parent, AppConstants.realmName));
+  Future<String> _getConfigPath() async {
+    io.Directory supportPath;
+    if (_originalSupportPath != null) {
+      supportPath = io.Directory(_originalSupportPath!);
+    } else {
+      supportPath = await getApplicationSupportDirectory();
+
+      // macOS path_provider quirk: ensure the directory matches our realm name if on develop
+      if (io.Platform.isMacOS && AppConstants.realmName.endsWith('.dev')) {
+        if (!supportPath.path.endsWith(AppConstants.realmName)) {
+          // Adjust path to use the .dev version
+          final parent = supportPath.parent.path;
+          supportPath = io.Directory(p.join(parent, AppConstants.realmName));
+        }
       }
+      _originalSupportPath = supportPath.path;
     }
 
     MainApp.supportDirectory.add(supportPath);
@@ -105,6 +115,14 @@ class DatabaseManager {
 
     // Ensure the global appDataDirectory subject has the value
     MainApp.appDataDirectory.add(path);
+
+    // Override application support path globally so aichat, google_fonts, etc. use the selected storagePath
+    if (PathProviderPlatform.instance is! CustomPathProviderPlatform) {
+      PathProviderPlatform.instance = CustomPathProviderPlatform(
+        PathProviderPlatform.instance,
+        path,
+      );
+    }
 
     // start database
     appDatabase = await _openDatabase(path);
