@@ -44,9 +44,10 @@ class LocalFileIsolate extends CollectionScanner {
     // A Stream that handles communication between isolates
     ReceivePort p = ReceivePort();
     RootIsolateToken? token = RootIsolateToken.instance;
+    final rootPath = collection.localCopyPath ?? collection.path;
     Map<String, dynamic> args = {
-      'path': path,
-      'rootPath': collection.localCopyPath ?? collection.path,
+      'path': path ?? rootPath,
+      'rootPath': rootPath,
       'recursive': recursive,
       'collectionId': collection.id,
       'llmServiceUrl': MainApp.llmServiceUrl.value,

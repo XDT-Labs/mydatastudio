@@ -28,7 +28,7 @@ hiddenimports = [
 ]
 
 # Collect all for complex packages
-for pkg in ['llama_cpp', 'uvicorn', 'fastapi', 'langchain', 'langchain_community', 'langchain_core', 'langchain_google_genai']:
+for pkg in ['llama_cpp', 'uvicorn', 'fastapi', 'langchain', 'langchain_community', 'langchain_core', 'langchain_google_genai', 'rawpy']:
     try:
         print(f"Collecting {pkg}...")
         tmp_ret = collect_all(pkg)

@@ -108,7 +108,9 @@ class _RxFilesPage extends State<RxFilesPage> {
 
         _listenToScannerStatus(value);
         _serviceLoadingSub?.cancel();
-        _serviceLoadingSub = _filesAndFoldersService!.isLoading.listen((loading) {
+        _serviceLoadingSub = _filesAndFoldersService!.isLoading.listen((
+          loading,
+        ) {
           if (mounted) {
             setState(() {
               _isServiceLoading = loading;
@@ -230,7 +232,6 @@ class _RxFilesPage extends State<RxFilesPage> {
 
   @override
   Widget build(BuildContext context) {
-
     if (collections.isEmpty) {
       return const NewFileCollectionPage();
     }
@@ -249,7 +250,7 @@ class _RxFilesPage extends State<RxFilesPage> {
         centerTitle: false,
         title: getBreadcrumb(collection!, path ?? collection!.path),
         bottom:
-            (_isLoadingMore || _isServiceLoading)
+            (_isLoadingMore || _isServiceLoading || isScanning)
                 ? const PreferredSize(
                   preferredSize: Size.fromHeight(2.0),
                   child: LinearProgressIndicator(
@@ -275,9 +276,22 @@ class _RxFilesPage extends State<RxFilesPage> {
             // TODO: disable is no files are checked
             icon: const Icon(Icons.refresh, color: Colors.black, weight: 100),
             tooltip: 'Refresh',
-            onPressed: () {
+            onPressed: () async {
               if (collection != null) {
-                logger.s("refresh file list");
+                logger.s("Refreshing folder $path");
+
+                // Get absolute path for scanning
+                final absPath = FilePathResolver.absoluteFromPath(
+                  path ?? '',
+                  collection!,
+                );
+
+                // Start a scan for this specific folder (non-recursive)
+                final mgr = ScannerManager.getInstance();
+                final scanner = await mgr.getScannerAsync(collection!);
+                await scanner.start(collection!, absPath, false, true);
+
+                // Also refresh the UI from the database
                 _filesAndFoldersService!.invoke(
                   GetFileAndFoldersServiceCommand(collection!, path ?? ''),
                 );
@@ -319,7 +333,8 @@ class _RxFilesPage extends State<RxFilesPage> {
                   flex: 3,
                   child: Stack(
                     children: [
-                      if (filesAndFolders.isEmpty && (_isLoadingMore || _isServiceLoading))
+                      if (filesAndFolders.isEmpty &&
+                          (_isLoadingMore || _isServiceLoading))
                         const Center(child: CircularProgressIndicator())
                       else if (filesAndFolders.isEmpty && isScanning)
                         _buildScanningPlaceholder()
