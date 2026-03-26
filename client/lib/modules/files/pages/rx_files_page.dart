@@ -24,6 +24,7 @@ import 'package:http/http.dart' as http;
 import 'package:mydatatools/file_sources/google_drive/google_drive_auth_service.dart';
 import 'package:flutter_breadcrumb/flutter_breadcrumb.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:mydatatools/scanners/scanner_manager.dart';
 
 class RxFilesPage extends StatefulWidget {
   const RxFilesPage({super.key});
@@ -63,6 +64,10 @@ class _RxFilesPage extends State<RxFilesPage> {
   int _fileOffset = 0;
   bool _hasMoreFiles = true;
   bool _isLoadingMore = false;
+  bool _isServiceLoading = false;
+  bool isScanning = false;
+  StreamSubscription? _scannerSub;
+  StreamSubscription? _serviceLoadingSub;
   final ScrollController _scrollController = ScrollController();
 
   /// Navigation trail — empty means we are at the collection root.
@@ -101,6 +106,16 @@ class _RxFilesPage extends State<RxFilesPage> {
           });
         });
 
+        _listenToScannerStatus(value);
+        _serviceLoadingSub?.cancel();
+        _serviceLoadingSub = _filesAndFoldersService!.isLoading.listen((loading) {
+          if (mounted) {
+            setState(() {
+              _isServiceLoading = loading;
+            });
+          }
+        });
+
         // Reset pagination on collection change, then load first page.
         _fileOffset = 0;
         _hasMoreFiles = true;
@@ -133,7 +148,48 @@ class _RxFilesPage extends State<RxFilesPage> {
     _fileServiceSub?.cancel();
     _collectionsServiceSub?.cancel();
     _selectedCollectionSub?.cancel();
+    _scannerSub?.cancel();
+    _serviceLoadingSub?.cancel();
     super.dispose();
+  }
+
+  void _listenToScannerStatus(Collection? c) {
+    _scannerSub?.cancel();
+    _scannerSub = null;
+    if (c == null) {
+      if (mounted) setState(() => isScanning = false);
+      return;
+    }
+
+    if (mounted) setState(() => isScanning = false);
+
+    bool wasScanning = false;
+    final mgr = ScannerManager.getInstance();
+    mgr.getScannerAsync(c).then((scanner) {
+      if (!mounted) return;
+      if (collection?.id != c.id) return;
+
+      _scannerSub = scanner.isScanning.listen((scanning) {
+        if (mounted) {
+          setState(() {
+            isScanning = scanning;
+          });
+          if (wasScanning && !scanning) {
+            // Scanner finished, trigger a silent refresh to show newly found files
+            if (collection != null) {
+              _filesAndFoldersService?.invoke(
+                GetFileAndFoldersServiceCommand(
+                  collection!,
+                  path ?? '',
+                  refreshOnly: true,
+                ),
+              );
+            }
+          }
+          wasScanning = scanning;
+        }
+      });
+    });
   }
 
   /// Loads the next page of files for the current collection and path.
@@ -174,8 +230,6 @@ class _RxFilesPage extends State<RxFilesPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    //final size = MediaQuery.of(context).size;
 
     if (collections.isEmpty) {
       return const NewFileCollectionPage();
@@ -194,6 +248,17 @@ class _RxFilesPage extends State<RxFilesPage> {
         scrolledUnderElevation: 0,
         centerTitle: false,
         title: getBreadcrumb(collection!, path ?? collection!.path),
+        bottom:
+            (isScanning || _isLoadingMore || _isServiceLoading)
+                ? const PreferredSize(
+                  preferredSize: Size.fromHeight(2.0),
+                  child: LinearProgressIndicator(
+                    minHeight: 2,
+                    backgroundColor: Colors.transparent,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                  ),
+                )
+                : null,
         actions: <Widget>[
           IconButton(
             icon: const Icon(Icons.add, color: Colors.black, weight: 200),
@@ -254,96 +319,85 @@ class _RxFilesPage extends State<RxFilesPage> {
                   flex: 3,
                   child: Stack(
                     children: [
-                      NotificationListener<FiledNotification>(
-                        child: FileTable(
-                          data: filesAndFolders,
-                          collection: collection,
-                          scrollController: _scrollController,
-                        ),
-                        onNotification: (FiledNotification n) {
-                          if (n is PathChangedNotification) {
-                            if (n.asset.path != path) {
-                              //make sure path changed before triggering reload
-                              setState(() {
-                                path = n.asset.path;
-                                // Push this folder onto the breadcrumb trail
-                                _breadcrumbTrail = [
-                                  ..._breadcrumbTrail,
-                                  _BreadcrumbEntry(
-                                    name: n.asset.name,
-                                    path: n.asset.path,
+                      if (filesAndFolders.isEmpty && (isScanning || _isLoadingMore || _isServiceLoading))
+                        isScanning
+                            ? _buildScanningPlaceholder()
+                            : const Center(child: CircularProgressIndicator())
+                      else
+                        NotificationListener<FiledNotification>(
+                          child: FileTable(
+                            data: filesAndFolders,
+                            collection: collection,
+                            scrollController: _scrollController,
+                          ),
+                          onNotification: (FiledNotification n) {
+                            if (n is PathChangedNotification) {
+                              if (n.asset.path != path) {
+                                //make sure path changed before triggering reload
+                                setState(() {
+                                  path = n.asset.path;
+                                  // Push this folder onto the breadcrumb trail
+                                  _breadcrumbTrail = [
+                                    ..._breadcrumbTrail,
+                                    _BreadcrumbEntry(
+                                      name: n.asset.name,
+                                      path: n.asset.path,
+                                    ),
+                                  ];
+                                  selectedItems =
+                                      []; // reset selection on path change
+                                  selectedAsset =
+                                      null; // close drawer when drilling into folder
+                                });
+                                // Reset pagination before loading the new path.
+                                _fileOffset = 0;
+                                _hasMoreFiles = true;
+                                _filesAndFoldersService!.invoke(
+                                  GetFileAndFoldersServiceCommand(
+                                    collection!,
+                                    n.asset.path,
                                   ),
-                                ];
-                                selectedItems =
-                                    []; // reset selection on path change
-                                selectedAsset =
-                                    null; // close drawer when drilling into folder
+                                );
+                                return true;
+                              }
+                            }
+                            if (n is SortChangedNotification) {
+                              sortColumn = n.sortColumn;
+                              sortAsc = n.sortAsc;
+                              setState(() {
+                                filesAndFolders = _mergeAndSortRowData(
+                                  filesAndFolders,
+                                  sortColumn,
+                                  sortAsc,
+                                );
                               });
-                              // Reset pagination before loading the new path.
-                              _fileOffset = 0;
-                              _hasMoreFiles = true;
+                              return true;
+                            }
+                            if (n is FileDeletedNotification) {
                               _filesAndFoldersService!.invoke(
                                 GetFileAndFoldersServiceCommand(
                                   collection!,
-                                  n.asset.path,
+                                  path ?? '',
+                                  refreshOnly: true,
                                 ),
                               );
                               return true;
                             }
-                          }
-                          if (n is SortChangedNotification) {
-                            sortColumn = n.sortColumn;
-                            sortAsc = n.sortAsc;
-                            setState(() {
-                              filesAndFolders = _mergeAndSortRowData(
-                                filesAndFolders,
-                                sortColumn,
-                                sortAsc,
-                              );
-                            });
-                            return true;
-                          }
-                          if (n is FileDeletedNotification) {
-                            _filesAndFoldersService!.invoke(
-                              GetFileAndFoldersServiceCommand(
-                                collection!,
-                                path ?? '',
-                                refreshOnly: true,
-                              ),
-                            );
-                            return true;
-                          }
-                          if (n is SelectionChangedNotification) {
-                            setState(() {
-                              selectedItems = n.selectedItems;
-                            });
-                            return true;
-                          }
-                          if (n is FileSelectedNotification) {
-                            setState(() {
-                              selectedAsset = n.asset;
-                            });
-                            return true;
-                          }
-                          return false;
-                        },
-                      ),
-                      StreamBuilder<bool>(
-                        stream: _filesAndFoldersService?.isLoading,
-                        builder: (context, snapshot) {
-                          if (snapshot.data == true) {
-                            return Container(
-                              color: theme.colorScheme.onSurface.withValues(
-                                alpha: 0.1,
-                              ),
-                              child: const Center(
-                                child: CircularProgressIndicator(),
-                              ),
-                            );
-                          }
-                          return const SizedBox.shrink();
-                        },
-                      ),
+                            if (n is SelectionChangedNotification) {
+                              setState(() {
+                                selectedItems = n.selectedItems;
+                              });
+                              return true;
+                            }
+                            if (n is FileSelectedNotification) {
+                              setState(() {
+                                selectedAsset = n.asset;
+                              });
+                              return true;
+                            }
+                            return false;
+                          },
+                        ),
                     ],
                   ),
                 ),
@@ -634,5 +688,26 @@ class _RxFilesPage extends State<RxFilesPage> {
         ),
       );
     }
+  }
+
+  Widget _buildScanningPlaceholder() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          Text(
+            'Scanning ${collection?.name ?? "files"}...',
+            style: const TextStyle(fontSize: 16, color: Colors.grey),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'This may take a minute for large accounts.',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
   }
 }
