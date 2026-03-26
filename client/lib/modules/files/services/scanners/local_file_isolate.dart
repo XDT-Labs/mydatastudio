@@ -231,9 +231,9 @@ class LocalFileIsolateWorker {
           scanStartTime,
         );
         if (file != null) {
-          logger.i('Found file: ${file.path}');
           fileBatch.add(file);
           if (fileBatch.length >= 100) {
+            logger.i('Found ${fileBatch.length} files, saving batch');
             dbWriterPort.send({
               'type': 'batch_file',
               'files': List.from(fileBatch),
@@ -277,6 +277,7 @@ class LocalFileIsolateWorker {
     }
 
     if (currentBatch == null && fileBatch.isNotEmpty) {
+      logger.i('Found ${fileBatch.length} files, saving final batch');
       dbWriterPort.send({'type': 'batch_file', 'files': List.from(fileBatch)});
       fileBatch.clear();
     }

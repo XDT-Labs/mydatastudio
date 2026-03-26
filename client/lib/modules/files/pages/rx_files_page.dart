@@ -249,7 +249,7 @@ class _RxFilesPage extends State<RxFilesPage> {
         centerTitle: false,
         title: getBreadcrumb(collection!, path ?? collection!.path),
         bottom:
-            (isScanning || _isLoadingMore || _isServiceLoading)
+            (_isLoadingMore || _isServiceLoading)
                 ? const PreferredSize(
                   preferredSize: Size.fromHeight(2.0),
                   child: LinearProgressIndicator(
@@ -319,10 +319,10 @@ class _RxFilesPage extends State<RxFilesPage> {
                   flex: 3,
                   child: Stack(
                     children: [
-                      if (filesAndFolders.isEmpty && (isScanning || _isLoadingMore || _isServiceLoading))
-                        isScanning
-                            ? _buildScanningPlaceholder()
-                            : const Center(child: CircularProgressIndicator())
+                      if (filesAndFolders.isEmpty && (_isLoadingMore || _isServiceLoading))
+                        const Center(child: CircularProgressIndicator())
+                      else if (filesAndFolders.isEmpty && isScanning)
+                        _buildScanningPlaceholder()
                       else
                         NotificationListener<FiledNotification>(
                           child: FileTable(
