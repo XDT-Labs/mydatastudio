@@ -63,8 +63,9 @@ extension LoginProviderExtension on LoginProviders {
     }
   }
 
-  /// Whether this provider uses PKCE (no client secret needed).
+  /// Whether this provider uses PKCE (code_challenge + code_verifier).
   /// Google desktop apps use PKCE per https://developers.google.com/identity/protocols/oauth2/native-app
+  /// Note: Google still requires client_secret alongside PKCE for desktop clients.
   bool get usesPkce {
     switch (this) {
       case LoginProviders.google:
@@ -75,14 +76,14 @@ extension LoginProviderExtension on LoginProviders {
     }
   }
 
-  /// OAuth client secret (only for non-PKCE providers like Azure).
-  /// Returns null for PKCE providers (Google) since no secret is needed.
-  String? get clientSecret {
-    if (usesPkce) return null;
+  /// OAuth client secret.
+  /// Google requires client_secret for desktop apps even with PKCE enabled.
+  /// Evaluation happens at compile-time via --dart-define or --dart-define-from-file.
+  String get clientSecret {
     switch (this) {
       case LoginProviders.google:
       case LoginProviders.googleDrive:
-        return null;
+        return const String.fromEnvironment('GOOGLE_CLIENT_SECRET');
       case LoginProviders.azure:
         return const String.fromEnvironment('AZURE_CLIENT_SECRET');
     }

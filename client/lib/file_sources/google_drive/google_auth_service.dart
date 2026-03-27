@@ -89,14 +89,15 @@ class GoogleAuthService {
     final provider = LoginProviders.google;
     final url = Uri.parse(provider.tokenEndpoint);
 
-    // PKCE refresh: no client_secret needed.
-    // Google accepts refresh_token + client_id for PKCE-originated grants.
+    // Google requires client_secret for desktop app token refresh,
+    // even with PKCE enabled.
     final response = await http.post(
       url,
       headers: {'Accept': 'application/json'},
       body: {
         'refresh_token': refreshToken,
         'client_id': provider.clientId,
+        'client_secret': provider.clientSecret,
         'grant_type': 'refresh_token',
       },
     );
