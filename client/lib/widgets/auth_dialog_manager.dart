@@ -11,26 +11,28 @@ class AuthDialogManager {
   void init() {
     GetCollectionsService.instance.sink.listen((value) {
       for (var c in value) {
-        if (c.needsReAuth && c.type == 'email') {
-          if (c.oauthService == 'google') {
-            _showGoogleAuthDialog(c);
-          }
+        if (c.needsReAuth && c.oauthService == 'google') {
+          _showGoogleAuthDialog(c);
         }
       }
     });
   }
 
   void _showGoogleAuthDialog(Collection collection) {
+    final isEmail = collection.type == 'email';
+    final typeLabel = isEmail ? 'Gmail' : 'Google Drive';
+    final icon = isEmail ? Icons.email : Icons.cloud;
+
     showDialog<SimpleDialog>(
       context: _globalNavigationKey.currentState!.context,
       builder: (BuildContext context) {
         return SimpleDialog(
-          title: const Text('Authenticate Expired'),
+          title: const Text('Authentication Expired'),
           children: <Widget>[
-            const SimpleDialogOption(
+            SimpleDialogOption(
               onPressed: null,
               child: Text(
-                "Your Google 'type' oauth token has expired or been reset for 'email'.\nClick button to re-authenticate.",
+                "Your Google OAuth token has expired or been revoked for '$typeLabel'.\nClick the button to re-authenticate.",
               ),
             ),
             SimpleDialogOption(
@@ -39,14 +41,23 @@ class AuthDialogManager {
                 width: 225,
                 height: 48,
                 child: ElevatedButton.icon(
-                  icon: const Icon(Icons.email),
-                  label: const Text("Login with Google"),
+                  icon: Icon(icon),
+                  label: Text("Login with Google ($typeLabel)"),
                   onPressed: () async {
-                    await LoginProviderExtension.handleGoogleMail(
-                      context,
-                      existing: collection,
-                    );
-                    // TODO close dialog
+                    if (isEmail) {
+                      await LoginProviderExtension.handleGoogleMail(
+                        context,
+                        existing: collection,
+                      );
+                    } else {
+                      await LoginProviderExtension.handleGoogleDrive(
+                        context,
+                        existing: collection,
+                      );
+                    }
+                    if (context.mounted) {
+                      Navigator.of(context).pop();
+                    }
                   },
                 ),
               ),
