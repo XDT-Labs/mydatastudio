@@ -194,7 +194,7 @@ extension LoginProviderExtension on LoginProviders {
 
       return collection;
     } catch (e, stack) {
-      AppLogger(null).e('Gmail OAuth failed');
+      AppLogger(null).e('Gmail OAuth failed', error: e, stackTrace: stack);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Gmail sign-in failed. Please try again.')),
