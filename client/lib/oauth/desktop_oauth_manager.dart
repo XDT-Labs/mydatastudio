@@ -23,6 +23,9 @@ class DesktopOAuthManager extends DesktopLoginManager {
   }
 
   Future<oauth2.Client> _getOAuth2Client(Uri redirectUrl) async {
+    // When usesPkce is true (Google), omit the secret parameter.
+    // The oauth2 package auto-generates code_verifier + S256 code_challenge.
+    // Non-PKCE providers (Azure) still need the client secret.
     var grant = oauth2.AuthorizationCodeGrant(
       loginProvider.clientId,
       Uri.parse(loginProvider.authorizationEndpoint),
