@@ -315,7 +315,7 @@ extension LoginProviderExtension on LoginProviders {
 
       return collection;
     } catch (e, stack) {
-      AppLogger(null).e('Google Drive OAuth failed');
+      AppLogger(null).e('Google Drive OAuth failed', error: e, stackTrace: stack);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Google Drive sign-in failed. Please try again.')),
