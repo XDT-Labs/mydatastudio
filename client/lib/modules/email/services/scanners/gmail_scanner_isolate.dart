@@ -12,7 +12,7 @@ import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/folder.dart';
 import 'package:mydatatools/modules/email/services/get_emails_service.dart';
-import 'package:mydatatools/oauth/google_auth_client.dart';
+import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
 import 'package:uuid/uuid.dart';
 
 class GmailScannerIsolate {
@@ -94,22 +94,22 @@ class GmailScannerIsolateWorker {
 
     final AppLogger logger = AppLogger(clientPort);
 
-    // Validate/Refresh Token
-    String? accessToken;
+    // Validate/Refresh Token using consolidated auth service
+    String? accessToken = collection.accessToken;
     try {
-      accessToken = await GoogleAuthClient.validateToken(
-        collection.accessToken!,
-        collection.refreshToken!,
-      );
+      if (GoogleAuthService.isTokenExpired(collection.expiration)) {
+        final result = await GoogleAuthService.refreshTokens(
+          accessToken: collection.accessToken!,
+          refreshToken: collection.refreshToken!,
+        );
+        accessToken = result.accessToken;
+      }
     } catch (e) {
       logger.e("Failed to validate Gmail token: $e");
       Isolate.exit(clientPort, {'error': 'auth_failed'});
     }
 
-    // if validation fails it throws an exception or Isolate.exit is called inside catch block
-
-    Map<String, String> authHeaders = {"Authorization": "Bearer $accessToken"};
-    final authHttpClient = GoogleAuthClient(authHeaders);
+    final authHttpClient = AuthenticatedHttpClient.bearer(accessToken!);
     final GmailApi gmailApi = GmailApi(authHttpClient);
 
     try {
