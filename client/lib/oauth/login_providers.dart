@@ -139,7 +139,7 @@ extension LoginProviderExtension on LoginProviders {
 
       if (peopleResponse.statusCode != 200) {
         AppLogger(null).e(
-          'Google People API error (${peopleResponse.statusCode}): ${peopleResponse.body}',
+          'Google People API error (${peopleResponse.statusCode})',
         );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -194,10 +194,10 @@ extension LoginProviderExtension on LoginProviders {
 
       return collection;
     } catch (e, stack) {
-      AppLogger(null).e('Gmail OAuth failed: $e\n$stack');
+      AppLogger(null).e('Gmail OAuth failed', error: e, stackTrace: stack);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gmail sign-in failed: $e')),
+          const SnackBar(content: Text('Gmail sign-in failed. Please try again.')),
         );
       }
       return null;
@@ -255,7 +255,7 @@ extension LoginProviderExtension on LoginProviders {
 
       if (peopleResponse.statusCode != 200) {
         AppLogger(null).e(
-          'Google People API error (${peopleResponse.statusCode}): ${peopleResponse.body}',
+          'Google People API error (${peopleResponse.statusCode})',
         );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -315,10 +315,10 @@ extension LoginProviderExtension on LoginProviders {
 
       return collection;
     } catch (e, stack) {
-      AppLogger(null).e('Google Drive OAuth failed: $e\n$stack');
+      AppLogger(null).e('Google Drive OAuth failed', error: e, stackTrace: stack);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Google Drive sign-in failed: $e')),
+          const SnackBar(content: Text('Google Drive sign-in failed. Please try again.')),
         );
       }
       return null;

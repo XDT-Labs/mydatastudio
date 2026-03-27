@@ -14,6 +14,10 @@ class ThumbnailGenerator {
     if (contentType == FilesConstants.mimeTypeImage) {
       var localFile = io.File(filePath);
       if (localFile.existsSync()) {
+        // Guard against decompression bombs - skip files larger than 50MB
+        if (localFile.lengthSync() > 50 * 1024 * 1024) {
+          return null;
+        }
         // Read a image from file.
         img.Image? image = img.decodeImage(localFile.readAsBytesSync());
         if (image != null) {
