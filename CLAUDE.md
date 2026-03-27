@@ -10,6 +10,63 @@ The app has two runtime components:
 1. **Flutter macOS desktop client** (`client/`) — the UI and data layer
 2. **Python FastAPI service** (`client/assets/python/aichat/`) — embedded in the flutter app and spawned as a subprocess at startup, handles all LLM inference and embeddings over HTTP on localhost
 
+## GSTACK
+gstack is a process, not a collection of tools. The skills run in the order a sprint runs:
+
+Think → Plan → Build → Review → Test → Ship → Reflect
+Each skill feeds into the next. /office-hours writes a design doc that /plan-ceo-review reads. /plan-eng-review writes a test plan that /qa picks up. /review catches bugs that /ship verifies are fixed. Nothing falls through the cracks because every step knows what came before it.
+
+- use the /browse skill from gstack for all web browsing, never use mcp__claude-in-chrome__* tools
+
+lists the available skills: ( if gstack skills aren't working, run cd .claude/skills/gstack && ./setup to build the binary and register skills.)
+
+### Planning & Review
+- `/office-hours` — YC-style forcing questions to pressure-test product ideas and demand reality
+- `/plan-ceo-review` — CEO/founder-mode plan review: rethinks the problem, challenges scope, finds the 10-star product
+- `/plan-eng-review` — Eng manager-mode plan review: locks in architecture, data flow, edge cases, test coverage
+- `/plan-design-review` — Designer's eye plan review: rates each design dimension 0-10 and fixes gaps before implementation
+- `/design-consultation` — Full design system proposal: aesthetic, typography, color, layout, spacing, motion; produces DESIGN.md
+
+### Shipping
+- `/review` — Pre-landing PR review: checks SQL safety, LLM trust boundaries, conditional side effects, structural issues
+- `/ship` — Full ship workflow: merge base, run tests, bump VERSION, update CHANGELOG, commit, push, create PR
+- `/land-and-deploy` — Merges the PR, waits for CI/deploy, verifies production health via canary checks
+
+### Quality & Testing
+- `/qa` — Systematically QA test the app, find bugs, fix them in source, commit each fix atomically, re-verify
+- `/qa-only` — Report-only QA: produces structured bug report with health score and repro steps, never fixes
+- `/canary` — Post-deploy canary monitoring: watches live app for console errors, perf regressions, page failures
+- `/benchmark` — Performance regression detection: establishes baselines for page load, Core Web Vitals, resource sizes
+
+### Debugging
+- `/investigate` — Systematic root-cause debugging: four phases (investigate, analyze, hypothesize, implement). No fixes without root cause.
+
+### UI / Design
+- `/design-review` — Designer's eye QA on a live/built site: finds visual inconsistency, spacing issues, hierarchy problems, AI slop; fixes and commits
+- `/browse` — Headless browser for navigating URLs, interacting with elements, taking screenshots, testing forms
+- `/setup-browser-cookies` — Import cookies from your real Chromium browser into the headless browse session
+
+### Security
+- `/cso` — Chief Security Officer audit: secrets archaeology, dependency supply chain, CI/CD security, OWASP Top 10, STRIDE threat modeling
+
+### Safety & Guardrails
+- `/careful` — Warns before destructive commands (rm -rf, DROP TABLE, force-push, reset --hard, kubectl delete)
+- `/freeze` — Restrict file edits to a specific directory for the session; prevents accidental changes outside scope
+- `/guard` — Full safety mode: combines /careful + /freeze for maximum protection
+- `/unfreeze` — Clear the freeze boundary set by /freeze, allowing edits to all directories again
+
+### Maintenance & Docs
+- `/retro` — Weekly engineering retrospective: analyzes commit history, work patterns, code quality metrics
+- `/document-release` — Post-ship docs update: refreshes README/ARCHITECTURE/CHANGELOG to match what shipped
+
+### Infrastructure
+- `/setup-deploy` — Configure deployment settings for /land-and-deploy (detects Fly.io, Render, Vercel, Netlify, etc.)
+
+### Tooling
+- `/codex` — OpenAI Codex CLI wrapper: code review (pass/fail gate), adversarial challenge mode, or consult mode
+- `/gstack-upgrade` — Upgrade gstack to the latest version
+
+
 ## Build Commands
 
 All orchestration goes through `make` from the repo root:
