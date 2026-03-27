@@ -313,10 +313,20 @@ class PstParser:
                     for i in range(num_attachments):
                         try:
                             att = message.get_attachment(i)
-                            filename = self._get_attachment_filename(att, i)
+                            raw_filename = self._get_attachment_filename(att, i)
+                            # Sanitize filename to prevent path traversal
+                            filename = os.path.basename(raw_filename).replace('..', '')
+                            if not filename:
+                                filename = f"attachment_{i}"
 
                             safe_filename = f"{entry_id}_{filename}"
                             file_path = os.path.join(attachment_folder, safe_filename)
+
+                            # Verify resolved path stays within output directory
+                            real_path = os.path.realpath(file_path)
+                            real_output = os.path.realpath(self.output_dir)
+                            if not real_path.startswith(real_output):
+                                continue
 
                             att.seek_offset(0, 0)
                             raw_data = att.read_buffer(att.size)

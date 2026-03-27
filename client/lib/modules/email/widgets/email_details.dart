@@ -58,22 +58,60 @@ class _EmailDetails extends State<EmailDetails> {
     }
   }
 
+  static const _csp = '<meta http-equiv="Content-Security-Policy" '
+      "content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data: https: http:;\">";
+
   void _loadEmailContent() {
     final htmlBody = widget.email.htmlBody;
     final plainBody = widget.email.plainBody;
 
     String html;
     if (htmlBody != null && htmlBody.trim().isNotEmpty) {
-      html = htmlBody;
+      html = _sanitizeHtml(htmlBody);
     } else if (plainBody != null && plainBody.trim().isNotEmpty) {
+      final escaped = _escapeHtml(plainBody);
       html =
-          '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">$plainBody</body></html>';
+          '<html><head>$_csp</head><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">$escaped</body></html>';
     } else {
       html =
           '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">(No content)</body></html>';
     }
 
     _controller.loadHtmlString(html);
+  }
+
+  static String _escapeHtml(String input) {
+    return input
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+  }
+
+  static String _sanitizeHtml(String html) {
+    var s = html;
+    // Remove script tags and content
+    s = s.replaceAll(RegExp(r'<script[\s\S]*?</script>', caseSensitive: false), '');
+    // Remove event handlers (on*)
+    s = s.replaceAll(RegExp(r"""\s+on\w+\s*=\s*["'][^"']*["']""", caseSensitive: false), '');
+    s = s.replaceAll(RegExp(r'\s+on\w+\s*=\s*\S+', caseSensitive: false), '');
+    // Remove dangerous tags
+    s = s.replaceAll(RegExp(r'<(iframe|object|embed|form|applet|base)[\s\S]*?(/?>|</\1>)', caseSensitive: false), '');
+    // Block javascript: URLs
+    s = s.replaceAll(RegExp(r'javascript\s*:', caseSensitive: false), 'blocked:');
+    // Remove existing meta tags (we inject our own CSP)
+    s = s.replaceAll(RegExp(r'<meta[^>]*>', caseSensitive: false), '');
+
+    // Inject CSP meta tag
+    if (s.contains(RegExp(r'<head', caseSensitive: false))) {
+      s = s.replaceFirst(RegExp(r'<head([^>]*)>', caseSensitive: false), '<head\$1>$_csp');
+    } else if (s.contains(RegExp(r'<html', caseSensitive: false))) {
+      s = s.replaceFirst(RegExp(r'<html([^>]*)>', caseSensitive: false), '<html\$1><head>$_csp</head>');
+    } else {
+      s = '<html><head>$_csp</head><body>$s</body></html>';
+    }
+    return s;
   }
 
   @override
