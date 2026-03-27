@@ -5,7 +5,7 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:a2da7f17875437372166c813ae45693daec1ac3af633caeaa324f30a51332f85"
+content_hash = "sha256:229045ae2acef5d0bc76f1f19eecc607d6a1780939319f5ec739e7a45786933a"
 
 [[metadata.targets]]
 requires_python = ">=3.11,<3.14"
@@ -16,6 +16,7 @@ version = "1.13.0"
 requires_python = ">=3.10.0"
 summary = "Accelerate"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "huggingface-hub>=0.21.0",
     "numpy>=1.17",
@@ -36,6 +37,7 @@ version = "2.6.1"
 requires_python = ">=3.9"
 summary = "Happy Eyeballs for asyncio"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "aiohappyeyeballs-2.6.1-py3-none-any.whl", hash = "sha256:f349ba8f4b75cb25c99c5c2d84e997e485204d2902a9597802b0371f09331fb8"},
     {file = "aiohappyeyeballs-2.6.1.tar.gz", hash = "sha256:c3f9d0113123803ccadfdf3f0faa505bc78e6a72d1cc4806cbd719826e943558"},
@@ -47,6 +49,7 @@ version = "3.13.3"
 requires_python = ">=3.9"
 summary = "Async http client/server framework (asyncio)"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "aiohappyeyeballs>=2.5.0",
     "aiosignal>=1.4.0",
@@ -118,6 +121,7 @@ version = "1.4.0"
 requires_python = ">=3.9"
 summary = "aiosignal: a list of registered asynchronous callbacks"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "frozenlist>=1.1.0",
     "typing-extensions>=4.2; python_version < \"3.13\"",
@@ -132,6 +136,7 @@ name = "altgraph"
 version = "0.17.5"
 summary = "Python graph (network) package"
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "altgraph-0.17.5-py2.py3-none-any.whl", hash = "sha256:f3a22400bce1b0c701683820ac4f3b159cd301acab067c51c653e06961600597"},
     {file = "altgraph-0.17.5.tar.gz", hash = "sha256:c87b395dd12fabde9c99573a9749d67da8d29ef9de0125c7f536699b4a9bc9e7"},
@@ -143,6 +148,7 @@ version = "0.0.4"
 requires_python = ">=3.8"
 summary = "Document parameters, class attributes, return types, and variables inline, with Annotated."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "annotated_doc-0.0.4-py3-none-any.whl", hash = "sha256:571ac1dc6991c450b25a9c2d84a3705e2ae7a53467b5d111c24fa8baabbed320"},
     {file = "annotated_doc-0.0.4.tar.gz", hash = "sha256:fbcda96e87e9c92ad167c2e53839e57503ecfda18804ea28102353485033faa4"},
@@ -154,6 +160,7 @@ version = "0.7.0"
 requires_python = ">=3.8"
 summary = "Reusable constraint types to use with typing.Annotated"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "typing-extensions>=4.0.0; python_version < \"3.9\"",
 ]
@@ -168,6 +175,7 @@ version = "4.12.1"
 requires_python = ">=3.9"
 summary = "High-level concurrency and networking framework on top of asyncio or Trio"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "exceptiongroup>=1.0.2; python_version < \"3.11\"",
     "idna>=2.8",
@@ -184,6 +192,7 @@ version = "25.4.0"
 requires_python = ">=3.9"
 summary = "Classes Without Boilerplate"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "attrs-25.4.0-py3-none-any.whl", hash = "sha256:adcf7e2a1fb3b36ac48d97835bb6d8ade15b8dcce26aba8bf1d14847b57a3373"},
     {file = "attrs-25.4.0.tar.gz", hash = "sha256:16d5969b87f0859ef33a48b35d55ac1be6e42ae49d5e853b597db70c35c57e11"},
@@ -195,6 +204,7 @@ version = "17.0.0"
 requires_python = ">=3.10"
 summary = "Pythonic bindings for FFmpeg's libraries."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "av-17.0.0-cp311-abi3-macosx_11_0_x86_64.whl", hash = "sha256:ed4013fac77c309a4a68141dcf6148f1821bb1073a36d4289379762a6372f711"},
     {file = "av-17.0.0-cp311-abi3-macosx_14_0_arm64.whl", hash = "sha256:e44b6c83e9f3be9f79ee87d0b77a27cea9a9cd67bd630362c86b7e56a748dfbb"},
@@ -213,6 +223,7 @@ version = "2026.2.25"
 requires_python = ">=3.7"
 summary = "Python package for providing Mozilla's CA Bundle."
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "certifi-2026.2.25-py3-none-any.whl", hash = "sha256:027692e4402ad994f1c42e52a4997a9763c646b73e4096e4d5d6db8af1d6f0fa"},
     {file = "certifi-2026.2.25.tar.gz", hash = "sha256:e887ab5cee78ea814d3472169153c2d12cd43b14bd03329a39a9c6e2e80bfba7"},
@@ -224,7 +235,7 @@ version = "2.0.0"
 requires_python = ">=3.9"
 summary = "Foreign Function Interface for Python calling C code."
 groups = ["default"]
-marker = "python_full_version >= \"3.9\" or platform_python_implementation == \"PyPy\""
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "pycparser; implementation_name != \"PyPy\"",
 ]
@@ -275,6 +286,7 @@ version = "3.4.5"
 requires_python = ">=3.7"
 summary = "The Real First Universal Charset Detector. Open, modern and actively maintained alternative to Chardet."
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "charset_normalizer-3.4.5-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:610f72c0ee565dfb8ae1241b666119582fdbfe7c0975c175be719f940e110694"},
     {file = "charset_normalizer-3.4.5-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:60d68e820af339df4ae8358c7a2e7596badeb61e544438e489035f9fbf3246a5"},
@@ -334,6 +346,7 @@ version = "8.3.1"
 requires_python = ">=3.10"
 summary = "Composable command line interface toolkit"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "colorama; platform_system == \"Windows\"",
 ]
@@ -348,7 +361,7 @@ version = "0.4.6"
 requires_python = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
 summary = "Cross-platform colored terminal text."
 groups = ["default", "dev"]
-marker = "sys_platform == \"win32\" or platform_system == \"Windows\""
+marker = "sys_platform == \"win32\" and python_version >= \"3.11\" and python_version < \"3.14\" or platform_system == \"Windows\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
@@ -360,6 +373,7 @@ version = "46.0.5"
 requires_python = ">=3.8, !=3.9.0, !=3.9.1"
 summary = "cryptography is a package which provides cryptographic recipes and primitives to Python developers."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "cffi>=1.14; python_full_version == \"3.8.*\" and platform_python_implementation != \"PyPy\"",
     "cffi>=2.0.0; python_full_version >= \"3.9\" and platform_python_implementation != \"PyPy\"",
@@ -408,7 +422,7 @@ name = "cuda-bindings"
 version = "12.9.4"
 summary = "Python bindings for CUDA"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "cuda-pathfinder~=1.1",
 ]
@@ -433,7 +447,7 @@ version = "1.4.2"
 requires_python = ">=3.10"
 summary = "Pathfinder for CUDA components"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "cuda_pathfinder-1.4.2-py3-none-any.whl", hash = "sha256:eb354abc20278f8609dc5b666a24648655bef5613c6dfe78a238a6fd95566754"},
 ]
@@ -444,6 +458,7 @@ version = "0.6.7"
 requires_python = ">=3.7,<4.0"
 summary = "Easily serialize dataclasses to and from JSON."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "marshmallow<4.0.0,>=3.18.0",
     "typing-inspect<1,>=0.4.0",
@@ -459,6 +474,7 @@ version = "5.6.3"
 requires_python = ">=3"
 summary = "Disk Cache -- Disk and file backed persistent cache."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "diskcache-5.6.3-py3-none-any.whl", hash = "sha256:5e31b2d5fbad117cc363ebaf6b689474db18a1f6438bc82358b024abd4c2ca19"},
     {file = "diskcache-5.6.3.tar.gz", hash = "sha256:2c3a3fa2743d8535d832ec61c2054a1641f41775aa7c556758a109941e33e4fc"},
@@ -470,6 +486,7 @@ version = "0.120.4"
 requires_python = ">=3.8"
 summary = "FastAPI framework, high performance, easy to learn, fast to code, ready for production"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "annotated-doc>=0.0.2",
     "pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4",
@@ -487,6 +504,7 @@ version = "3.25.2"
 requires_python = ">=3.10"
 summary = "A platform independent file lock."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "filelock-3.25.2-py3-none-any.whl", hash = "sha256:ca8afb0da15f229774c9ad1b455ed96e85a81373065fb10446672f64444ddf70"},
     {file = "filelock-3.25.2.tar.gz", hash = "sha256:b64ece2b38f4ca29dd3e810287aa8c48182bbecd1ae6e9ae126c9b35f1382694"},
@@ -497,6 +515,7 @@ name = "filetype"
 version = "1.2.0"
 summary = "Infer file type and MIME type of any file/buffer. No external dependencies."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "filetype-1.2.0-py2.py3-none-any.whl", hash = "sha256:7ce71b6880181241cf7ac8697a2f1eb6a8bd9b429f7ad6d27b8db9ba5f1c2d25"},
     {file = "filetype-1.2.0.tar.gz", hash = "sha256:66b56cd6474bf41d8c54660347d37afcc3f7d1970648de365c102ef77548aadb"},
@@ -508,6 +527,7 @@ version = "1.8.0"
 requires_python = ">=3.9"
 summary = "A list-like structure which implements collections.abc.MutableSequence"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "frozenlist-1.8.0-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:09474e9831bc2b2199fad6da3c14c7b0fbdd377cce9d3d77131be28906cb7d84"},
     {file = "frozenlist-1.8.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:17c883ab0ab67200b5f964d2b9ed6b00971917d5d8a92df149dc2c9779208ee9"},
@@ -583,6 +603,7 @@ version = "2026.2.0"
 requires_python = ">=3.10"
 summary = "File-system specification"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "fsspec-2026.2.0-py3-none-any.whl", hash = "sha256:98de475b5cb3bd66bedd5c4679e87b4fdfe1a3bf4d707b151b3c07e58c9a2437"},
     {file = "fsspec-2026.2.0.tar.gz", hash = "sha256:6544e34b16869f5aacd5b90bdf1a71acb37792ea3ddf6125ee69a22a53fb8bff"},
@@ -594,6 +615,7 @@ version = "0.18.0"
 requires_python = ">=3.8"
 summary = "Read and write ML models in GGUF for GGML"
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "numpy>=1.17",
     "pyyaml>=5.1",
@@ -611,6 +633,7 @@ version = "0.10.0"
 requires_python = ">=3.7"
 summary = "Google Ai Generativelanguage API client library"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "google-api-core[grpc]!=2.0.*,!=2.1.*,!=2.10.*,!=2.2.*,!=2.3.*,!=2.4.*,!=2.5.*,!=2.6.*,!=2.7.*,!=2.8.*,!=2.9.*,<3.0.0,>=1.34.1",
     "google-auth!=2.24.0,!=2.25.0,<3.0.0,>=2.14.1",
@@ -631,6 +654,7 @@ version = "2.30.0"
 requires_python = ">=3.9"
 summary = "Google API client core library"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "google-auth<3.0.0,>=2.14.1",
     "googleapis-common-protos<2.0.0,>=1.56.3",
@@ -651,6 +675,7 @@ extras = ["grpc"]
 requires_python = ">=3.9"
 summary = "Google API client core library"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "google-api-core==2.30.0",
     "grpcio-status<2.0.0,>=1.33.2",
@@ -671,6 +696,7 @@ version = "2.49.0"
 requires_python = ">=3.8"
 summary = "Google Authentication Library"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "cryptography>=38.0.3",
     "pyasn1-modules>=0.2.1",
@@ -687,6 +713,7 @@ version = "1.73.0"
 requires_python = ">=3.7"
 summary = "Common protobufs used in Google APIs"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "protobuf!=4.21.1,!=4.21.2,!=4.21.3,!=4.21.4,!=4.21.5,<7.0.0,>=3.20.2",
 ]
@@ -701,7 +728,7 @@ version = "3.3.2"
 requires_python = ">=3.10"
 summary = "Lightweight in-process concurrent programming"
 groups = ["default"]
-marker = "platform_machine == \"win32\" or platform_machine == \"WIN32\" or platform_machine == \"AMD64\" or platform_machine == \"amd64\" or platform_machine == \"x86_64\" or platform_machine == \"ppc64le\" or platform_machine == \"aarch64\""
+marker = "python_version >= \"3.11\" and python_version < \"3.14\" and (platform_machine == \"win32\" or platform_machine == \"WIN32\" or platform_machine == \"AMD64\" or platform_machine == \"amd64\" or platform_machine == \"x86_64\" or platform_machine == \"ppc64le\" or platform_machine == \"aarch64\")"
 files = [
     {file = "greenlet-3.3.2-cp311-cp311-macosx_11_0_universal2.whl", hash = "sha256:c56692189a7d1c7606cb794be0a8381470d95c57ce5be03fb3d0ef57c7853b86"},
     {file = "greenlet-3.3.2-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1ebd458fa8285960f382841da585e02201b53a5ec2bac6b156fc623b5ce4499f"},
@@ -739,6 +766,7 @@ version = "1.78.1"
 requires_python = ">=3.9"
 summary = "HTTP/2-based RPC framework"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "typing-extensions~=4.12",
 ]
@@ -782,6 +810,7 @@ version = "1.78.1"
 requires_python = ">=3.9"
 summary = "Status proto mapping for gRPC"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "googleapis-common-protos>=1.5.5",
     "grpcio>=1.78.1",
@@ -798,6 +827,7 @@ version = "0.16.0"
 requires_python = ">=3.8"
 summary = "A pure-Python, bring-your-own-I/O implementation of HTTP/1.1"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "h11-0.16.0-py3-none-any.whl", hash = "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"},
     {file = "h11-0.16.0.tar.gz", hash = "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1"},
@@ -809,7 +839,7 @@ version = "1.4.0"
 requires_python = ">=3.8"
 summary = "Fast transfer of large files with the Hugging Face Hub."
 groups = ["default"]
-marker = "platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"arm64\" or platform_machine == \"aarch64\""
+marker = "python_version >= \"3.11\" and python_version < \"3.14\" and (platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"arm64\" or platform_machine == \"aarch64\")"
 files = [
     {file = "hf_xet-1.4.0-cp313-cp313t-macosx_10_12_x86_64.whl", hash = "sha256:76725fcbc5f59b23ac778f097d3029d6623e3cf6f4057d99d1fce1a7e3cff8fc"},
     {file = "hf_xet-1.4.0-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:76f1f73bee81a6e6f608b583908aa24c50004965358ac92c1dc01080a21bcd09"},
@@ -836,6 +866,7 @@ version = "1.0.9"
 requires_python = ">=3.8"
 summary = "A minimal low-level HTTP client."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "certifi",
     "h11>=0.16",
@@ -851,6 +882,7 @@ version = "0.7.1"
 requires_python = ">=3.9"
 summary = "A collection of framework independent HTTP protocol utils."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "httptools-0.7.1-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:474d3b7ab469fefcca3697a10d11a32ee2b9573250206ba1e50d5980910da657"},
     {file = "httptools-0.7.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:a3c3b7366bb6c7b96bd72d0dbe7f7d5eead261361f013be5f6d9590465ea1c70"},
@@ -882,6 +914,7 @@ version = "0.28.1"
 requires_python = ">=3.8"
 summary = "The next generation HTTP client."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "anyio",
     "certifi",
@@ -899,6 +932,7 @@ version = "0.4.3"
 requires_python = ">=3.9"
 summary = "Consume Server-Sent Event (SSE) messages with HTTPX."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "httpx_sse-0.4.3-py3-none-any.whl", hash = "sha256:0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc"},
     {file = "httpx_sse-0.4.3.tar.gz", hash = "sha256:9b1ed0127459a66014aec3c56bebd93da3c1bc8bb6618c8082039a44889a755d"},
@@ -910,6 +944,7 @@ version = "0.36.0"
 requires_python = ">=3.8.0"
 summary = "Client library to download and publish models, datasets and other repos on the huggingface.co hub"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "filelock",
     "fsspec>=2023.5.0",
@@ -931,6 +966,7 @@ version = "3.11"
 requires_python = ">=3.8"
 summary = "Internationalized Domain Names in Applications (IDNA)"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "idna-3.11-py3-none-any.whl", hash = "sha256:771a87f49d9defaf64091e6e6fe9c18d4833f140bd19464795bc32d966ca37ea"},
     {file = "idna-3.11.tar.gz", hash = "sha256:795dafcc9c04ed0c1fb032c2aa73654d8e8c5023a7df64a53f39190ada629902"},
@@ -942,6 +978,7 @@ version = "2.3.0"
 requires_python = ">=3.10"
 summary = "brain-dead simple config-ini parsing"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12"},
     {file = "iniconfig-2.3.0.tar.gz", hash = "sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730"},
@@ -953,6 +990,7 @@ version = "3.1.6"
 requires_python = ">=3.7"
 summary = "A very fast and expressive template engine."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "MarkupSafe>=2.0",
 ]
@@ -967,6 +1005,7 @@ version = "1.33"
 requires_python = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*, !=3.6.*"
 summary = "Apply JSON-Patches (RFC 6902) "
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "jsonpointer>=1.9",
 ]
@@ -981,6 +1020,7 @@ version = "3.0.0"
 requires_python = ">=3.7"
 summary = "Identify specific nodes in a JSON document (RFC 6901) "
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "jsonpointer-3.0.0-py2.py3-none-any.whl", hash = "sha256:13e088adc14fca8b6aa8177c044e12701e6ad4b28ff10e65f2267a90109c9942"},
     {file = "jsonpointer-3.0.0.tar.gz", hash = "sha256:2b2d729f2091522d61c3b31f82e11870f60b68f43fbc705cb76bf4b832af59ef"},
@@ -992,6 +1032,7 @@ version = "4.26.0"
 requires_python = ">=3.10"
 summary = "An implementation of JSON Schema validation for Python"
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "attrs>=22.2.0",
     "jsonschema-specifications>=2023.03.6",
@@ -1009,6 +1050,7 @@ version = "2025.9.1"
 requires_python = ">=3.9"
 summary = "The JSON Schema meta-schemas and vocabularies, exposed as a Registry"
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "referencing>=0.31.0",
 ]
@@ -1023,6 +1065,7 @@ version = "0.3.27"
 requires_python = "<4.0,>=3.9"
 summary = "Building applications with LLMs through composability"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "PyYAML>=5.3",
     "SQLAlchemy<3,>=1.4",
@@ -1044,6 +1087,7 @@ version = "0.3.21"
 requires_python = "<4.0,>=3.9"
 summary = "Community contributed LangChain integrations."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "PyYAML>=5.3",
     "SQLAlchemy<3,>=1.4",
@@ -1069,6 +1113,7 @@ version = "0.3.79"
 requires_python = "<4.0.0,>=3.9.0"
 summary = "Building applications with LLMs through composability"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "PyYAML<7.0.0,>=5.3.0",
     "jsonpatch<2.0.0,>=1.33.0",
@@ -1089,6 +1134,7 @@ version = "2.1.12"
 requires_python = ">=3.9"
 summary = "An integration package connecting Google's genai package and LangChain"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "filetype<2,>=1.2",
     "google-ai-generativelanguage<1,>=0.7",
@@ -1106,6 +1152,7 @@ version = "0.3.11"
 requires_python = ">=3.9"
 summary = "LangChain text splitting utilities"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "langchain-core<2.0.0,>=0.3.75",
 ]
@@ -1120,6 +1167,7 @@ version = "0.3.45"
 requires_python = ">=3.9"
 summary = "Client library to connect to the LangSmith LLM Tracing and Evaluation Platform."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "httpx<1,>=0.23.0",
     "orjson<4.0.0,>=3.9.14; platform_python_implementation != \"PyPy\"",
@@ -1141,6 +1189,7 @@ version = "20231205"
 requires_python = ">=3.7"
 summary = "Python bindings module for libpff"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "libpff-python-20231205.tar.gz", hash = "sha256:06c218be51321b16dc3b835185ee1cd2fa5c2a1ca856e0390c1d6e4ddf329250"},
     {file = "libpff_python-20231205-cp311-cp311-macosx_12_0_x86_64.whl", hash = "sha256:2dfa98dacb5f5a754b5a9f97aba2faf45fe4349632cf2921f4b683140354b037"},
@@ -1153,6 +1202,7 @@ version = "0.3.16"
 requires_python = ">=3.8"
 summary = "Python bindings for the llama.cpp library"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "diskcache>=5.6.1",
     "jinja2>=2.11.3",
@@ -1168,7 +1218,7 @@ name = "macholib"
 version = "1.16.4"
 summary = "Mach-O header analysis and editing"
 groups = ["dev"]
-marker = "sys_platform == \"darwin\""
+marker = "python_version >= \"3.11\" and python_version < \"3.14\" and sys_platform == \"darwin\""
 dependencies = [
     "altgraph>=0.17",
 ]
@@ -1183,6 +1233,7 @@ version = "3.0.3"
 requires_python = ">=3.9"
 summary = "Safely add untrusted strings to HTML/XML markup."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "markupsafe-3.0.3-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:1cc7ea17a6824959616c525620e387f6dd30fec8cb44f649e31712db02123dad"},
     {file = "markupsafe-3.0.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:4bd4cd07944443f5a265608cc6aab442e4f74dff8088b0dfc8238647b8f6ae9a"},
@@ -1237,6 +1288,7 @@ version = "3.26.2"
 requires_python = ">=3.9"
 summary = "A lightweight library for converting complex datatypes to and from native Python datatypes."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "packaging>=17.0",
 ]
@@ -1251,6 +1303,7 @@ version = "1.10.0"
 requires_python = "<3.15,>=3.10.0"
 summary = "Mistral-common is a library of common utilities for Mistral AI."
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "jsonschema>=4.21.1",
     "numpy<2.4,>=1.25; python_version <= \"3.12\"",
@@ -1274,6 +1327,7 @@ name = "mpmath"
 version = "1.3.0"
 summary = "Python library for arbitrary-precision floating-point arithmetic"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "mpmath-1.3.0-py3-none-any.whl", hash = "sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"},
     {file = "mpmath-1.3.0.tar.gz", hash = "sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f"},
@@ -1285,6 +1339,7 @@ version = "6.7.1"
 requires_python = ">=3.9"
 summary = "multidict implementation"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "typing-extensions>=4.1.0; python_version < \"3.11\"",
 ]
@@ -1371,6 +1426,7 @@ version = "1.1.0"
 requires_python = ">=3.8"
 summary = "Type system extensions for programs checked with the mypy type checker."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "mypy_extensions-1.1.0-py3-none-any.whl", hash = "sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505"},
     {file = "mypy_extensions-1.1.0.tar.gz", hash = "sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558"},
@@ -1382,6 +1438,7 @@ version = "3.6.1"
 requires_python = "!=3.14.1,>=3.11"
 summary = "Python package for creating and manipulating graphs and networks"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "networkx-3.6.1-py3-none-any.whl", hash = "sha256:d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762"},
     {file = "networkx-3.6.1.tar.gz", hash = "sha256:26b7c357accc0c8cde558ad486283728b65b6a95d85ee1cd66bafab4c8168509"},
@@ -1393,6 +1450,7 @@ version = "1.26.4"
 requires_python = ">=3.9"
 summary = "Fundamental package for array computing in Python"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "numpy-1.26.4-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:4c66707fabe114439db9068ee468c26bbdf909cac0fb58686a42a24de1760c71"},
     {file = "numpy-1.26.4-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:edd8b5fe47dab091176d21bb6de568acdd906d1887a4584a15a9a96a1dca06ef"},
@@ -1419,7 +1477,7 @@ version = "12.8.4.1"
 requires_python = ">=3"
 summary = "CUBLAS native runtime libraries"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "nvidia_cublas_cu12-12.8.4.1-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:b86f6dd8935884615a0683b663891d43781b819ac4f2ba2b0c9604676af346d0"},
     {file = "nvidia_cublas_cu12-12.8.4.1-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:8ac4e771d5a348c551b2a426eda6193c19aa630236b418086020df5ba9667142"},
@@ -1432,7 +1490,7 @@ version = "12.8.90"
 requires_python = ">=3"
 summary = "CUDA profiling tools runtime libs."
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "nvidia_cuda_cupti_cu12-12.8.90-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:4412396548808ddfed3f17a467b104ba7751e6b58678a4b840675c56d21cf7ed"},
     {file = "nvidia_cuda_cupti_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:ea0cb07ebda26bb9b29ba82cda34849e73c166c18162d3913575b0c9db9a6182"},
@@ -1445,7 +1503,7 @@ version = "12.8.93"
 requires_python = ">=3"
 summary = "NVRTC native runtime libraries"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "nvidia_cuda_nvrtc_cu12-12.8.93-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:a7756528852ef889772a84c6cd89d41dfa74667e24cca16bb31f8f061e3e9994"},
     {file = "nvidia_cuda_nvrtc_cu12-12.8.93-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:fc1fec1e1637854b4c0a65fb9a8346b51dd9ee69e61ebaccc82058441f15bce8"},
@@ -1458,7 +1516,7 @@ version = "12.8.90"
 requires_python = ">=3"
 summary = "CUDA Runtime native Libraries"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:52bf7bbee900262ffefe5e9d5a2a69a30d97e2bc5bb6cc866688caa976966e3d"},
     {file = "nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:adade8dcbd0edf427b7204d480d6066d33902cab2a4707dcfc48a2d0fd44ab90"},
@@ -1471,7 +1529,7 @@ version = "9.10.2.21"
 requires_python = ">=3"
 summary = "cuDNN runtime libraries"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "nvidia-cublas-cu12",
 ]
@@ -1487,7 +1545,7 @@ version = "11.3.3.83"
 requires_python = ">=3"
 summary = "CUFFT native runtime libraries"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "nvidia-nvjitlink-cu12",
 ]
@@ -1503,7 +1561,7 @@ version = "1.13.1.3"
 requires_python = ">=3"
 summary = "cuFile GPUDirect libraries"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "nvidia_cufile_cu12-1.13.1.3-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:1d069003be650e131b21c932ec3d8969c1715379251f8d23a1860554b1cb24fc"},
     {file = "nvidia_cufile_cu12-1.13.1.3-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:4beb6d4cce47c1a0f1013d72e02b0994730359e17801d395bdcbf20cfb3bb00a"},
@@ -1515,7 +1573,7 @@ version = "10.3.9.90"
 requires_python = ">=3"
 summary = "CURAND native runtime libraries"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "nvidia_curand_cu12-10.3.9.90-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:dfab99248034673b779bc6decafdc3404a8a6f502462201f2f31f11354204acd"},
     {file = "nvidia_curand_cu12-10.3.9.90-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:b32331d4f4df5d6eefa0554c565b626c7216f87a06a4f56fab27c3b68a830ec9"},
@@ -1528,7 +1586,7 @@ version = "11.7.3.90"
 requires_python = ">=3"
 summary = "CUDA solver native runtime libraries"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "nvidia-cublas-cu12",
     "nvidia-cusparse-cu12",
@@ -1546,7 +1604,7 @@ version = "12.5.8.93"
 requires_python = ">=3"
 summary = "CUSPARSE native runtime libraries"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "nvidia-nvjitlink-cu12",
 ]
@@ -1561,7 +1619,7 @@ name = "nvidia-cusparselt-cu12"
 version = "0.7.1"
 summary = "NVIDIA cuSPARSELt"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "nvidia_cusparselt_cu12-0.7.1-py3-none-manylinux2014_aarch64.whl", hash = "sha256:8878dce784d0fac90131b6817b607e803c36e629ba34dc5b433471382196b6a5"},
     {file = "nvidia_cusparselt_cu12-0.7.1-py3-none-manylinux2014_x86_64.whl", hash = "sha256:f1bb701d6b930d5a7cea44c19ceb973311500847f81b634d802b7b539dc55623"},
@@ -1574,7 +1632,7 @@ version = "2.27.5"
 requires_python = ">=3"
 summary = "NVIDIA Collective Communication Library (NCCL) Runtime"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "nvidia_nccl_cu12-2.27.5-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:31432ad4d1fb1004eb0c56203dc9bc2178a1ba69d1d9e02d64a6938ab5e40e7a"},
     {file = "nvidia_nccl_cu12-2.27.5-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:ad730cf15cb5d25fe849c6e6ca9eb5b76db16a80f13f425ac68d8e2e55624457"},
@@ -1586,7 +1644,7 @@ version = "12.8.93"
 requires_python = ">=3"
 summary = "Nvidia JIT LTO Library"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "nvidia_nvjitlink_cu12-12.8.93-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:81ff63371a7ebd6e6451970684f916be2eab07321b73c9d244dc2b4da7f73b88"},
     {file = "nvidia_nvjitlink_cu12-12.8.93-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:adccd7161ace7261e01bb91e44e88da350895c270d23f744f0820c818b7229e7"},
@@ -1599,7 +1657,7 @@ version = "3.4.5"
 requires_python = ">=3"
 summary = "NVSHMEM creates a global address space that provides efficient and scalable communication for NVIDIA GPU clusters."
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "nvidia_nvshmem_cu12-3.4.5-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:0b48363fc6964dede448029434c6abed6c5e37f823cb43c3bcde7ecfc0457e15"},
     {file = "nvidia_nvshmem_cu12-3.4.5-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:042f2500f24c021db8a06c5eec2539027d57460e1c1a762055a6554f72c369bd"},
@@ -1611,7 +1669,7 @@ version = "12.8.90"
 requires_python = ">=3"
 summary = "NVIDIA Tools Extension"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "nvidia_nvtx_cu12-12.8.90-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:d7ad891da111ebafbf7e015d34879f7112832fc239ff0d7d776b6cb685274615"},
     {file = "nvidia_nvtx_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:5b17e2001cc0d751a5bc2c6ec6d26ad95913324a4adb86788c944f8ce9ba441f"},
@@ -1624,7 +1682,7 @@ version = "3.11.7"
 requires_python = ">=3.10"
 summary = "Fast, correct Python JSON library supporting dataclasses, datetimes, and numpy"
 groups = ["default"]
-marker = "platform_python_implementation != \"PyPy\""
+marker = "python_version >= \"3.11\" and python_version < \"3.14\" and platform_python_implementation != \"PyPy\""
 files = [
     {file = "orjson-3.11.7-cp311-cp311-macosx_10_15_x86_64.macosx_11_0_arm64.macosx_10_15_universal2.whl", hash = "sha256:9487abc2c2086e7c8eb9a211d2ce8855bae0e92586279d0d27b341d5ad76c85c"},
     {file = "orjson-3.11.7-cp311-cp311-macosx_15_0_arm64.whl", hash = "sha256:79cacb0b52f6004caf92405a7e1f11e6e2de8bdf9019e4f76b44ba045125cd6b"},
@@ -1680,6 +1738,7 @@ version = "25.0"
 requires_python = ">=3.8"
 summary = "Core utilities for Python packages"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "packaging-25.0-py3-none-any.whl", hash = "sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484"},
     {file = "packaging-25.0.tar.gz", hash = "sha256:d443872c98d677bf60f6a1f2f8c1cb748e8fe762d2bf9d3148b5599295b0fc4f"},
@@ -1691,7 +1750,7 @@ version = "2024.8.26"
 requires_python = ">=3.6.0"
 summary = "Python PE parsing module"
 groups = ["dev"]
-marker = "sys_platform == \"win32\""
+marker = "python_version >= \"3.11\" and python_version < \"3.14\" and sys_platform == \"win32\""
 files = [
     {file = "pefile-2024.8.26-py3-none-any.whl", hash = "sha256:76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f"},
     {file = "pefile-2024.8.26.tar.gz", hash = "sha256:3ff6c5d8b43e8c37bb6e6dd5085658d658a7a0bdcd20b6a07b1fcfc1c4e9d632"},
@@ -1703,6 +1762,7 @@ version = "12.1.1"
 requires_python = ">=3.10"
 summary = "Python Imaging Library (fork)"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "pillow-12.1.1-cp311-cp311-macosx_10_10_x86_64.whl", hash = "sha256:e879bb6cd5c73848ef3b2b48b8af9ff08c5b71ecda8048b7dd22d8a33f60be32"},
     {file = "pillow-12.1.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:365b10bb9417dd4498c0e3b128018c4a624dc11c7b97d8cc54effe3b096f4c38"},
@@ -1767,6 +1827,7 @@ version = "1.6.0"
 requires_python = ">=3.9"
 summary = "plugin and hook calling mechanisms for python"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746"},
     {file = "pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3"},
@@ -1778,6 +1839,7 @@ version = "0.4.1"
 requires_python = ">=3.9"
 summary = "Accelerated property cache"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "propcache-0.4.1-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:60a8fda9644b7dfd5dece8c61d8a85e271cb958075bfc4e01083c148b61a7caf"},
     {file = "propcache-0.4.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:c30b53e7e6bda1d547cabb47c825f3843a0a1a42b0496087bb58d8fedf9f41b5"},
@@ -1849,6 +1911,7 @@ version = "1.27.1"
 requires_python = ">=3.7"
 summary = "Beautiful, Pythonic protocol buffers"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "protobuf<7.0.0,>=3.19.0",
 ]
@@ -1863,6 +1926,7 @@ version = "6.33.5"
 requires_python = ">=3.9"
 summary = ""
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "protobuf-6.33.5-cp310-abi3-win32.whl", hash = "sha256:d71b040839446bac0f4d162e758bea99c8251161dae9d0983a3b88dee345153b"},
     {file = "protobuf-6.33.5-cp310-abi3-win_amd64.whl", hash = "sha256:3093804752167bcab3998bec9f1048baae6e29505adaf1afd14a37bddede533c"},
@@ -1880,6 +1944,7 @@ version = "7.2.2"
 requires_python = ">=3.6"
 summary = "Cross-platform lib for process and system monitoring."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "psutil-7.2.2-cp313-cp313t-macosx_10_13_x86_64.whl", hash = "sha256:2edccc433cbfa046b980b0df0171cd25bcaeb3a68fe9022db0979e7aa74a826b"},
     {file = "psutil-7.2.2-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:e78c8603dcd9a04c7364f1a3e670cea95d51ee865e4efb3556a3a63adef958ea"},
@@ -1904,6 +1969,7 @@ version = "0.6.2"
 requires_python = ">=3.8"
 summary = "Pure-Python implementation of ASN.1 types and DER/BER/CER codecs (X.208)"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "pyasn1-0.6.2-py3-none-any.whl", hash = "sha256:1eb26d860996a18e9b6ed05e7aae0e9fc21619fcee6af91cca9bad4fbea224bf"},
     {file = "pyasn1-0.6.2.tar.gz", hash = "sha256:9b59a2b25ba7e4f8197db7686c09fb33e658b98339fadb826e9512629017833b"},
@@ -1915,6 +1981,7 @@ version = "0.4.2"
 requires_python = ">=3.8"
 summary = "A collection of ASN.1-based protocols modules"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "pyasn1<0.7.0,>=0.6.1",
 ]
@@ -1929,6 +1996,7 @@ version = "26.2.16"
 requires_python = ">=3.10"
 summary = "ISO country, subdivision, language, currency and script definitions and their translations"
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "pycountry-26.2.16-py3-none-any.whl", hash = "sha256:115c4baf7cceaa30f59a4694d79483c9167dbce7a9de4d3d571c5f3ea77c305a"},
     {file = "pycountry-26.2.16.tar.gz", hash = "sha256:5b6027d453fcd6060112b951dd010f01f168b51b4bf8a1f1fc8c95c8d94a0801"},
@@ -1940,7 +2008,7 @@ version = "3.0"
 requires_python = ">=3.10"
 summary = "C parser in Python"
 groups = ["default"]
-marker = "python_full_version >= \"3.9\" and implementation_name != \"PyPy\" or platform_python_implementation == \"PyPy\" and implementation_name != \"PyPy\""
+marker = "python_version >= \"3.11\" and implementation_name != \"PyPy\" and python_version < \"3.14\""
 files = [
     {file = "pycparser-3.0-py3-none-any.whl", hash = "sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"},
     {file = "pycparser-3.0.tar.gz", hash = "sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29"},
@@ -1952,6 +2020,7 @@ version = "2.12.3"
 requires_python = ">=3.9"
 summary = "Data validation using Python type hints"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "annotated-types>=0.6.0",
     "pydantic-core==2.41.4",
@@ -1969,6 +2038,7 @@ version = "2.41.4"
 requires_python = ">=3.9"
 summary = "Core functionality for Pydantic validation and serialization"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "typing-extensions>=4.14.1",
 ]
@@ -2037,6 +2107,7 @@ version = "2.11.0"
 requires_python = ">=3.9"
 summary = "Extra Pydantic types."
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "pydantic>=2.5.2",
     "typing-extensions",
@@ -2053,6 +2124,7 @@ extras = ["pycountry"]
 requires_python = ">=3.9"
 summary = "Extra Pydantic types."
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "pycountry>=23",
     "pydantic-extra-types==2.11.0",
@@ -2068,6 +2140,7 @@ version = "2.13.1"
 requires_python = ">=3.10"
 summary = "Settings management using Pydantic"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "pydantic>=2.7.0",
     "python-dotenv>=0.21.0",
@@ -2084,6 +2157,7 @@ version = "6.19.0"
 requires_python = "<3.15,>=3.8"
 summary = "PyInstaller bundles a Python application and all its dependencies into a single package."
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "altgraph",
     "importlib-metadata>=4.6; python_version < \"3.10\"",
@@ -2115,6 +2189,7 @@ version = "2026.3"
 requires_python = ">=3.8"
 summary = "Community maintained hooks for PyInstaller"
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "importlib-metadata>=4.6; python_version < \"3.10\"",
     "packaging>=22.0",
@@ -2131,6 +2206,7 @@ version = "8.3.3"
 requires_python = ">=3.8"
 summary = "pytest: simple powerful testing with Python"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "colorama; sys_platform == \"win32\"",
     "exceptiongroup>=1.0.0rc8; python_version < \"3.11\"",
@@ -2150,6 +2226,7 @@ version = "0.24.0"
 requires_python = ">=3.8"
 summary = "Pytest support for asyncio"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "pytest<9,>=8.2",
 ]
@@ -2164,6 +2241,7 @@ version = "1.2.2"
 requires_python = ">=3.10"
 summary = "Read key-value pairs from a .env file and set them as environment variables"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "python_dotenv-1.2.2-py3-none-any.whl", hash = "sha256:1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a"},
     {file = "python_dotenv-1.2.2.tar.gz", hash = "sha256:2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3"},
@@ -2175,6 +2253,7 @@ version = "0.0.9"
 requires_python = ">=3.8"
 summary = "A streaming multipart parser for Python"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "python_multipart-0.0.9-py3-none-any.whl", hash = "sha256:97ca7b8ea7b05f977dc3849c3ba99d51689822fab725c3703af7c866a0c2b215"},
     {file = "python_multipart-0.0.9.tar.gz", hash = "sha256:03f54688c663f1b7977105f021043b0793151e4cb1c1a9d4a11fc13d622c4026"},
@@ -2186,7 +2265,7 @@ version = "0.2.3"
 requires_python = ">=3.6"
 summary = "A (partial) reimplementation of pywin32 using ctypes/cffi"
 groups = ["dev"]
-marker = "sys_platform == \"win32\""
+marker = "python_version >= \"3.11\" and python_version < \"3.14\" and sys_platform == \"win32\""
 files = [
     {file = "pywin32-ctypes-0.2.3.tar.gz", hash = "sha256:d162dc04946d704503b2edc4d55f3dba5c1d539ead017afa00142c38b9885755"},
     {file = "pywin32_ctypes-0.2.3-py3-none-any.whl", hash = "sha256:8a1513379d709975552d202d942d9837758905c8d01eb82b8bcc30918929e7b8"},
@@ -2198,6 +2277,7 @@ version = "6.0.3"
 requires_python = ">=3.8"
 summary = "YAML parser and emitter for Python"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "pyyaml-6.0.3-cp311-cp311-macosx_10_13_x86_64.whl", hash = "sha256:44edc647873928551a01e7a563d7452ccdebee747728c1080d881d68af7b997e"},
     {file = "pyyaml-6.0.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:652cb6edd41e718550aad172851962662ff2681490a8a711af6a4d288dd96824"},
@@ -2237,6 +2317,7 @@ version = "0.0.14"
 requires_python = ">=3.8"
 summary = "Qwen Vision Language Model Utils - PyTorch"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "av",
     "packaging",
@@ -2250,23 +2331,26 @@ files = [
 
 [[package]]
 name = "rawpy"
-version = "0.23.2"
+version = "0.26.1"
 summary = "RAW image processing for Python, a wrapper for libraw"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "numpy>=1.26.0",
 ]
 files = [
-    {file = "rawpy-0.23.2-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:dd77b7ad389b47d374b522cb93ff2ed07f54230c92be8c13bfd7a620f7b9c566"},
-    {file = "rawpy-0.23.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:d1e00dea7636031244633606a5ef95f7087c6807f3cecc9829cfe09809c6b99a"},
-    {file = "rawpy-0.23.2-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9e58c8d33381e9638f22909554eb442f6043fdc0b475701c424b8ca05afe5d36"},
-    {file = "rawpy-0.23.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:59c0701667f13d1773f3b6bab60b9a7a6e22ff184d25f4c1d1bfb444fef98914"},
-    {file = "rawpy-0.23.2-cp311-cp311-win_amd64.whl", hash = "sha256:cf4790b20a0b27232b9511669e8777d839863efc9acc38e82db87dfec0384b4a"},
-    {file = "rawpy-0.23.2-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:b4fbda4ba01ee3bde82d3940e025f226c715fc963bb876532d640490de133c0e"},
-    {file = "rawpy-0.23.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:5998a4f7cd13236bbde72811dff3a9be7b723ef25078263ecef8ec826328483e"},
-    {file = "rawpy-0.23.2-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d138c6ebc2796b44d57bbae306ec75076acd0b59091de8b886d1e9e6c30b966b"},
-    {file = "rawpy-0.23.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b0ce160d06b353769abc5ac6298fbf812d218c49943f1fe9fa97229e8846ca6d"},
-    {file = "rawpy-0.23.2-cp312-cp312-win_amd64.whl", hash = "sha256:75fd34b63bed8ed9f585fb8d783b6260c32b45a25c202e812af642dc05837bd7"},
+    {file = "rawpy-0.26.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:784f3b15b2095cd1284a999f056b1a024f908407af72cb0dd613eb282db6462e"},
+    {file = "rawpy-0.26.1-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ccb3d439eeb6ee2110e674da122d112682a3fff1b9217ade347f333d64ab7a72"},
+    {file = "rawpy-0.26.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5cf23bd11ad1e392cf39ecd2e46cfbdf9c486ada5f551317a1ce3aa4edf0912e"},
+    {file = "rawpy-0.26.1-cp311-cp311-win_amd64.whl", hash = "sha256:274c60371c00ba9be2ebec4d003b3b168c2e54b0d3df29680ea95185bf50448b"},
+    {file = "rawpy-0.26.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:e22d191407d2e42bf8e1517df5dbbc503f7c547296dc55ca31b2269839e7a8f9"},
+    {file = "rawpy-0.26.1-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3974a53808708c3c606bc9bbce3d81256bda0f7c027f67b9c3b9ff8e04967481"},
+    {file = "rawpy-0.26.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b42a19713c4f078fe7e1171dd22dbbc60e5c1f3d3e29bbf7492deb161562b21c"},
+    {file = "rawpy-0.26.1-cp312-cp312-win_amd64.whl", hash = "sha256:30551fbb279f214390b9d7aa2b4227256f71324bb8a82cbe8dc4c8157835f834"},
+    {file = "rawpy-0.26.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:6b9ce24a5446098b0cb93dea3cba102959bde20df39a10c3bcedf1226295e54b"},
+    {file = "rawpy-0.26.1-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8d1d0a26e79297e95a183a769e0bca3404830797224e168980b04463532084be"},
+    {file = "rawpy-0.26.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:cd7529caf7722f6b89b3c0ab505313bd4638dd3136af0275906209114ce74d73"},
+    {file = "rawpy-0.26.1-cp313-cp313-win_amd64.whl", hash = "sha256:a730ed88843141224518724e0926f6b71d5c1883c3ca839865bac6b450337332"},
 ]
 
 [[package]]
@@ -2275,6 +2359,7 @@ version = "0.37.0"
 requires_python = ">=3.10"
 summary = "JSON Referencing + Python"
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "attrs>=22.2.0",
     "rpds-py>=0.7.0",
@@ -2291,6 +2376,7 @@ version = "2026.2.28"
 requires_python = ">=3.10"
 summary = "Alternative regular expression module, to replace re."
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "regex-2026.2.28-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:e621fb7c8dc147419b28e1702f58a0177ff8308a76fa295c71f3e7827849f5d9"},
     {file = "regex-2026.2.28-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:0d5bef2031cbf38757a0b0bc4298bb4824b6332d28edc16b39247228fbdbad97"},
@@ -2365,6 +2451,7 @@ version = "2.32.5"
 requires_python = ">=3.9"
 summary = "Python HTTP for Humans."
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "certifi>=2017.4.17",
     "charset-normalizer<4,>=2",
@@ -2382,6 +2469,7 @@ version = "1.0.0"
 requires_python = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
 summary = "A utility belt for advanced users of python-requests"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "requests<3.0.0,>=2.0.1",
 ]
@@ -2396,6 +2484,7 @@ version = "0.30.0"
 requires_python = ">=3.10"
 summary = "Python bindings to Rust's persistent data structures (rpds)"
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "rpds_py-0.30.0-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:a2bffea6a4ca9f01b3f8e548302470306689684e61602aa3d141e34da06cf425"},
     {file = "rpds_py-0.30.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:dc4f992dfe1e2bc3ebc7444f6c7051b4bc13cd8e33e43511e8ffd13bf407010d"},
@@ -2477,6 +2566,7 @@ version = "4.9.1"
 requires_python = ">=3.6,<4"
 summary = "Pure-Python RSA implementation"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "pyasn1>=0.1.3",
 ]
@@ -2491,6 +2581,7 @@ version = "0.7.0"
 requires_python = ">=3.9"
 summary = ""
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "safetensors-0.7.0-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:c82f4d474cf725255d9e6acf17252991c3c8aac038d6ef363a4bf8be2f6db517"},
     {file = "safetensors-0.7.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:94fd4858284736bb67a897a41608b5b0c2496c9bdb3bf2af1fa3409127f20d57"},
@@ -2515,6 +2606,7 @@ version = "0.2.1"
 requires_python = ">=3.9"
 summary = "Unsupervised text tokenizer and detokenizer."
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "sentencepiece-0.2.1-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:6356d0986b8b8dc351b943150fcd81a1c6e6e4d439772e8584c64230e58ca987"},
     {file = "sentencepiece-0.2.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:8f8ba89a3acb3dc1ae90f65ec1894b0b9596fdb98ab003ff38e058f898b39bc7"},
@@ -2557,6 +2649,7 @@ version = "82.0.1"
 requires_python = ">=3.9"
 summary = "Most extensible Python build backend with support for C/C++ extension modules"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "setuptools-82.0.1-py3-none-any.whl", hash = "sha256:a59e362652f08dcd477c78bb6e7bd9d80a7995bc73ce773050228a348ce2e5bb"},
     {file = "setuptools-82.0.1.tar.gz", hash = "sha256:7d872682c5d01cfde07da7bccc7b65469d3dca203318515ada1de5eda35efbf9"},
@@ -2568,6 +2661,7 @@ version = "2.0.48"
 requires_python = ">=3.7"
 summary = "Database Abstraction Library"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "greenlet>=1; platform_machine == \"win32\" or platform_machine == \"WIN32\" or platform_machine == \"AMD64\" or platform_machine == \"amd64\" or platform_machine == \"x86_64\" or platform_machine == \"ppc64le\" or platform_machine == \"aarch64\"",
     "importlib-metadata; python_version < \"3.8\"",
@@ -2611,6 +2705,7 @@ version = "0.49.3"
 requires_python = ">=3.9"
 summary = "The little ASGI library that shines."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "anyio<5,>=3.6.2",
     "typing-extensions>=4.10.0; python_version < \"3.13\"",
@@ -2626,6 +2721,7 @@ version = "1.14.0"
 requires_python = ">=3.9"
 summary = "Computer algebra system (CAS) in Python"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "mpmath<1.4,>=1.1.0",
 ]
@@ -2640,6 +2736,7 @@ version = "9.1.4"
 requires_python = ">=3.10"
 summary = "Retry code until it succeeds"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55"},
     {file = "tenacity-9.1.4.tar.gz", hash = "sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a"},
@@ -2651,6 +2748,7 @@ version = "0.12.0"
 requires_python = ">=3.9"
 summary = "tiktoken is a fast BPE tokeniser for use with OpenAI's models"
 groups = ["dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "regex>=2022.1.18",
     "requests>=2.26.0",
@@ -2693,6 +2791,7 @@ version = "0.22.2"
 requires_python = ">=3.9"
 summary = ""
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "huggingface-hub<2.0,>=0.16.4",
 ]
@@ -2721,6 +2820,7 @@ version = "2.10.0"
 requires_python = ">=3.10"
 summary = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "cuda-bindings==12.9.4; platform_system == \"Linux\" and platform_machine == \"x86_64\"",
     "filelock",
@@ -2779,6 +2879,7 @@ version = "0.25.0"
 requires_python = ">=3.10"
 summary = "image and video datasets and models for torch deep learning"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "numpy",
     "pillow!=8.3.*,>=5.3.0",
@@ -2809,6 +2910,7 @@ version = "4.67.3"
 requires_python = ">=3.7"
 summary = "Fast, Extensible Progress Meter"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "colorama; platform_system == \"Windows\"",
     "importlib-metadata; python_version < \"3.8\"",
@@ -2824,6 +2926,7 @@ version = "4.57.6"
 requires_python = ">=3.9.0"
 summary = "State-of-the-art Machine Learning for JAX, PyTorch and TensorFlow"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "filelock",
     "huggingface-hub<1.0,>=0.34.0",
@@ -2847,7 +2950,7 @@ version = "3.6.0"
 requires_python = "<3.15,>=3.10"
 summary = "A language and compiler for custom Deep Learning operations"
 groups = ["default"]
-marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\""
+marker = "platform_system == \"Linux\" and platform_machine == \"x86_64\" and python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "importlib-metadata; python_version < \"3.10\"",
 ]
@@ -2868,6 +2971,7 @@ version = "4.15.0"
 requires_python = ">=3.9"
 summary = "Backported and Experimental Type Hints for Python 3.9+"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "typing_extensions-4.15.0-py3-none-any.whl", hash = "sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548"},
     {file = "typing_extensions-4.15.0.tar.gz", hash = "sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466"},
@@ -2878,6 +2982,7 @@ name = "typing-inspect"
 version = "0.9.0"
 summary = "Runtime inspection utilities for typing module."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "mypy-extensions>=0.3.0",
     "typing-extensions>=3.7.4",
@@ -2894,6 +2999,7 @@ version = "0.4.2"
 requires_python = ">=3.9"
 summary = "Runtime typing introspection tools"
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "typing-extensions>=4.12.0",
 ]
@@ -2908,6 +3014,7 @@ version = "2.6.3"
 requires_python = ">=3.9"
 summary = "HTTP library with thread-safe connection pooling, file post, and more."
 groups = ["default", "dev"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "urllib3-2.6.3-py3-none-any.whl", hash = "sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4"},
     {file = "urllib3-2.6.3.tar.gz", hash = "sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed"},
@@ -2919,6 +3026,7 @@ version = "0.38.0"
 requires_python = ">=3.9"
 summary = "The lightning-fast ASGI server."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "click>=7.0",
     "h11>=0.8",
@@ -2936,6 +3044,7 @@ extras = ["standard"]
 requires_python = ">=3.9"
 summary = "The lightning-fast ASGI server."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "colorama>=0.4; sys_platform == \"win32\"",
     "httptools>=0.6.3",
@@ -2957,7 +3066,7 @@ version = "0.22.1"
 requires_python = ">=3.8.1"
 summary = "Fast implementation of asyncio event loop on top of libuv"
 groups = ["default"]
-marker = "(sys_platform != \"cygwin\" and sys_platform != \"win32\") and platform_python_implementation != \"PyPy\""
+marker = "(sys_platform != \"cygwin\" and sys_platform != \"win32\") and platform_python_implementation != \"PyPy\" and python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "uvloop-0.22.1-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:c60ebcd36f7b240b30788554b6f0782454826a0ed765d8430652621b5de674b9"},
     {file = "uvloop-0.22.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:3b7f102bf3cb1995cfeaee9321105e8f5da76fdb104cdad8986f85461a1b7b77"},
@@ -2986,6 +3095,7 @@ version = "1.1.1"
 requires_python = ">=3.9"
 summary = "Simple, modern and high performance file watching and code reload in python."
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "anyio>=3.0.0",
 ]
@@ -3052,6 +3162,7 @@ version = "16.0"
 requires_python = ">=3.10"
 summary = "An implementation of the WebSocket Protocol (RFC 6455 & 7692)"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 files = [
     {file = "websockets-16.0-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:31a52addea25187bde0797a97d6fc3d2f92b6f72a9370792d65a6e84615ac8a8"},
     {file = "websockets-16.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:417b28978cdccab24f46400586d128366313e8a96312e4b9362a4af504f3bbad"},
@@ -3095,6 +3206,7 @@ version = "1.23.0"
 requires_python = ">=3.10"
 summary = "Yet another URL library"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "idna>=2.0",
     "multidict>=4.0",
@@ -3183,6 +3295,7 @@ version = "0.23.0"
 requires_python = ">=3.8"
 summary = "Zstandard bindings for Python"
 groups = ["default"]
+marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "cffi>=1.17; platform_python_implementation == \"PyPy\"",
 ]

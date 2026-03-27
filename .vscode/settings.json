@@ -5,7 +5,7 @@
             "previewLimit": 50,
             "driver": "SQLite",
             "name": "local db",
-            "database": "${env:HOME}/Library/Application Support/mydata.tools/data/mydata.db"
+            "database": "/Users/mikenimer/Library/Application Support/mydata.tools.dev/data/mydata.db"
         }
     ]
 }
