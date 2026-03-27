@@ -29,9 +29,7 @@ from pst_parser import PstParser, NON_EMAIL_FOLDER_NAMES  # noqa: E402
 # ---------------------------------------------------------------------------
 # Path to the test PST file – override via env var if needed
 # ---------------------------------------------------------------------------
-PST_FILE = os.environ.get(
-    "TEST_PST_FILE", "/Users/mikenimer/Desktop/email/mnimer_2010.pst"
-)
+PST_FILE = os.environ.get("TEST_PST_FILE", "")
 
 # Regex that matches a bare email address anywhere in a string,
 # e.g. "Joe Smith <joe@example.com>" or "joe@example.com"

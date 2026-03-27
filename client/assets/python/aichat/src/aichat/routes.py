@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, Generator
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 import json
+import os
 
 from .models import ChatRequest, StartSessionRequest, EmbeddingRequest, PstImportRequest
 from .pst_parser import PstParser
@@ -166,7 +167,7 @@ async def start_session(request: StartSessionRequest) -> Dict[str, Any]:
             set_current_model_id(None)
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to load model {model_id} into memory. Check console for details (e.g., VRAM/RAM limits). Error: {e}"
+                detail="Failed to load model into memory. Check console for details."
             )
 
 
@@ -233,7 +234,6 @@ async def generate_chat_response(request: ChatRequest) -> Dict[str, Any]:
         # Combine history and new turn
         full_prompt = history_text + new_turn
 
-        print(f"[DEBUG] Full prompt: {full_prompt}")
         # The LangChain LlamaCpp wrapper takes a single string input
         response_text = llm_instance.invoke(full_prompt)
         ai_response = response_text.strip()
@@ -248,7 +248,7 @@ async def generate_chat_response(request: ChatRequest) -> Dict[str, Any]:
         print(f"[ERROR] An error occurred during model invocation: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to generate response: {e}"
+            detail="Failed to generate response. Check server logs for details."
         )
 
 
@@ -314,7 +314,7 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
                 print(f"[ERROR] Failed to load embedding model: {e}")
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Failed to load embedding model: {e}"
+                    detail="Failed to load embedding model. Check server logs for details."
                 )
     
     try:
@@ -361,7 +361,7 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to generate embedding: {e}"
+            detail="Failed to generate embedding. Check server logs for details."
         )
 
 
@@ -408,7 +408,7 @@ async def download_model(request: StartSessionRequest) -> Dict[str, Any]:
         print(f"[ERROR] Download failed for {model_id}/{filename}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to download model '{filename}' from '{model_id}': {e}"
+            detail="Failed to download model. Check server logs for details."
         )
 
 
@@ -419,8 +419,16 @@ async def import_pst(request: PstImportRequest):
     Streams JSON objects representing folders, emails, and attachments found in the PST.
     Attachments are extracted to the specified output directory.
     """
+    # Validate file path
+    file_path = os.path.realpath(request.file_path)
+    if not file_path.lower().endswith('.pst'):
+        raise HTTPException(status_code=400, detail="file_path must point to a .pst file")
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=400, detail="file_path does not exist")
+    output_dir = os.path.realpath(request.output_dir)
+
     def event_stream() -> Generator[str, None, None]:
-        parser = PstParser(request.file_path, request.output_dir)
+        parser = PstParser(file_path, output_dir)
         try:
             parser.open()
             for item in parser.walk():
