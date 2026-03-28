@@ -5,9 +5,13 @@ class GoogleDriveIdleView extends StatelessWidget {
   const GoogleDriveIdleView({
     super.key,
     required this.onConnect,
+    required this.saveLocalCopy,
+    required this.onSaveLocalCopyChanged,
   });
 
   final VoidCallback onConnect;
+  final bool saveLocalCopy;
+  final ValueChanged<bool?> onSaveLocalCopyChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +55,19 @@ class GoogleDriveIdleView extends StatelessWidget {
         ),
         const SizedBox(height: 28),
         GoogleDriveSignInButton(onTap: onConnect),
+        const SizedBox(height: 12),
+        CheckboxListTile(
+          value: saveLocalCopy,
+          onChanged: onSaveLocalCopyChanged,
+          title: const Text(
+            'Save a local copy of all cloud files, as a local backup',
+            style: TextStyle(fontSize: 13),
+          ),
+          controlAffinity: ListTileControlAffinity.leading,
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          visualDensity: VisualDensity.compact,
+        ),
       ],
     );
   }

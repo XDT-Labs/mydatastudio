@@ -8,7 +8,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: GoogleDriveIdleView(onConnect: () {}),
+            body: GoogleDriveIdleView(
+              onConnect: () {},
+              saveLocalCopy: true,
+              onSaveLocalCopyChanged: (_) {},
+            ),
           ),
         ),
       );
@@ -20,7 +24,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: GoogleDriveIdleView(onConnect: () {}),
+            body: GoogleDriveIdleView(
+              onConnect: () {},
+              saveLocalCopy: true,
+              onSaveLocalCopyChanged: (_) {},
+            ),
           ),
         ),
       );
@@ -32,7 +40,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: GoogleDriveIdleView(onConnect: () {}),
+            body: GoogleDriveIdleView(
+              onConnect: () {},
+              saveLocalCopy: true,
+              onSaveLocalCopyChanged: (_) {},
+            ),
           ),
         ),
       );
@@ -47,6 +59,8 @@ void main() {
           home: Scaffold(
             body: GoogleDriveIdleView(
               onConnect: () => called = true,
+              saveLocalCopy: true,
+              onSaveLocalCopyChanged: (_) {},
             ),
           ),
         ),
@@ -56,6 +70,29 @@ void main() {
       await tester.pump();
 
       expect(called, isTrue);
+    });
+
+    testWidgets('checkbox toggles local copy preference', (tester) async {
+      bool? lastValue;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GoogleDriveIdleView(
+              onConnect: () {},
+              saveLocalCopy: true,
+              onSaveLocalCopyChanged: (val) => lastValue = val,
+            ),
+          ),
+        ),
+      );
+
+      final checkbox = find.byType(Checkbox);
+      expect(checkbox, findsOneWidget);
+
+      await tester.tap(find.textContaining('Save a local copy'));
+      await tester.pump();
+
+      expect(lastValue, isFalse);
     });
   });
 }

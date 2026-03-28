@@ -131,6 +131,7 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
   _DriveAuthState _authState = _DriveAuthState.idle;
   String? _errorMessage;
   String? _connectedEmail;
+  bool _saveLocalCopy = true;
 
   Future<void> _connectGoogleDrive() async {
     setState(() {
@@ -139,7 +140,10 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
     });
 
     try {
-      final collection = await LoginProviderExtension.handleGoogleDrive(context);
+      final collection = await LoginProviderExtension.handleGoogleDrive(
+        context,
+        downloadLocalCopy: _saveLocalCopy,
+      );
 
       if (!mounted) return;
 
@@ -213,6 +217,12 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
                 key: const ValueKey('idle'),
                 child: GoogleDriveIdleView(
                   onConnect: _connectGoogleDrive,
+                  saveLocalCopy: _saveLocalCopy,
+                  onSaveLocalCopyChanged: (value) {
+                    setState(() {
+                      _saveLocalCopy = value ?? true;
+                    });
+                  },
                 ),
               ),
           },

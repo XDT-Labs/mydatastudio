@@ -238,6 +238,7 @@ extension LoginProviderExtension on LoginProviders {
     BuildContext context, {
     Collection? existing,
     String rootFolderId = 'root',
+    bool downloadLocalCopy = true,
   }) async {
     if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -311,6 +312,7 @@ extension LoginProviderExtension on LoginProviders {
         userId: userId,
         expiration: client.credentials.expiration,
         needsReAuth: false,
+        downloadLocalCopy: downloadLocalCopy,
       );
 
       if (existing != null) {
