@@ -1,3 +1,4 @@
+import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/file_asset.dart';
 import 'package:path/path.dart' as p;
@@ -30,6 +31,11 @@ class FilePathResolver {
         relativePath.startsWith('/') ||
         relativePath.isEmpty) {
       return relativePath;
+    }
+
+    // Google Drive folders store their ID as the path, which is absolute
+    if (collection.scanner == AppConstants.scannerFileGDrive) {
+      return relativePath; 
     }
 
     final root = collection.localCopyPath ?? collection.path;

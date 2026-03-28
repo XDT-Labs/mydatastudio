@@ -195,7 +195,7 @@ class _EmailDrawer extends State<EmailDrawer> {
                           // For PST we run one-time import isolate
                           final writerPort =
                               await DatabaseManager.instance.writerPort;
-                          final serverUrl = MainApp.llmServiceUrl.value;
+                          final serverUrl = MainApp.llmServiceUrl.valueOrNull;
                           final appDataDir =
                               MainApp.appDataDirectory.valueOrNull;
 

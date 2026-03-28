@@ -47,8 +47,8 @@ class EmbeddingIsolate {
         _controlPort = data;
         // Send initial URL if available
         if (MainApp.llmServiceUrl.hasValue &&
-            MainApp.llmServiceUrl.value != null) {
-          updateUrl(MainApp.llmServiceUrl.value!);
+            MainApp.llmServiceUrl.valueOrNull != null) {
+          updateUrl(MainApp.llmServiceUrl.valueOrNull!);
         }
       } else if (data is Map) {
         final type = data['type'];
