@@ -47,7 +47,8 @@ class DbIsolateWriterClient {
     Map<String, dynamic> cfg = {
       'token': token,
       'replyTo': _receivePort!.sendPort,
-      'loggerPort': _receivePort!.sendPort, // Send logs back through our own ReceivePort
+      'loggerPort':
+          _receivePort!.sendPort, // Send logs back through our own ReceivePort
       'path': storagePath,
       'name': dbName,
       'useMemoryDb': useMemoryDb,
@@ -162,7 +163,7 @@ class DbIsolateWriterClient {
       try {
         if (data['type'] == 'file') {
           File f = data['file'] as File;
-          logger.d("DbIsolateWriter: Received file upsert for ${f.name} (id: ${f.id}, collectionId: ${f.collectionId})");
+          //logger.d("DbIsolateWriter: Received file upsert for ${f.name} (id: ${f.id}, collectionId: ${f.collectionId})");
           await FileUpsertService.instance.invoke(
             FileUpsertServiceCommand(f, db),
           );
@@ -175,7 +176,7 @@ class DbIsolateWriterClient {
           replyTo?.send({'status': 'ok'});
         } else if (data['type'] == 'folder') {
           Folder folder = data['folder'] as Folder;
-          logger.d("DbIsolateWriter: Received folder upsert for ${folder.name} (path: ${folder.path}, parent: ${folder.parent})");
+          //logger.d("DbIsolateWriter: Received folder upsert for ${folder.name} (path: ${folder.path}, parent: ${folder.parent})");
           await FolderUpsertService.instance.invoke(
             FolderUpsertServiceCommand(folder, db),
           );
@@ -185,7 +186,7 @@ class DbIsolateWriterClient {
           await CleanupDeletedFilesService.instance.invoke(
             CleanupDeletedFilesServiceCommand(
               data['collectionId'] as String,
-              data['path'] as String, 
+              data['path'] as String,
               time,
               db,
               recursive: data['recursive'] ?? true,
@@ -233,7 +234,7 @@ class DbIsolateWriterClient {
           final id = data['id'] as String;
           final status = data['status'] as String;
           final lastScan = data['lastScan'] as String?;
-          
+
           final repo = CollectionRepository(db);
           final col = await repo.collectionById(id);
           if (col != null) {

@@ -50,6 +50,7 @@ app.post("/download-model", summary="Download a GGUF model from Hugging Face Hub
 app.post("/chat", summary="Generate a chat response using the currently loaded model")(routes.generate_chat_response)
 app.post("/embedding", summary="Generate embeddings for text or image using Gemma-3-4B")(routes.generate_embedding)
 app.post("/import/pst", summary="Import and parse an Outlook PST file")(routes.import_pst)
+app.post("/thumbnail", summary="Generate a thumbnail for an image, including RAW formats")(routes.generate_thumbnail)
 
 
 

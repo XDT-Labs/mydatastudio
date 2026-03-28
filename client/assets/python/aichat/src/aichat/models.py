@@ -138,3 +138,17 @@ class PstImportRequest(BaseModel):
     """
     file_path: str = Field(..., description="Path to the PST file on the local machine")
     output_dir: str = Field(..., description="Directory to save extracted attachments")
+
+
+class ThumbnailRequest(BaseModel):
+    """
+    Request model for thumbnail generation.
+    
+    Attributes:
+        file_path (str): Absolute path to the image file on the local machine
+        width (int): Target width for the thumbnail
+        height (int): Target height for the thumbnail
+    """
+    file_path: str = Field(..., description="Absolute path to the image file on the local machine")
+    width: int = Field(default=320, description="Target width for the thumbnail")
+    height: int = Field(default=240, description="Target height for the thumbnail")
