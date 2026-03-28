@@ -52,7 +52,7 @@ class ScannerManager {
       }
       await Future.delayed(const Duration(seconds: 5));
       logger.d('${c.id} | ${c.path}');
-      registerScanner(c);
+      startScanner(c);
     }
 
     //listen for new collections and add them at runtime

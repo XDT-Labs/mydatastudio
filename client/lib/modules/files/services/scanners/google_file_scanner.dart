@@ -1,14 +1,18 @@
+import 'dart:async';
+import 'dart:io' as io;
 import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:mydatatools/app_logger.dart';
+import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/folder.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 import 'package:logger/logger.dart';
+import 'package:path/path.dart' as p;
 
 /// Scanner lifecycle manager for cloud-based file sources (Google Drive, etc.).
 ///
@@ -69,6 +73,8 @@ class CloudFileIsolate extends CollectionScanner {
       'collectionId': collection.id,
       'collectionName': collection.name,
       'collectionPath': collection.path,
+      'storagePath': DatabaseManager.instance.storagePath,
+      'downloadLocalCopy': collection.downloadLocalCopy,
       // The root folder ID to start scanning from (e.g. 'root' or a specific folder ID)
       'rootFolderId': actualPath,
       'isFullScan': actualPath == collection.path,
@@ -126,6 +132,11 @@ class CloudFileIsolate extends CollectionScanner {
           }
         } else if (type == 'status') {
           _logger?.s(msg);
+        } else if (type == 'scan_complete') {
+          // The initial scan is done, but the isolate might stay alive for downloads.
+          // For now, we allow start() to return so ScannerManager is unblocked.
+          // But we don't break the loop if we want to keep listening for logs from the worker.
+          isScanning.add(false);
         }
       }
     }
@@ -152,6 +163,15 @@ class CloudFileIsolateWorker {
   final SendPort dbWriterPort;
   final SendPort? loggerPort;
   late final AppLogger logger;
+
+  // Caches for path reconstruction
+  final Map<String, String> _folderNames = {};
+  final Map<String, String> _folderParents = {};
+
+  // Download management
+  final List<File> _downloadQueue = [];
+  static const int _maxConcurrentDownloads = 3;
+  bool _isScanning = false;
 
   CloudFileIsolateWorker(this.dbWriterPort, this.loggerPort) {
     logger = AppLogger(loggerPort);
@@ -193,6 +213,8 @@ class CloudFileIsolateWorker {
     final collectionName = args['collectionName'] as String;
     final collectionPath = args['collectionPath'] as String? ?? 'root';
     final rootFolderId = args['rootFolderId'] as String? ?? 'root';
+    final storagePath = args['storagePath'] as String?;
+    final downloadLocalCopy = args['downloadLocalCopy'] as bool? ?? false;
     final isFullScan = args['isFullScan'] as bool? ?? false;
     final recursive = args['recursive'] as bool? ?? true;
     final accessToken = args['accessToken'] as String?;
@@ -246,6 +268,7 @@ class CloudFileIsolateWorker {
     );
 
     final scanStartTime = DateTime.now();
+    _isScanning = true;
 
     try {
       final count = await _scanFolder(
@@ -255,6 +278,7 @@ class CloudFileIsolateWorker {
         parentId: rootFolderId,
         recursive: recursive,
         scanStartTime: scanStartTime,
+        downloadLocalCopy: downloadLocalCopy,
       );
 
       logger.i(
@@ -275,6 +299,14 @@ class CloudFileIsolateWorker {
       });
       await syncPort.first;
       syncPort.close();
+      
+      _isScanning = false;
+      (args['port'] as SendPort).send({'type': 'scan_complete'});
+
+      if (downloadLocalCopy && storagePath != null) {
+        logger.i('CloudFileIsolate: processing download queue (${_downloadQueue.length} items)');
+        await _processQueue(driveApi, storagePath, collectionName, collectionPath);
+      }
     } catch (e, stack) {
       logger.e(
         'CloudFileIsolate: scan error for "$collectionName": $e\n$stack',
@@ -295,6 +327,7 @@ class CloudFileIsolateWorker {
     required String parentId,
     required bool recursive,
     required DateTime scanStartTime,
+    bool downloadLocalCopy = false,
     List<File>? currentBatch,
   }) async {
     int count = 0;
@@ -326,6 +359,9 @@ class CloudFileIsolateWorker {
         final isFolder = f.mimeType == 'application/vnd.google-apps.folder';
 
         if (isFolder) {
+          _folderNames[f.id!] = f.name ?? 'Untitled Folder';
+          _folderParents[f.id!] = parentId;
+
           final folder = _toFolder(
             collectionId: collectionId,
             collectionPath: collectionPath,
@@ -346,6 +382,7 @@ class CloudFileIsolateWorker {
                 parentId: f.id!,
                 recursive: recursive,
                 scanStartTime: scanStartTime,
+                downloadLocalCopy: downloadLocalCopy,
                 currentBatch: fileBatch,
               );
             }
@@ -362,6 +399,10 @@ class CloudFileIsolateWorker {
           if (file != null) {
             logger.i('Found Drive file: ${f.name} (${f.id})');
             fileBatch.add(file);
+            
+            if (downloadLocalCopy && !_isGoogleNativeFormat(f.mimeType ?? '')) {
+              _downloadQueue.add(file);
+            }
 
             if (fileBatch.length >= 100) {
               logger.d(
@@ -393,6 +434,99 @@ class CloudFileIsolateWorker {
     }
 
     return count;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Download Queue Processing
+  // ---------------------------------------------------------------------------
+
+  Future<void> _processQueue(drive.DriveApi driveApi, String storagePath, String collectionName, String collectionPath) async {
+    List<Future<void>> activeTasks = [];
+    
+    while (_downloadQueue.isNotEmpty || activeTasks.isNotEmpty) {
+      // Pause if scanning is re-triggered
+      if (_isScanning) {
+        await Future.delayed(const Duration(seconds: 1));
+        continue;
+      }
+
+      while (_downloadQueue.isNotEmpty && activeTasks.length < _maxConcurrentDownloads) {
+        final file = _downloadQueue.removeAt(0);
+        final task = _downloadFile(driveApi, file, storagePath, collectionName, collectionPath);
+        activeTasks.add(task);
+        // Remove task from active list when done
+        task.then((_) => activeTasks.remove(task));
+      }
+
+      if (activeTasks.isNotEmpty) {
+        // Wait for at least one task to complete before checking again
+        await Future.any(activeTasks);
+      }
+    }
+  }
+
+  Future<void> _downloadFile(drive.DriveApi driveApi, File file, String storagePath, String collectionName, String collectionPath) async {
+    try {
+      final driveId = file.path.replaceFirst('gdrive://', '');
+      final relativePath = _reconstructPath(file.parent, collectionPath);
+      final destDir = p.join(storagePath, 'files', 'gdrive', collectionName, relativePath);
+      final destPath = p.join(destDir, file.name);
+
+      final destFile = io.File(destPath);
+      if (await destFile.exists()) {
+        logger.d('File already exists on disk: $destPath');
+        dbWriterPort.send({
+          'type': 'update_file_local_path',
+          'id': file.id,
+          'localPath': destPath,
+        });
+        return;
+      }
+
+      await destFile.parent.create(recursive: true);
+      logger.i('Downloading: ${file.name} to $destPath');
+
+      final drive.Media media = await driveApi.files.get(
+        driveId,
+        downloadOptions: drive.DownloadOptions.fullMedia,
+      ) as drive.Media;
+
+      final sink = destFile.openWrite();
+      try {
+        await media.stream.pipe(sink);
+        logger.i('Downloaded: ${file.name}');
+        
+        dbWriterPort.send({
+          'type': 'update_file_local_path',
+          'id': file.id,
+          'localPath': destPath,
+        });
+      } finally {
+        await sink.flush();
+        await sink.close();
+      }
+    } catch (e) {
+      logger.e('Failed to download ${file.name}: $e');
+    }
+  }
+
+  String _reconstructPath(String parentId, String collectionPath) {
+    List<String> segments = [];
+    String? currentId = parentId;
+    
+    while (currentId != null && currentId.isNotEmpty && currentId != collectionPath && currentId != 'root') {
+      String? name = _folderNames[currentId];
+      if (name == null) break;
+      segments.insert(0, name);
+      currentId = _folderParents[currentId];
+    }
+    
+    return p.joinAll(segments);
+  }
+
+  bool _isGoogleNativeFormat(String mimeType) {
+    return mimeType.startsWith('application/vnd.google-apps.') &&
+        mimeType != 'application/vnd.google-apps.folder';
   }
 
   // ---------------------------------------------------------------------------

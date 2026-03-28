@@ -254,7 +254,7 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration {
@@ -470,6 +470,23 @@ class AppDatabase extends _$AppDatabase {
             collections.downloadLocalCopy,
           );
           logger.i('v14 migration complete');
+        }
+        if (from < 15) {
+          logger.i(
+            'Upgrade to v15: Adding localPath to Files',
+          );
+          try {
+            await m.database.customStatement(
+              'ALTER TABLE files ADD COLUMN local_path TEXT',
+            );
+          } catch (e) {
+            if (e.toString().contains('duplicate column name')) {
+              logger.w("local_path column already exists in Files table, skipping.");
+            } else {
+              rethrow;
+            }
+          }
+          logger.i('v15 migration complete');
         }
       },
       beforeOpen: (OpeningDetails details) async {

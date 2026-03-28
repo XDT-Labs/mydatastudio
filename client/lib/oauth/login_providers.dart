@@ -297,7 +297,7 @@ extension LoginProviderExtension on LoginProviders {
 
       final collection = Collection(
         id: collectionId,
-        name: 'Google Drive ($email)',
+        name: email,
         // 'path' stores the Drive root folder ID for this collection.
         // 'root' refers to the user's entire Drive. The folder picker UI
         // (Phase 9) can update this to a specific folder ID.

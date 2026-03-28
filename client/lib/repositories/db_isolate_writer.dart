@@ -21,6 +21,7 @@ import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:logger/logger.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:drift/drift.dart';
 
 class DbIsolateWriterClient {
   Isolate? _isolate;
@@ -244,6 +245,13 @@ class DbIsolateWriterClient {
             }
             await repo.updateCollection(col);
           }
+          replyTo?.send({'status': 'ok'});
+        } else if (data['type'] == 'update_file_local_path') {
+          final id = data['id'] as String;
+          final localPath = data['localPath'] as String;
+          await (db.update(db.files)..where((t) => t.id.equals(id))).write(
+            FilesCompanion(localPath: Value(localPath)),
+          );
           replyTo?.send({'status': 'ok'});
         } else {
           logger.w("Unknown message type: ${data['type']}");

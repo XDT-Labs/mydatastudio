@@ -95,20 +95,32 @@ class CollectionRepository {
       });
 
       // 8. Physical disk cleanup (especially for email attachments/cache)
-      if (collection.type == 'email') {
-        try {
-          String? appDir = MainApp.appDataDirectory.value;
-          if (appDir != null) {
+      String? appDir = MainApp.appDataDirectory.value;
+      if (appDir != null) {
+        if (collection.type == 'email') {
+          try {
             final collectionDiskPath = p.join(appDir, 'files', 'email', collection.id);
             final dir = io.Directory(collectionDiskPath);
             if (await dir.exists()) {
               await dir.delete(recursive: true);
-              logger.i("Deleted collection disk path: $collectionDiskPath");
+              logger.i("Deleted email collection disk path: $collectionDiskPath");
             }
+          } catch (e) {
+            logger.e("Failed to delete email collection files from disk: $e");
           }
-        } catch (e) {
-          logger.e("Failed to delete collection files from disk: $e");
+        } else if (collection.type == 'file' && collection.scanner.contains('gdrive')) {
+          try {
+            // Google Drive files are saved under files/gdrive/{collection.name}
+            final collectionDiskPath = p.join(appDir, 'files', 'gdrive', collection.name);
+            final dir = io.Directory(collectionDiskPath);
+            if (await dir.exists()) {
+              await dir.delete(recursive: true);
+              logger.i("Deleted GDrive collection disk path: $collectionDiskPath");
+            }
+          } catch (e) {
+            logger.e("Failed to delete GDrive collection files from disk: $e");
+          }
+        }
       }
-    }
   }
 }

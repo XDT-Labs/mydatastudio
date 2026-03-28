@@ -28,6 +28,7 @@ class Files extends Table {
   TextColumn get emailId => text().nullable()();
   RealColumn get latitude => real().nullable()();
   RealColumn get longitude => real().nullable()();
+  TextColumn get localPath => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -58,6 +59,7 @@ class File implements FileAsset, Insertable<File> {
   String? emailId;
   double? latitude;
   double? longitude;
+  String? localPath;
 
   File({
     required this.id,
@@ -76,6 +78,7 @@ class File implements FileAsset, Insertable<File> {
     this.emailId,
     this.latitude,
     this.longitude,
+    this.localPath,
   });
 
   File.fromDb({
@@ -95,6 +98,7 @@ class File implements FileAsset, Insertable<File> {
     this.emailId,
     this.latitude,
     this.longitude,
+    this.localPath,
   });
 
   @override
@@ -116,6 +120,7 @@ class File implements FileAsset, Insertable<File> {
       emailId: Value(emailId),
       latitude: Value(latitude),
       longitude: Value(longitude),
+      localPath: Value(localPath),
     ).toColumns(nullToAbsent);
   }
 }

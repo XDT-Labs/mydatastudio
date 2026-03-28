@@ -2454,6 +2454,17 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
     type: DriftSqlType.double,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _localPathMeta = const VerificationMeta(
+    'localPath',
+  );
+  @override
+  late final GeneratedColumn<String> localPath = GeneratedColumn<String>(
+    'local_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2472,6 +2483,7 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
     emailId,
     latitude,
     longitude,
+    localPath,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2614,6 +2626,12 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
         longitude.isAcceptableOrUnknown(data['longitude']!, _longitudeMeta),
       );
     }
+    if (data.containsKey('local_path')) {
+      context.handle(
+        _localPathMeta,
+        localPath.isAcceptableOrUnknown(data['local_path']!, _localPathMeta),
+      );
+    }
     return context;
   }
 
@@ -2697,6 +2715,10 @@ class $FilesTable extends Files with TableInfo<$FilesTable, File> {
         DriftSqlType.double,
         data['${effectivePrefix}longitude'],
       ),
+      localPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}local_path'],
+      ),
     );
   }
 
@@ -2723,6 +2745,7 @@ class FilesCompanion extends UpdateCompanion<File> {
   final Value<String?> emailId;
   final Value<double?> latitude;
   final Value<double?> longitude;
+  final Value<String?> localPath;
   final Value<int> rowid;
   const FilesCompanion({
     this.id = const Value.absent(),
@@ -2741,6 +2764,7 @@ class FilesCompanion extends UpdateCompanion<File> {
     this.emailId = const Value.absent(),
     this.latitude = const Value.absent(),
     this.longitude = const Value.absent(),
+    this.localPath = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   FilesCompanion.insert({
@@ -2760,6 +2784,7 @@ class FilesCompanion extends UpdateCompanion<File> {
     this.emailId = const Value.absent(),
     this.latitude = const Value.absent(),
     this.longitude = const Value.absent(),
+    this.localPath = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -2787,6 +2812,7 @@ class FilesCompanion extends UpdateCompanion<File> {
     Expression<String>? emailId,
     Expression<double>? latitude,
     Expression<double>? longitude,
+    Expression<String>? localPath,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2806,6 +2832,7 @@ class FilesCompanion extends UpdateCompanion<File> {
       if (emailId != null) 'email_id': emailId,
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
+      if (localPath != null) 'local_path': localPath,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2827,6 +2854,7 @@ class FilesCompanion extends UpdateCompanion<File> {
     Value<String?>? emailId,
     Value<double?>? latitude,
     Value<double?>? longitude,
+    Value<String?>? localPath,
     Value<int>? rowid,
   }) {
     return FilesCompanion(
@@ -2846,6 +2874,7 @@ class FilesCompanion extends UpdateCompanion<File> {
       emailId: emailId ?? this.emailId,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
+      localPath: localPath ?? this.localPath,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2901,6 +2930,9 @@ class FilesCompanion extends UpdateCompanion<File> {
     if (longitude.present) {
       map['longitude'] = Variable<double>(longitude.value);
     }
+    if (localPath.present) {
+      map['local_path'] = Variable<String>(localPath.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2926,6 +2958,7 @@ class FilesCompanion extends UpdateCompanion<File> {
           ..write('emailId: $emailId, ')
           ..write('latitude: $latitude, ')
           ..write('longitude: $longitude, ')
+          ..write('localPath: $localPath, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5763,6 +5796,7 @@ typedef $$FilesTableCreateCompanionBuilder =
       Value<String?> emailId,
       Value<double?> latitude,
       Value<double?> longitude,
+      Value<String?> localPath,
       Value<int> rowid,
     });
 typedef $$FilesTableUpdateCompanionBuilder =
@@ -5783,6 +5817,7 @@ typedef $$FilesTableUpdateCompanionBuilder =
       Value<String?> emailId,
       Value<double?> latitude,
       Value<double?> longitude,
+      Value<String?> localPath,
       Value<int> rowid,
     });
 
@@ -5871,6 +5906,11 @@ class $$FilesTableFilterComposer extends Composer<_$AppDatabase, $FilesTable> {
 
   ColumnFilters<double> get longitude => $composableBuilder(
     column: $table.longitude,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get localPath => $composableBuilder(
+    column: $table.localPath,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5963,6 +6003,11 @@ class $$FilesTableOrderingComposer
     column: $table.longitude,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get localPath => $composableBuilder(
+    column: $table.localPath,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$FilesTableAnnotationComposer
@@ -6033,6 +6078,9 @@ class $$FilesTableAnnotationComposer
 
   GeneratedColumn<double> get longitude =>
       $composableBuilder(column: $table.longitude, builder: (column) => column);
+
+  GeneratedColumn<String> get localPath =>
+      $composableBuilder(column: $table.localPath, builder: (column) => column);
 }
 
 class $$FilesTableTableManager
@@ -6079,6 +6127,7 @@ class $$FilesTableTableManager
                 Value<String?> emailId = const Value.absent(),
                 Value<double?> latitude = const Value.absent(),
                 Value<double?> longitude = const Value.absent(),
+                Value<String?> localPath = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => FilesCompanion(
                 id: id,
@@ -6097,6 +6146,7 @@ class $$FilesTableTableManager
                 emailId: emailId,
                 latitude: latitude,
                 longitude: longitude,
+                localPath: localPath,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -6117,6 +6167,7 @@ class $$FilesTableTableManager
                 Value<String?> emailId = const Value.absent(),
                 Value<double?> latitude = const Value.absent(),
                 Value<double?> longitude = const Value.absent(),
+                Value<String?> localPath = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => FilesCompanion.insert(
                 id: id,
@@ -6135,6 +6186,7 @@ class $$FilesTableTableManager
                 emailId: emailId,
                 latitude: latitude,
                 longitude: longitude,
+                localPath: localPath,
                 rowid: rowid,
               ),
           withReferenceMapper:
