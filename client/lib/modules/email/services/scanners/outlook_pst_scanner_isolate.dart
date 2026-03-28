@@ -99,7 +99,7 @@ class OutlookPstScannerIsolateWorker {
     }
 
     // 2. Call FastAPI endpoint
-    logger.i("PST Scanner: Calling AI Chat API at $serverUrl/import/pst");
+    logger.i("PST Scanner: Calling AI Chat API for PST import");
 
     final client = http.Client();
     final request = http.Request('POST', Uri.parse("$serverUrl/import/pst"));
@@ -187,6 +187,13 @@ class OutlookPstScannerIsolateWorker {
               for (var att in data['attachments']) {
                 final fileId = const Uuid().v4();
                 final attPath = att['path'] as String? ?? '';
+
+                // Validate path stays within extraction root
+                if (attPath.isNotEmpty &&
+                    !p.canonicalize(attPath).startsWith(p.canonicalize(extractionRoot))) {
+                  logger.w('PST Scanner: Skipping attachment with path outside extraction root');
+                  continue;
+                }
 
                 // Ensure every directory level from extractionRoot down to the
                 // attachment's parent has a Folder record in the file module DB.

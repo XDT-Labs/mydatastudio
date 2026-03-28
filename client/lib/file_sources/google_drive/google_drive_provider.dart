@@ -6,15 +6,14 @@ import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/file_sources/file_source_file.dart';
 import 'package:mydatatools/file_sources/file_source_provider.dart';
-import 'package:mydatatools/file_sources/google_drive/google_drive_auth_service.dart';
+import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/oauth/google_auth_client.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 /// [FileSourceProvider] implementation for Google Drive collections.
 ///
 /// Uses the Drive v3 API via `package:googleapis`. Auth tokens are managed
-/// by [GoogleDriveAuthService] which auto-refreshes near-expiry tokens
+/// by [GoogleAuthService] which auto-refreshes near-expiry tokens
 /// and persists the new values back to the [Collection] record in the DB.
 ///
 /// **Scopes required:** `https://www.googleapis.com/auth/drive`
@@ -174,16 +173,14 @@ class GoogleDriveProvider implements FileSourceProvider {
 
   /// Builds an authenticated Drive v3 API client for [collection].
   ///
-  /// Uses [GoogleDriveAuthService] to obtain a valid (auto-refreshed if needed)
-  /// access token, then wraps it in a [GoogleAuthClient].
+  /// Uses [GoogleAuthService] to obtain a valid (auto-refreshed if needed)
+  /// access token, then wraps it in an [AuthenticatedHttpClient].
   Future<drive.DriveApi> _buildApi(Collection collection) async {
-    final accessToken = await GoogleDriveAuthService.getValidAccessToken(
+    final accessToken = await GoogleAuthService.getValidAccessToken(
       collection,
     );
 
-    final authHttpClient = GoogleAuthClient({
-      'Authorization': 'Bearer $accessToken',
-    });
+    final authHttpClient = AuthenticatedHttpClient.bearer(accessToken);
 
     return drive.DriveApi(authHttpClient);
   }

@@ -17,6 +17,7 @@ Usage:
 """
 import os
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 
 from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, API_TITLE, API_DESCRIPTION
@@ -30,8 +31,16 @@ app = FastAPI(
     title=API_TITLE,
     description=API_DESCRIPTION,
     version="1.0.0",
-    docs_url="/docs",  # Swagger UI at /docs
-    redoc_url="/redoc"  # ReDoc UI at /redoc
+    docs_url=None,
+    redoc_url=None,
+)
+
+# Restrict CORS to localhost only
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost", "http://127.0.0.1"],
+    allow_methods=["POST", "GET"],
+    allow_headers=["*"],
 )
 
 # Register API route handlers
@@ -92,7 +101,7 @@ def main() -> None:
     import uvicorn
     uvicorn.run(
         app, 
-        host="0.0.0.0", 
+        host="127.0.0.1",
         port=0,
         log_level="info",
         reload=False  # Set to True for development

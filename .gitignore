@@ -67,3 +67,5 @@ secrets-dev.json
 client/config/secrets.json
 **/config/secrets/*.json
 .env
+analyzer_output.txt
+.realm_name
