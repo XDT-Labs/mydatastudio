@@ -551,7 +551,7 @@ class YahooScannerIsolateWorker {
       isDeleted: false,
     );
 
-    if (hasAttachments && collection.downloadAttachments) {
+    if (collection.downloadLocalCopy) {
       final labelName = targetFolder;
       final year = msgDate.year.toString();
       // Use the app-managed extraction root (not collection.path which is an

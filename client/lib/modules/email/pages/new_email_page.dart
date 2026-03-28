@@ -472,7 +472,7 @@ class _YahooTabState extends State<_YahooTab> {
         accessToken: appPassword, // Store app password in accessToken field
         userId: email,
         needsReAuth: false,
-        downloadAttachments: true,
+        downloadLocalCopy: true,
       );
 
       GetCollectionsService.instance.addCollection(c);

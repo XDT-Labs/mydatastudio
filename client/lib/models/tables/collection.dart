@@ -23,7 +23,7 @@ class Collections extends Table {
   DateTimeColumn get expiration => dateTime().nullable()();
   DateTimeColumn get lastScanDate => dateTime().nullable()();
   BoolColumn get needsReAuth => boolean()();
-  BoolColumn get downloadAttachments => boolean().withDefault(const Constant(false))();
+  BoolColumn get downloadLocalCopy => boolean().withDefault(const Constant(false))();
   // Absolute root path for local file collections. Null for cloud/email.
   TextColumn get localCopyPath => text().nullable()();
 
@@ -47,7 +47,7 @@ class Collection implements Insertable<Collection> {
   DateTime? expiration;
   DateTime? lastScanDate;
   bool needsReAuth = false;
-  bool downloadAttachments = false;
+  bool downloadLocalCopy = false;
   String? localCopyPath;
 
   // fields not in db
@@ -69,7 +69,7 @@ class Collection implements Insertable<Collection> {
     this.expiration,
     this.lastScanDate,
     required this.needsReAuth,
-    this.downloadAttachments = false,
+    this.downloadLocalCopy = false,
     this.localCopyPath,
   });
 
@@ -88,7 +88,7 @@ class Collection implements Insertable<Collection> {
     this.expiration,
     this.lastScanDate,
     required this.needsReAuth,
-    required this.downloadAttachments,
+    required this.downloadLocalCopy,
     this.localCopyPath,
   });
 
@@ -109,7 +109,7 @@ class Collection implements Insertable<Collection> {
       expiration: Value(expiration),
       lastScanDate: Value(lastScanDate),
       needsReAuth: Value(needsReAuth),
-      downloadAttachments: Value(downloadAttachments),
+      downloadLocalCopy: Value(downloadLocalCopy),
       localCopyPath: Value(localCopyPath),
     ).toColumns(nullToAbsent);
   }

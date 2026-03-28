@@ -254,7 +254,7 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration {
@@ -459,6 +459,17 @@ class AppDatabase extends _$AppDatabase {
             "WHERE oauth_service = 'google'",
           );
           logger.i('v13 migration complete');
+        }
+        if (from < 14) {
+          logger.i(
+            'Upgrade to v14: Rename download_attachments to download_local_copy',
+          );
+          await m.renameColumn(
+            collections,
+            'download_attachments',
+            collections.downloadLocalCopy,
+          );
+          logger.i('v14 migration complete');
         }
       },
       beforeOpen: (OpeningDetails details) async {
