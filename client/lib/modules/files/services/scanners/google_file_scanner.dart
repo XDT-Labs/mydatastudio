@@ -57,6 +57,8 @@ class CloudFileIsolate extends CollectionScanner {
     final ReceivePort p = ReceivePort(debugName);
     final token = RootIsolateToken.instance!;
 
+    final String? actualPath = (path != null && path.isNotEmpty) ? path : collection.path;
+
     // Only pass isolate-safe primitives across the boundary
     final Map<String, dynamic> args = {
       'token': token,
@@ -65,9 +67,10 @@ class CloudFileIsolate extends CollectionScanner {
       'loggerPort': p.sendPort, // Send logs back through our own ReceivePort
       'collectionId': collection.id,
       'collectionName': collection.name,
+      'collectionPath': collection.path,
       // The root folder ID to start scanning from (e.g. 'root' or a specific folder ID)
-      'rootFolderId': path ?? collection.path,
-      'isFullScan': path == null || path == collection.path,
+      'rootFolderId': actualPath,
+      'isFullScan': actualPath == collection.path,
       'recursive': recursive,
       // Raw token strings — the worker re-creates the API client inside the isolate
       'providerKey': collection.scanner,
@@ -187,6 +190,7 @@ class CloudFileIsolateWorker {
   Future<void> _scan(Map<String, dynamic> args) async {
     final collectionId = args['collectionId'] as String;
     final collectionName = args['collectionName'] as String;
+    final collectionPath = args['collectionPath'] as String? ?? 'root';
     final rootFolderId = args['rootFolderId'] as String? ?? 'root';
     final isFullScan = args['isFullScan'] as bool? ?? false;
     final recursive = args['recursive'] as bool? ?? true;
@@ -248,6 +252,7 @@ class CloudFileIsolateWorker {
       final count = await _scanFolder(
         driveApi: driveApi,
         collectionId: collectionId,
+        collectionPath: collectionPath,
         parentId: rootFolderId,
         recursive: recursive,
         scanStartTime: scanStartTime,
@@ -262,7 +267,7 @@ class CloudFileIsolateWorker {
       dbWriterPort.send({
         'type': 'cleanup_deleted',
         'collectionId': collectionId,
-        'path': rootFolderId,
+        'path': rootFolderId == collectionPath ? '' : rootFolderId,
         'scanStartTime': scanStartTime,
         'recursive': recursive,
         'isCloud': true,
@@ -287,6 +292,7 @@ class CloudFileIsolateWorker {
   Future<int> _scanFolder({
     required drive.DriveApi driveApi,
     required String collectionId,
+    required String collectionPath,
     required String parentId,
     required bool recursive,
     required DateTime scanStartTime,
@@ -321,9 +327,9 @@ class CloudFileIsolateWorker {
         final isFolder = f.mimeType == 'application/vnd.google-apps.folder';
 
         if (isFolder) {
-          // Persist folder first so the UI can show the tree
           final folder = _toFolder(
             collectionId: collectionId,
+            collectionPath: collectionPath,
             parentId: parentId,
             driveFile: f,
             scanStartTime: scanStartTime,
@@ -337,6 +343,7 @@ class CloudFileIsolateWorker {
               count += await _scanFolder(
                 driveApi: driveApi,
                 collectionId: collectionId,
+                collectionPath: collectionPath,
                 parentId: f.id!,
                 recursive: recursive,
                 scanStartTime: scanStartTime,
@@ -348,6 +355,7 @@ class CloudFileIsolateWorker {
           count++;
           final file = _toFile(
             collectionId: collectionId,
+            collectionPath: collectionPath,
             parentId: parentId,
             driveFile: f,
             scanStartTime: scanStartTime,
@@ -394,6 +402,7 @@ class CloudFileIsolateWorker {
 
   Folder? _toFolder({
     required String collectionId,
+    required String collectionPath,
     required String parentId,
     required drive.File driveFile,
     required DateTime scanStartTime,
@@ -407,7 +416,7 @@ class CloudFileIsolateWorker {
       // 'path' for cloud folders stores the Drive file ID so it can be used
       // as a parentId in future API calls.
       path: driveFile.id!,
-      parent: parentId,
+      parent: parentId == collectionPath ? '' : parentId,
       dateCreated: driveFile.createdTime ?? scanStartTime,
       dateLastModified: driveFile.modifiedTime ?? scanStartTime,
       lastScannedDate: scanStartTime,
@@ -419,6 +428,7 @@ class CloudFileIsolateWorker {
 
   File? _toFile({
     required String collectionId,
+    required String collectionPath,
     required String parentId,
     required drive.File driveFile,
     required DateTime scanStartTime,
@@ -436,7 +446,7 @@ class CloudFileIsolateWorker {
       // 'path' stores a URI-like reference. For cloud files this is the Drive
       // file ID prefixed with 'gdrive://' so it's distinguishable from local paths.
       path: 'gdrive://${driveFile.id}',
-      parent: parentId,
+      parent: parentId == collectionPath ? '' : parentId,
       dateCreated: driveFile.createdTime ?? scanStartTime,
       dateLastModified: driveFile.modifiedTime ?? scanStartTime,
       lastScannedDate: scanStartTime,

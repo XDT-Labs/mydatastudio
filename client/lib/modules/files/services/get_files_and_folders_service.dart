@@ -28,9 +28,6 @@ class GetFileAndFoldersService
     GetFileAndFoldersServiceCommand command,
   ) async {
     isLoading.add(true);
-    AppDatabase? db = DatabaseManager.instance.database;
-    FileDesktopRepository fileRepo = FileDesktopRepository(db!);
-    FolderDesktopRepository folderRepo = FolderDesktopRepository(db);
 
     // relativePath is what gets stored in the DB and used for repo queries.
     String relativePath = command.path;
@@ -48,8 +45,6 @@ class GetFileAndFoldersService
     };
 
     if (emailScanners.contains(command.collection.scanner)) {
-      // Email collections use a computed extraction root; files are stored
-      // relative to this root in the database.
       final storagePath = DatabaseManager.instance.storagePath;
       if (storagePath != null) {
         final extractionRoot = p.join(
@@ -58,15 +53,10 @@ class GetFileAndFoldersService
           'email',
           command.collection.id,
         );
-        // command.path is always a relative path (e.g. "" / "INBOX" / "INBOX/2022").
-        // The only legacy case where it could be wrong is if an absolute path
-        // that is NOT under the extraction root was stored (e.g. the old
-        // email-address string). Reset to root only in that case.
         if (p.isAbsolute(command.path) &&
             !command.path.startsWith(extractionRoot)) {
           relativePath = '';
         }
-        // Build the absolute path for the scanner from the (possibly corrected) relativePath.
         absolutePath =
             relativePath.isEmpty
                 ? extractionRoot
@@ -78,7 +68,6 @@ class GetFileAndFoldersService
         );
       }
     } else {
-      // Local/cloud collections: resolve absolute path from localCopyPath.
       absolutePath = FilePathResolver.absoluteFromPath(
         relativePath,
         command.collection,
@@ -86,40 +75,54 @@ class GetFileAndFoldersService
       if (absolutePath.isEmpty) absolutePath = command.collection.path;
     }
 
-    // Skip scanner if it's just a refresh-only or load-more request.
-    if (!command.refreshOnly && command.offset == 0) {
-      ScannerManager.getInstance()
-          .getScanner(command.collection)
-          ?.start(command.collection, absolutePath, false, false);
+    // ── 1. QUERY DB FIRST — show cached results immediately ──────────
+    try {
+      final AppDatabase db = DatabaseManager.instance.database!;
+      final FileDesktopRepository fileRepo = FileDesktopRepository(db);
+      final FolderDesktopRepository folderRepo = FolderDesktopRepository(db);
+
+      final List<FileAsset> folders =
+          command.offset == 0
+              ? await folderRepo.getByParentPath(
+                command.collection.id,
+                relativePath,
+              )
+              : [];
+
+      final List<FileAsset> files = await fileRepo.getByParentPath(
+        command.collection.id,
+        relativePath,
+        limit: command.pageSize,
+        offset: command.offset,
+      );
+
+      final List<FileAsset> newItems = [...folders, ...files];
+
+      if (command.offset == 0) {
+        _currentItems = newItems;
+      } else {
+        _currentItems = [..._currentItems, ...newItems];
+      }
+      sink.add(_currentItems);
+
+      // ── 2. THEN trigger scanner in background ────────────────────
+      // Fire-and-forget: the scanner writes to the DB via DbIsolateWriter.
+      // When isScanning transitions false→true→false the page auto-refreshes.
+      if (!command.refreshOnly && command.offset == 0) {
+        ScannerManager.getInstance()
+            .getScannerAsync(command.collection)
+            .then((scanner) => scanner.start(
+                  command.collection, absolutePath, false, false));
+      }
+
+      isLoading.add(false);
+      return newItems;
+    } catch (e, stack) {
+      logger.e('GetFileAndFoldersService.invoke failed: $e',
+          error: e, stackTrace: stack);
+      isLoading.add(false);
+      return _currentItems;
     }
-
-    // Folders always load fully; only files paginate.
-    final List<FileAsset> folders =
-        command.offset == 0
-            ? await folderRepo.getByParentPath(
-              command.collection.id,
-              relativePath,
-            )
-            : [];
-
-    final List<FileAsset> files = await fileRepo.getByParentPath(
-      command.collection.id,
-      relativePath,
-      limit: command.pageSize,
-      offset: command.offset,
-    );
-
-    final List<FileAsset> newItems = [...folders, ...files];
-
-    if (command.offset == 0) {
-      _currentItems = newItems;
-    } else {
-      _currentItems = [..._currentItems, ...newItems];
-    }
-    sink.add(_currentItems);
-
-    isLoading.add(false);
-    return newItems;
   }
 }
 

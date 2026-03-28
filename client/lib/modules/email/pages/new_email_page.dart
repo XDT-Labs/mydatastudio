@@ -285,7 +285,7 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
 
       // Start the one-time scan isolate immediately
       final writerPort = await DatabaseManager.instance.writerPort;
-      final serverUrl = MainApp.llmServiceUrl.value;
+      final serverUrl = MainApp.llmServiceUrl.valueOrNull;
       if (serverUrl == null) {
         throw Exception('LLM Service url is not configured');
       }
