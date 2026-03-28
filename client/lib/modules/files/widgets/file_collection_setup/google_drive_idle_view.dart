@@ -5,21 +5,21 @@ class GoogleDriveIdleView extends StatelessWidget {
   const GoogleDriveIdleView({
     super.key,
     required this.onConnect,
-    required this.onCancel,
   });
 
   final VoidCallback onConnect;
-  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Image.asset('assets/images/google-drive.png', height: 72),
         const SizedBox(height: 24),
         const Text(
           'Connect Google Drive',
+          textAlign: TextAlign.center,
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
@@ -50,21 +50,7 @@ class GoogleDriveIdleView extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 28),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: onCancel,
-                child: const Text('Cancel'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 2,
-              child: GoogleDriveSignInButton(onTap: onConnect),
-            ),
-          ],
-        ),
+        GoogleDriveSignInButton(onTap: onConnect),
       ],
     );
   }

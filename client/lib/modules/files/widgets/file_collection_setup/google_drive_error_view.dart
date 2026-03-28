@@ -5,12 +5,10 @@ class GoogleDriveErrorView extends StatelessWidget {
     super.key,
     required this.errorMessage,
     required this.onRetry,
-    required this.onCancel,
   });
 
   final String? errorMessage;
   final VoidCallback onRetry;
-  final VoidCallback onCancel;
 
   static const Color _googleBlue = Color(0xFF4285F4);
 
@@ -18,19 +16,23 @@ class GoogleDriveErrorView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          width: 64,
-          height: 64,
-          decoration: const BoxDecoration(
-            color: Color(0xFFDB4437),
-            shape: BoxShape.circle,
+        Center(
+          child: Container(
+            width: 64,
+            height: 64,
+            decoration: const BoxDecoration(
+              color: Color(0xFFDB4437),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.error_outline, color: Colors.white, size: 36),
           ),
-          child: const Icon(Icons.error_outline, color: Colors.white, size: 36),
         ),
         const SizedBox(height: 20),
         const Text(
           'Connection Failed',
+          textAlign: TextAlign.center,
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
         if (errorMessage != null) ...[
@@ -54,32 +56,18 @@ class GoogleDriveErrorView extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 24),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: onCancel,
-                child: const Text('Cancel'),
-              ),
+        ElevatedButton.icon(
+          onPressed: onRetry,
+          icon: const Icon(Icons.refresh, size: 18),
+          label: const Text('Try Again'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _googleBlue,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 2,
-              child: ElevatedButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Try Again'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _googleBlue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
       ],
     );

@@ -207,14 +207,12 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
                 child: GoogleDriveErrorView(
                   errorMessage: _errorMessage,
                   onRetry: _connectGoogleDrive,
-                  onCancel: () => GoRouter.of(context).go('/files'),
                 ),
               ),
             _DriveAuthState.idle => _cardContainer(
                 key: const ValueKey('idle'),
                 child: GoogleDriveIdleView(
                   onConnect: _connectGoogleDrive,
-                  onCancel: () => GoRouter.of(context).go('/files'),
                 ),
               ),
           },

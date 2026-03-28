@@ -8,7 +8,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: GoogleDriveIdleView(onConnect: () {}, onCancel: () {}),
+            body: GoogleDriveIdleView(onConnect: () {}),
           ),
         ),
       );
@@ -20,7 +20,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: GoogleDriveIdleView(onConnect: () {}, onCancel: () {}),
+            body: GoogleDriveIdleView(onConnect: () {}),
           ),
         ),
       );
@@ -28,23 +28,16 @@ void main() {
       expect(find.textContaining('Drive access'), findsOneWidget);
     });
 
-    testWidgets('cancel button calls onCancel', (tester) async {
-      bool called = false;
+    testWidgets('Cancel button is NOT present', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: GoogleDriveIdleView(
-              onConnect: () {},
-              onCancel: () => called = true,
-            ),
+            body: GoogleDriveIdleView(onConnect: () {}),
           ),
         ),
       );
 
-      await tester.tap(find.text('Cancel'));
-      await tester.pump();
-
-      expect(called, isTrue);
+      expect(find.text('Cancel'), findsNothing);
     });
 
     testWidgets('sign in button calls onConnect', (tester) async {
@@ -54,7 +47,6 @@ void main() {
           home: Scaffold(
             body: GoogleDriveIdleView(
               onConnect: () => called = true,
-              onCancel: () {},
             ),
           ),
         ),

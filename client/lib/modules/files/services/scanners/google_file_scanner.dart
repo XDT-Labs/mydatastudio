@@ -57,7 +57,8 @@ class CloudFileIsolate extends CollectionScanner {
     final ReceivePort p = ReceivePort(debugName);
     final token = RootIsolateToken.instance!;
 
-    final String? actualPath = (path != null && path.isNotEmpty) ? path : collection.path;
+    final String? actualPath =
+        (path != null && path.isNotEmpty) ? path : collection.path;
 
     // Only pass isolate-safe primitives across the boundary
     final Map<String, dynamic> args = {
@@ -137,7 +138,7 @@ class CloudFileIsolate extends CollectionScanner {
   @override
   void stop() {
     _isolate?.kill(priority: Isolate.beforeNextEvent);
-    _logger?.w('CloudFileIsolate stopped');
+    _logger?.i('CloudFileIsolate stopped');
   }
 }
 
@@ -238,9 +239,7 @@ class CloudFileIsolateWorker {
     }
 
     // Build Drive API client from refreshed token
-    final driveApi = drive.DriveApi(
-      AuthenticatedHttpClient.bearer(validToken),
-    );
+    final driveApi = drive.DriveApi(AuthenticatedHttpClient.bearer(validToken));
 
     logger.i(
       'CloudFileIsolate: starting scan of "$collectionName" from folder "$rootFolderId"',
