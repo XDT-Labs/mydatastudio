@@ -18,9 +18,16 @@ import 'package:flutter/services.dart';
 
 import 'package:go_router/go_router.dart';
 import 'package:reactive_forms/reactive_forms.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:mydatatools/modules/email/pages/email_page.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/gmail_idle_view.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/gmail_loading_view.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/gmail_success_view.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/gmail_error_view.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_idle_view.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_loading_view.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_success_view.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_error_view.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
@@ -109,8 +116,6 @@ class _GmailTabState extends State<_GmailTab> {
   String? _errorMessage;
   String? _connectedEmail;
 
-  static const Color _googleBlue = Color(0xFF4285F4);
-
   Future<void> _connectGmail() async {
     setState(() {
       _authState = _GmailAuthState.loading;
@@ -169,125 +174,42 @@ class _GmailTabState extends State<_GmailTab> {
   }
 
   Widget _buildIdle() {
-    return _buildCard(
+    return _cardContainer(
       key: const ValueKey('idle'),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.email, size: 72, color: _googleBlue),
-          const SizedBox(height: 24),
-          const Text(
-            'Connect Gmail',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Sign in with your Google account to scan and backup your emails '
-            'directly to this app.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade600,
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 28),
-          _buildGoogleSignInButton(),
-        ],
-      ),
+      child: GmailIdleView(onConnect: _connectGmail),
     );
   }
 
   Widget _buildLoading() {
-    return _buildCard(
+    return _cardContainer(
       key: const ValueKey('loading'),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 20),
-          const Text(
-            'Connecting to Gmail…',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-          ),
-        ],
-      ),
+      child: const GmailLoadingView(),
     );
   }
 
   Widget _buildSuccess() {
-    return _buildCard(
+    return _cardContainer(
       key: const ValueKey('success'),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.check_circle, color: Colors.green, size: 64),
-          const SizedBox(height: 20),
-          const Text(
-            'Gmail Connected!',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-          ),
-          if (_connectedEmail != null)
-            Text(_connectedEmail!, style: const TextStyle(color: Colors.grey)),
-        ],
-      ),
+      child: GmailSuccessView(connectedEmail: _connectedEmail),
     );
   }
 
   Widget _buildError() {
-    return _buildCard(
+    return _cardContainer(
       key: const ValueKey('error'),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.error, color: Colors.red, size: 64),
-          const SizedBox(height: 20),
-          const Text(
-            'Connection Failed',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-          ),
-          if (_errorMessage != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Text(
-                _errorMessage!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.red),
-              ),
-            ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: _connectGmail,
-            child: const Text('Try Again'),
-          ),
-        ],
+      child: GmailErrorView(
+        errorMessage: _errorMessage,
+        onRetry: _connectGmail,
       ),
     );
   }
 
-  Widget _buildCard({required Widget child, required Key key}) {
+  Widget _cardContainer({required Widget child, required Key key}) {
     return Card(
       key: key,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(padding: const EdgeInsets.all(36), child: child),
-    );
-  }
-
-  Widget _buildGoogleSignInButton() {
-    return ElevatedButton.icon(
-      onPressed: _connectGmail,
-      icon: const FaIcon(FontAwesomeIcons.google, size: 18, color: _googleBlue),
-      label: const Text('Sign in with Google'),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: BorderSide(color: Colors.grey.shade300),
-        ),
-      ),
     );
   }
 }
@@ -516,8 +438,6 @@ class _YahooTabState extends State<_YahooTab> {
     ),
   });
 
-  static const Color _yahooPurple = Color(0xFF6001D2);
-
   Future<void> _connectYahoo() async {
     if (!_form.valid) {
       _form.markAllAsTouched();
@@ -609,223 +529,41 @@ class _YahooTabState extends State<_YahooTab> {
   }
 
   Widget _buildIdle() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(vertical: 32),
-      child: _buildCard(
-        key: const ValueKey('idle'),
-        child: ReactiveForm(
-          formGroup: _form,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Center(
-                child: Icon(Icons.email, size: 64, color: _yahooPurple),
-              ),
-              const SizedBox(height: 16),
-              const Center(
-                child: Text(
-                  'Connect Yahoo Mail',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                ),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'Setup Instructions',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade200),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildStep(
-                      1,
-                      'Log in to your Yahoo Account Security settings.',
-                    ),
-                    _buildStep(2, 'Click "Generate app password".'),
-                    _buildStep(
-                      3,
-                      'Select "Other App", name it "MyDataTools", and click Generate.',
-                    ),
-                    _buildStep(
-                      4,
-                      'Copy the 16-character code and paste it below.',
-                    ),
-                    const SizedBox(height: 12),
-                    Center(
-                      child: TextButton.icon(
-                        onPressed: _launchYahooSecurity,
-                        icon: const Icon(Icons.open_in_new, size: 16),
-                        label: const Text('Open Yahoo Security Settings'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'Email Address',
-                style: TextStyle(fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(height: 8),
-              ReactiveTextField<String>(
-                formControlName: 'email',
-                decoration: InputDecoration(
-                  hintText: 'yourname@yahoo.com',
-                  prefixIcon: const Icon(Icons.alternate_email),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'App Password',
-                style: TextStyle(fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(height: 8),
-              ReactiveTextField<String>(
-                formControlName: 'appPassword',
-                obscureText: true,
-                decoration: InputDecoration(
-                  hintText: 'Enter 16-character app password',
-                  prefixIcon: const Icon(Icons.lock_outline),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                validationMessages: {
-                  'required': (error) => 'App password is required',
-                  'minLength':
-                      (error) => 'App password should be 16 characters',
-                },
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton.icon(
-                  onPressed: _connectYahoo,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _yahooPurple,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: const Text(
-                    'Connect Yahoo Account',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStep(int number, String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$number. ',
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: _yahooPurple,
-            ),
-          ),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
-            ),
-          ),
-        ],
+    return _cardContainer(
+      key: const ValueKey('idle'),
+      child: YahooIdleView(
+        form: _form,
+        onConnect: _connectYahoo,
+        onLaunchSecurity: _launchYahooSecurity,
       ),
     );
   }
 
   Widget _buildLoading() {
-    return _buildCard(
+    return _cardContainer(
       key: const ValueKey('loading'),
-      child: const Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircularProgressIndicator(color: _yahooPurple),
-          SizedBox(height: 20),
-          Text(
-            'Verifying connection…',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-          ),
-        ],
-      ),
+      child: const YahooLoadingView(),
     );
   }
 
   Widget _buildSuccess() {
-    return _buildCard(
+    return _cardContainer(
       key: const ValueKey('success'),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.check_circle, color: Colors.green, size: 64),
-          const SizedBox(height: 20),
-          const Text(
-            'Account Connected!',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-          ),
-          if (_connectedEmail != null)
-            Text(_connectedEmail!, style: const TextStyle(color: Colors.grey)),
-        ],
-      ),
+      child: YahooSuccessView(connectedEmail: _connectedEmail),
     );
   }
 
   Widget _buildError() {
-    return _buildCard(
+    return _cardContainer(
       key: const ValueKey('error'),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.error, color: Colors.red, size: 64),
-          const SizedBox(height: 20),
-          const Text(
-            'Setup Failed',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-          ),
-          if (_errorMessage != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Text(
-                _errorMessage!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.red),
-              ),
-            ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: () => setState(() => _authState = _YahooAuthState.idle),
-            child: const Text('Try Again'),
-          ),
-        ],
+      child: YahooErrorView(
+        errorMessage: _errorMessage,
+        onRetry: () => setState(() => _authState = _YahooAuthState.idle),
       ),
     );
   }
 
-  Widget _buildCard({required Widget child, required Key key}) {
+  Widget _cardContainer({required Widget child, required Key key}) {
     return Card(
       key: key,
       elevation: 1,
