@@ -50,7 +50,7 @@ class LocalFileIsolate extends CollectionScanner {
       'rootPath': rootPath,
       'recursive': recursive,
       'collectionId': collection.id,
-      'llmServiceUrl': MainApp.llmServiceUrl.value,
+      'llmServiceUrl': MainApp.llmServiceUrl.valueOrNull,
     };
 
     //// Invoked the _scan() method in an isolate thread

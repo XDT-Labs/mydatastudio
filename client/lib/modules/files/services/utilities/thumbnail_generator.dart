@@ -8,38 +8,27 @@ import 'package:path/path.dart' as p;
 
 class ThumbnailGenerator {
   Future<String?> imageToBase64(File file, {String? llmServiceUrl}) async {
-    return pathImageToBase64(file.path, file.contentType,
-        llmServiceUrl: llmServiceUrl);
+    return pathImageToBase64(
+      file.path,
+      file.contentType,
+      llmServiceUrl: llmServiceUrl,
+    );
   }
 
-<<<<<<< HEAD
-  Future<String?> pathImageToBase64(String filePath, String? contentType,
-      {String? llmServiceUrl}) async {
+  Future<String?> pathImageToBase64(
+    String filePath,
+    String? contentType, {
+    String? llmServiceUrl,
+  }) async {
     final ext = p.extension(filePath).toLowerCase();
-    final isRaw = ['.nef', '.cr2', '.arw', '.dng', '.orf', '.sr2'].contains(ext);
-=======
-  Future<String?> pathImageToBase64(String filePath, String? contentType) async {
-    bool thumbGenerated = false;
-    if (contentType == FilesConstants.mimeTypeImage) {
-      var localFile = io.File(filePath);
-      if (localFile.existsSync()) {
-        // Guard against decompression bombs - skip files larger than 50MB
-        if (localFile.lengthSync() > 50 * 1024 * 1024) {
-          return null;
-        }
-        // Read a image from file.
-        img.Image? image = img.decodeImage(localFile.readAsBytesSync());
-        if (image != null) {
-          img.Image? thumb;
-          //resize to something around 320x240 (small enough to use as a thumbnail big enough to do other things, like phash or ml)
-          if (image.height >= image.width && image.height > 240) {
-            thumb = img.copyResize(image, height: 240);
-          } else if (image.width >= image.height && image.width > 320) {
-            thumb = img.copyResize(image, width: 320);
-          } else {
-            thumb = image; // Use original if it's already small enough
-          }
->>>>>>> develop
+    final isRaw = [
+      '.nef',
+      '.cr2',
+      '.arw',
+      '.dng',
+      '.orf',
+      '.sr2',
+    ].contains(ext);
 
     // If it's a RAW file and we have the Python service, use it!
     if (isRaw && llmServiceUrl != null) {
@@ -68,6 +57,11 @@ class ThumbnailGenerator {
       var localFile = io.File(filePath);
       if (localFile.existsSync()) {
         try {
+          // Guard against decompression bombs - skip files larger than 50MB
+          if (localFile.lengthSync() > 50 * 1024 * 1024) {
+            return null;
+          }
+
           img.Image? image = img.decodeImage(localFile.readAsBytesSync());
           if (image != null) {
             img.Image? thumb;
