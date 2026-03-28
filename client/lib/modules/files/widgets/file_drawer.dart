@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/modules/files/pages/rx_files_page.dart';
+import 'package:mydatatools/modules/files/widgets/file_drawer/accordion_header_widget.dart';
+import 'package:mydatatools/modules/files/widgets/file_drawer/collection_tile_widget.dart';
+import 'package:mydatatools/modules/files/widgets/file_drawer/section_sub_header_widget.dart';
 import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
@@ -296,76 +299,16 @@ class _FileDrawer extends State<FileDrawer> {
     String title,
     IconData icon,
   ) {
-    final isExpanded = _expandedSection == section;
-    return GestureDetector(
+    return AccordionHeaderWidget(
+      title: title,
+      icon: icon,
+      isExpanded: _expandedSection == section,
       onTap: () => setState(() => _expandedSection = section),
-      child: Container(
-        margin: const EdgeInsets.symmetric(
-          vertical: 0.5,
-        ), // Tiny separator space
-        decoration: BoxDecoration(
-          color:
-              isExpanded
-                  ? theme.colorScheme.primaryContainer
-                  : theme.colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.zero,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 20,
-              color:
-                  isExpanded
-                      ? theme.colorScheme.primary
-                      : theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontWeight: isExpanded ? FontWeight.bold : FontWeight.w500,
-                  fontSize: 14,
-                  color:
-                      isExpanded
-                          ? theme.colorScheme.onPrimaryContainer
-                          : theme.colorScheme.onSurface,
-                ),
-              ),
-            ),
-            Icon(
-              isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-              size: 18,
-              color:
-                  isExpanded
-                      ? theme.colorScheme.primary
-                      : theme.colorScheme.onSurfaceVariant,
-            ),
-          ],
-        ),
-      ),
     );
   }
 
   Widget _buildSubHeader(ThemeData theme, String title) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
-      ),
-      child: Text(
-        title.toUpperCase(),
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-          fontWeight: FontWeight.w800,
-          letterSpacing: 1.0,
-          fontSize: 9,
-        ),
-      ),
-    );
+    return SectionSubHeaderWidget(title: title);
   }
 
   Widget _buildCollectionTile(
@@ -373,61 +316,20 @@ class _FileDrawer extends State<FileDrawer> {
     ThemeData theme,
     Collection col,
   ) {
-    final isSelected = collection?.id == col.id;
-    final subTitle = _getSubtitle(col);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 1.0),
-      child: ListTile(
-        dense: true,
-        selected: isSelected,
-        selectedTileColor: theme.colorScheme.primaryContainer.withValues(
-          alpha: 0.3,
-        ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        title: Text(
-          _getDisplayName(col),
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-        subtitle:
-            subTitle != null
-                ? Text(
-                  subTitle,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: Colors.grey,
-                    fontSize: 11,
-                  ),
-                )
-                : null,
-        trailing: PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, size: 18),
-          onSelected: (String value) {
-            if (value == 'sync') {
-              ScannerManager.getInstance()
-                  .getScanner(col)
-                  ?.start(col, col.path, true, true);
-            } else if (value == 'delete') {
-              _showDeleteConfirmationDialog(context, col);
-            }
-          },
-          itemBuilder:
-              (BuildContext context) => <PopupMenuEntry<String>>[
-                const PopupMenuItem<String>(value: 'sync', child: Text('Sync')),
-                const PopupMenuItem<String>(
-                  value: 'delete',
-                  child: Text('Delete'),
-                ),
-              ],
-        ),
-        onTap: () {
-          RxFilesPage.selectedCollection.add(col);
-          RxFilesPage.selectedPath.add(col.path);
-          GoRouter.of(context).go('/files');
-        },
-      ),
+    return CollectionTileWidget(
+      collection: col,
+      isSelected: collection?.id == col.id,
+      displayName: _getDisplayName(col),
+      subtitle: _getSubtitle(col),
+      onTap: () {
+        RxFilesPage.selectedCollection.add(col);
+        RxFilesPage.selectedPath.add(col.path);
+        GoRouter.of(context).go('/files');
+      },
+      onSync: () => ScannerManager.getInstance()
+          .getScanner(col)
+          ?.start(col, col.path, true, true),
+      onDelete: () => _showDeleteConfirmationDialog(context, col),
     );
   }
 

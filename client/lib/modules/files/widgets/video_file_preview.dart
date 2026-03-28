@@ -135,11 +135,11 @@ class _VideoFilePreviewState extends State<VideoFilePreview> {
     return SizedBox(
       height: widget.height,
       width: double.infinity,
-      child: _buildContent(context),
+      child: _content(context),
     );
   }
 
-  Widget _buildContent(BuildContext context) {
+  Widget _content(BuildContext context) {
     if (_loading) {
       return Container(
         color: Colors.grey.shade900,

@@ -13,6 +13,7 @@ import 'package:mydatatools/modules/email/services/email_repository.dart';
 import 'package:mydatatools/modules/email/services/get_email_folders_service.dart';
 import 'package:mydatatools/modules/email/widgets/email_details.dart';
 import 'package:mydatatools/modules/email/widgets/email_table.dart';
+import 'package:mydatatools/modules/email/widgets/scanning_placeholder_widget.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
@@ -566,23 +567,6 @@ class _EmailPage extends State<EmailPage> {
   }
 
   Widget _buildScanningPlaceholder() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 16),
-          Text(
-            'Scanning ${collection?.name ?? "emails"}...',
-            style: const TextStyle(fontSize: 16, color: Colors.grey),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'This may take a minute for large accounts.',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
-          ),
-        ],
-      ),
-    );
+    return ScanningPlaceholderWidget(collectionName: collection?.name);
   }
 }
