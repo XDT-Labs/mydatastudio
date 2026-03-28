@@ -94,13 +94,25 @@ class GmailScannerIsolateWorker {
 
     final AppLogger logger = AppLogger(clientPort);
 
-    // Validate/Refresh Token using consolidated auth service
-    String? accessToken = collection.accessToken;
+    // Validate tokens exist before attempting refresh or API calls.
+    // Dart flow-analysis doesn't recognise Isolate.exit() as a terminator,
+    // so we use local non-nullable bindings instead of the ! operator.
+    final accessTokenRaw = collection.accessToken;
+    final refreshTokenRaw = collection.refreshToken;
+    if (accessTokenRaw == null || refreshTokenRaw == null) {
+      logger.e('GmailScannerIsolate: no tokens for "${collection.name}" — aborting scan');
+      Isolate.exit(clientPort, {'error': 'auth_failed'});
+    }
+    final String safeAccessToken = accessTokenRaw;
+    final String safeRefreshToken = refreshTokenRaw;
+
+    // Refresh token if near expiry using consolidated auth service
+    String accessToken = safeAccessToken;
     try {
       if (GoogleAuthService.isTokenExpired(collection.expiration)) {
         final result = await GoogleAuthService.refreshTokens(
-          accessToken: collection.accessToken!,
-          refreshToken: collection.refreshToken!,
+          accessToken: safeAccessToken,
+          refreshToken: safeRefreshToken,
         );
         accessToken = result.accessToken;
       }
@@ -109,7 +121,7 @@ class GmailScannerIsolateWorker {
       Isolate.exit(clientPort, {'error': 'auth_failed'});
     }
 
-    final authHttpClient = AuthenticatedHttpClient.bearer(accessToken!);
+    final authHttpClient = AuthenticatedHttpClient.bearer(accessToken);
     final GmailApi gmailApi = GmailApi(authHttpClient);
 
     try {
