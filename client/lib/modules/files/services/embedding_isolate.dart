@@ -7,10 +7,9 @@ import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/file_sources/google_drive/google_drive_auth_service.dart';
+import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/oauth/google_auth_client.dart';
 import 'package:mydatatools/repositories/database_repository.dart';
 
 class EmbeddingIsolate {
@@ -240,7 +239,7 @@ class EmbeddingIsolate {
 
     if (nearExpiry && collection.refreshToken != null) {
       try {
-        final result = await GoogleDriveAuthService.refreshTokens(
+        final result = await GoogleAuthService.refreshTokens(
           accessToken: collection.accessToken!,
           refreshToken: collection.refreshToken!,
         );
@@ -258,7 +257,7 @@ class EmbeddingIsolate {
     }
 
     final driveApi = drive.DriveApi(
-      GoogleAuthClient({'Authorization': 'Bearer $accessToken'}),
+      AuthenticatedHttpClient.bearer(accessToken),
     );
 
     try {

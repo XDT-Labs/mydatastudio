@@ -6,6 +6,7 @@ import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
+import 'package:mydatatools/modules/email/widgets/email_drawer/email_folder_tile_widget.dart';
 import 'package:mydatatools/modules/email/pages/email_page.dart';
 import 'package:mydatatools/modules/email/services/get_email_folders_service.dart';
 import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
@@ -495,56 +496,13 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
     IconData? icon, {
     double indent = 48.0,
   }) {
-    final theme = Theme.of(context);
-    final isSelected = widget.isSelected && widget.selectedFolderId == f.id;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 8.0),
-      child: ListTile(
-        dense: true,
-        contentPadding: EdgeInsets.only(left: indent - 8.0),
-        leading:
-            icon != null
-                ? Icon(
-                  icon,
-                  size: 18,
-                  color: isSelected ? theme.colorScheme.primary : null,
-                )
-                : null,
-        title: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-        trailing:
-            (f.messagesUnread ?? 0) > 0
-                ? Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    f.messagesUnread.toString(),
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: theme.colorScheme.onPrimaryContainer,
-                    ),
-                  ),
-                )
-                : null,
-        selected: isSelected,
-        selectedTileColor: theme.colorScheme.primaryContainer.withValues(
-          alpha: 0.3,
-        ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        onTap: () => widget.onFolderTap(f.id),
-      ),
+    return EmailFolderTileWidget(
+      folder: f,
+      label: label,
+      icon: icon,
+      isSelected: widget.isSelected && widget.selectedFolderId == f.id,
+      onTap: () => widget.onFolderTap(f.id),
+      indent: indent,
     );
   }
 }

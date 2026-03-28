@@ -1,11 +1,10 @@
-import 'dart:io' as io;
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/email.dart';
 import 'package:mydatatools/models/tables/file.dart' as model;
 import 'package:mydatatools/modules/email/services/email_repository.dart';
+import 'package:mydatatools/modules/email/widgets/email_detail/email_attachments_section.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:open_filex/open_filex.dart';
 
 class EmailDetails extends StatefulWidget {
   const EmailDetails({
@@ -58,22 +57,60 @@ class _EmailDetails extends State<EmailDetails> {
     }
   }
 
+  static const _csp = '<meta http-equiv="Content-Security-Policy" '
+      "content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data: https: http:;\">";
+
   void _loadEmailContent() {
     final htmlBody = widget.email.htmlBody;
     final plainBody = widget.email.plainBody;
 
     String html;
     if (htmlBody != null && htmlBody.trim().isNotEmpty) {
-      html = htmlBody;
+      html = _sanitizeHtml(htmlBody);
     } else if (plainBody != null && plainBody.trim().isNotEmpty) {
+      final escaped = _escapeHtml(plainBody);
       html =
-          '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">$plainBody</body></html>';
+          '<html><head>$_csp</head><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">$escaped</body></html>';
     } else {
       html =
           '<html><body style="font-family: sans-serif; white-space: pre-wrap; padding: 16px;">(No content)</body></html>';
     }
 
     _controller.loadHtmlString(html);
+  }
+
+  static String _escapeHtml(String input) {
+    return input
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+  }
+
+  static String _sanitizeHtml(String html) {
+    var s = html;
+    // Remove script tags and content
+    s = s.replaceAll(RegExp(r'<script[\s\S]*?</script>', caseSensitive: false), '');
+    // Remove event handlers (on*)
+    s = s.replaceAll(RegExp(r"""\s+on\w+\s*=\s*["'][^"']*["']""", caseSensitive: false), '');
+    s = s.replaceAll(RegExp(r'\s+on\w+\s*=\s*\S+', caseSensitive: false), '');
+    // Remove dangerous tags
+    s = s.replaceAll(RegExp(r'<(iframe|object|embed|form|applet|base)[\s\S]*?(/?>|</\1>)', caseSensitive: false), '');
+    // Block javascript: URLs
+    s = s.replaceAll(RegExp(r'javascript\s*:', caseSensitive: false), 'blocked:');
+    // Remove existing meta tags (we inject our own CSP)
+    s = s.replaceAll(RegExp(r'<meta[^>]*>', caseSensitive: false), '');
+
+    // Inject CSP meta tag
+    if (s.contains(RegExp(r'<head', caseSensitive: false))) {
+      s = s.replaceFirst(RegExp(r'<head([^>]*)>', caseSensitive: false), '<head\$1>$_csp');
+    } else if (s.contains(RegExp(r'<html', caseSensitive: false))) {
+      s = s.replaceFirst(RegExp(r'<html([^>]*)>', caseSensitive: false), '<html\$1><head>$_csp</head>');
+    } else {
+      s = '<html><head>$_csp</head><body>$s</body></html>';
+    }
+    return s;
   }
 
   @override
@@ -134,116 +171,7 @@ class _EmailDetails extends State<EmailDetails> {
   }
 
   Widget _buildAttachmentsSection() {
-    final theme = Theme.of(context);
-    return Container(
-      decoration: BoxDecoration(color: theme.colorScheme.surfaceContainerHigh),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                '${_attachments.length} Attachments',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 100,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: _attachments.length,
-              itemBuilder: (context, index) {
-                final attachment = _attachments[index];
-                return _buildAttachmentThumbnail(attachment);
-              },
-            ),
-          ),
-        ],
-      ),
-    );
+    return EmailAttachmentsSection(attachments: _attachments);
   }
 
-  Widget _buildAttachmentThumbnail(model.File file) {
-    final isImage = file.contentType.startsWith('image/');
-    final theme = Theme.of(context);
-
-    return GestureDetector(
-      onTap: () async {
-        if (await io.File(file.path).exists()) {
-          await OpenFilex.open(file.path);
-        }
-      },
-      child: Container(
-        width: 120,
-        margin: const EdgeInsets.only(right: 8),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerLowest,
-          borderRadius: BorderRadius.circular(4),
-          boxShadow: [
-            BoxShadow(
-              color: theme.colorScheme.shadow,
-              blurRadius: 4,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child:
-                  isImage
-                      ? Image.file(
-                        io.File(file.path),
-                        fit: BoxFit.cover,
-                        errorBuilder:
-                            (context, error, stackTrace) => const Icon(
-                              Icons.broken_image,
-                              color: Colors.grey,
-                            ),
-                      )
-                      : Center(
-                        child: Icon(
-                          _getIconForType(file.contentType),
-                          size: 32,
-                          color: Colors.grey.shade400,
-                        ),
-                      ),
-            ),
-            Container(
-              padding: const EdgeInsets.all(6),
-              color: Colors.grey.shade50,
-              child: Text(
-                file.name,
-                style: const TextStyle(
-                  fontSize: 10,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                maxLines: 1,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  IconData _getIconForType(String? mimeType) {
-    if (mimeType == null) return Icons.insert_drive_file;
-    if (mimeType.contains('pdf')) return Icons.picture_as_pdf;
-    if (mimeType.contains('text')) return Icons.description;
-    if (mimeType.contains('zip') || mimeType.contains('compressed')) {
-      return Icons.folder_zip;
-    }
-    if (mimeType.contains('video')) return Icons.video_file;
-    if (mimeType.contains('audio')) return Icons.audio_file;
-    return Icons.insert_drive_file;
-  }
 }

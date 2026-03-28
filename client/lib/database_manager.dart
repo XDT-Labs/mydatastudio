@@ -254,7 +254,7 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration {
@@ -445,6 +445,20 @@ class AppDatabase extends _$AppDatabase {
             }
           }
           logger.i('v12 data migration complete');
+        }
+        if (from < 13) {
+          logger.i(
+            'Upgrade to v13: Mark Google OAuth collections for PKCE re-auth',
+          );
+          // Tokens obtained with the old Authorization Code Grant (which
+          // embedded client_secret) won't refresh without the secret. Flag
+          // every Google collection so the UI prompts re-authentication
+          // through the new PKCE flow.
+          await m.database.customStatement(
+            "UPDATE collections SET needs_re_auth = 1 "
+            "WHERE oauth_service = 'google'",
+          );
+          logger.i('v13 migration complete');
         }
       },
       beforeOpen: (OpeningDetails details) async {

@@ -344,8 +344,10 @@ class YahooScannerIsolateWorker {
         .replaceAll(RegExp(r'^_|_$'), '');
 
     for (final part in parts) {
-      final fileName = part.decodeFileName();
-      if (fileName == null) continue;
+      final rawFileName = part.decodeFileName();
+      if (rawFileName == null) continue;
+      // Sanitize filename to prevent path traversal
+      final fileName = p.basename(rawFileName).replaceAll('..', '');
 
       Uint8List? content;
       try {

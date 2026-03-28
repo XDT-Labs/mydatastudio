@@ -28,7 +28,7 @@ def get_local_path(model_id: str) -> str:
         './models/google-gemma-2-9b-it-local/'
     """
     # Use a sanitized version of the model ID for the directory name
-    safe_model_name = model_id.replace('/', '-')
+    safe_model_name = model_id.replace('/', '-').replace('..', '')
     return f"./models/{safe_model_name}-local/"
 
 
@@ -80,8 +80,15 @@ def handle_local_archive(archive_path: str, target_dir: str) -> bool:
         # Create the target directory
         os.makedirs(target_dir, exist_ok=True)
         
-        # Extract the archive (auto-detects compression format)
+        # Extract the archive safely (auto-detects compression format)
         with tarfile.open(archive_path, 'r:*') as tar:
+            # Validate all members before extraction to prevent path traversal
+            for member in tar.getmembers():
+                member_path = os.path.normpath(os.path.join(target_dir, member.name))
+                if not member_path.startswith(os.path.realpath(target_dir)):
+                    raise ValueError(f"Tar member '{member.name}' would escape target directory")
+                if member.name.startswith('/') or '..' in member.name.split('/'):
+                    raise ValueError(f"Tar member '{member.name}' contains unsafe path components")
             tar.extractall(path=target_dir)
         
         print(f"[LOADER] Archive extraction complete to {target_dir}.")

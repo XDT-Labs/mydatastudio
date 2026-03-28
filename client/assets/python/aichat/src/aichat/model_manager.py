@@ -138,12 +138,11 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
 
     print(f"[EMBEDDING] Loading from {model_path}...")
     model = AutoModel.from_pretrained(
-        model_path, 
-        trust_remote_code=True,
+        model_path,
         dtype=torch.float16 if device != "cpu" else torch.float32
     ).to(device)
-    
-    processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+
+    processor = AutoProcessor.from_pretrained(model_path)
     
     print(f"[EMBEDDING] Transformers model {model_id} loaded successfully.")
     return model, processor

@@ -3,11 +3,10 @@ import 'dart:isolate';
 import 'package:flutter/services.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/file_sources/google_drive/google_drive_auth_service.dart';
+import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/oauth/google_auth_client.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 import 'package:logger/logger.dart';
 
@@ -220,7 +219,7 @@ class CloudFileIsolateWorker {
     if (nearExpiry) {
       try {
         logger.i('CloudFileIsolate: refreshing token for "$collectionName"');
-        final result = await GoogleDriveAuthService.refreshTokens(
+        final result = await GoogleAuthService.refreshTokens(
           accessToken: safeAccessToken,
           refreshToken: safeRefreshToken,
         );
@@ -236,7 +235,7 @@ class CloudFileIsolateWorker {
 
     // Build Drive API client from refreshed token
     final driveApi = drive.DriveApi(
-      GoogleAuthClient({'Authorization': 'Bearer $validToken'}),
+      AuthenticatedHttpClient.bearer(validToken),
     );
 
     logger.i(

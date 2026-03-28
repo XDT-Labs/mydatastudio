@@ -63,7 +63,21 @@ extension LoginProviderExtension on LoginProviders {
     }
   }
 
+  /// Whether this provider uses PKCE (code_challenge + code_verifier).
+  /// Google desktop apps use PKCE per https://developers.google.com/identity/protocols/oauth2/native-app
+  /// Note: Google still requires client_secret alongside PKCE for desktop clients.
+  bool get usesPkce {
+    switch (this) {
+      case LoginProviders.google:
+      case LoginProviders.googleDrive:
+        return true;
+      case LoginProviders.azure:
+        return false;
+    }
+  }
+
   /// OAuth client secret.
+  /// Google requires client_secret for desktop apps even with PKCE enabled.
   /// Evaluation happens at compile-time via --dart-define or --dart-define-from-file.
   String get clientSecret {
     switch (this) {
@@ -71,7 +85,7 @@ extension LoginProviderExtension on LoginProviders {
       case LoginProviders.googleDrive:
         return const String.fromEnvironment('GOOGLE_CLIENT_SECRET');
       case LoginProviders.azure:
-        return "";
+        return const String.fromEnvironment('AZURE_CLIENT_SECRET');
     }
   }
 
@@ -139,7 +153,7 @@ extension LoginProviderExtension on LoginProviders {
 
       if (peopleResponse.statusCode != 200) {
         AppLogger(null).e(
-          'Google People API error (${peopleResponse.statusCode}): ${peopleResponse.body}',
+          'Google People API error (${peopleResponse.statusCode})',
         );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -194,10 +208,10 @@ extension LoginProviderExtension on LoginProviders {
 
       return collection;
     } catch (e, stack) {
-      AppLogger(null).e('Gmail OAuth failed: $e\n$stack');
+      AppLogger(null).e('Gmail OAuth failed', error: e, stackTrace: stack);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gmail sign-in failed: $e')),
+          const SnackBar(content: Text('Gmail sign-in failed. Please try again.')),
         );
       }
       return null;
@@ -255,7 +269,7 @@ extension LoginProviderExtension on LoginProviders {
 
       if (peopleResponse.statusCode != 200) {
         AppLogger(null).e(
-          'Google People API error (${peopleResponse.statusCode}): ${peopleResponse.body}',
+          'Google People API error (${peopleResponse.statusCode})',
         );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -315,10 +329,10 @@ extension LoginProviderExtension on LoginProviders {
 
       return collection;
     } catch (e, stack) {
-      AppLogger(null).e('Google Drive OAuth failed: $e\n$stack');
+      AppLogger(null).e('Google Drive OAuth failed', error: e, stackTrace: stack);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Google Drive sign-in failed: $e')),
+          const SnackBar(content: Text('Google Drive sign-in failed. Please try again.')),
         );
       }
       return null;
