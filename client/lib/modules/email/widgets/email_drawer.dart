@@ -269,7 +269,8 @@ class _EmailDrawer extends State<EmailDrawer> {
   ) {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      useRootNavigator: false,
+      builder: (BuildContext dialogContext) {
         return AlertDialog(
           title: const Text('Confirm Delete'),
           content: Text(
@@ -278,12 +279,12 @@ class _EmailDrawer extends State<EmailDrawer> {
           actions: <Widget>[
             TextButton(
               child: const Text('Cancel'),
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(dialogContext).pop(),
             ),
             TextButton(
               child: const Text('Delete', style: TextStyle(color: Colors.red)),
               onPressed: () async {
-                Navigator.of(context).pop();
+                Navigator.of(dialogContext).pop();
 
                 // 1. Show progress in the header
                 EmailPage.isDeleting.add(true);

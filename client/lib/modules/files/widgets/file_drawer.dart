@@ -339,7 +339,8 @@ class _FileDrawer extends State<FileDrawer> {
   ) {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      useRootNavigator: false,
+      builder: (BuildContext dialogContext) {
         return AlertDialog(
           title: const Text('Confirm Delete'),
           content: Text(
@@ -349,19 +350,19 @@ class _FileDrawer extends State<FileDrawer> {
             TextButton(
               child: const Text('Cancel'),
               onPressed: () {
-                Navigator.of(context).pop();
+                Navigator.of(dialogContext).pop();
               },
             ),
             TextButton(
               child: const Text('Delete', style: TextStyle(color: Colors.red)),
               onPressed: () async {
-                Navigator.of(context).pop();
-
                 final db = DatabaseManager.instance.database;
                 if (db != null) {
-                  // Capture context-dependent objects before async gap
+                  // Capture context-dependent objects before async gap and pop
                   final router = GoRouter.of(context);
                   final messenger = ScaffoldMessenger.of(context);
+
+                  Navigator.of(dialogContext).pop();
 
                   // Delete the collection and all related metadata (files, folders, etc.)
                   await CollectionRepository().deleteCollection(collection.id);
