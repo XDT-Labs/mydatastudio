@@ -90,8 +90,11 @@ class CustomLogOutput extends LogOutput {
       final dateStr = DateTime.now().toIso8601String().split('T').first;
       if (!_initialized || _currentDateStr != dateStr) {
         // Safe to check because in isolates, this subject is empty.
-        if (MainApp.appDataDirectory.hasValue && MainApp.appDataDirectory.value != null) {
-          final logDir = Directory(p.join(MainApp.appDataDirectory.value!, 'logs'));
+        if (MainApp.appDataDirectory.hasValue &&
+            MainApp.appDataDirectory.value != null) {
+          final logDir = Directory(
+            p.join(MainApp.appDataDirectory.value!, 'logs'),
+          );
           if (!logDir.existsSync()) {
             logDir.createSync(recursive: true);
           }
@@ -124,7 +127,8 @@ class CustomLogOutput extends LogOutput {
 class AppLogger extends Logger {
   SendPort? sendPort;
 
-  AppLogger(this.sendPort, {super.filter}) : super(printer: ConcisePrinter(), output: CustomLogOutput());
+  AppLogger(this.sendPort, {super.filter})
+    : super(printer: ConcisePrinter(), output: CustomLogOutput());
 
   @override
   void log(
