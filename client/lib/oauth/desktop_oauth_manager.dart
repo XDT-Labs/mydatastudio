@@ -23,6 +23,8 @@ class DesktopOAuthManager extends DesktopLoginManager {
   }
 
   Future<oauth2.Client> _getOAuth2Client(Uri redirectUrl) async {
+    // The oauth2 package auto-generates PKCE (code_verifier + S256 code_challenge)
+    // for all grants. Google requires client_secret alongside PKCE for desktop apps.
     var grant = oauth2.AuthorizationCodeGrant(
       loginProvider.clientId,
       Uri.parse(loginProvider.authorizationEndpoint),
