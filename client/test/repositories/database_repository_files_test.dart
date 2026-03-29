@@ -7,42 +7,37 @@ import 'package:collection/collection.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider/path_provider.dart';
-
+import 'package:uuid/uuid.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('DatabaseRepository', () {
-    //late DatabaseManager databaseRepository;
     io.Directory? path;
-    //String dbName = 'test-${DateTime.now().millisecondsSinceEpoch}.sqllite';
 
-    setUpAll(() async {
-      //final Uri basedir = (goldenFileComparator as LocalFileComparator).basedir;
-
+    setUp(() async {
       //https://github.com/flutter/flutter/issues/10912#issuecomment-587403632
       TestWidgetsFlutterBinding.ensureInitialized();
       const MethodChannel channel = MethodChannel(
         'plugins.flutter.io/path_provider',
       );
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-        return ".";
-      });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+            return ".";
+          });
 
       path = await getTemporaryDirectory();
+      DatabaseManager.instance.useMemoryDb = true;
+      DatabaseManager.instance.appDatabase = AppDatabase(
+        null,
+        null,
+        null,
+        true,
+      );
     });
 
-    tearDownAll(() async {
-      //(await databaseRepository.database).close();
-
-      if (path != null) {
-        /*
-        io.File f = io.File("data/$dbName");
-        if (f.existsSync()) {
-          f.deleteSync();
-        }
-        */
-      }
+    tearDown(() async {
+      await DatabaseManager.instance.database?.close();
     });
 
     test('check instance not null', () {
@@ -50,8 +45,7 @@ void main() {
     });
 
     //Apps, AppUsers, Collections, Emails, Files, Folders
-    test('check Collections tables exists', () async {
-      print("closing database");
+    test('check Files tables exists', () async {
       var tables = DatabaseManager.instance.database?.allTables;
 
       var t = tables?.firstWhereOrNull((e) {
@@ -61,7 +55,11 @@ void main() {
     });
 
     test("Delete File", () async {
-      /*
+      var db = DatabaseManager.instance.database;
+      if (db == null) {
+        fail("database is null");
+      }
+
       m.File file = m.File(
         id: const Uuid().v4().toString(),
         name: "foo.jpg",
@@ -74,75 +72,95 @@ void main() {
         size: 101,
         isDeleted: false,
       );
-      */
-      // var db = DatabaseManager.instance.database;
-      // await db?.into(db?.files).insert(file);
 
-      // List<m.File> allItems = await db?.select(db?.files).get();
-      // expect(allItems.length, equals(1));
+      await db.into(db.files).insert(file);
 
-      // await db?.delete(db?.files).delete(file);
+      List<m.File> allItems = await db.select(db.files).get();
+      expect(allItems.length, equals(1));
 
-      // List<m.File> afterDeleteItems = await db?.select(db?.files).get();
-      // expect(afterDeleteItems.length, equals(0));
-      fail("not implemented");
+      await db.delete(db.files).delete(file);
+
+      List<m.File> afterDeleteItems = await db.select(db.files).get();
+      expect(afterDeleteItems.length, equals(0));
     });
 
     test("check all properties are saved", () async {
-      /*
+      var db = DatabaseManager.instance.database;
+      if (db == null) {
+        fail("database is null");
+      }
+
+      String fileId = const Uuid().v4().toString();
+      String collectionId = const Uuid().v4().toString();
+      DateTime dateCreated = DateTime.now().subtract(const Duration(days: 1));
+      DateTime dateLastModified = DateTime.now();
+
       m.File file = m.File(
-        id: const Uuid().v4().toString(),
+        id: fileId,
         name: "foo.jpg",
         path: "/pics",
         parent: "/MyPhotos",
-        dateCreated: DateTime.now().subtract(const Duration(days: 1)),
-        dateLastModified: DateTime.now(),
-        collectionId: const Uuid().v4().toString(),
+        dateCreated: dateCreated,
+        dateLastModified: dateLastModified,
+        collectionId: collectionId,
         contentType: "image/jpeg",
         size: 101,
         isDeleted: false,
+        thumbnail: "thumb",
+        downloadUrl: "url",
+        emailId: "email123",
+        latitude: 12.34,
+        longitude: 56.78,
+        localPath: "/local/path",
       );
-      */
 
-      // var db = await DatabaseManager.instance.database;
-      // await db?.into(db?.files).insert(file);
+      await db.into(db.files).insert(file);
 
-      // List<m.File> allItems = await db?.select(db?.files).get();
+      List<m.File> allItems = await db.select(db.files).get();
 
-      // expect(allItems.length, equals(1));
-      // expect(allItems[0].id, equals(file.id));
-      // expect(allItems[0].name, equals(file.name));
-      // expect(allItems[0].path, equals(file.path));
-      // expect(allItems[0].parent, equals(file.parent));
-      // expect(
-      //   allItems[0].dateCreated.difference(file.dateCreated).inSeconds,
-      //   equals(0),
-      // );
-      // expect(
-      //   allItems[0].dateLastModified
-      //       .difference(file.dateLastModified)
-      //       .inSeconds,
-      //   equals(0),
-      // );
-      // expect(allItems[0].collectionId, equals(file.collectionId));
-      // expect(allItems[0].contentType, equals(file.contentType));
-      // expect(allItems[0].isDeleted, equals(file.isDeleted));
-      // expect(allItems[0].size, equals(file.size));
-
-      // await db.delete(db.files).delete(file);
-      fail("not implemented");
+      expect(allItems.length, equals(1));
+      expect(allItems[0].id, equals(fileId));
+      expect(allItems[0].name, equals("foo.jpg"));
+      expect(allItems[0].path, equals("/pics"));
+      expect(allItems[0].parent, equals("/MyPhotos"));
+      expect(
+        allItems[0].dateCreated.difference(dateCreated).inSeconds,
+        equals(0),
+      );
+      expect(
+        allItems[0].dateLastModified
+            .difference(dateLastModified)
+            .inSeconds,
+        equals(0),
+      );
+      expect(allItems[0].collectionId, equals(collectionId));
+      expect(allItems[0].contentType, equals("image/jpeg"));
+      expect(allItems[0].isDeleted, equals(false));
+      expect(allItems[0].size, equals(101));
+      expect(allItems[0].thumbnail, equals("thumb"));
+      expect(allItems[0].downloadUrl, equals("url"));
+      expect(allItems[0].emailId, equals("email123"));
+      expect(allItems[0].latitude, equals(12.34));
+      expect(allItems[0].longitude, equals(56.78));
+      expect(allItems[0].localPath, equals("/local/path"));
     });
 
     test("Insert multiple files", () async {
-      /*
+      var db = DatabaseManager.instance.database;
+      if (db == null) {
+        fail("database is null");
+      }
+
+      String collectionId = const Uuid().v4().toString();
+
       m.File file1 = m.File(
         id: const Uuid().v4().toString(),
         name: "foo1.jpg",
         path: "/pics",
         parent: "/MyPhotos",
-        dateCreated: DateTime.now().subtract(const Duration(days: 1)),
+        dateCreated: DateTime.now(),
         dateLastModified: DateTime.now(),
-        collectionId: const Uuid().v4().toString(),
+        collectionId: collectionId,
         contentType: "image/jpeg",
         size: 101,
         isDeleted: false,
@@ -152,9 +170,9 @@ void main() {
         name: "foo2.jpg",
         path: "/pics",
         parent: "/MyPhotos",
-        dateCreated: DateTime.now().subtract(const Duration(days: 1)),
+        dateCreated: DateTime.now(),
         dateLastModified: DateTime.now(),
-        collectionId: const Uuid().v4().toString(),
+        collectionId: collectionId,
         contentType: "image/jpeg",
         size: 101,
         isDeleted: false,
@@ -164,28 +182,20 @@ void main() {
         name: "foo3.jpg",
         path: "/pics",
         parent: "/MyPhotos",
-        dateCreated: DateTime.now().subtract(const Duration(days: 1)),
+        dateCreated: DateTime.now(),
         dateLastModified: DateTime.now(),
-        collectionId: const Uuid().v4().toString(),
+        collectionId: collectionId,
         contentType: "image/jpeg",
         size: 101,
         isDeleted: false,
       );
-      */
 
-      // var db = await databaseRepository.database;
-      // await db.into(db.files).insert(file1);
-      // await db.into(db.files).insert(file2);
-      // await db.into(db.files).insert(file3);
+      await db.into(db.files).insert(file1);
+      await db.into(db.files).insert(file2);
+      await db.into(db.files).insert(file3);
 
-      // List<m.File> allItems = await db.select(db.files).get();
-
-      // expect(allItems.length, equals(3));
-
-      // await db.delete(db.files).delete(file1);
-      // await db.delete(db.files).delete(file2);
-      // await db.delete(db.files).delete(file3);
-      fail("not implemented");
+      List<m.File> allItems = await db.select(db.files).get();
+      expect(allItems.length, equals(3));
     });
   });
 }

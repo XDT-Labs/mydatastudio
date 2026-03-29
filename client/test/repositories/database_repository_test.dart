@@ -18,7 +18,7 @@ void main() {
     io.Directory? path;
     String dbName = 'test-${DateTime.now().millisecondsSinceEpoch}.sqllite';
 
-    setUpAll(() async {
+    setUp(() async {
       //https://github.com/flutter/flutter/issues/10912#issuecomment-587403632
       TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -31,10 +31,17 @@ void main() {
       });
 
       path = await getTemporaryDirectory();
+      DatabaseManager.instance.useMemoryDb = true;
+      DatabaseManager.instance.appDatabase = AppDatabase(
+        null,
+        null,
+        null,
+        true,
+      );
     });
 
-    tearDownAll(() async {
-      //DatabaseManager.instance.database.close();
+    tearDown(() async {
+      await DatabaseManager.instance.database?.close();
 
       if (path != null) {
         io.File f = io.File("data/$dbName");

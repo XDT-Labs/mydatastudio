@@ -12,12 +12,12 @@ import 'package:uuid/uuid.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('DatabaseRepository', () async {
+  group('DatabaseRepository', () {
     late DatabaseManager databaseManager;
     io.Directory? path;
     String dbName = 'test-${DateTime.now().millisecondsSinceEpoch}.sqllite';
 
-    setUpAll(() async {
+    setUp(() async {
       //https://github.com/flutter/flutter/issues/10912#issuecomment-587403632
       TestWidgetsFlutterBinding.ensureInitialized();
       const MethodChannel channel = MethodChannel(
@@ -30,11 +30,18 @@ void main() {
 
       path = await getTemporaryDirectory();
       databaseManager = DatabaseManager.instance; //dbName
+      databaseManager.useMemoryDb = true;
+      databaseManager.appDatabase = AppDatabase(
+        null,
+        null,
+        null,
+        true,
+      );
       print(databaseManager);
     });
 
-    tearDownAll(() async {
-      //(await databaseManager.database).close();
+    tearDown(() async {
+      await databaseManager.database?.close();
 
       if (path != null) {
         io.File f = io.File("data/$dbName");

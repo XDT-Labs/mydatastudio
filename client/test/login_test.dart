@@ -16,9 +16,9 @@ void main() {
 
     // Initialize database manually to avoid path_provider errors in tests
     DatabaseManager.instance.appDatabase = AppDatabase(
-      NativeDatabase.memory(),
       null,
-      'test_db',
+      null,
+      null,
       true,
     );
 
@@ -128,7 +128,6 @@ void main() {
     await tester.pumpAndSettle();
 
     // 5. Verify that the button is RE-ENABLED (not null) and an error is shown
-    // In our implementation, MaterialButton's onPressed is null when isSubmitting is true.
     final loginButton = tester.widget<MaterialButton>(
       find.widgetWithText(MaterialButton, 'Login'),
     );
@@ -137,6 +136,9 @@ void main() {
       isNotNull,
       reason: 'Button should be re-enabled after error',
     );
+
+    // Wait for toast timer to finish
+    await tester.pump(const Duration(seconds: 5));
   });
 
   testWidgets('LoginForm login failure test', (WidgetTester tester) async {
@@ -153,11 +155,7 @@ void main() {
     await tester.tap(find.text('Login'));
     await tester.pumpAndSettle();
 
-    // 4. Verify failure (Toast might not show in test environment easily without context,
-    // but we can check that onLoginSuccessful was NOT called if we tracked it,
-    // or check for error message if it's a widget)
-    // The code uses context.showToast("Wrong password").
-    // We might not see the toast in widget test depending on implementation.
-    // But we can verify that we didn't crash.
+    // Wait for toast timer to finish
+    await tester.pump(const Duration(seconds: 5));
   });
 }

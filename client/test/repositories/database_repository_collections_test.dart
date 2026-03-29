@@ -17,7 +17,7 @@ void main() {
     io.Directory? path;
     String dbName = 'test-${DateTime.now().millisecondsSinceEpoch}.sqlite';
 
-    setUpAll(() async {
+    setUp(() async {
       //final Uri basedir = (goldenFileComparator as LocalFileComparator).basedir;
 
       //https://github.com/flutter/flutter/issues/10912#issuecomment-587403632
@@ -32,11 +32,18 @@ void main() {
 
       path = await getTemporaryDirectory();
       databaseManager = DatabaseManager.instance; //dbName
+      databaseManager.useMemoryDb = true;
+      databaseManager.appDatabase = AppDatabase(
+        null,
+        null,
+        null,
+        true,
+      );
       print(databaseManager);
     });
 
-    tearDownAll(() async {
-      //(await databaseManager.database).close();
+    tearDown(() async {
+      await databaseManager.database?.close();
 
       if (path != null) {
         io.File f = io.File("data/$dbName");

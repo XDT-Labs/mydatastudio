@@ -686,7 +686,7 @@ class AppDatabase extends _$AppDatabase {
           );
       appsAdded++;
 
-      return Future(() => appsAdded);
+      return appsAdded;
     } catch (err) {
       logger.e(err);
       rethrow;

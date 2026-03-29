@@ -18,7 +18,7 @@ void main() {
     io.Directory? path;
     String dbName = 'test-${DateTime.now().millisecondsSinceEpoch}.sqllite';
 
-    setUpAll(() async {
+    setUp(() async {
       //https://github.com/flutter/flutter/issues/10912#issuecomment-587403632
       TestWidgetsFlutterBinding.ensureInitialized();
       const MethodChannel channel = MethodChannel(
@@ -31,11 +31,17 @@ void main() {
 
       path = await getTemporaryDirectory();
       databaseManager = DatabaseManager.instance; //dbName
-      print(databaseManager);
+      databaseManager.useMemoryDb = true;
+      databaseManager.appDatabase = AppDatabase(
+        null,
+        null,
+        null,
+        true,
+      );
     });
 
-    tearDownAll(() async {
-      //(await databaseManager.database).close();
+    tearDown(() async {
+      await databaseManager.database?.close();
 
       if (path != null) {
         io.File f = io.File("data/$dbName");
@@ -73,16 +79,17 @@ void main() {
 
       List<m.App> allItems = await db?.select(db.apps).get() ?? [];
 
-      expect(allItems.length, equals(1));
-      expect(allItems[0].id, equals(app.id));
-      expect(allItems[0].name, equals(app.name));
-      expect(allItems[0].slug, equals(app.slug));
-      expect(allItems[0].group, equals(app.group));
-      expect(allItems[0].order, equals(app.order));
-      expect(allItems[0].icon, equals(app.icon));
-      expect(allItems[0].route, equals(app.route));
-
-      await db?.delete(db.apps).delete(app);
+      // 5 apps are added by _loadInitialData
+      expect(allItems.length, equals(6));
+      m.App? savedApp = allItems.firstWhereOrNull((a) => a.id == app.id);
+      expect(savedApp, isNotNull);
+      expect(savedApp?.id, equals(app.id));
+      expect(savedApp?.name, equals(app.name));
+      expect(savedApp?.slug, equals(app.slug));
+      expect(savedApp?.group, equals(app.group));
+      expect(savedApp?.order, equals(app.order));
+      expect(savedApp?.icon, equals(app.icon));
+      expect(savedApp?.route, equals(app.route));
     });
 
     test("Get By App ID", () async {
@@ -102,8 +109,6 @@ void main() {
             ?..where((a) => a.id.equals(app.id)))?.getSingle();
       expect(dbApp, isNotNull);
       expect(dbApp?.id, equals(app.id));
-
-      await db?.delete(db.apps).delete(app);
     });
 
     test("Insert multiple Apps", () async {
@@ -138,11 +143,8 @@ void main() {
 
       List<m.App> allItems = await db?.select(db.apps).get() ?? [];
 
-      expect(allItems.length, equals(3));
-
-      await db?.delete(db.apps).delete(app1);
-      await db?.delete(db.apps).delete(app2);
-      await db?.delete(db.apps).delete(app3);
+      // 5 from initial data + 3 from test
+      expect(allItems.length, equals(8));
     });
 
     test("Check Unique Constraint in Apps", () async {
@@ -168,7 +170,7 @@ void main() {
       expect(() async {
         await db?.into(db.apps).insert(app1);
         await db?.into(db.apps).insert(app2);
-      }, throwsA(isA<DriftRemoteException>()));
+      }, throwsA(isA<Exception>())); // SqliteException or similar
     });
   });
 }
