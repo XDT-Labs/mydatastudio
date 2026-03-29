@@ -1,9 +1,29 @@
 import 'package:googleapis/drive/v3.dart' as drive;
+import 'package:mocktail/mocktail.dart';
+import 'package:mydatatools/file_sources/file_source_file.dart';
 import 'package:mydatatools/file_sources/google_drive/google_drive_provider.dart';
+import 'package:mydatatools/models/tables/collection.dart';
 import 'package:test/test.dart';
+import 'package:uuid/uuid.dart';
+
+class MockDriveApi extends Mock implements drive.DriveApi {}
+class MockFilesResource extends Mock implements drive.FilesResource {}
+
+/// A testable version of GoogleDriveProvider that allows injecting a mock API.
+class MockGoogleDriveProvider extends GoogleDriveProvider {
+  final drive.DriveApi _mockApi;
+  const MockGoogleDriveProvider(this._mockApi);
+
+  @override
+  Future<drive.DriveApi> buildApi(Collection collection) async => _mockApi;
+}
 
 void main() {
   const provider = GoogleDriveProvider();
+
+  setUpAll(() {
+    registerFallbackValue(drive.File());
+  });
 
   // ---------------------------------------------------------------------------
   // Provider metadata
@@ -176,27 +196,106 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
-  // downloadFile — native format guard
+  // API dependent tests (using mocks)
   // ---------------------------------------------------------------------------
 
-  group('GoogleDriveProvider.downloadFile — native format guard', () {
-    // We only test the guard here (no network needed). Network-dependent paths
-    // are covered by integration/widget tests that inject a mock API client.
+  group('GoogleDriveProvider (mocked API)', () {
+    late MockDriveApi mockApi;
+    late MockFilesResource mockFiles;
+    late MockGoogleDriveProvider testProvider;
+    late Collection collection;
 
-    test('native format guard identifies Google Docs mimeType', () async {
-      const nativeFile = _NativeFileSourceFile();
+    setUp(() {
+      mockApi = MockDriveApi();
+      mockFiles = MockFilesResource();
+      testProvider = MockGoogleDriveProvider(mockApi);
+      
+      when(() => mockApi.files).thenReturn(mockFiles);
 
-      expect(
-        provider.isGoogleNativeFormat(nativeFile.mimeType),
-        isTrue,
-        reason: 'The native format guard should identify this MIME type',
+      collection = Collection(
+        id: const Uuid().v4(),
+        name: 'Gdrive',
+        path: 'root',
+        type: 'file',
+        scanner: 'file.gdrive',
+        scanStatus: 'pending',
+        needsReAuth: false,
       );
     });
-  });
-}
 
-/// Minimal inline stub for testing the guard condition.
-class _NativeFileSourceFile {
-  const _NativeFileSourceFile();
-  String get mimeType => 'application/vnd.google-apps.document';
+    test('listFolder calls files.list and maps results', () async {
+      final fileList = drive.FileList()
+        ..files = [
+          drive.File()
+            ..id = 'f1'
+            ..name = 'file1.txt'
+            ..mimeType = 'text/plain',
+          drive.File()
+            ..id = 'd1'
+            ..name = 'Folder1'
+            ..mimeType = 'application/vnd.google-apps.folder',
+        ];
+
+      when(() => mockFiles.list(
+            q: any(named: 'q'),
+            $fields: any(named: '\$fields'),
+            pageToken: any(named: 'pageToken'),
+            pageSize: any(named: 'pageSize'),
+            orderBy: any(named: 'orderBy'),
+          )).thenAnswer((_) async => fileList);
+
+      final results = await testProvider.listFolder(collection);
+
+      expect(results.length, equals(2));
+      expect(results[0].name, equals('file1.txt'));
+      expect(results[1].isFolder, isTrue);
+      
+      verify(() => mockFiles.list(
+            q: "'root' in parents and trashed = false",
+            $fields: any(named: '\$fields'),
+            pageSize: 200,
+            orderBy: 'folder, name',
+          )).called(1);
+    });
+
+    test('deleteFile calls files.update with trashed=true', () async {
+      final file = FileSourceFile(
+        id: 'f123',
+        name: 'Delete Me',
+        mimeType: 'text/plain',
+        isFolder: false,
+      );
+
+      when(() => mockFiles.update(
+            any(),
+            any(),
+          )).thenAnswer((_) async => drive.File());
+
+      final success = await testProvider.deleteFile(collection, file);
+
+      expect(success, isTrue);
+      
+      final capturedFile = verify(() => mockFiles.update(
+            captureAny(),
+            'f123',
+          )).captured.first as drive.File;
+      
+      expect(capturedFile.trashed, isTrue);
+    });
+
+    test('deleteFile returns false on API error', () async {
+      final file = FileSourceFile(
+        id: 'f123',
+        name: 'Error Me',
+        mimeType: 'text/plain',
+        isFolder: false,
+      );
+
+      when(() => mockFiles.update(any(), any()))
+          .thenThrow(Exception('API Error'));
+
+      final success = await testProvider.deleteFile(collection, file);
+      expect(success, isFalse);
+    });
+  });
 }

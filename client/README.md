@@ -9,7 +9,6 @@ All stored locally on your machine. No ads. No tracking. No selling your data. J
 
 ### TODO:
 - Add archive for social sites
-- Add Email archive app.
 - Add Social Network Archives
   - figure out oauth plan
 - Build private Social Network into app
@@ -41,3 +40,36 @@ cd installers/dmg_creator
 appdmg installers/dmg_creator/config.json installers/mydata.tools.dmg
 ```
 
+# Tests
+
+* Run all tests
+  ```bash
+  flutter test
+  ```
+
+* Run integration tests
+  ```bash
+  flutter test test/integration
+  ```
+
+* Run unit tests
+  ```bash
+  flutter test test/unit
+  ```
+
+* Run widget tests
+  ```bash
+  flutter test test/widget
+  ```
+
+* Run all tests
+  ```bash
+  flutter test --coverage
+  ```
+
+* Generate coverage report
+  ```bash
+  flutter test --coverage
+  genhtml coverage/lcov.info -o coverage/html
+  ```   
+  

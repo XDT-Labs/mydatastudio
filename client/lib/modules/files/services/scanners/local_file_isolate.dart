@@ -10,7 +10,6 @@ import 'package:flutter/services.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
 import 'package:path/path.dart' as p;
-import 'package:logger/logger.dart';
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
 
@@ -55,12 +54,18 @@ class LocalFileIsolate extends CollectionScanner {
 
     //// Invoked the _scan() method in an isolate thread
     LocalFileIsolateWorker worker = LocalFileIsolateWorker(
-      token!,
+      token,
       p.sendPort,
       dbWriterIsolatePort!,
       loggerIsolatePort,
     );
-    isolate = await Isolate.spawn<Map<String, dynamic>>(worker._scan, args);
+    logger?.i('Spawning local file scanner isolate for $path');
+    try {
+      isolate = await Isolate.spawn<Map<String, dynamic>>(worker._scan, args);
+    } catch (e) {
+      logger?.e('Failed to spawn local file scanner isolate: $e');
+      return 0;
+    }
     isolate!.addOnExitListener(p.sendPort);
 
     await for (var message in p) {
@@ -119,7 +124,7 @@ class LocalFileIsolate extends CollectionScanner {
 
 //// Method will run in Isolate
 class LocalFileIsolateWorker {
-  RootIsolateToken token;
+  RootIsolateToken? token;
   SendPort receiverPort;
   SendPort dbWriterPort;
   SendPort? loggerPort;
@@ -141,14 +146,15 @@ class LocalFileIsolateWorker {
     this.loggerPort,
   ) {
     // Ensure the background binary messenger is initialized so plugins/platform channels work
-    BackgroundIsolateBinaryMessenger.ensureInitialized(token);
+    if (token != null) {
+      BackgroundIsolateBinaryMessenger.ensureInitialized(token!);
+    }
   }
 
   // start scanning
   void _scan(Map<String, dynamic> args) async {
-    Logger.level = Level.debug;
     logger = AppLogger(loggerPort);
-
+    
     String path = args['path'];
     // Normalize path: Remove trailing slash if it exists (unless it's just '/')
     if (path.length > 1 && path.endsWith('/')) {
@@ -175,6 +181,7 @@ class LocalFileIsolateWorker {
       scanStartTime,
       llmServiceUrl: llmServiceUrl,
     );
+    print('Worker: Scan finished, found $fileCount files');
 
     // Final cleanup — send the RELATIVE path so the repo can match stored records.
     final cleanupRelPath = p.relative(path, from: rootPath);
@@ -193,6 +200,7 @@ class LocalFileIsolateWorker {
     syncPort.close();
 
     // return file count
+    print('Worker: Exiting isolate with count $fileCount');
     Isolate.exit(receiverPort, fileCount);
   }
 

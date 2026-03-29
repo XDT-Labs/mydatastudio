@@ -53,6 +53,8 @@ class DbIsolateWriterClient {
       'path': storagePath,
       'name': dbName,
       'useMemoryDb': useMemoryDb,
+      'isTesting': DatabaseManager.isTesting,
+      'skipExtensionLoading': DatabaseManager.skipExtensionLoading,
     };
 
     _isolate = await Isolate.spawn(
@@ -145,6 +147,8 @@ class DbIsolateWriterClient {
     final path = cfg['path'] as String?;
     final name = cfg['name'] as String?;
     final useMemoryDb = cfg['useMemoryDb'] as bool? ?? false;
+    DatabaseManager.isTesting = cfg['isTesting'] as bool? ?? false;
+    DatabaseManager.skipExtensionLoading = cfg['skipExtensionLoading'] as bool? ?? false;
 
     // Send control port back to the spawner
     initialReplyTo.send(port.sendPort);
@@ -164,7 +168,7 @@ class DbIsolateWriterClient {
       try {
         if (data['type'] == 'file') {
           File f = data['file'] as File;
-          //logger.d("DbIsolateWriter: Received file upsert for ${f.name} (id: ${f.id}, collectionId: ${f.collectionId})");
+          logger.d("DbIsolateWriter: Received file upsert for ${f.name} (id: ${f.id}, collectionId: ${f.collectionId})");
           await FileUpsertService.instance.invoke(
             FileUpsertServiceCommand(f, db),
           );
@@ -177,7 +181,7 @@ class DbIsolateWriterClient {
           replyTo?.send({'status': 'ok'});
         } else if (data['type'] == 'folder') {
           Folder folder = data['folder'] as Folder;
-          //logger.d("DbIsolateWriter: Received folder upsert for ${folder.name} (path: ${folder.path}, parent: ${folder.parent})");
+          logger.d("DbIsolateWriter: Received folder upsert for ${folder.name} (path: ${folder.path}, parent: ${folder.parent})");
           await FolderUpsertService.instance.invoke(
             FolderUpsertServiceCommand(folder, db),
           );

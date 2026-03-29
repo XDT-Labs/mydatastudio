@@ -54,8 +54,8 @@ class _FileTable extends State<FileTable> {
         const typeWidth = 80.0;
         const sizeWidth = 80.0;
         const dateWidth = 140.0;
-        const actionsWidth = 130.0;
-        const spacing = 20.0;
+        const actionsWidth = 150.0;
+        const spacing = 16.0;
         const margin = 24.0; // 12 on each side
 
         // Total width occupied by other columns and spacing
@@ -272,35 +272,49 @@ class _FileTable extends State<FileTable> {
               ),
               DataCell(
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 130),
+                  constraints: const BoxConstraints(maxWidth: 150),
                   child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.info_outline),
-                        tooltip: 'Details',
-                        onPressed: () {
-                          FileSelectedNotification(f).dispatch(context);
-                        },
+                      Flexible(
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.info_outline, size: 20),
+                          tooltip: 'Details',
+                          onPressed: () {
+                            FileSelectedNotification(f).dispatch(context);
+                          },
+                        ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.open_in_new),
-                        tooltip: 'Open',
-                        onPressed: () async {
-                          if (f.path.startsWith('gdrive://')) {
-                            final id = f.path.substring(9);
-                            final url =
-                                'https://drive.google.com/file/d/$id/view';
-                            await launchUrl(Uri.parse(url));
-                          } else {
-                            await OpenFilex.open(f.path);
-                          }
-                        },
+                      Flexible(
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.open_in_new, size: 20),
+                          tooltip: 'Open',
+                          onPressed: () async {
+                            if (f.path.startsWith('gdrive://')) {
+                              final id = f.path.substring(9);
+                              final url =
+                                  'https://drive.google.com/file/d/$id/view';
+                              await launchUrl(Uri.parse(url));
+                            } else {
+                              await OpenFilex.open(f.path);
+                            }
+                          },
+                        ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.delete),
-                        tooltip: 'Delete',
-                        onPressed:
-                            () => _showDeleteConfirmationDialog(context, f),
+                      Flexible(
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.delete, size: 20),
+                          color: Colors.red.withOpacity(0.7),
+                          tooltip: 'Delete',
+                          onPressed:
+                              () => _showDeleteConfirmationDialog(context, f),
+                        ),
                       ),
                     ],
                   ),

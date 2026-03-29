@@ -12,6 +12,10 @@ import 'package:path/path.dart' as p;
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:mydatatools/custom_path_provider.dart';
+import 'package:mydatatools/modules/files/services/file_upsert_service.dart';
+import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatatools/modules/files/services/batch_file_upsert_service.dart';
+import 'package:mydatatools/modules/files/services/cleanup_deleted_files_service.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
@@ -46,9 +50,17 @@ class DatabaseManager {
 
   /// Flag to determine if an in-memory database should be used (for testing)
   bool useMemoryDb = false;
+
+  /// Flag to skip loading native extensions (for testing environments)
+  static bool skipExtensionLoading = false;
+
+  /// Flag to indicate if the app is running in a test environment
+  static bool isTesting = io.Platform.environment.containsKey('FLUTTER_TEST');
   String? storagePath;
   AppDatabase? appDatabase;
   DbIsolateWriterClient? _writerIsolateClient;
+  ReceivePort? _testWriterPort;
+  StreamSubscription? _testWriterSubscription;
   SendPort? _writerPort;
   EmbeddingIsolate? _embeddingIsolate;
   DatabaseRepository? _repository;
@@ -129,15 +141,19 @@ class DatabaseManager {
 
     // start database repository
     _repository = DatabaseRepository(appDatabase!);
+ 
+    if (isTesting) {
+      _startTestWriterPort(appDatabase!);
+    } else {
+      // start writer isolate
+      await _startWriterIsolate(appDatabase!, path);
 
-    // start writer isolate
-    await _startWriterIsolate(appDatabase!, path);
+      // start scanners
+      await _startScanners();
 
-    // start scanners
-    await _startScanners();
-
-    // start embedding isolate
-    await _startEmbeddingIsolate(path);
+      // start embedding isolate
+      await _startEmbeddingIsolate(path);
+    }
 
     isInitializedNotifier.value = true;
     return appDatabase!;
@@ -176,6 +192,42 @@ class DatabaseManager {
     }
   }
 
+  void _startTestWriterPort(AppDatabase db) {
+    _testWriterSubscription?.cancel();
+    _testWriterPort?.close();
+    
+    _testWriterPort = ReceivePort();
+    _writerPort = _testWriterPort!.sendPort;
+    _testWriterSubscription = _testWriterPort!.listen((data) async {
+      if (data is! Map) return;
+      SendPort? replyTo = data['replyTo'] as SendPort?;
+      try {
+        if (data['type'] == 'file') {
+          await FileUpsertService.instance.invoke(FileUpsertServiceCommand(data['file'] as File, db));
+          replyTo?.send({'status': 'ok'});
+        } else if (data['type'] == 'batch_file') {
+          await BatchFileUpsertService.instance.invoke(BatchFileUpsertServiceCommand((data['files'] as List).cast<File>(), db));
+          replyTo?.send({'status': 'ok'});
+        } else if (data['type'] == 'folder') {
+          await FolderUpsertService.instance.invoke(FolderUpsertServiceCommand(data['folder'] as Folder, db));
+          replyTo?.send({'status': 'ok'});
+        } else if (data['type'] == 'cleanup_deleted') {
+          await CleanupDeletedFilesService.instance.invoke(CleanupDeletedFilesServiceCommand(
+            data['collectionId'] as String,
+            data['path'] as String,
+            data['scanStartTime'] as DateTime,
+            db,
+            recursive: data['recursive'] ?? true,
+          ));
+          replyTo?.send({'status': 'ok'});
+        }
+      } catch (e) {
+        logger.e("TestWriterPort error: $e");
+        replyTo?.send({'status': 'error', 'message': e.toString()});
+      }
+    });
+  }
+
   Future<void> _startWriterIsolate(
     AppDatabase database,
     String storagePath,
@@ -199,6 +251,25 @@ class DatabaseManager {
     );
   }
 
+  void dispose() {
+    _testWriterSubscription?.cancel();
+    _testWriterPort?.close();
+    _testWriterPort = null;
+    _testWriterSubscription = null;
+
+    _writerIsolateClient?.stop();
+    _writerIsolateClient = null;
+
+    _embeddingIsolate?.stop();
+    _embeddingIsolate = null;
+    
+    appDatabase?.close();
+    appDatabase = null;
+    _writerPort = null;
+    _repository = null;
+    isInitializedNotifier.value = false;
+  }
+
   /// Returns the [SendPort] for the writer isolate
   Future<SendPort> get writerPort async {
     if (_writerPort == null) {
@@ -206,13 +277,19 @@ class DatabaseManager {
         "Unkown error initializing Database and/or writer isolate",
       );
     }
-    return Future(() => _writerPort!);
+    return Future.value(_writerPort!);
   }
 
   /// Stop helper to be called from app shell
   /// Stops the database writer isolate
   Future<void> stopDbWriterIsolate() async {
     try {
+      if (_testWriterSubscription != null) {
+        await _testWriterSubscription!.cancel();
+        _testWriterPort?.close();
+        _testWriterSubscription = null;
+        _testWriterPort = null;
+      }
       if (_writerIsolateClient != null) {
         await _writerIsolateClient!.stop();
         _writerIsolateClient = null;
@@ -626,6 +703,9 @@ class AppDatabase extends _$AppDatabase {
 /// Gracefully no-ops (with a warning) if the extension fails to load so
 /// dev/test builds without native assets still work.
 Sqlite3 _loadExtensions() {
+  if (DatabaseManager.skipExtensionLoading || DatabaseManager.isTesting || io.Platform.environment.containsKey('FLUTTER_TEST')) {
+    return sqlite3;
+  }
   try {
     sqlite3.loadSqliteVectorExtension();
     AppLogger(null).d('sqlite_vector extension loaded');
@@ -653,9 +733,24 @@ LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb) {
 
       // Make sqlite3 pick a more suitable location for temporary files - the
       // one from the system may be inaccessible due to ios/mac app sandbox.
-      sqlite3.tempDirectory = (await getTemporaryDirectory()).path;
+      if (!DatabaseManager.isTesting) {
+        sqlite3.tempDirectory = (await getTemporaryDirectory()).path;
+      }
 
       AppLogger(null).i("Opening Database | $path");
+      // In tests, avoid createInBackground to bypass FFI/isolate callback issues
+      if (DatabaseManager.isTesting) {
+        return NativeDatabase(
+          file,
+          logStatements: false,
+          setup: (db) {
+            db.execute('PRAGMA busy_timeout=5000;');
+            db.execute('PRAGMA journal_mode=WAL;');
+          },
+          sqlite3: _loadExtensions,
+        );
+      }
+      
       // createInBackground moves all SQLite I/O to a dedicated background
       // isolate managed by Drift. This prevents any DB query from blocking
       // frames on the main UI thread, fixing jank during email queries and
