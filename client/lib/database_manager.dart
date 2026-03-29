@@ -703,16 +703,18 @@ class AppDatabase extends _$AppDatabase {
 /// Gracefully no-ops (with a warning) if the extension fails to load so
 /// dev/test builds without native assets still work.
 Sqlite3 _loadExtensions() {
-  if (DatabaseManager.skipExtensionLoading || DatabaseManager.isTesting || io.Platform.environment.containsKey('FLUTTER_TEST')) {
+  if (DatabaseManager.skipExtensionLoading) {
     return sqlite3;
   }
   try {
     sqlite3.loadSqliteVectorExtension();
     AppLogger(null).d('sqlite_vector extension loaded');
   } catch (e) {
-    AppLogger(
-      null,
-    ).w('sqlite_vector not loaded (vector search unavailable): $e');
+    // In tests, the native assets might not be available. We log a warning
+    // instead of throwing to allow dev/test flows to continue without vectors.
+    AppLogger(null).w(
+      'sqlite_vector not loaded (vector search unavailable): $e',
+    );
   }
   return sqlite3;
 }
