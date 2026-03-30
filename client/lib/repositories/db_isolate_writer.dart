@@ -257,6 +257,10 @@ class DbIsolateWriterClient {
             FilesCompanion(localPath: Value(localPath)),
           );
           replyTo?.send({'status': 'ok'});
+        } else if (data['type'] == 'get_files_to_download') {
+          final id = data['collectionId'] as String;
+          final files = await FileDesktopRepository(db).getFilesToDownload(id);
+          replyTo?.send({'status': 'ok', 'files': files});
         } else {
           logger.w("Unknown message type: ${data['type']}");
           replyTo?.send({'error': 'Unknown message type: ${data['type']}'});

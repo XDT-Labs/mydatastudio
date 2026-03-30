@@ -71,7 +71,7 @@ class _NewEmailPage extends State<NewEmailPage> {
       body: Center(
         child: SizedBox.expand(
           child: DefaultTabController(
-            length: 3,
+            length: 4,
             child: Scaffold(
               appBar: AppBar(
                 toolbarHeight: 0,
@@ -79,6 +79,7 @@ class _NewEmailPage extends State<NewEmailPage> {
                   tabs: [
                     Tab(icon: Icon(Icons.email), text: 'Gmail'),
                     Tab(icon: Icon(Icons.email), text: 'Yahoo Mail'),
+                    Tab(icon: Icon(Icons.email), text: 'Outlook'),
                     Tab(icon: Icon(Icons.email), text: 'Outlook PST'),
                   ],
                 ),
@@ -87,6 +88,7 @@ class _NewEmailPage extends State<NewEmailPage> {
                 children: [
                   const _GmailTab(),
                   const _YahooTab(),
+                  const _OutlookTab(),
                   const _OutlookPstTab(),
                 ],
               ),
@@ -569,6 +571,197 @@ class _YahooTabState extends State<_YahooTab> {
       elevation: 1,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(padding: const EdgeInsets.all(32), child: child),
+    );
+  }
+}
+
+// =============================================================================
+// Outlook Tab — stateful OAuth flow
+// =============================================================================
+
+enum _OutlookAuthState { idle, loading, success, error }
+
+class _OutlookTab extends StatefulWidget {
+  const _OutlookTab();
+
+  @override
+  State<_OutlookTab> createState() => _OutlookTabState();
+}
+
+class _OutlookTabState extends State<_OutlookTab> {
+  _OutlookAuthState _authState = _OutlookAuthState.idle;
+  String? _errorMessage;
+  String? _connectedEmail;
+
+  Future<void> _connectOutlook() async {
+    setState(() {
+      _authState = _OutlookAuthState.loading;
+      _errorMessage = null;
+    });
+
+    try {
+      final collection = await LoginProviderExtension.handleOutlookMail(context);
+
+      if (!mounted) return;
+
+      if (collection == null) {
+        setState(() {
+          _authState = _OutlookAuthState.error;
+          _errorMessage = 'Sign-in was cancelled or failed. Please try again.';
+        });
+        return;
+      }
+
+      setState(() {
+        _authState = _OutlookAuthState.success;
+        _connectedEmail = collection.name;
+      });
+
+      EmailPage.selectedCollection.add(collection);
+      ScannerManager.getInstance().startScanner(collection);
+
+      await Future.delayed(const Duration(milliseconds: 900));
+      if (!mounted) return;
+      GoRouter.of(context).go('/email');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _authState = _OutlookAuthState.error;
+        _errorMessage = e.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          child: switch (_authState) {
+            _OutlookAuthState.loading => _buildLoading(),
+            _OutlookAuthState.success => _buildSuccess(),
+            _OutlookAuthState.error => _buildError(),
+            _OutlookAuthState.idle => _buildIdle(),
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIdle() {
+    return _cardContainer(
+      key: const ValueKey('idle'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.email, size: 72, color: Color(0xFF0078D4)),
+          const SizedBox(height: 24),
+          const Text(
+            'Connect Outlook',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Sign in with your Microsoft account to scan and backup your emails '
+            'directly to this app.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey.shade600,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 28),
+          ElevatedButton.icon(
+            onPressed: _connectOutlook,
+            icon: const Icon(Icons.login, size: 24),
+            label: const Text('Sign in with Microsoft'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0078D4),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoading() {
+    return _cardContainer(
+      key: const ValueKey('loading'),
+      child: const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 24),
+          Text('Connecting to Microsoft...'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSuccess() {
+    return _cardContainer(
+      key: const ValueKey('success'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.check_circle, color: Colors.green, size: 64),
+          const SizedBox(height: 24),
+          const Text(
+            'Successfully Connected!',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Connected as $_connectedEmail',
+            style: const TextStyle(fontSize: 14, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildError() {
+    return _cardContainer(
+      key: const ValueKey('error'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.error_outline, color: Colors.red, size: 64),
+          const SizedBox(height: 24),
+          const Text(
+            'Connection Failed',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _errorMessage ?? 'Unknown error occurred.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 14, color: Colors.grey),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: () => setState(() => _authState = _OutlookAuthState.idle),
+            child: const Text('Try Again'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cardContainer({required Widget child, required Key key}) {
+    return Card(
+      key: key,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(padding: const EdgeInsets.all(36), child: child),
     );
   }
 }

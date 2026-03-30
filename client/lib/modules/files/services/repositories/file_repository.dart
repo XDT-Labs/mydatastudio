@@ -139,6 +139,17 @@ class FileDesktopRepository {
         .get();
   }
 
+  Future<List<File>> getFilesToDownload(String collectionId) async {
+    return await (db.select(db.files)
+          ..where(
+            (t) =>
+                t.collectionId.equals(collectionId) &
+                t.localPath.isNull() &
+                t.isDeleted.equals(false),
+          ))
+        .get();
+  }
+
   Future<void> deleteAllByCollectionId(String collectionId) async {
     await (db.delete(db.files)..where((t) => t.collectionId.equals(collectionId))).go();
   }

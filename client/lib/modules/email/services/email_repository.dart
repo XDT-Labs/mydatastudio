@@ -203,4 +203,48 @@ class EmailRepository {
       await deleteEmails(toDeleteIds);
     }
   }
+
+  Future<void> cleanupDeletedOutlook(
+    Collection collection,
+    String folder,
+    List<int> remoteUids,
+  ) async {
+    // 1. Get all local email IDs and UIDs for this folder
+    final query =
+        database.selectOnly(database.emails)
+          ..addColumns([database.emails.id, database.emails.uid])
+          ..where(
+            database.emails.collectionId.equals(collection.id) &
+                database.emails.folderId.equals(folder),
+          );
+
+    final rows = await query.get();
+    final localEmails =
+        rows
+            .map(
+              (row) => (
+                id: row.read(database.emails.id)!,
+                uid: row.read(database.emails.uid),
+              ),
+            )
+            .toList();
+
+    // 2. Find missing emails by UID
+    final remoteUidSet = remoteUids.toSet();
+    final toDeleteIds =
+        localEmails
+            .where((e) {
+              if (e.uid == null) return false;
+              return !remoteUidSet.contains(e.uid);
+            })
+            .map((e) => e.id)
+            .toList();
+
+    if (toDeleteIds.isNotEmpty) {
+      logger.i(
+        "Cleanup: Deleting ${toDeleteIds.length} emails locally that were removed from Outlook folder $folder.",
+      );
+      await deleteEmails(toDeleteIds);
+    }
+  }
 }

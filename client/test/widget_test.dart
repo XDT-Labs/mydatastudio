@@ -1,28 +1,25 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-import 'package:mydatatools/family_dam_app.dart';
 import 'package:flutter/material.dart';
+import 'package:mydatatools/family_dam_app.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('App starts and shows SetupPage', (WidgetTester tester) async {
+    // Set a larger screen size to avoid Stepper overflow
+    tester.view.physicalSize = const Size(1600, 1200);
+    tester.view.devicePixelRatio = 1.0;
+
     // Build our app and trigger a frame.
     await tester.pumpWidget(const FamilyDamApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Verify that the app shows the SetupPage (since DatabaseManager is not initialized in tests)
+    // We expect to find 'MyData Tools' text.
+    // Use pumpAndSettle to handle any redirects or animations
+    await tester.pumpAndSettle();
+    
+    expect(find.text('MyData Tools'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Reset the size after the test
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
   });
 }
