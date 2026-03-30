@@ -150,6 +150,11 @@ class FileDesktopRepository {
         .get();
   }
 
+  Future<List<File>> getScanMetadata(String collectionId) async {
+    return await (db.select(db.files)..where((t) => t.collectionId.equals(collectionId)))
+        .get();
+  }
+
   Future<void> deleteAllByCollectionId(String collectionId) async {
     await (db.delete(db.files)..where((t) => t.collectionId.equals(collectionId))).go();
   }

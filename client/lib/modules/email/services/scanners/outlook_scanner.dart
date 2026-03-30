@@ -30,8 +30,8 @@ class OutlookScanner extends CollectionScanner {
     bool recursive,
     bool force,
   ) async {
-    // check if scan has already been run once
-    if (!force && collection.lastScanDate != null) return Future(() => 0);
+    // We no longer skip scanning if lastScanDate is not null. 
+    // The underlying isolate will handle incremental sync logic based on the date.
 
     // If scanning already, don't restart.
     if (isScanning.value) return 0;

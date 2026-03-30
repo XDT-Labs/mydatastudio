@@ -42,6 +42,8 @@ class GmailScannerIsolate {
       'dbWriterPort': dbWriterPort,
       'collection': collection,
       'folderId': folderId,
+      'lastScanDate': collection.lastScanDate?.toIso8601String(),
+      'force': force,
       'appDir': appDir,
     };
 
@@ -86,6 +88,10 @@ class GmailScannerIsolateWorker {
     final SendPort dbWriterPort = args['dbWriterPort'];
     final Collection collection = args['collection'];
     final String? folderId = args['folderId'];
+    final String? lastScanDateStr = args['lastScanDate'];
+    final DateTime? lastScanDate =
+        lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
+    final bool force = args['force'] ?? false;
     final String appDir = args['appDir'];
 
     if (token != null) {
@@ -135,10 +141,15 @@ class GmailScannerIsolateWorker {
         dbWriterPort.send({'type': 'email_folder', 'folder': folder});
       }
 
+      final scanStartTime = DateTime.now();
+      int totalFound = 0;
+      int newEmails = 0;
+      int skipped = 0;
+
       // 2. Sync Emails
       if (folderId != null) {
         logger.s("Syncing folder: $folderId");
-        await _pullEmails(
+        final results = await _pullEmails(
           gmailApi,
           dbWriterPort,
           clientPort,
@@ -146,13 +157,18 @@ class GmailScannerIsolateWorker {
           appDir,
           accessToken,
           labelId: folderId,
+          lastScanDate: lastScanDate,
+          force: force,
         );
+        totalFound += results['total'] ?? 0;
+        newEmails += results['new'] ?? 0;
+        skipped += results['skipped'] ?? 0;
       } else {
         // Default sync: Inbox, Sent, Trash, Spam
         const defaultLabels = ['INBOX', 'SENT', 'TRASH', 'SPAM'];
         for (var label in defaultLabels) {
           logger.s("Syncing label: $label");
-          await _pullEmails(
+          final results = await _pullEmails(
             gmailApi,
             dbWriterPort,
             clientPort,
@@ -160,11 +176,27 @@ class GmailScannerIsolateWorker {
             appDir,
             accessToken,
             labelId: label,
+            lastScanDate: lastScanDate,
+            force: force,
           );
+          totalFound += results['total'] ?? 0;
+          newEmails += results['new'] ?? 0;
+          skipped += results['skipped'] ?? 0;
         }
       }
 
-      logger.s("Gmail sync complete.");
+      logger.i(
+        "Gmail sync complete: $totalFound found, $newEmails new, $skipped skipped.",
+      );
+
+      // Update lastScanDate in the DB
+      dbWriterPort.send({
+        'type': 'update_collection_status',
+        'id': collection.id,
+        'status': 'ready',
+        'lastScan': scanStartTime.toIso8601String(),
+      });
+
       clientPort.send({'type': 'refresh', 'status': 'done'});
     } catch (e, stack) {
       logger.e("Error in Gmail Isolate: $e", error: e, stackTrace: stack);
@@ -173,7 +205,7 @@ class GmailScannerIsolateWorker {
     }
   }
 
-  static Future<void> _pullEmails(
+  static Future<Map<String, int>> _pullEmails(
     GmailApi gmailApi,
     SendPort dbWriterPort,
     SendPort clientPort,
@@ -182,18 +214,39 @@ class GmailScannerIsolateWorker {
     String accessToken, {
     String? labelId,
     String? pageToken,
+    DateTime? lastScanDate,
+    bool force = false,
   }) async {
     final logger = AppLogger(clientPort);
+    int total = 0;
+    int newCount = 0;
+    int skippedCount = 0;
+
+    String? query;
+    if (!force && lastScanDate != null) {
+      // Gmail search query 'after:' uses seconds since epoch or YYYY/MM/DD
+      // Using seconds (Unix timestamp) is most precise.
+      final seconds = lastScanDate.millisecondsSinceEpoch ~/ 1000;
+      query = 'after:$seconds';
+      logger.i("Gmail: Performing incremental sync ($query)");
+    }
 
     final response = await gmailApi.users.messages.list(
       'me',
+      q: query,
       labelIds: labelId != null ? [labelId] : null,
       pageToken: pageToken,
       maxResults: 50, // Small batch for responsiveness
     );
 
     final messages = response.messages ?? [];
-    if (messages.isEmpty) return;
+    if (messages.isEmpty) {
+      return {
+        'total': 0,
+        'new': 0,
+        'skipped': 0,
+      };
+    }
 
     List<Email> emailBatch = [];
 
@@ -251,7 +304,19 @@ class GmailScannerIsolateWorker {
           hasAttachments: hasAttachments,
           isDeleted: m.labelIds?.contains('TRASH') ?? false,
         );
+        
+        // Double-check precision even with 'after:' query to handle same-second changes
+        if (!force && lastScanDate != null) {
+          final lastScanSecs = lastScanDate.millisecondsSinceEpoch ~/ 1000;
+          final msgSecs = msgDate.millisecondsSinceEpoch ~/ 1000;
+          if (msgSecs <= lastScanSecs) {
+            skippedCount++;
+            continue;
+          }
+        }
+
         emailBatch.add(email);
+        newCount++;
 
         if (hasAttachments) {
           final labelName = labelMap[labelId] ?? 'Email';
@@ -305,7 +370,7 @@ class GmailScannerIsolateWorker {
     }
 
     if (response.nextPageToken != null) {
-      await _pullEmails(
+      final subResults = await _pullEmails(
         gmailApi,
         dbWriterPort,
         clientPort,
@@ -314,8 +379,19 @@ class GmailScannerIsolateWorker {
         accessToken,
         labelId: labelId,
         pageToken: response.nextPageToken,
+        lastScanDate: lastScanDate,
+        force: force,
       );
+      total += subResults['total'] ?? 0;
+      newCount += subResults['new'] ?? 0;
+      skippedCount += subResults['skipped'] ?? 0;
     }
+
+    return {
+      'total': total + messages.length,
+      'new': newCount,
+      'skipped': skippedCount,
+    };
   }
 
   static String? _getHeader(List<MessagePartHeader>? headers, String name) {

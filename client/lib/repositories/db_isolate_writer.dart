@@ -261,6 +261,10 @@ class DbIsolateWriterClient {
           final id = data['collectionId'] as String;
           final files = await FileDesktopRepository(db).getFilesToDownload(id);
           replyTo?.send({'status': 'ok', 'files': files});
+        } else if (data['type'] == 'get_collection_metadata') {
+          final id = data['collectionId'] as String;
+          final files = await FileDesktopRepository(db).getScanMetadata(id);
+          replyTo?.send({'status': 'ok', 'files': files});
         } else {
           logger.w("Unknown message type: ${data['type']}");
           replyTo?.send({'error': 'Unknown message type: ${data['type']}'});

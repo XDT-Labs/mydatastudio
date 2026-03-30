@@ -45,15 +45,15 @@ class ScannerManager {
     // Delay scanner startup to let the app UI finish initializing and prevent startup lockups
     await Future.delayed(const Duration(seconds: 5));
 
-    //start scanner for all existing collections
+    //register scanners for all existing collections (no full scan on startup)
     var collections = await database.select(database.collections).get();
     for (var c in collections) {
       if (c.scanner == AppConstants.scannerEmailOutlookPst) {
         continue;
       }
-      await Future.delayed(const Duration(seconds: 5));
-      logger.d('${c.id} | ${c.path}');
-      startScanner(c);
+      await Future.delayed(const Duration(seconds: 1));
+      logger.i('Registering scanner for ${c.name} | ${c.path}');
+      await registerScanner(c);
     }
 
     //listen for new collections and add them at runtime

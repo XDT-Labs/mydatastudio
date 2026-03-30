@@ -45,6 +45,8 @@ class OutlookScannerIsolate {
       'dbWriterPort': dbWriterPort,
       'collection': collection,
       'folderId': folderId,
+      'lastScanDate': collection.lastScanDate?.toIso8601String(),
+      'force': force,
       'appDir': appDir,
     };
 
@@ -143,6 +145,11 @@ class OutlookScannerIsolateWorker {
     final Collection collection = args['collection'];
     final String? folderId = args['folderId'];
     final String type = args['type'] ?? 'sync';
+    final String? lastScanDateStr = args['lastScanDate'];
+    final DateTime? lastScanDate =
+        lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
+    final bool force = args['force'] ?? false;
+
     final List<int>? uidsToMove =
         args['uids'] != null ? (args['uids'] as List).cast<int>() : null;
 
@@ -151,13 +158,12 @@ class OutlookScannerIsolateWorker {
     }
 
     final AppLogger logger = AppLogger(clientPort);
-    final emailAddress = collection.name ?? collection.path ?? collection.userId!;
+    final emailAddress = collection.name;
     final accessToken = collection.accessToken!;
 
     final client = ImapClient(isLogEnabled: true);
     try {
       logger.i("DEBUG: Outlook Isolate - Connecting for $type...");
-      logger.i("DEBUG: Outlook Isolate - Target Email: $emailAddress");
       logger.i("DEBUG: Outlook Isolate - Target Email: $emailAddress");
       // Use imap-mail.outlook.com for better personal account support
       await client.connectToServer('imap-mail.outlook.com', 993, isSecure: true);
@@ -250,6 +256,11 @@ class OutlookScannerIsolateWorker {
         return;
       }
 
+      final scanStartTime = DateTime.now();
+      int totalFound = 0;
+      int newEmails = 0;
+      int skipped = 0;
+
       // 1. Sync Folders
       logger.s("Syncing Outlook folders...");
       final mailboxes = await client.listMailboxes();
@@ -268,29 +279,49 @@ class OutlookScannerIsolateWorker {
       logger.s("Syncing folder: $targetFolder");
       await client.selectMailboxByPath(targetFolder);
 
-      // Fetch ALL UIDs to detect deletions
+      // Fetch UIDs for the folder
       List<int> allUids = [];
       try {
+        // Build search criteria
+        String searchCriteria = 'ALL';
+        if (!force && lastScanDate != null) {
+          // IMAP SINCE query uses day-level precision (RFC 3501)
+          // We subtract 1 day to be safe around timezones/boundaries
+          final sinceDate = lastScanDate.subtract(const Duration(days: 1));
+          final monthNames = [
+            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+          ];
+          final dateStr =
+              "${sinceDate.day}-${monthNames[sinceDate.month - 1]}-${sinceDate.year}";
+          searchCriteria = 'SINCE $dateStr';
+          logger.i("Outlook: Performing incremental sync SINCE $dateStr");
+        }
+
         final searchResult = await client.uidSearchMessages(
-          searchCriteria: 'ALL',
+          searchCriteria: searchCriteria,
         );
         allUids = searchResult.matchingSequence?.toList() ?? [];
-        clientPort?.send({
-          'type': 'cleanup_uids',
-          'folder': targetFolder,
-          'uids': allUids,
-        });
+        totalFound = allUids.length;
+
+        if (searchCriteria == 'ALL') {
+          clientPort?.send({
+            'type': 'cleanup_uids',
+            'folder': targetFolder,
+            'uids': allUids,
+          });
+        }
       } catch (err) {
-        logger.e("Failed to fetch all UIDs for folder cleanup: $err");
+        logger.e("Failed to fetch UIDs for folder: $err");
       }
 
       if (allUids.isEmpty) {
-        logger.s("No messages found in $targetFolder.");
+        logger.s("No new messages found in $targetFolder.");
       } else {
         const int batchSize = 50;
         final reversedUids = allUids.reversed.toList();
         logger.s(
-          "Starting full sync of ${reversedUids.length} messages in $targetFolder...",
+          "Processing ${reversedUids.length} messages in $targetFolder...",
         );
 
         for (int i = 0; i < reversedUids.length; i += batchSize) {
@@ -320,6 +351,20 @@ class OutlookScannerIsolateWorker {
 
             List<Email> emailBatch = [];
             for (final message in fetchResult.messages) {
+              final msgDate = message.decodeDate() ?? DateTime.now();
+
+              // Refine incremental check with second-level precision
+              if (!force && lastScanDate != null) {
+                // Truncate both to seconds for reliable comparison
+                final lastScanSecs = lastScanDate.millisecondsSinceEpoch ~/ 1000;
+                final msgSecs = msgDate.millisecondsSinceEpoch ~/ 1000;
+                
+                if (msgSecs <= lastScanSecs) {
+                  skipped++;
+                  continue;
+                }
+              }
+
               final emailObj = await _parseAndProcessMessage(
                 message: message,
                 collection: collection,
@@ -329,6 +374,7 @@ class OutlookScannerIsolateWorker {
                 logger: logger,
               );
               emailBatch.add(emailObj);
+              newEmails++;
             }
 
             if (emailBatch.isNotEmpty) {
@@ -341,7 +387,18 @@ class OutlookScannerIsolateWorker {
         }
       }
 
-      logger.s("Outlook sync complete.");
+      logger.i(
+        "Outlook sync complete: $totalFound found, $newEmails new, $skipped skipped.",
+      );
+
+      // Update lastScanDate in the DB
+      dbWriterPort.send({
+        'type': 'update_collection_status',
+        'id': collection.id,
+        'status': 'ready',
+        'lastScan': scanStartTime.toIso8601String(),
+      });
+
       clientPort?.send({'type': 'refresh', 'status': 'done'});
     } catch (e, stack) {
       logger.e("Error in Outlook Isolate: $e", error: e, stackTrace: stack);
