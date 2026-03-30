@@ -73,12 +73,14 @@ class CloudFileIsolate extends CollectionScanner {
       'collectionId': collection.id,
       'collectionName': collection.name,
       'collectionPath': collection.path,
+      'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'storagePath': DatabaseManager.instance.storagePath,
       'downloadLocalCopy': collection.downloadLocalCopy,
       // The root folder ID to start scanning from (e.g. 'root' or a specific folder ID)
       'rootFolderId': actualPath,
       'isFullScan': actualPath == collection.path,
       'recursive': recursive,
+      'force': force,
       // Raw token strings — the worker re-creates the API client inside the isolate
       'providerKey': collection.scanner,
       'accessToken': collection.accessToken,
@@ -213,10 +215,13 @@ class CloudFileIsolateWorker {
     final collectionName = args['collectionName'] as String;
     final collectionPath = args['collectionPath'] as String? ?? 'root';
     final rootFolderId = args['rootFolderId'] as String? ?? 'root';
+    final lastScanDateStr = args['lastScanDate'] as String?;
+    final lastScanDate = lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
     final storagePath = args['storagePath'] as String?;
     final downloadLocalCopy = args['downloadLocalCopy'] as bool? ?? false;
     final isFullScan = args['isFullScan'] as bool? ?? false;
     final recursive = args['recursive'] as bool? ?? true;
+    final force = args['force'] as bool? ?? false;
     final accessToken = args['accessToken'] as String?;
     final refreshToken = args['refreshToken'] as String?;
     final expiryStr = args['accessTokenExpiry'] as String?;
@@ -263,49 +268,115 @@ class CloudFileIsolateWorker {
     // Build Drive API client from refreshed token
     final driveApi = drive.DriveApi(AuthenticatedHttpClient.bearer(validToken));
 
-    logger.i(
-      'CloudFileIsolate: starting scan of "$collectionName" from folder "$rootFolderId"',
-    );
-
     final scanStartTime = DateTime.now();
     _isScanning = true;
 
     try {
-      final count = await _scanFolder(
-        driveApi: driveApi,
-        collectionId: collectionId,
-        collectionPath: collectionPath,
-        parentId: rootFolderId,
-        recursive: recursive,
-        scanStartTime: scanStartTime,
-        downloadLocalCopy: downloadLocalCopy,
-      );
+      int count = 0;
+      bool skipCleanup = false;
+
+      // Rule Selection:
+      // If it's a full scan (root), and not forced, and we have a lastScanDate
+      // then we perform an incremental metadata sync using modifiedTime.
+      if (isFullScan && !force && lastScanDate != null) {
+        logger.i(
+          'CloudFileIsolate: Performing INCREMENTAL sync for "$collectionName" (since $lastScanDate)',
+        );
+        count = await _incrementalScan(
+          driveApi: driveApi,
+          collectionId: collectionId,
+          collectionPath: collectionPath,
+          lastScanDate: lastScanDate,
+          scanStartTime: scanStartTime,
+        );
+        // We skip cleanup_deleted because incremental sync only sees changes,
+        // and doesn't know about missing items.
+        skipCleanup = true;
+      } else {
+        logger.i(
+          'CloudFileIsolate: Starting RECURSIVE scan of "$collectionName" from folder "$rootFolderId" (force=$force)',
+        );
+        count = await _scanFolder(
+          driveApi: driveApi,
+          collectionId: collectionId,
+          collectionPath: collectionPath,
+          parentId: rootFolderId,
+          recursive: recursive,
+          scanStartTime: scanStartTime,
+          downloadLocalCopy: downloadLocalCopy,
+        );
+      }
 
       logger.i(
         'CloudFileIsolate: scan complete — $count items for "$collectionName"',
       );
 
-      // Signal the DB writer to mark anything not seen this scan as deleted
-      final ReceivePort syncPort = ReceivePort();
+      if (!skipCleanup) {
+        // Signal the DB writer to mark anything not seen this scan as deleted
+        // (Only for full walks or forced refreshes)
+        final ReceivePort syncPort = ReceivePort();
+        dbWriterPort.send({
+          'type': 'cleanup_deleted',
+          'collectionId': collectionId,
+          'path': rootFolderId == collectionPath ? '' : rootFolderId,
+          'scanStartTime': scanStartTime,
+          'recursive': recursive,
+          'isCloud': true,
+          'isFullScan': isFullScan,
+          'replyTo': syncPort.sendPort,
+        });
+        await syncPort.first;
+        syncPort.close();
+      }
+
+      // Update lastScanDate in the DB
       dbWriterPort.send({
-        'type': 'cleanup_deleted',
-        'collectionId': collectionId,
-        'path': rootFolderId == collectionPath ? '' : rootFolderId,
-        'scanStartTime': scanStartTime,
-        'recursive': recursive,
-        'isCloud': true,
-        'isFullScan': isFullScan,
-        'replyTo': syncPort.sendPort,
+        'type': 'update_collection_status',
+        'id': collectionId,
+        'status': 'ready',
+        'lastScan': scanStartTime.toIso8601String(),
       });
-      await syncPort.first;
-      syncPort.close();
-      
+
       _isScanning = false;
       (args['port'] as SendPort).send({'type': 'scan_complete'});
 
       if (downloadLocalCopy && storagePath != null) {
-        logger.i('CloudFileIsolate: processing download queue (${_downloadQueue.length} items)');
-        await _processQueue(driveApi, storagePath, collectionName, collectionPath);
+        // Query DB for files with null localPath
+        logger.i('CloudFileIsolate: querying DB for files needing download...');
+        final ReceivePort downloadListPort = ReceivePort();
+        dbWriterPort.send({
+          'type': 'get_files_to_download',
+          'collectionId': collectionId,
+          'replyTo': downloadListPort.sendPort,
+        });
+
+        final response = await downloadListPort.first;
+        downloadListPort.close();
+
+        if (response is Map && response['status'] == 'ok') {
+          final List<File> allFilesNeedingDownload =
+              (response['files'] as List).cast<File>();
+          _downloadQueue.clear();
+
+          // Filter out Google native formats (Docs, Sheets, etc.) that we can't download as full media
+          for (final file in allFilesNeedingDownload) {
+            if (!_isGoogleNativeFormat(file.contentType)) {
+              _downloadQueue.add(file);
+            }
+          }
+
+          logger.i(
+            'CloudFileIsolate: processing download queue (${_downloadQueue.length} items)',
+          );
+          await _processQueue(
+            driveApi,
+            storagePath,
+            collectionName,
+            collectionPath,
+          );
+        } else {
+          logger.e('CloudFileIsolate: failed to fetch download list from DB');
+        }
       }
     } catch (e, stack) {
       logger.e(
@@ -314,6 +385,93 @@ class CloudFileIsolateWorker {
     }
 
     Isolate.exit(args['port'] as SendPort, 0);
+  }
+
+  /// Performs an incremental metadata sync using Drive's modifiedTime query.
+  /// Finds all items modified since [lastScanDate].
+  Future<int> _incrementalScan({
+    required drive.DriveApi driveApi,
+    required String collectionId,
+    required String collectionPath,
+    required DateTime lastScanDate,
+    required DateTime scanStartTime,
+  }) async {
+    int count = 0;
+    final fileBatch = <File>[];
+    String? pageToken;
+
+    // We use a query like: modifiedTime > '2023-01-01T00:00:00Z' and trashed = false
+    // Note: If collectionPath is not 'root', this query might still return items outside the collection
+    // but the mapping helpers handle filtering by checking parent IDs against known DB folder IDs.
+    final String rfc3339Date = lastScanDate.toUtc().toIso8601String();
+    String query = "modifiedTime > '$rfc3339Date' and trashed = false";
+    
+    // If we are restricted to a specific subfolder, we can try to scoped it, 
+    // but cross-folder moves make global queries safer for catch-up.
+    // For now, we trust the DB upsert logic to handle items correctly.
+
+    do {
+      final response = await driveApi.files.list(
+        q: query,
+        $fields:
+            'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, parents, thumbnailLink, webContentLink)',
+        pageToken: pageToken,
+        pageSize: 100,
+      );
+
+      final files = response.files ?? [];
+      for (final f in files) {
+        if (f.id == null) continue;
+        count++;
+
+        final isFolder = f.mimeType == 'application/vnd.google-apps.folder';
+        final parentId = (f.parents != null && f.parents!.isNotEmpty) ? f.parents!.first : 'root';
+
+        if (isFolder) {
+          final folder = _toFolder(
+            collectionId: collectionId,
+            collectionPath: collectionPath,
+            parentId: parentId,
+            driveFile: f,
+            scanStartTime: scanStartTime,
+          );
+          if (folder != null) {
+            dbWriterPort.send({'type': 'folder', 'folder': folder});
+            logger.i('Found NEW/CHANGED folder: ${f.name} (${f.id})');
+          }
+        } else {
+          final file = _toFile(
+            collectionId: collectionId,
+            collectionPath: collectionPath,
+            parentId: parentId,
+            driveFile: f,
+            scanStartTime: scanStartTime,
+          );
+          if (file != null) {
+            fileBatch.add(file);
+            logger.i('Found NEW/CHANGED file: ${f.name} (${f.id})');
+
+            if (fileBatch.length >= 100) {
+              dbWriterPort.send({
+                'type': 'batch_file',
+                'files': List<File>.from(fileBatch),
+              });
+              fileBatch.clear();
+            }
+          }
+        }
+      }
+      pageToken = response.nextPageToken;
+    } while (pageToken != null);
+
+    if (fileBatch.isNotEmpty) {
+      dbWriterPort.send({
+        'type': 'batch_file',
+        'files': List<File>.from(fileBatch),
+      });
+    }
+
+    return count;
   }
 
   /// Recursively scans a Drive folder.
@@ -400,10 +558,6 @@ class CloudFileIsolateWorker {
             logger.i('Found Drive file: ${f.name} (${f.id})');
             fileBatch.add(file);
             
-            if (downloadLocalCopy && !_isGoogleNativeFormat(f.mimeType ?? '')) {
-              _downloadQueue.add(file);
-            }
-
             if (fileBatch.length >= 100) {
               logger.d(
                 'CloudFileIsolate: Sending batch of ${fileBatch.length} files to DB writer',
