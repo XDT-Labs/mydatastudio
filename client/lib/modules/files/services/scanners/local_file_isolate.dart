@@ -13,6 +13,17 @@ import 'package:path/path.dart' as p;
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
 
+/// [LocalFileIsolate] is a collection scanner responsible for indexing files
+/// on the local filesystem. It uses a background Dart isolate to crawl
+/// directories, extract metadata (EXIF, thumbnails), and update the database.
+///
+/// Synchronization Rules:
+/// 1. [Registration-Only Startup] Scanners MUST only register on startup.
+/// 2. [Force Safety Gate] start() MUST return immediately if force is false.
+/// 3. [Manual Sync] User-initiated syncs MUST call start(force: true).
+/// 4. [Discovery vs Sync] Discover items quickly, sync heavy metadata incrementally.
+/// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
+///    syncs (path == null) and targeted folder scans (path != null).
 class LocalFileIsolate extends CollectionScanner {
   RootIsolateToken? token;
   SendPort? loggerIsolatePort;
@@ -24,6 +35,15 @@ class LocalFileIsolate extends CollectionScanner {
     logger = AppLogger(loggerIsolatePort);
   }
 
+  /// Starts the local file scanning process.
+  ///
+  /// [collection] The local collection to scan.
+  /// [path] Mode selector:
+  ///   - If NULL: **Full Sync**. Exhaustively traverses the entire collection root.
+  ///   - If NOT NULL: **Targeted Scan**. Focuses ONLY on the specified directory
+  ///     path for immediate results during navigation.
+  /// [recursive] Whether to scan subdirectories.
+  /// [force] If false, returns 0 immediately (Rule 2). If true, triggers sync.
   @override
   Future<int> start(
     Collection collection,
@@ -31,7 +51,8 @@ class LocalFileIsolate extends CollectionScanner {
     recursive,
     bool force,
   ) async {
-    if (isScanning.value && !force) {
+    if (!force) {
+      logger?.i("Registration-only mode: skipping scan for ${collection.name}");
       return 0;
     }
 
@@ -63,12 +84,12 @@ class LocalFileIsolate extends CollectionScanner {
     );
     logger?.i('Spawning local file scanner isolate for $path');
     try {
-      isolate = await Isolate.spawn<Map<String, dynamic>>(worker._scan, args);
+      isolate = await spawnIsolate(worker._scan, args);
     } catch (e) {
       logger?.e('Failed to spawn local file scanner isolate: $e');
       return 0;
     }
-    isolate!.addOnExitListener(p.sendPort);
+    isolate?.addOnExitListener(p.sendPort);
 
     await for (var message in p) {
       if (message == null) {
@@ -121,6 +142,14 @@ class LocalFileIsolate extends CollectionScanner {
       isolate!.kill(priority: Isolate.beforeNextEvent);
       logger?.w('Killed local file scanner');
     }
+  }
+
+  /// Overridable for testing to avoid real isolate spawning
+  Future<Isolate?> spawnIsolate(
+    void Function(Map<String, dynamic>) entryPoint,
+    Map<String, dynamic> args,
+  ) async {
+    return await Isolate.spawn<Map<String, dynamic>>(entryPoint, args);
   }
 }
 

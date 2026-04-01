@@ -375,3 +375,89 @@ erDiagram
     Folder ||--o{ Folder : "parent"
     File ||--|| FileEmbedding : "has embedding"
 ```
+
+---
+
+## Scanner Architecture
+
+The application uses a standardized, multi-layered scanner architecture to asynchronously discover and synchronize data from various sources (Local Files, Google Drive, Email IMAP, PST Files). To ensure a fast and responsive startup experience, all scanners must strictly follow the **"Registration-Only Startup"** rule.
+
+### Scanner Lifecycle
+
+All scanners implement a lifecycle that separates the "Discovery" of items (folders, files, emails) from the "Sync" of their full content (metadata extraction, thumbnail generation, body parsing).
+
+```mermaid
+sequenceDiagram
+    participant SM as ScannerManager
+    participant CS as CollectionScanner
+    participant IC as IsolateClient
+    participant IW as IsolateWorker
+
+    Note over SM: Startup (App Initialization)
+    SM->>CS: startScanners()
+    CS->>IC: start(force: false)
+    Note right of IC: Rule 1: No Isolate Spawned
+    IC-->>CS: return 0 (Registration Only)
+
+    Note over SM: Manual Sync or Folder Navigation
+    SM->>CS: startScanner(collection, force: true)
+    CS->>IC: start(force: true)
+    Note right of IC: Rule 2: Force triggers sync
+    IC->>IW: spawnIsolate()
+    loop Discovery Phase
+        IW->>IW: Scan for new/updated items
+        IW-->>IC: Send found items (ID/Path only)
+    end
+    loop Sync Phase
+        IW->>IW: Extract text/EXIF/Thumbnails
+        IW-->>IC: Send detailed metadata
+    end
+    IW->>IW: Update Collection.lastScanDate
+    IW-->>IC: Done
+    IC-->>CS: Emit isScanning = false
+```
+
+### The 5 Synchronization Rules
+
+To maintain parity across all scanners (File, Email, Social), every scanner implementation MUST adhere to these rules:
+
+| Rule | Name | Behavior |
+|------|------|----------|
+| **Rule 1** | **Registration-Only Startup** | `ScannerManager.startScanners()` must only register scanners in the internal map. It must NEVER trigger a background scan automatically on startup. |
+| **Rule 2** | **Force Safety Gate** | The scanner's `start()` method must return immediately if `force` is `false`. No isolates should be spawned, and no API connections should be opened unless `force: true` is passed. |
+| **Rule 3** | **Manual Sync Explicitly Forces** | When a user clicks "Sync Collection," the app must call `start(force: true)`, bypassing the startup safety gate. |
+| **Rule 4** | **Discovery vs. Sync** | Scanners should ideally discover items first (to update the UI quickly) and then perform heavy extraction (thumbnails, embeddings) in a secondary background pass or incrementally. |
+| **Rule 5** | **Targeted Scanning vs. Full Sync** | Scanners MUST support both full collection syncs (`path == null`) and targeted folder scans (`path != null`) to provide immediate UI feedback during navigation. |
+
+### Scanning Modes: Targeted vs. Full Sync
+
+All scanners MUST implement two distinct operation modes based on the `path` parameter:
+
+1.  **Full Collection Synchronization (`path == null`)**:
+    *   **Behavior**: Recursively traverses the entire collection (e.g., all Gmail folders, all local files in a multi-Gigabyte directory).
+    *   **Goal**: Ensure the local database is perfectly in sync with the source.
+    *   **State**: Updates the `Collection.lastScanDate` upon successful completion.
+
+2.  **Targeted Folder Scan (`path != null`)**:
+    *   **Behavior**: Focuses exclusively on the specified directory or folder ID.
+    *   **Goal**: Provide near-instantaneous UI updates when a user navigates into a specific folder.
+    *   **Optimization**: This mode is often invoked with `force: true` by the UI during navigation, even if a full sync is not yet complete.
+
+### Building a New Scanner (LLM Guide)
+
+When creating a new scanner (e.g., `SocialScanner`), follow these implementation requirements:
+
+1.  **Inherit/Implement:** Must implement the `CollectionScanner` interface.
+2.  **Isolate Client:** Create a client class (e.g., `SocialScannerIsolate`) that handles the `spawnIsolate` logic.
+3.  **Rule 2 Implementation:** In the `start()` method of your client:
+    ```dart
+    Future<void> start(Collection collection, {bool force = false}) async {
+      if (!force) {
+        logger.i("Registration-only mode: skipping scan for ${collection.name}");
+        return;
+      }
+      // ... Proceed with spawning isolate ...
+    }
+    ```
+4.  **Null-Safe Isolates:** Use null-aware access for the isolate reference (`_isolate?.addOnExitListener`) to support unit testing with mock isolates.
+5.  **Status Reporting:** Use the `statusPort` to communicate progress back to the main isolate, updating `isScanning` and triggering UI refreshes.

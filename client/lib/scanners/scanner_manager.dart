@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:isolate';
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
-
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/database_manager.dart';
@@ -15,9 +15,11 @@ import 'package:mydatatools/modules/email/services/scanners/outlook_scanner.dart
 import 'package:mydatatools/modules/email/services/scanners/yahoo_scanner.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 
+typedef ScannerFactory = Future<CollectionScanner> Function(Collection c);
+
 class ScannerManager {
   final AppLogger logger = AppLogger(null);
-  static final ScannerManager _instance = ScannerManager._internal();
+  static final ScannerManager _instance = ScannerManager.internal();
   List<Collection> collections = [];
   Map<String, CollectionScanner> scanners = {};
   Map<String, OutlookPstScannerIsolate> pstScanners = {};
@@ -25,6 +27,9 @@ class ScannerManager {
   late AppDatabase database;
   //class reference to keep change listeners running
   StreamSubscription<List<Collection>>? collectionSubs;
+
+  @visibleForTesting
+  ScannerFactory? scannerFactory;
 
   // todo: pass in a dedicated writer thread
   factory ScannerManager(AppDatabase database) {
@@ -36,17 +41,18 @@ class ScannerManager {
     return _instance;
   }
 
-  ScannerManager._internal() {
+  @visibleForTesting
+  ScannerManager.internal() {
     // initialization logic
     //_instance.startScanners();
   }
 
-  void startScanners() async {
+  Future<void> startScanners() async {
     // Delay scanner startup to let the app UI finish initializing and prevent startup lockups
     await Future.delayed(const Duration(seconds: 5));
 
     //register scanners for all existing collections (no full scan on startup)
-    var collections = await database.select(database.collections).get();
+    var collections = await getAllCollections();
     for (var c in collections) {
       if (c.scanner == AppConstants.scannerEmailOutlookPst) {
         continue;
@@ -57,8 +63,7 @@ class ScannerManager {
     }
 
     //listen for new collections and add them at runtime
-    Stream<List<Collection>> collectionWatch =
-        database.select(database.collections).watch();
+    Stream<List<Collection>> collectionWatch = watchCollections();
 
     collectionWatch.listen((changes) {
       logger.d('Value from controller: $changes');
@@ -114,7 +119,7 @@ class ScannerManager {
 
   Future<void> startScanner(Collection c) async {
     final scanner = await registerScanner(c);
-    await scanner.start(c, null, true, false);
+    await scanner.start(c, null, true, true);
   }
 
   CollectionScanner? getScanner(Collection c) {
@@ -149,6 +154,12 @@ class ScannerManager {
   }
 
   Future<CollectionScanner> _doRegisterScanner(Collection c) async {
+    if (scannerFactory != null) {
+      final scanner = await scannerFactory!(c);
+      scanners[c.id] = scanner;
+      return scanner;
+    }
+
     try {
       CollectionScanner scanner;
       switch (c.scanner) {
@@ -228,5 +239,13 @@ class ScannerManager {
     } finally {
       _registrationFutures.remove(c.id);
     }
+  }
+
+  Future<List<Collection>> getAllCollections() async {
+    return await database.select(database.collections).get();
+  }
+
+  Stream<List<Collection>> watchCollections() {
+    return database.select(database.collections).watch();
   }
 }

@@ -6,8 +6,17 @@ import 'package:mydatatools/modules/email/services/scanners/gmail_scanner_isolat
 import 'package:mydatatools/scanners/collection_scanner.dart';
 import 'package:flutter/services.dart';
 
-// TODO
-//@see https://pub.dev/packages/driven
+/// [GmailScanner] is a collection scanner responsible for indexing emails
+/// from a Gmail account. It manages the lifecycle of the [GmailScannerIsolate]
+/// and bridges communication between the UI and the background worker.
+///
+/// Synchronization Rules:
+/// 1. [Registration-Only Startup] Scanners MUST only register on startup.
+/// 2. [Force Safety Gate] start() MUST return immediately if force is false.
+/// 3. [Manual Sync] User-initiated syncs MUST call start(force: true).
+/// 4. [Discovery vs Sync] Discover items quickly, sync heavy metadata incrementally.
+/// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
+///    syncs (path == null) and targeted folder scans (path != null).
 class GmailScanner extends CollectionScanner {
   final SendPort? dbWriterPort;
   final String dbPath;
@@ -25,6 +34,21 @@ class GmailScanner extends CollectionScanner {
     this.dbWriterPort,
   });
 
+  /// Starts the Gmail scanning process.
+  ///
+  /// [collection] The Google/Gmail collection to scan.
+  /// [path] Optional label ID (e.g., 'INBOX') to restrict the scan.
+  /// [recursive] Not currently used for Gmail (labels are flat).
+  /// [force] If false, returns 0 immediately (Rule 2). If true, triggers sync.
+  /// Starts the Gmail scanning process.
+  ///
+  /// [collection] The Gmail collection to scan.
+  /// [path] Mode selector:
+  ///   - If NULL: **Full Sync**. Exhaustively traverses all labels/folders.
+  ///   - If NOT NULL: **Targeted Scan**. Focuses ONLY on the specified folder ID
+  ///     (e.g., 'INBOX', 'Sent') for immediate results during navigation.
+  /// [recursive] Whether to scan sub-labels.
+  /// [force] If false, returns 0 immediately (Rule 2). If true, triggers sync.
   @override
   Future<int> start(
     Collection collection,
@@ -36,6 +60,11 @@ class GmailScanner extends CollectionScanner {
     // The underlying isolate will handle incremental sync logic based on the date.
 
     // If scanning already, don't restart.
+    if (!force) {
+      logger.i("Registration-only mode: skipping scan for ${collection.name}");
+      return 0;
+    }
+    
     if (isScanning.value) return 0;
     
     isScanning.add(true);

@@ -16,6 +16,17 @@ import 'package:uuid/uuid.dart';
 
 import 'package:http/http.dart' as http;
 
+/// [OutlookPstScannerIsolate] is the client-side manager for the Outlook PST
+/// scanning background isolate. It handles spawning the worker, which calls
+/// the Python FastAPI service to parse the PST file and stream results back.
+///
+/// Synchronization Rules:
+/// 1. [Registration-Only Startup] Scanners MUST only register on startup.
+/// 2. [Force Safety Gate] start() MUST return immediately if force is false.
+/// 3. [Manual Sync] User-initiated syncs MUST call start(force: true).
+/// 4. [Discovery vs Sync] Discover items quickly, sync heavy metadata incrementally.
+/// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
+///    syncs (path == null) and targeted folder scans (path != null).
 class OutlookPstScannerIsolate {
   final RootIsolateToken? token;
   final SendPort? dbWriterPort;
@@ -31,7 +42,19 @@ class OutlookPstScannerIsolate {
     required this.serverUrl,
   });
 
+  /// Spawns the PST background worker isolate.
+  ///
+  /// [collection] The PST collection to synchronize.
+  /// [force] If false, returns immediately (Rule 2).
+  ///
+  /// Note: PST scanners currently default to a **Full Sync** of the entire
+  /// archive. Targeted scanning of specific PST folders is not yet implemented.
   Future<void> start(Collection collection, {bool force = false}) async {
+    if (!force) {
+      logger.i("Registration-only mode: skipping scan for ${collection.name}");
+      return;
+    }
+
     if (dbWriterPort == null) {
       throw Exception("dbWriterPort is required for OutlookPstScannerIsolate");
     }
@@ -61,12 +84,17 @@ class OutlookPstScannerIsolate {
     });
   }
 
+  /// Immediately terminates the background isolate.
   void stop() {
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
   }
 }
 
+/// Entry point and logic for the PST background scan.
+///
+/// The worker runs in a separate isolate and communicates with the Python
+/// FastAPI service via HTTP to parse the PST file.
 class OutlookPstScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> workerArgs) async {
     final RootIsolateToken? token = workerArgs['token'];

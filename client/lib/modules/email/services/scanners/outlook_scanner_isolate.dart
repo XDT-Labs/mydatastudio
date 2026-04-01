@@ -18,6 +18,17 @@ import 'package:mydatatools/modules/email/services/email_repository.dart';
 import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:uuid/uuid.dart';
 
+/// [OutlookScannerIsolate] is the client-side manager for the Outlook scanning
+/// background isolate. It handles spawning the worker, parameter propagation,
+/// and bidirectional communication during the IMAP sync process.
+///
+/// Synchronization Rules:
+/// 1. [Registration-Only Startup] Scanners MUST only register on startup.
+/// 2. [Force Safety Gate] start() MUST return immediately if force is false.
+/// 3. [Manual Sync] User-initiated syncs MUST call start(force: true).
+/// 4. [Discovery vs Sync] Discover items quickly, sync heavy metadata incrementally.
+/// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
+///    syncs (path == null) and targeted folder scans (path != null).
 class OutlookScannerIsolate {
   final RootIsolateToken? token;
   final SendPort? dbWriterPort;
@@ -27,12 +38,26 @@ class OutlookScannerIsolate {
 
   OutlookScannerIsolate({this.token, this.dbWriterPort, required this.appDir});
 
+  /// Spawns the Outlook background worker isolate.
+  ///
+  /// [collection] The collection to synchronize.
+  /// [folderId] Mode selector:
+  ///   - If NULL: **Full Sync**. Synchronizes all folders.
+  ///   - If NOT NULL: **Targeted Scan**. Focuses ONLY on the specified folder ID
+  ///     (e.g., 'INBOX', 'Sent').
+  /// [force] If false, returns immediately (Rule 2).
+  /// [statusPort] Optional port to receive status/heartbeat messages.
   Future<void> start(
     Collection collection, {
     String? folderId,
     bool force = false,
     SendPort? statusPort,
   }) async {
+    if (!force) {
+      logger.i("Registration-only mode: skipping scan for ${collection.name}");
+      return;
+    }
+
     if (dbWriterPort == null) {
       throw Exception("dbWriterPort is required for OutlookScannerIsolate");
     }
@@ -50,7 +75,7 @@ class OutlookScannerIsolate {
       'appDir': appDir,
     };
 
-    _isolate = await Isolate.spawn(OutlookScannerIsolateWorker.worker, args);
+    _isolate = await spawnIsolate(OutlookScannerIsolateWorker.worker, args);
 
     bool isIsolateDone = false;
     bool isCleanupInProgress = false;
@@ -131,9 +156,18 @@ class OutlookScannerIsolate {
     }
   }
 
+  /// Immediately terminates the background isolate.
   void stop() {
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
+  }
+
+  /// Overridable for testing to avoid real isolate spawning
+  Future<Isolate?> spawnIsolate(
+    Function(Map<String, dynamic>) entryPoint,
+    Map<String, dynamic> args,
+  ) async {
+    return await Isolate.spawn(entryPoint, args);
   }
 }
 

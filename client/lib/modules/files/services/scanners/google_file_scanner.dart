@@ -20,6 +20,14 @@ import 'package:path/path.dart' as p;
 /// but instead of reading the local filesystem it uses a [FileSourceProvider]
 /// reconstructed *inside* the isolate from raw token strings.
 ///
+/// Synchronization Rules:
+/// 1. [Registration-Only Startup] Scanners MUST only register on startup.
+/// 2. [Force Safety Gate] start() MUST return immediately if force is false.
+/// 3. [Manual Sync] User-initiated syncs MUST call start(force: true).
+/// 4. [Discovery vs Sync] Discover items quickly, sync heavy metadata incrementally.
+/// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
+///    syncs (path == null) and targeted folder scans (path != null).
+///
 /// ## Why reconstruct instead of passing the provider object?
 /// Dart isolates do not share memory. Only primitive types, [SendPort]s, and
 /// types that implement [Isolate]-safe serialisation can cross the boundary.
@@ -40,6 +48,15 @@ class CloudFileIsolate extends CollectionScanner {
     _logger = AppLogger(loggerIsolatePort);
   }
 
+  /// Starts the cloud file scanning process.
+  ///
+  /// [collection] The cloud collection to scan.
+  /// [path] Mode selector:
+  ///   - If NULL: **Full Sync**. Exhaustively traverses the entire cloud collection root.
+  ///   - If NOT NULL: **Targeted Scan**. Focuses ONLY on the specified folder ID
+  ///     (e.g., Google Drive folder ID) for immediate results during navigation.
+  /// [recursive] Whether to scan subfolders.
+  /// [force] If false, returns 0 immediately (Rule 2). If true, triggers sync.
   @override
   Future<int> start(
     Collection collection,
@@ -47,7 +64,8 @@ class CloudFileIsolate extends CollectionScanner {
     bool recursive,
     bool force,
   ) async {
-    if (isScanning.value && !force) {
+    if (!force) {
+      _logger?.i("Registration-only mode: skipping scan for ${collection.name}");
       return 0;
     }
 
@@ -88,12 +106,12 @@ class CloudFileIsolate extends CollectionScanner {
       'accessTokenExpiry': collection.expiration?.toIso8601String(),
     };
 
-    _isolate = await Isolate.spawn<Map<String, dynamic>>(
+    _isolate = await spawnIsolate(
       CloudFileIsolateWorker._entry,
       args,
       debugName: debugName,
     );
-    _isolate!.addOnExitListener(p.sendPort);
+    _isolate?.addOnExitListener(p.sendPort);
 
     // Listen for heartbeats, logs, and the exit signal
     await for (final message in p) {
@@ -152,6 +170,19 @@ class CloudFileIsolate extends CollectionScanner {
   void stop() {
     _isolate?.kill(priority: Isolate.beforeNextEvent);
     _logger?.i('CloudFileIsolate stopped');
+  }
+
+  /// Overridable for testing to avoid real isolate spawning
+  Future<Isolate?> spawnIsolate(
+    void Function(Map<String, dynamic>) entryPoint,
+    Map<String, dynamic> args, {
+    String? debugName,
+  }) async {
+    return await Isolate.spawn<Map<String, dynamic>>(
+      entryPoint,
+      args,
+      debugName: debugName,
+    );
   }
 }
 
