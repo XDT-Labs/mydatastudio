@@ -3827,6 +3827,257 @@ class FilesEmbeddingsCompanion extends UpdateCompanion<FilesEmbedding> {
   }
 }
 
+class $ProvidersTable extends Providers
+    with TableInfo<$ProvidersTable, Provider> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ProvidersTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _serviceMeta = const VerificationMeta(
+    'service',
+  );
+  @override
+  late final GeneratedColumn<String> service = GeneratedColumn<String>(
+    'service',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _clientIdMeta = const VerificationMeta(
+    'clientId',
+  );
+  @override
+  late final GeneratedColumn<String> clientId = GeneratedColumn<String>(
+    'client_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientSecretMeta = const VerificationMeta(
+    'clientSecret',
+  );
+  @override
+  late final GeneratedColumn<String> clientSecret = GeneratedColumn<String>(
+    'client_secret',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _apiKeyMeta = const VerificationMeta('apiKey');
+  @override
+  late final GeneratedColumn<String> apiKey = GeneratedColumn<String>(
+    'api_key',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  late final GeneratedColumnWithTypeConverter<List<String>?, String>
+  permissions = GeneratedColumn<String>(
+    'permissions',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  ).withConverter<List<String>?>($ProvidersTable.$converterpermissionsn);
+  @override
+  List<GeneratedColumn> get $columns => [
+    service,
+    clientId,
+    clientSecret,
+    apiKey,
+    permissions,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'providers';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<Provider> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('service')) {
+      context.handle(
+        _serviceMeta,
+        service.isAcceptableOrUnknown(data['service']!, _serviceMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_serviceMeta);
+    }
+    if (data.containsKey('client_id')) {
+      context.handle(
+        _clientIdMeta,
+        clientId.isAcceptableOrUnknown(data['client_id']!, _clientIdMeta),
+      );
+    }
+    if (data.containsKey('client_secret')) {
+      context.handle(
+        _clientSecretMeta,
+        clientSecret.isAcceptableOrUnknown(
+          data['client_secret']!,
+          _clientSecretMeta,
+        ),
+      );
+    }
+    if (data.containsKey('api_key')) {
+      context.handle(
+        _apiKeyMeta,
+        apiKey.isAcceptableOrUnknown(data['api_key']!, _apiKeyMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {service};
+  @override
+  Provider map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return Provider.fromDb(
+      service:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.string,
+            data['${effectivePrefix}service'],
+          )!,
+      clientId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}client_id'],
+      ),
+      clientSecret: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}client_secret'],
+      ),
+      apiKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}api_key'],
+      ),
+      permissions: $ProvidersTable.$converterpermissionsn.fromSql(
+        attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}permissions'],
+        ),
+      ),
+    );
+  }
+
+  @override
+  $ProvidersTable createAlias(String alias) {
+    return $ProvidersTable(attachedDatabase, alias);
+  }
+
+  static TypeConverter<List<String>, String> $converterpermissions =
+      const StringArrayConverter();
+  static TypeConverter<List<String>?, String?> $converterpermissionsn =
+      NullAwareTypeConverter.wrap($converterpermissions);
+}
+
+class ProvidersCompanion extends UpdateCompanion<Provider> {
+  final Value<String> service;
+  final Value<String?> clientId;
+  final Value<String?> clientSecret;
+  final Value<String?> apiKey;
+  final Value<List<String>?> permissions;
+  final Value<int> rowid;
+  const ProvidersCompanion({
+    this.service = const Value.absent(),
+    this.clientId = const Value.absent(),
+    this.clientSecret = const Value.absent(),
+    this.apiKey = const Value.absent(),
+    this.permissions = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ProvidersCompanion.insert({
+    required String service,
+    this.clientId = const Value.absent(),
+    this.clientSecret = const Value.absent(),
+    this.apiKey = const Value.absent(),
+    this.permissions = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : service = Value(service);
+  static Insertable<Provider> custom({
+    Expression<String>? service,
+    Expression<String>? clientId,
+    Expression<String>? clientSecret,
+    Expression<String>? apiKey,
+    Expression<String>? permissions,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (service != null) 'service': service,
+      if (clientId != null) 'client_id': clientId,
+      if (clientSecret != null) 'client_secret': clientSecret,
+      if (apiKey != null) 'api_key': apiKey,
+      if (permissions != null) 'permissions': permissions,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ProvidersCompanion copyWith({
+    Value<String>? service,
+    Value<String?>? clientId,
+    Value<String?>? clientSecret,
+    Value<String?>? apiKey,
+    Value<List<String>?>? permissions,
+    Value<int>? rowid,
+  }) {
+    return ProvidersCompanion(
+      service: service ?? this.service,
+      clientId: clientId ?? this.clientId,
+      clientSecret: clientSecret ?? this.clientSecret,
+      apiKey: apiKey ?? this.apiKey,
+      permissions: permissions ?? this.permissions,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (service.present) {
+      map['service'] = Variable<String>(service.value);
+    }
+    if (clientId.present) {
+      map['client_id'] = Variable<String>(clientId.value);
+    }
+    if (clientSecret.present) {
+      map['client_secret'] = Variable<String>(clientSecret.value);
+    }
+    if (apiKey.present) {
+      map['api_key'] = Variable<String>(apiKey.value);
+    }
+    if (permissions.present) {
+      map['permissions'] = Variable<String>(
+        $ProvidersTable.$converterpermissionsn.toSql(permissions.value),
+      );
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ProvidersCompanion(')
+          ..write('service: $service, ')
+          ..write('clientId: $clientId, ')
+          ..write('clientSecret: $clientSecret, ')
+          ..write('apiKey: $apiKey, ')
+          ..write('permissions: $permissions, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3841,6 +4092,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $FilesEmbeddingsTable filesEmbeddings = $FilesEmbeddingsTable(
     this,
   );
+  late final $ProvidersTable providers = $ProvidersTable(this);
   late final Index collectionsIdIdx = Index(
     'collections_id_idx',
     'CREATE INDEX collections_id_idx ON collections (id)',
@@ -3939,6 +4191,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     folders,
     albums,
     filesEmbeddings,
+    providers,
     collectionsIdIdx,
     collectionsPathIdx,
     collectionsTypeIdx,
@@ -6846,6 +7099,213 @@ typedef $$FilesEmbeddingsTableProcessedTableManager =
       FilesEmbedding,
       PrefetchHooks Function()
     >;
+typedef $$ProvidersTableCreateCompanionBuilder =
+    ProvidersCompanion Function({
+      required String service,
+      Value<String?> clientId,
+      Value<String?> clientSecret,
+      Value<String?> apiKey,
+      Value<List<String>?> permissions,
+      Value<int> rowid,
+    });
+typedef $$ProvidersTableUpdateCompanionBuilder =
+    ProvidersCompanion Function({
+      Value<String> service,
+      Value<String?> clientId,
+      Value<String?> clientSecret,
+      Value<String?> apiKey,
+      Value<List<String>?> permissions,
+      Value<int> rowid,
+    });
+
+class $$ProvidersTableFilterComposer
+    extends Composer<_$AppDatabase, $ProvidersTable> {
+  $$ProvidersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get service => $composableBuilder(
+    column: $table.service,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get clientId => $composableBuilder(
+    column: $table.clientId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get clientSecret => $composableBuilder(
+    column: $table.clientSecret,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get apiKey => $composableBuilder(
+    column: $table.apiKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnWithTypeConverterFilters<List<String>?, List<String>, String>
+  get permissions => $composableBuilder(
+    column: $table.permissions,
+    builder: (column) => ColumnWithTypeConverterFilters(column),
+  );
+}
+
+class $$ProvidersTableOrderingComposer
+    extends Composer<_$AppDatabase, $ProvidersTable> {
+  $$ProvidersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get service => $composableBuilder(
+    column: $table.service,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get clientId => $composableBuilder(
+    column: $table.clientId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get clientSecret => $composableBuilder(
+    column: $table.clientSecret,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get apiKey => $composableBuilder(
+    column: $table.apiKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get permissions => $composableBuilder(
+    column: $table.permissions,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ProvidersTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ProvidersTable> {
+  $$ProvidersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get service =>
+      $composableBuilder(column: $table.service, builder: (column) => column);
+
+  GeneratedColumn<String> get clientId =>
+      $composableBuilder(column: $table.clientId, builder: (column) => column);
+
+  GeneratedColumn<String> get clientSecret => $composableBuilder(
+    column: $table.clientSecret,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get apiKey =>
+      $composableBuilder(column: $table.apiKey, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<List<String>?, String> get permissions =>
+      $composableBuilder(
+        column: $table.permissions,
+        builder: (column) => column,
+      );
+}
+
+class $$ProvidersTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ProvidersTable,
+          Provider,
+          $$ProvidersTableFilterComposer,
+          $$ProvidersTableOrderingComposer,
+          $$ProvidersTableAnnotationComposer,
+          $$ProvidersTableCreateCompanionBuilder,
+          $$ProvidersTableUpdateCompanionBuilder,
+          (Provider, BaseReferences<_$AppDatabase, $ProvidersTable, Provider>),
+          Provider,
+          PrefetchHooks Function()
+        > {
+  $$ProvidersTableTableManager(_$AppDatabase db, $ProvidersTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () => $$ProvidersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$ProvidersTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer:
+              () => $$ProvidersTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> service = const Value.absent(),
+                Value<String?> clientId = const Value.absent(),
+                Value<String?> clientSecret = const Value.absent(),
+                Value<String?> apiKey = const Value.absent(),
+                Value<List<String>?> permissions = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ProvidersCompanion(
+                service: service,
+                clientId: clientId,
+                clientSecret: clientSecret,
+                apiKey: apiKey,
+                permissions: permissions,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String service,
+                Value<String?> clientId = const Value.absent(),
+                Value<String?> clientSecret = const Value.absent(),
+                Value<String?> apiKey = const Value.absent(),
+                Value<List<String>?> permissions = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ProvidersCompanion.insert(
+                service: service,
+                clientId: clientId,
+                clientSecret: clientSecret,
+                apiKey: apiKey,
+                permissions: permissions,
+                rowid: rowid,
+              ),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          BaseReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ProvidersTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ProvidersTable,
+      Provider,
+      $$ProvidersTableFilterComposer,
+      $$ProvidersTableOrderingComposer,
+      $$ProvidersTableAnnotationComposer,
+      $$ProvidersTableCreateCompanionBuilder,
+      $$ProvidersTableUpdateCompanionBuilder,
+      (Provider, BaseReferences<_$AppDatabase, $ProvidersTable, Provider>),
+      Provider,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -6867,4 +7327,6 @@ class $AppDatabaseManager {
       $$AlbumsTableTableManager(_db, _db.albums);
   $$FilesEmbeddingsTableTableManager get filesEmbeddings =>
       $$FilesEmbeddingsTableTableManager(_db, _db.filesEmbeddings);
+  $$ProvidersTableTableManager get providers =>
+      $$ProvidersTableTableManager(_db, _db.providers);
 }

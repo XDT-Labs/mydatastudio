@@ -33,6 +33,7 @@ import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/file_embedding.dart';
 import 'package:mydatatools/models/tables/folder.dart';
+import 'package:mydatatools/models/tables/provider.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatatools/modules/files/services/embedding_isolate.dart';
 import 'package:uuid/uuid.dart';
@@ -90,15 +91,6 @@ class DatabaseManager {
       supportPath = io.Directory(_originalSupportPath!);
     } else {
       supportPath = await getApplicationSupportDirectory();
-
-      // macOS path_provider quirk: ensure the directory matches our realm name if on develop
-      if (io.Platform.isMacOS && AppConstants.realmName.endsWith('.dev')) {
-        if (!supportPath.path.endsWith(AppConstants.realmName)) {
-          // Adjust path to use the .dev version
-          final parent = supportPath.parent.path;
-          supportPath = io.Directory(p.join(parent, AppConstants.realmName));
-        }
-      }
       _originalSupportPath = supportPath.path;
     }
 
@@ -315,6 +307,7 @@ class DatabaseManager {
     Folders,
     Albums,
     FilesEmbeddings,
+    Providers,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -331,7 +324,7 @@ class AppDatabase extends _$AppDatabase {
   String? name;
 
   @override
-  int get schemaVersion => 15;
+  int get schemaVersion => 16;
 
   @override
   MigrationStrategy get migration {
@@ -564,6 +557,13 @@ class AppDatabase extends _$AppDatabase {
             }
           }
           logger.i('v15 migration complete');
+        }
+        if (from < 16) {
+          logger.i(
+            'Upgrade to v16: Adding Providers table',
+          );
+          await m.createTable(providers);
+          logger.i('v16 migration complete');
         }
       },
       beforeOpen: (OpeningDetails details) async {

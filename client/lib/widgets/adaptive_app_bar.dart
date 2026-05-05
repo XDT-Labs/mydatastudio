@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 class AdaptiveAppBar extends StatelessWidget implements PreferredSizeWidget {
   const AdaptiveAppBar({
@@ -38,7 +39,9 @@ class AdaptiveAppBar extends StatelessWidget implements PreferredSizeWidget {
             IconButton(
               icon: const Icon(Icons.settings, color: Colors.black54),
               tooltip: 'User Settings',
-              onPressed: () {},
+              onPressed: () {
+                GoRouter.of(context).push('/settings');
+              },
             ),
           ],
         ),

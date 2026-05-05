@@ -12,9 +12,18 @@ import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
+import 'package:mydatatools/database_manager.dart';
 
 // ignore: constant_identifier_names
 enum LoginProviders { google, googleDrive, azure, outlook }
+
+class ProviderConfigurationException implements Exception {
+  final String message;
+  ProviderConfigurationException(this.message);
+
+  @override
+  String toString() => 'ProviderConfigurationException: $message';
+}
 
 ///
 /// Based on this stackoverflow answer
@@ -64,15 +73,16 @@ extension LoginProviderExtension on LoginProviders {
 
   /// OAuth client ID.
   /// Evaluation happens at compile-time via --dart-define or --dart-define-from-file.
-  String get clientId {
-    switch (this) {
-      case LoginProviders.google:
-      case LoginProviders.googleDrive:
-        return const String.fromEnvironment('GOOGLE_CLIENT_ID');
-      case LoginProviders.azure:
-      case LoginProviders.outlook:
-        return const String.fromEnvironment('AZURE_CLIENT_ID');
+  Future<String> get clientId async {
+    final db = DatabaseManager.instance.database;
+    if (db != null) {
+      final provider = await (db.select(db.providers)..where((tbl) => tbl.service.equals(key))).getSingleOrNull();
+      if (provider != null && provider.clientId != null && provider.clientId!.isNotEmpty) {
+        return provider.clientId!;
+      }
     }
+
+    return '';
   }
 
   /// Whether this provider uses PKCE (code_challenge + code_verifier).
@@ -92,15 +102,16 @@ extension LoginProviderExtension on LoginProviders {
   /// OAuth client secret.
   /// Google requires client_secret for desktop apps even with PKCE enabled.
   /// Evaluation happens at compile-time via --dart-define or --dart-define-from-file.
-  String get clientSecret {
-    switch (this) {
-      case LoginProviders.google:
-      case LoginProviders.googleDrive:
-        return const String.fromEnvironment('GOOGLE_CLIENT_SECRET');
-      case LoginProviders.azure:
-      case LoginProviders.outlook:
-        return const String.fromEnvironment('AZURE_CLIENT_SECRET');
+  Future<String> get clientSecret async {
+    final db = DatabaseManager.instance.database;
+    if (db != null) {
+      final provider = await (db.select(db.providers)..where((tbl) => tbl.service.equals(key))).getSingleOrNull();
+      if (provider != null && provider.clientSecret != null && provider.clientSecret!.isNotEmpty) {
+        return provider.clientSecret!;
+      }
     }
+
+    return '';
   }
 
   List<String> get scopes {

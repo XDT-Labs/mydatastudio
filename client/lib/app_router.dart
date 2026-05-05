@@ -17,6 +17,7 @@ import 'package:mydatatools/modules/social/pages/twitter_page.dart';
 import 'package:mydatatools/modules/social/widgets/social_drawer.dart';
 import 'package:mydatatools/pages/home.dart';
 import 'package:mydatatools/pages/login.dart';
+import 'package:mydatatools/pages/settings.dart';
 import 'package:mydatatools/pages/setup.dart';
 import 'package:mydatatools/services/get_user_service.dart';
 import 'package:mydatatools/widgets/router/navigation_wrapper.dart';
@@ -78,6 +79,17 @@ class AppRouter {
                 key: UniqueKey(),
                 isStandalone: true,
                 body: const SetupPage(),
+              );
+            },
+          ),
+
+          GoRoute(
+            path: '/settings',
+            pageBuilder: (BuildContext context, GoRouterState state) {
+              return RoutePage(
+                key: UniqueKey(),
+                isStandalone: true,
+                body: const SettingsPage(),
               );
             },
           ),

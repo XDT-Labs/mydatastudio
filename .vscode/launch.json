@@ -9,9 +9,7 @@
             "cwd": "client",
             "request": "launch",
             "type": "dart",
-            "args": [
-                "--dart-define-from-file=config/secrets-dev.json"
-            ]
+            "args": []
         },
         {
             "name": "client (impeller)",
@@ -19,8 +17,7 @@
             "request": "launch",
             "type": "dart",
             "args": [
-                "--enable-impeller",
-                "--dart-define-from-file=config/secrets-dev.json"
+                "--enable-impeller"
             ]
         },
         {
@@ -29,9 +26,7 @@
             "request": "launch",
             "type": "dart",
             "flutterMode": "profile",
-            "args": [
-                "--dart-define-from-file=config/secrets-dev.json"
-            ]
+            "args": []
         },
         {
             "name": "client (release mode)",
@@ -39,9 +34,7 @@
             "request": "launch",
             "type": "dart",
             "flutterMode": "release",
-            "args": [
-                "--dart-define-from-file=config/secrets.json"
-            ]
+            "args": []
         }
     ]
 }

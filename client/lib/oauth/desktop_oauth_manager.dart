@@ -25,13 +25,20 @@ class DesktopOAuthManager extends DesktopLoginManager {
   Future<oauth2.Client> _getOAuth2Client(Uri redirectUrl, {Map<String, String>? customParameters}) async {
     // The oauth2 package auto-generates PKCE (code_verifier + S256 code_challenge)
     // for all grants. Google requires client_secret alongside PKCE for desktop apps.
+    final clientId = await loginProvider.clientId;
+    final clientSecret = await loginProvider.clientSecret;
+
+    if (clientId.isEmpty || clientSecret.isEmpty) {
+      throw ProviderConfigurationException('Please configure Client ID and Secret in Settings for ${loginProvider.key}.');
+    }
+
     var grant = oauth2.AuthorizationCodeGrant(
-      loginProvider.clientId,
+      clientId,
       Uri.parse(loginProvider.authorizationEndpoint.replaceAll('{tenant}', loginProvider.tenant)),
       Uri.parse(loginProvider.tokenEndpoint.replaceAll('{tenant}', loginProvider.tenant)),
       httpClient: JsonAcceptingHttpClient(scopes: loginProvider.scopes),
       basicAuth: false,
-      secret: loginProvider.clientSecret.isEmpty ? null : loginProvider.clientSecret,
+      secret: clientSecret.isEmpty ? null : clientSecret,
     );
     var authorizationUrl = grant.getAuthorizationUrl(
       redirectUrl,
