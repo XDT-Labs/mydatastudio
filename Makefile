@@ -128,14 +128,6 @@ local-install-python: build-python
 	rm -fr ~/Library/Application\ Support/$$REALM/aichat
 	@echo "--- ✅ Copy complete ---"
 
-# Cloud Run Deployment
-.PHONY: deploy-download-service
-deploy-download-service: init
-	@echo "--- 🚀 Deploying $(SERVICE_NAME) to Cloud Run ---"
-	cd services/download-models && gcloud builds submit . \
-		--config cloudbuild.yaml \
-		--region=$(REGION) \
-		--substitutions _SERVICE_NAME=$(SERVICE_NAME),_REGION=$(REGION),_GCS_BUCKET=mydata-tools_downloads,_GCS_FOLDER_PREFIX=local-llm-models/,_REPO_NAME=$(IMAGE_REPO)
 
 
 # Cleanup
