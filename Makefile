@@ -37,8 +37,7 @@ HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
 
 # Flutter Config
 FLUTTER_DIR = client
-# Default realm name, overridden in set-bundle-id
-REALM_NAME = mydata.tools
+
 
 # --- Targets ---
 
