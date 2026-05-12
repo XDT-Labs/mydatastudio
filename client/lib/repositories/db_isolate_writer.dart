@@ -158,7 +158,10 @@ class DbIsolateWriterClient {
     final AppLogger logger = AppLogger(cfg['loggerPort'] as SendPort?);
 
     // create the AppDatabase inside the isolate
-    AppDatabase db = AppDatabase(null, path, name, useMemoryDb);
+    // We pass inBackground: false because this code is already running
+    // inside a dedicated background isolate. Spawning another isolate
+    // via createInBackground here adds overhead and file lock races.
+    AppDatabase db = AppDatabase(null, path, name, useMemoryDb, false);
 
     await for (final data in port) {
       if (data is! Map) continue;

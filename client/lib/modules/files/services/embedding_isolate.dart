@@ -123,7 +123,8 @@ class EmbeddingIsolate {
 
     logger.i("EmbeddingIsolate starting loop");
 
-    final db = AppDatabase(null, storagePath, dbName, false);
+    // We pass inBackground: false because this is already a background isolate
+    final db = AppDatabase(null, storagePath, dbName, false, false);
     final repo = DatabaseRepository(db);
 
     // Initial delay to let everything settle

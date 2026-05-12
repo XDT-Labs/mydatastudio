@@ -131,6 +131,11 @@ class DatabaseManager {
     // start database
     appDatabase = await _openDatabase(path);
 
+    // Explicitly enforce WAL mode before spawning background isolates.
+    // This guarantees the database acquires the initial EXCLUSIVE lock
+    // and converts to WAL mode without contention from background threads.
+    await appDatabase!.customStatement('PRAGMA journal_mode=WAL;');
+
     // start database repository
     _repository = DatabaseRepository(appDatabase!);
  
@@ -318,7 +323,8 @@ class AppDatabase extends _$AppDatabase {
     String? path,
     String? name,
     bool useMemoryDb = false,
-  ]) : super(executor ?? _openConnection(path, name, useMemoryDb));
+    bool inBackground = true,
+  ]) : super(executor ?? _openConnection(path, name, useMemoryDb, inBackground));
 
   String? path;
   String? name;
@@ -719,7 +725,7 @@ Sqlite3 _loadExtensions() {
   return sqlite3;
 }
 
-LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb) {
+LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb, bool inBackground) {
   if (!useMemoryDb && (path == null || name == null)) {
     throw ("Path or Name not provided, can not start scanner");
   }
@@ -741,7 +747,8 @@ LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb) {
 
       AppLogger(null).i("Opening Database | $path");
       // In tests, avoid createInBackground to bypass FFI/isolate callback issues
-      if (DatabaseManager.isTesting) {
+      // Also avoid it if inBackground is false (e.g., when already running inside an isolate)
+      if (DatabaseManager.isTesting || !inBackground) {
         return NativeDatabase(
           file,
           logStatements: false,

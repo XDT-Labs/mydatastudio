@@ -1,0 +1,130 @@
+import 'package:flutter/material.dart';
+import 'package:mydatatools/database_manager.dart';
+import 'package:drift/drift.dart' as drift;
+
+class GoogleDriveConfigureView extends StatefulWidget {
+  final VoidCallback onConfigured;
+
+  const GoogleDriveConfigureView({super.key, required this.onConfigured});
+
+  @override
+  State<GoogleDriveConfigureView> createState() => _GoogleDriveConfigureViewState();
+}
+
+class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
+  final _clientIdController = TextEditingController();
+  final _clientSecretController = TextEditingController();
+  bool _isSaving = false;
+
+  @override
+  void dispose() {
+    _clientIdController.dispose();
+    _clientSecretController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final db = DatabaseManager.instance.database;
+    if (db == null) return;
+
+    final clientId = _clientIdController.text.trim();
+    final clientSecret = _clientSecretController.text.trim();
+
+    if (clientId.isEmpty || clientSecret.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Client ID and Client Secret are required')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      final existing = await (db.select(db.providers)..where((tbl) => tbl.service.equals('google'))).getSingleOrNull();
+
+      if (existing != null) {
+        await (db.update(db.providers)..where((tbl) => tbl.service.equals('google'))).write(
+          ProvidersCompanion(
+            clientId: drift.Value(clientId),
+            clientSecret: drift.Value(clientSecret),
+          ),
+        );
+      } else {
+        await db.into(db.providers).insert(
+          ProvidersCompanion(
+            service: const drift.Value('google'),
+            clientId: drift.Value(clientId),
+            clientSecret: drift.Value(clientSecret),
+            apiKey: const drift.Value(''),
+          ),
+        );
+      }
+      
+      widget.onConfigured();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save configuration: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Image.asset('assets/images/google-drive.png', height: 72),
+        const SizedBox(height: 24),
+        const Text(
+          'Configure Google Drive',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'To connect to Google Drive, you must provide your own OAuth Client ID and Secret.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.5),
+        ),
+        const SizedBox(height: 24),
+        TextField(
+          controller: _clientIdController,
+          decoration: const InputDecoration(
+            labelText: 'Client ID',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _clientSecretController,
+          decoration: const InputDecoration(
+            labelText: 'Client Secret',
+            border: OutlineInputBorder(),
+          ),
+          obscureText: true,
+        ),
+        const SizedBox(height: 28),
+        ElevatedButton(
+          onPressed: _isSaving ? null : _save,
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+          ),
+          child: _isSaving 
+            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Text('Save & Continue', style: TextStyle(fontSize: 16)),
+        ),
+      ],
+    );
+  }
+}
