@@ -71,13 +71,9 @@ class UserRepository {
       throw Exception("Database not initialized");
     }
 
-    int rowsUpdated = await db!.into(db!.appUsers).insertOnConflictUpdate(user);
+    await db!.into(db!.appUsers).insertOnConflictUpdate(user);
 
-    if (rowsUpdated == 0) {
-      throw Exception("Error saving user");
-    }
-
-    // TODO: register user, with only the Public Key to server
+    // TODO: register user, send only the Public Key to server
 
     return Future(() => user);
   }

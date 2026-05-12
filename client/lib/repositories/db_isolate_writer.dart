@@ -228,9 +228,8 @@ class DbIsolateWriterClient {
           replyTo?.send({'status': 'ok'});
         } else if (data['type'] == 'user') {
           // Handle user save
-          UserRepository(db).saveUser(data['user'] as AppUser).then((v) async {
-            replyTo?.send({'status': 'ok', 'id': v?.id});
-          });
+          final v = await UserRepository(db).saveUser(data['user'] as AppUser);
+          replyTo?.send({'status': 'ok', 'id': v?.id});
         } else if (data['type'] == 'delete_collection') {
           // Handle collection delete in background
           final id = data['id'] as String;
