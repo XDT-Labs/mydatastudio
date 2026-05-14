@@ -16,7 +16,14 @@ class _SettingsPageState extends State<SettingsPage> {
   final Map<String, TextEditingController> _apiKeyControllers = {};
   bool _isLoading = true;
 
-  final List<String> _supportedProviders = ['google', 'outlook'];
+  final List<String> _supportedProviders = [
+    'google',
+    'microsoft/azure',
+    'dropbox',
+    'facebook',
+    'instagram',
+    'twitter',
+  ];
 
   @override
   void initState() {
@@ -101,7 +108,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: const Text('Providers'),
         leading: BackButton(
           onPressed: () {
             if (GoRouter.of(context).canPop()) {
