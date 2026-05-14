@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:media_kit/media_kit.dart';
 
 /// The main() function is the starting point of the application. It first ensures that the Flutter binding is initialized.
@@ -69,6 +70,8 @@ class MainAppState extends State<MainApp>
     with WidgetsBindingObserver, WindowListener {
   bool _needsSetup = false;
   bool _isSetupComplete = false;
+  bool _dbAccessError = false;
+  String? _dbErrorPath;
   PythonManager? pythonManager;
   late final AppLifecycleListener _lifecycleListener;
 
@@ -130,31 +133,40 @@ class MainAppState extends State<MainApp>
         _needsSetup = true;
       });
     } else {
-      // 1. Initialize local Database
-      var dbFuture = DatabaseManager.instance.initializeDatabase();
-      await dbFuture;
+      try {
+        // 1. Initialize local Database
+        var dbFuture = DatabaseManager.instance.initializeDatabase();
+        await dbFuture;
 
-      // 2. Initialize Python Manager
-      final pythonFuture =
-          (() async {
-            final pythonMgr = await PythonManager.forAppSupport();
-            await pythonMgr.startAiChatService();
-            return pythonMgr;
-          })();
+        // 2. Initialize Python Manager
+        final pythonFuture =
+            (() async {
+              final pythonMgr = await PythonManager.forAppSupport();
+              await pythonMgr.startAiChatService();
+              return pythonMgr;
+            })();
 
-      // Wait for both to finish (db is already done)
-      await Future.wait([pythonFuture, dbFuture]);
+        // Wait for both to finish (db is already done)
+        await Future.wait([pythonFuture, dbFuture]);
 
-      // set database repository
-      MainApp.databaseManager = DatabaseManager.instance;
-      //set python manager
-      pythonManager = await pythonFuture;
+        // set database repository
+        MainApp.databaseManager = DatabaseManager.instance;
+        //set python manager
+        pythonManager = await pythonFuture;
 
-      // 4. Signal ready
-      if (mounted) {
-        setState(() {
-          _isSetupComplete = MainApp.databaseManager != null;
-        });
+        // 4. Signal ready
+        if (mounted) {
+          setState(() {
+            _isSetupComplete = MainApp.databaseManager != null;
+          });
+        }
+      } on FileSystemException catch (e) {
+        if (mounted) {
+          setState(() {
+            _dbAccessError = true;
+            _dbErrorPath = e.path;
+          });
+        }
       }
     }
   }
@@ -195,6 +207,104 @@ class MainAppState extends State<MainApp>
     );
   }
 
+  Widget _initDbErrorScreen() {
+    () async {
+      await windowManager.setTitle('MyData Tools - Error');
+      await windowManager.setSize(const Size(800, 600));
+      await windowManager.center();
+    }();
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Colors.grey.shade900,
+        body: Center(
+          child: Card(
+            elevation: 8,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Container(
+              width: 500,
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.redAccent, size: 64),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Storage Location Not Found',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'The configured storage location could not be accessed. It may be on a disconnected network drive or the folder was moved.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SelectableText(
+                          "Configured Location:\n${DatabaseManager.instance.storagePath ?? 'Unknown'}",
+                          style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 12),
+                        SelectableText(
+                          "Error Details:\n$_dbErrorPath",
+                          style: const TextStyle(fontFamily: 'monospace', color: Colors.red),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry Existing'),
+                        onPressed: () {
+                          setState(() {
+                            _dbAccessError = false;
+                            _dbErrorPath = null;
+                          });
+                          _initStartup();
+                        },
+                      ),
+                      const SizedBox(width: 16),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.folder_open),
+                        label: const Text('Pick New Location'),
+                        onPressed: () async {
+                          String? newPath = await FilePicker.platform.getDirectoryPath();
+                          if (newPath != null) {
+                            await DatabaseManager.instance.updateConfigPath(newPath);
+                            if (mounted) {
+                              setState(() {
+                                _dbAccessError = false;
+                                _dbErrorPath = null;
+                              });
+                              _initStartup();
+                            }
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _initSetupScreen() {
     // Handle case where database initialization fails but we want to show the main app anyway
     // Or perhaps navigate to a setup screen.
@@ -221,6 +331,9 @@ class MainAppState extends State<MainApp>
 
   @override
   Widget build(BuildContext context) {
+    if (_dbAccessError) {
+      return _initDbErrorScreen();
+    }
     if (_needsSetup) {
       return _initSetupScreen();
     }

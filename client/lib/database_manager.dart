@@ -110,6 +110,17 @@ class DatabaseManager {
     return file.existsSync();
   }
 
+  /// Updates the database configuration path
+  Future<void> updateConfigPath(String newPath) async {
+    io.File file = io.File(await _getConfigPath());
+    var config = <String, dynamic>{};
+    if (file.existsSync()) {
+      config = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+    }
+    config['path'] = newPath;
+    file.writeAsStringSync(jsonEncode(config));
+  }
+
   /// Initializes the database, repository, writer isolate, and scanners
   Future<AppDatabase> initializeDatabase() async {
     io.File file = io.File(await _getConfigPath());
@@ -185,6 +196,9 @@ class DatabaseManager {
     } catch (err) {
       //unknown error
       logger.e(err);
+      if (err is io.FileSystemException) {
+        rethrow;
+      }
       throw Exception(err);
     }
   }
