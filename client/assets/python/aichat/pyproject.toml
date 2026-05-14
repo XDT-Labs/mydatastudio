@@ -38,8 +38,8 @@ license = {text = "Apache"}
 distribution = true
 
 [tool.pdm.options]
-# Enable PEP 582 to create __pypackages__ folder
-use_venv = false
+# Use standard virtual environment instead of PEP 582 for VS Code compatibility
+use_venv = true
 
 
 [tool.setuptools.packages.find]

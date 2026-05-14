@@ -40,6 +40,16 @@ class PythonManager {
   bool get isRunning => _pythonProc != null;
 
   Future<void> startAiChatService() async {
+    const remoteUrl = String.fromEnvironment('PYTHON_SERVER_URL');
+    if (remoteUrl.isNotEmpty) {
+      logger.i('[python] Using remote AI Chat service at: $remoteUrl');
+      print('[python] Using remote AI Chat service at: $remoteUrl');
+      MainApp.llmServiceUrl.add(remoteUrl);
+      isLLMServiceRunning.value = true;
+      PythonManager.startupProgress.value = 'Connected to remote AI service';
+      return Future.value();
+    }
+
     PythonManager.startupProgress.value = 'Preparing AI service...';
     // Use a completer to ensure the aichat assets are available before proceeding.
     Completer<void> completer = Completer<void>();

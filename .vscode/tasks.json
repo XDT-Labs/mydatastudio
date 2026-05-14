@@ -13,6 +13,18 @@
             "command": "cd client/assets/python/aichat && pdm install && python -m PyInstaller -y main.spec --clean --noconfirm && cd dist/aichat && zip -r ../../../../../app/aichat-macos.zip aichat",
             "problemMatcher": [],
             "group": "build"
+        },
+        {
+            "label": "Use Dev Pubspec",
+            "type": "shell",
+            "command": "cp client/pubspec.dev.yaml client/pubspec.yaml",
+            "problemMatcher": []
+        },
+        {
+            "label": "Use Prod Pubspec",
+            "type": "shell",
+            "command": "cp client/pubspec.prod.yaml client/pubspec.yaml",
+            "problemMatcher": []
         }
     ]
 }
