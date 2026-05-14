@@ -15,15 +15,18 @@ class UserRepository {
   }
 
   Future<AppUser?> userExists() async {
-    AppUser? user = await db?.select(db!.appUsers).getSingleOrNull();
+    if (db == null) return null;
+    AppUser? user = await (db!.select(db!.appUsers)..limit(1)).getSingleOrNull();
     return user;
   }
 
   /// Search for user by password that has been hashed with a PBKDF2 algorithm
   Future<AppUser?> user(String password) async {
+    if (db == null) return null;
     AppUser? user =
-        await (db?.select(db!.appUsers)
-          ?..where((e) => e.password.equals(password)))?.getSingleOrNull();
+        await (db!.select(db!.appUsers)
+          ..where((e) => e.password.equals(password))
+          ..limit(1)).getSingleOrNull();
 
     if (user != null) {
       String keyDir = '${user.localStoragePath}${Platform.pathSeparator}keys';

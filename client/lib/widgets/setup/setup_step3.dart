@@ -27,6 +27,7 @@ class SetupStep3 extends StatefulWidget {
 class _SetupStep3State extends State<SetupStep3> {
   final EncryptionHelper encHelper = EncryptionHelper();
   final AppLogger logger = AppLogger(null);
+  bool _isSubmitting = false;
 
   final encryptionForm = FormGroup(
     {
@@ -162,19 +163,33 @@ class _SetupStep3State extends State<SetupStep3> {
                   ),
                   OutlinedButton(
                     onPressed:
-                        encryptionForm.valid
-                            ? () => onStepContinueHandler(context, appUserClone)
+                        (encryptionForm.valid && !_isSubmitting)
+                            ? () {
+                                setState(() {
+                                  _isSubmitting = true;
+                                });
+                                onStepContinueHandler(context, appUserClone);
+                              }
                             : null,
                     style: ButtonStyle(
                       backgroundColor:
-                          encryptionForm.valid
+                          (encryptionForm.valid && !_isSubmitting)
                               ? WidgetStateProperty.all<Color>(Colors.green)
                               : WidgetStateProperty.all<Color>(Colors.grey),
                       foregroundColor: WidgetStateProperty.all<Color>(
                         Colors.white,
                       ),
                     ),
-                    child: const Text('Complete Setup'),
+                    child: _isSubmitting
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text('Complete Setup'),
                   ),
                 ],
               );

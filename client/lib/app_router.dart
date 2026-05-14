@@ -20,6 +20,7 @@ import 'package:mydatatools/pages/login.dart';
 import 'package:mydatatools/pages/settings.dart';
 import 'package:mydatatools/pages/setup.dart';
 import 'package:mydatatools/services/get_user_service.dart';
+import 'package:mydatatools/repositories/user_repository.dart';
 import 'package:mydatatools/widgets/router/navigation_wrapper.dart';
 import 'package:mydatatools/widgets/router/route_page.dart';
 import 'package:flutter/material.dart';
@@ -45,6 +46,12 @@ class AppRouter {
       //check if user is logged in
       AppUser? user = GetUserService.instance.sink.valueOrNull;
       if (user == null) {
+        // Check if there are any users in the database at all
+        UserRepository repo = UserRepository(DatabaseManager.instance.database);
+        AppUser? existingUser = await repo.userExists();
+        if (existingUser == null) {
+          return '/setup';
+        }
         return '/login';
       }
 
