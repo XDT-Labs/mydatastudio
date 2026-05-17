@@ -22,6 +22,7 @@ class GetCollectionsService
     // UI sections to show loading spinners (e.g., FileDrawer showing
     // a spinner when only Gmail login triggered a refresh).
     final allCollections = await repo.collections();
+    print('GetCollectionsService.invoke: found ${allCollections.length} collections');
     sink.add(allCollections);
     
     return Future(() => allCollections);

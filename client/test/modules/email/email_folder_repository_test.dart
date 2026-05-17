@@ -1,34 +1,55 @@
-import 'package:drift/native.dart';
+import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatatools/database_manager.dart';
+import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/modules/email/services/email_folder_repository.dart';
 
 void main() {
-  late AppDatabase database;
+  late Directory tempDir;
+  late DatabaseManager databaseManager;
   late EmailFolderRepository repository;
 
   setUp(() async {
-    // Use an in-memory database for testing
-    database = AppDatabase(NativeDatabase.memory());
-    repository = EmailFolderRepository(database);
+    TestWidgetsFlutterBinding.ensureInitialized();
+    tempDir = await Directory.systemTemp.createTemp('email_folder_test_');
+
+    const MethodChannel channel = MethodChannel(
+      'plugins.flutter.io/path_provider',
+    );
+    // ignore: deprecated_member_use
+    channel.setMockMethodCallHandler((MethodCall methodCall) async {
+      return tempDir.path;
+    });
+
+    databaseManager = DatabaseManager.instance;
+    databaseManager.useMemoryDb = false;
+    await databaseManager.initializeDatabase();
+
+    repository = EmailFolderRepository(databaseManager.database!);
 
     // Need to insert a collection because of foreign key constraint in EmailFolders table
-    await database.into(database.collections).insert(
-          CollectionsCompanion.insert(
-            id: 'col1',
-            name: 'Test Account',
-            path: 'test@gmail.com',
-            type: 'email',
-            scanner: 'gmail',
-            scanStatus: 'idle',
-            needsReAuth: false,
-          ),
-        );
+    final colRepo = CollectionRepository(databaseManager.database!);
+    await colRepo.addCollection(Collection(
+      id: 'col1',
+      name: 'Test Account',
+      path: 'test@gmail.com',
+      type: 'email',
+      scanner: 'gmail',
+      scanStatus: 'idle',
+      needsReAuth: false,
+    ));
   });
 
   tearDown(() async {
-    await database.close();
+    databaseManager.dispose();
+    if (tempDir.existsSync()) {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    }
   });
 
   test('upsertFolder and byCollectionId works correctly', () async {

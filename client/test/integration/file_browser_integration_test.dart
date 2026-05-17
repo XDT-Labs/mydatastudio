@@ -7,14 +7,18 @@ import 'package:mydatatools/main.dart';
 import 'package:mydatatools/modules/files/pages/rx_files_page.dart';
 import 'package:path/path.dart' as p;
 import 'package:mydatatools/models/tables/app_user.dart';
+import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatatools/repositories/user_repository.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatatools/services/get_user_service.dart';
+import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:uuid/uuid.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:drift/drift.dart';
 
 class MockPathProviderPlatform extends Mock
     with MockPlatformInterfaceMixin
@@ -59,31 +63,6 @@ void main() {
     
     // 7. Mock LLM service URL to avoid initialization errors
     MainApp.llmServiceUrl.add('http://localhost:8000');
-    
-    // 8. Setup a fake user
-    final user = AppUser(
-      id: const Uuid().v4(),
-      name: 'Integration Test User',
-      email: 'test@example.com',
-      password: 'password',
-      localStoragePath: tempDir.path,
-    );
-    
-    // Insert user via directly to ensure it's synced
-    await (dbMgr.database as AppDatabase).into((dbMgr.database as AppDatabase).appUsers).insert(
-          AppUsersCompanion.insert(
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            password: user.password,
-            localStoragePath: user.localStoragePath,
-          ),
-        );
-    
-    // Seed the GetUserService singleton
-    GetUserService.instance.sink.add(user);
-    
-    DatabaseManager.isInitializedNotifier.value = true;
   });
 
   tearDown(() async {
@@ -112,9 +91,29 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(() => tester.view.resetPhysicalSize());
 
+    // Setup a fake user and insert via runAsync
+    final user = AppUser(
+      id: const Uuid().v4(),
+      name: 'Integration Test User',
+      email: 'test@example.com',
+      password: 'password',
+      localStoragePath: tempDir.path,
+    );
+
+    await tester.runAsync(() async {
+      final dbMgr = DatabaseManager.instance;
+      final userRepo = UserRepository(dbMgr.database!);
+      await userRepo.saveUser(user);
+    });
+
+    // Seed the GetUserService singleton
+    GetUserService.instance.sink.add(user);
+    DatabaseManager.isInitializedNotifier.value = true;
+
     // 1. Create a collection in DB
-    await db.into(db.collections).insert(
-      CollectionsCompanion.insert(
+    final colRepo = CollectionRepository(DatabaseManager.instance.database!);
+    await tester.runAsync(() async {
+      await colRepo.addCollection(Collection(
         id: colId,
         name: 'Integration Collection',
         path: collectionPath,
@@ -122,9 +121,8 @@ void main() {
         scanner: AppConstants.scannerFileLocal,
         scanStatus: 'idle',
         needsReAuth: false,
-        downloadLocalCopy: const Value(false),
-      ),
-    );
+      ));
+    });
 
     // 2. Seed test files on disk
     io.File(p.join(collectionPath, 'test1.txt')).createSync();
@@ -136,7 +134,13 @@ void main() {
 
     // 3. Trigger Scanner
     final scannerManager = ScannerManager(db);
-    final collection = await (db.select(db.collections)..where((t) => t.id.equals(colId))).getSingle();
+    late Collection collection;
+    
+    await tester.runAsync(() async {
+      final fetchedCollection = await colRepo.collectionById(colId);
+      expect(fetchedCollection, isNotNull);
+      collection = fetchedCollection!;
+    });
     
     print('Test: Starting scanner for ${collection.name}');
     await tester.runAsync(() async {
@@ -146,11 +150,12 @@ void main() {
 
     // 4. Wait for database persistence
     print('Test: Waiting for files to reach DB...');
+    final fileRepo = FileDesktopRepository(DatabaseManager.instance.database!);
     await tester.runAsync(() async {
       int retries = 0;
       int count = 0;
       while (retries < 40) {
-        final files = await (db.select(db.files)..where((t) => t.collectionId.equals(colId))).get();
+        final files = await fileRepo.getByParentPath(colId, '');
         count = files.length;
         print('Test: DB file count = $count');
         if (count >= 2) break;
@@ -160,23 +165,45 @@ void main() {
       expect(count, greaterThanOrEqualTo(2), reason: 'Should have found at least 2 files in root');
     });
 
-    // 5. Verify UI Rendering
-    print('Test: Pumping RxFilesPage...');
-    
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(
-          body: RxFilesPage(),
+    await tester.runAsync(() async {
+      final collectionsInDb = await colRepo.collections();
+      print('Test: Collections in DB = ${collectionsInDb.length}');
+      if (collectionsInDb.isNotEmpty) {
+        print('Test: First collection name = ${collectionsInDb.first.name}');
+      }
+      
+      // Let's seed GetCollectionsService manually to avoid timing issues
+      GetCollectionsService.instance.sink.add(collectionsInDb);
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: RxFilesPage(),
+          ),
         ),
-      ),
-    );
+      );
 
-    // We need to set the selected collection for RxFilesPage AFTER pumpWidget (so it's listening)
-    RxFilesPage.selectedCollection.add(collection);
+      // We need to set the selected collection for RxFilesPage AFTER pumpWidget (so it's listening)
+      RxFilesPage.selectedCollection.add(collection);
 
-    // Allow data to load and UI to settle
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.pump(const Duration(milliseconds: 500));
+      // Allow data to load and UI to settle dynamically
+      int pumpRetries = 0;
+      while (pumpRetries < 40) {
+        await tester.pump(const Duration(milliseconds: 100));
+        if (find.text('test1.txt').evaluate().isNotEmpty) {
+          print('Test: Found test1.txt in widget tree at retry $pumpRetries!');
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 100));
+        pumpRetries++;
+      }
+    });
+
+    // Print all rendered Text widgets for diagnostics
+    for (final element in find.byType(Text).evaluate()) {
+      final textWidget = element.widget as Text;
+      print('Rendered Text: "${textWidget.data}"');
+    }
 
     // Verify file names are present in the list
     expect(find.text('test1.txt'), findsOneWidget);

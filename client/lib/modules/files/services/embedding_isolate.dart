@@ -123,11 +123,7 @@ class EmbeddingIsolate {
 
     logger.i("EmbeddingIsolate starting loop");
 
-    // We pass inBackground: false because this is already a background isolate.
-    // This connection is READ-ONLY (writes go through writerPort), but it still
-    // needs proper PRAGMA configuration to avoid lock contention and checkpoint
-    // storms with the main thread and writer isolate connections.
-    final db = AppDatabase(null, storagePath, dbName, false, false);
+    final db = await AppDatabase.create(null, storagePath, dbName, false);
     final repo = DatabaseRepository(db);
 
     // Initial delay to let everything settle

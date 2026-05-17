@@ -1,20 +1,4 @@
-import 'package:mydatatools/database_manager.dart';
-import 'package:drift/drift.dart';
-import 'package:mydatatools/models/tables/converters/string_array_convertor.dart';
-
-@UseRowClass(Provider, constructor: 'fromDb')
-class Providers extends Table {
-  TextColumn get service => text()();
-  TextColumn get clientId => text().nullable()();
-  TextColumn get clientSecret => text().nullable()();
-  TextColumn get apiKey => text().nullable()();
-  TextColumn get permissions => text().map(const StringArrayConverter()).nullable()();
-
-  @override
-  Set<Column> get primaryKey => {service};
-}
-
-class Provider implements Insertable<Provider> {
+class Provider {
   String service;
   String? clientId;
   String? clientSecret;
@@ -29,22 +13,24 @@ class Provider implements Insertable<Provider> {
     this.permissions,
   });
 
-  Provider.fromDb({
-    required this.service,
-    this.clientId,
-    this.clientSecret,
-    this.apiKey,
-    this.permissions,
-  });
+  factory Provider.fromDbMap(Map<String, dynamic> map) {
+    final permissionsStr = map['permissions'] as String? ?? '';
+    return Provider(
+      service: map['service'] as String,
+      clientId: map['client_id'] as String?,
+      clientSecret: map['client_secret'] as String?,
+      apiKey: map['api_key'] as String?,
+      permissions: permissionsStr.isEmpty ? [] : permissionsStr.split(','),
+    );
+  }
 
-  @override
-  Map<String, Expression<Object>> toColumns(bool nullToAbsent) {
-    return ProvidersCompanion(
-      service: Value(service),
-      clientId: clientId == null && nullToAbsent ? const Value.absent() : Value(clientId),
-      clientSecret: clientSecret == null && nullToAbsent ? const Value.absent() : Value(clientSecret),
-      apiKey: apiKey == null && nullToAbsent ? const Value.absent() : Value(apiKey),
-      permissions: permissions == null && nullToAbsent ? const Value.absent() : Value(permissions),
-    ).toColumns(nullToAbsent);
+  Map<String, dynamic> toDbMap() {
+    return {
+      'service': service,
+      'client_id': clientId,
+      'client_secret': clientSecret,
+      'api_key': apiKey,
+      'permissions': (permissions ?? []).join(','),
+    };
   }
 }

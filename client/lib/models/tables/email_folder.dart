@@ -1,24 +1,4 @@
-import 'package:drift/drift.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-
-@UseRowClass(EmailFolder, constructor: 'fromDb')
-@TableIndex(name: 'email_folders_id_idx', columns: {#id})
-@TableIndex(name: 'email_folders_collectionid_idx', columns: {#collectionId})
-class EmailFolders extends Table {
-  TextColumn get id => text()(); // Gmail labelId, IMAP mailbox path, etc.
-  TextColumn get collectionId => text().references(Collections, #id)();
-  TextColumn get name => text()();
-  TextColumn get type => text().withDefault(const Constant('user'))(); // 'system' or 'user'
-  IntColumn get messagesTotal => integer().nullable()();
-  IntColumn get messagesUnread => integer().nullable()();
-  TextColumn get parentId => text().nullable()();
-
-  @override
-  Set<Column> get primaryKey => {id, collectionId};
-}
-
-class EmailFolder implements Insertable<EmailFolder> {
+class EmailFolder {
   final String id;
   final String collectionId;
   final String name;
@@ -37,26 +17,27 @@ class EmailFolder implements Insertable<EmailFolder> {
     this.parentId,
   });
 
-  EmailFolder.fromDb({
-    required this.id,
-    required this.collectionId,
-    required this.name,
-    required this.type,
-    this.messagesTotal,
-    this.messagesUnread,
-    this.parentId,
-  });
+  factory EmailFolder.fromDbMap(Map<String, dynamic> map) {
+    return EmailFolder(
+      id: map['id'] as String,
+      collectionId: map['collection_id'] as String,
+      name: map['name'] as String,
+      type: map['type'] as String? ?? 'user',
+      messagesTotal: map['messages_total'] as int?,
+      messagesUnread: map['messages_unread'] as int?,
+      parentId: map['parent_id'] as String?,
+    );
+  }
 
-  @override
-  Map<String, Expression> toColumns(bool nullToAbsent) {
-    return EmailFoldersCompanion(
-      id: Value(id),
-      collectionId: Value(collectionId),
-      name: Value(name),
-      type: Value(type),
-      messagesTotal: Value(messagesTotal),
-      messagesUnread: Value(messagesUnread),
-      parentId: Value(parentId),
-    ).toColumns(nullToAbsent);
+  Map<String, dynamic> toDbMap() {
+    return {
+      'id': id,
+      'collection_id': collectionId,
+      'name': name,
+      'type': type,
+      'messages_total': messagesTotal,
+      'messages_unread': messagesUnread,
+      'parent_id': parentId,
+    };
   }
 }

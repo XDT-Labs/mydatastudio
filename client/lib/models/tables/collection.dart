@@ -1,37 +1,4 @@
-import 'package:mydatatools/database_manager.dart';
-import 'package:drift/drift.dart';
-
-//part 'collection.g.dart';
-
-@UseRowClass(Collection, constructor: 'fromDb')
-@TableIndex(name: 'collections_id_idx', columns: {#id})
-@TableIndex(name: 'collections_path_idx', columns: {#path})
-@TableIndex(name: 'collections_type_idx', columns: {#type})
-class Collections extends Table {
-  TextColumn get id => text()();
-  TextColumn get name => text()();
-  TextColumn get path => text()();
-  TextColumn get type => text()();
-  TextColumn get scanner => text()();
-  TextColumn get scanStatus => text()();
-  //oauth tokens for external systems
-  TextColumn get oauthService => text().nullable()();
-  TextColumn get accessToken => text().nullable()();
-  TextColumn get refreshToken => text().nullable()();
-  TextColumn get idToken => text().nullable()();
-  TextColumn get userId => text().nullable()();
-  DateTimeColumn get expiration => dateTime().nullable()();
-  DateTimeColumn get lastScanDate => dateTime().nullable()();
-  BoolColumn get needsReAuth => boolean()();
-  BoolColumn get downloadLocalCopy => boolean().withDefault(const Constant(false))();
-  // Absolute root path for local file collections. Null for cloud/email.
-  TextColumn get localCopyPath => text().nullable()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
-class Collection implements Insertable<Collection> {
+class Collection {
   String id;
   String name;
   String path;
@@ -73,44 +40,45 @@ class Collection implements Insertable<Collection> {
     this.localCopyPath,
   });
 
-  Collection.fromDb({
-    required this.id,
-    required this.name,
-    required this.path,
-    required this.type,
-    required this.scanner,
-    required this.scanStatus,
-    this.oauthService,
-    this.accessToken,
-    this.refreshToken,
-    this.idToken,
-    this.userId,
-    this.expiration,
-    this.lastScanDate,
-    required this.needsReAuth,
-    required this.downloadLocalCopy,
-    this.localCopyPath,
-  });
+  factory Collection.fromDbMap(Map<String, dynamic> map) {
+    return Collection(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      path: map['path'] as String,
+      type: map['type'] as String,
+      scanner: map['scanner'] as String,
+      scanStatus: map['scan_status'] as String,
+      oauthService: map['oauth_service'] as String?,
+      accessToken: map['access_token'] as String?,
+      refreshToken: map['refresh_token'] as String?,
+      idToken: map['id_token'] as String?,
+      userId: map['user_id'] as String?,
+      expiration: map['expiration'] != null ? DateTime.fromMillisecondsSinceEpoch(map['expiration'] as int) : null,
+      lastScanDate: map['last_scan_date'] != null ? DateTime.fromMillisecondsSinceEpoch(map['last_scan_date'] as int) : null,
+      needsReAuth: (map['needs_re_auth'] as int? ?? 0) != 0,
+      downloadLocalCopy: (map['download_local_copy'] as int? ?? 0) != 0,
+      localCopyPath: map['local_copy_path'] as String?,
+    );
+  }
 
-  @override
-  Map<String, Expression> toColumns(bool nullToAbsent) {
-    return CollectionsCompanion(
-      id: Value(id),
-      name: Value(name),
-      path: Value(path),
-      type: Value(type),
-      scanner: Value(scanner),
-      scanStatus: Value(scanStatus),
-      oauthService: Value(oauthService),
-      accessToken: Value(accessToken),
-      refreshToken: Value(refreshToken),
-      idToken: Value(idToken),
-      userId: Value(userId),
-      expiration: Value(expiration),
-      lastScanDate: Value(lastScanDate),
-      needsReAuth: Value(needsReAuth),
-      downloadLocalCopy: Value(downloadLocalCopy),
-      localCopyPath: Value(localCopyPath),
-    ).toColumns(nullToAbsent);
+  Map<String, dynamic> toDbMap() {
+    return {
+      'id': id,
+      'name': name,
+      'path': path,
+      'type': type,
+      'scanner': scanner,
+      'scan_status': scanStatus,
+      'oauth_service': oauthService,
+      'access_token': accessToken,
+      'refresh_token': refreshToken,
+      'id_token': idToken,
+      'user_id': userId,
+      'expiration': expiration?.millisecondsSinceEpoch,
+      'last_scan_date': lastScanDate?.millisecondsSinceEpoch,
+      'needs_re_auth': needsReAuth ? 1 : 0,
+      'download_local_copy': downloadLocalCopy ? 1 : 0,
+      'local_copy_path': localCopyPath,
+    };
   }
 }

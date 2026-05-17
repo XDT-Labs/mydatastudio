@@ -1,8 +1,6 @@
-// dart
 import 'dart:async';
 import 'dart:isolate';
 
-import 'package:flutter/services.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/repositories/database_repository.dart';
 import 'package:mydatatools/models/tables/app_user.dart';
@@ -20,15 +18,10 @@ import 'package:mydatatools/modules/email/services/email_folder_upsert_service.d
 import 'package:mydatatools/modules/email/services/email_repository.dart';
 import 'package:mydatatools/models/tables/email.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:logger/logger.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/repositories/collection_repository.dart';
-import 'package:drift/drift.dart';
-import 'package:sqlite3/sqlite3.dart' show SqliteException;
 
 class DbIsolateWriterClient {
-  Isolate? _isolate;
-  SendPort? _sendPort;
   SendPort? _writerPort;
   ReceivePort? _receivePort;
   final AppLogger _localLogger = AppLogger(null);
@@ -37,78 +30,32 @@ class DbIsolateWriterClient {
     return _writerPort;
   }
 
-  /// Start the DB isolate. Pass the same storagePath and dbName used by the app.
+  /// Start the main-thread writer message loop.
   Future<void> start(
     String storagePath,
     String dbName, {
     bool useMemoryDb = false,
   }) async {
-    if (_isolate != null) return;
+    if (_receivePort != null) return;
     _receivePort = ReceivePort("DbIsolateWriterClient");
-    Completer<void> completer = Completer<void>();
+    _writerPort = _receivePort!.sendPort;
 
-    RootIsolateToken? token = RootIsolateToken.instance;
-    Map<String, dynamic> cfg = {
-      'token': token,
-      'replyTo': _receivePort!.sendPort,
-      'loggerPort':
-          _receivePort!.sendPort, // Send logs back through our own ReceivePort
-      'path': storagePath,
-      'name': dbName,
-      'useMemoryDb': useMemoryDb,
-      'isTesting': DatabaseManager.isTesting,
-      'skipExtensionLoading': DatabaseManager.skipExtensionLoading,
-    };
+    final db = DatabaseManager.instance.database!;
 
-    _isolate = await Isolate.spawn(
-      _isolateEntry,
-      cfg,
-      debugName: 'DbIsolateWriterClientIsolate',
-    );
+    _receivePort!.listen((data) async {
+      if (data is! Map) return;
 
-    // list for port to be sent back from isolate
-    _receivePort?.listen((data) {
-      if (data is SendPort) {
-        _writerPort = data;
-        if (!completer.isCompleted) {
-          completer.complete();
-        }
-      } else if (data is Map) {
-        final type = data['type'];
-        final msg = data['message'];
-
-        if (type == 'log') {
-          final level = data['level'] as String;
-          switch (level) {
-            case 'info':
-              _localLogger.i('[DbWriter] $msg');
-              break;
-            case 'error':
-              _localLogger.e(
-                '[DbWriter] $msg',
-                error: data['error'],
-                stackTrace: data['stackTrace'],
-              );
-              break;
-            case 'warning':
-              _localLogger.w('[DbWriter] $msg');
-              break;
-            case 'debug':
-              _localLogger.d('[DbWriter] $msg');
-              break;
-            default:
-              _localLogger.i('[DbWriter] $msg');
-          }
-        } else if (type == 'status') {
-          _localLogger.s(msg);
-        }
+      SendPort? replyTo = data['replyTo'] as SendPort?;
+      try {
+        await processMessage(data, db, _localLogger, replyTo);
+      } catch (e, stack) {
+        _localLogger.e("Error in DbIsolateWriterClient: $e", error: e, stackTrace: stack);
+        replyTo?.send({'error': e.toString()});
       }
     });
-
-    return completer.future;
   }
 
-  /// Send a message to the isolate and await a response.
+  /// Send a message and await a response.
   Future<dynamic> send(Map<String, dynamic> message) async {
     if (_writerPort == null) {
       throw Exception(
@@ -132,104 +79,33 @@ class DbIsolateWriterClient {
   }
 
   Future<void> stop() async {
-    if (_sendPort == null) return;
-    _sendPort!.send({'type': 'close'});
     _receivePort?.close();
-    _isolate?.kill(priority: Isolate.immediate);
-    _isolate = null;
-    _sendPort = null;
+    _receivePort = null;
     _writerPort = null;
   }
 
-  // Isolate entry-point. Must be a top-level function.
-  static Future<void> _isolateEntry(Map<String, dynamic> cfg) async {
-    final port = ReceivePort();
-    BackgroundIsolateBinaryMessenger.ensureInitialized(cfg['token']);
-
-    final SendPort initialReplyTo = cfg['replyTo'] as SendPort;
-    final path = cfg['path'] as String?;
-    final name = cfg['name'] as String?;
-    final useMemoryDb = cfg['useMemoryDb'] as bool? ?? false;
-    DatabaseManager.isTesting = cfg['isTesting'] as bool? ?? false;
-    DatabaseManager.skipExtensionLoading = cfg['skipExtensionLoading'] as bool? ?? false;
-
-    // Send control port back to the spawner
-    initialReplyTo.send(port.sendPort);
-
-    // Set log level inside the isolate
-    Logger.level = Level.debug;
-    final AppLogger logger = AppLogger(cfg['loggerPort'] as SendPort?);
-
-    // create the AppDatabase inside the isolate
-    // We pass inBackground: false because this code is already running
-    // inside a dedicated background isolate. Spawning another isolate
-    // via createInBackground here adds overhead and file lock races.
-    AppDatabase db = AppDatabase(null, path, name, useMemoryDb, false);
-
-    await for (final data in port) {
-      if (data is! Map) continue;
-
-      SendPort? replyTo = data['replyTo'] as SendPort?;
-
-      // Retry loop for transient SQLITE_BUSY (code 5) errors.
-      // The writer isolate shares the same database file with the main
-      // thread's Drift connection (via createInBackground). Even though
-      // the main thread is read-only in practice, transient lock contention
-      // can occur during WAL checkpoints or Drift's internal transaction
-      // management. Retrying here is a centralized safety net.
-      const int maxRetries = 5;
-      const Duration retryBaseDelay = Duration(milliseconds: 100);
-
-      for (int attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-          await _processMessage(data, db, logger, replyTo);
-          break; // Success — exit retry loop
-        } on SqliteException catch (e) {
-          if (e.resultCode == 5 && attempt < maxRetries) {
-            final delay = retryBaseDelay * (1 << attempt);
-            logger.w(
-              'DbIsolateWriter: SQLITE_BUSY on ${data['type']} '
-              '(attempt ${attempt + 1}/$maxRetries), '
-              'retrying in ${delay.inMilliseconds}ms...',
-            );
-            await Future.delayed(delay);
-            continue;
-          }
-          // Not SQLITE_BUSY or exhausted retries
-          logger.e("Error in DbIsolateWriter: $e", error: e, stackTrace: null);
-          replyTo?.send({'error': e.toString()});
-        } catch (e, stack) {
-          logger.e("Error in DbIsolateWriter: $e", error: e, stackTrace: stack);
-          replyTo?.send({'error': e.toString()});
-          break; // Non-retryable error
-        }
-      }
-    }
-  }
-
   /// Dispatches a single message to the appropriate handler.
-  /// Extracted so the retry loop can re-invoke the entire operation.
-  static Future<void> _processMessage(
+  static Future<void> processMessage(
     Map data,
     AppDatabase db,
     AppLogger logger,
     SendPort? replyTo,
   ) async {
     if (data['type'] == 'file') {
-      File f = data['file'] as File;
+      final f = data['file'];
       logger.d("DbIsolateWriter: Received file upsert for ${f.name} (id: ${f.id}, collectionId: ${f.collectionId})");
       await FileUpsertService.instance.invoke(
         FileUpsertServiceCommand(f, db),
       );
       replyTo?.send({'status': 'ok'});
     } else if (data['type'] == 'batch_file') {
-      List<File> filesToUpsert = (data['files'] as List).cast<File>();
+      List filesToUpsert = data['files'] as List;
       await BatchFileUpsertService.instance.invoke(
-        BatchFileUpsertServiceCommand(filesToUpsert, db),
+        BatchFileUpsertServiceCommand(filesToUpsert.cast<File>(), db),
       );
       replyTo?.send({'status': 'ok'});
     } else if (data['type'] == 'folder') {
-      Folder folder = data['folder'] as Folder;
+      final folder = data['folder'];
       logger.d("DbIsolateWriter: Received folder upsert for ${folder.name} (path: ${folder.path}, parent: ${folder.parent})");
       await FolderUpsertService.instance.invoke(
         FolderUpsertServiceCommand(folder, db),
@@ -250,13 +126,13 @@ class DbIsolateWriterClient {
       );
       replyTo?.send({'status': 'ok'});
     } else if (data['type'] == 'batch_email') {
-      List<Email> emailsToUpsert = (data['emails'] as List).cast<Email>();
+      List emailsToUpsert = data['emails'] as List;
       await EmailUpsertService.instance.invoke(
-        EmailUpsertServiceCommand(emailsToUpsert, db),
+        EmailUpsertServiceCommand(emailsToUpsert.cast<Email>(), db),
       );
       replyTo?.send({'status': 'ok'});
     } else if (data['type'] == 'email_folder') {
-      EmailFolder folder = data['folder'] as EmailFolder;
+      final folder = data['folder'];
       await EmailFolderUpsertService.instance.invoke(
         EmailFolderUpsertServiceCommand(folder, db),
       );
@@ -296,8 +172,9 @@ class DbIsolateWriterClient {
     } else if (data['type'] == 'update_file_local_path') {
       final id = data['id'] as String;
       final localPath = data['localPath'] as String;
-      await (db.update(db.files)..where((t) => t.id.equals(id))).write(
-        FilesCompanion(localPath: Value(localPath)),
+      await db.execute(
+        'UPDATE files SET local_path = ? WHERE id = ?',
+        [localPath, id],
       );
       replyTo?.send({'status': 'ok'});
     } else if (data['type'] == 'get_files_to_download') {
@@ -340,25 +217,15 @@ class DbIsolateWriterClient {
       final clientId = data['clientId'] as String;
       final clientSecret = data['clientSecret'] as String;
       final apiKey = data['apiKey'] as String? ?? '';
-      final existing = await (db.select(db.providers)..where((tbl) => tbl.service.equals(service))).getSingleOrNull();
-      if (existing != null) {
-        await (db.update(db.providers)..where((tbl) => tbl.service.equals(service))).write(
-          ProvidersCompanion(
-            clientId: Value(clientId),
-            clientSecret: Value(clientSecret),
-            apiKey: Value(apiKey),
-          ),
-        );
-      } else {
-        await db.into(db.providers).insert(
-          ProvidersCompanion(
-            service: Value(service),
-            clientId: Value(clientId),
-            clientSecret: Value(clientSecret),
-            apiKey: Value(apiKey),
-          ),
-        );
-      }
+      await db.execute(
+        'INSERT INTO providers (service, client_id, client_secret, api_key) '
+        'VALUES (?, ?, ?, ?) '
+        'ON CONFLICT(service) DO UPDATE SET '
+        'client_id = excluded.client_id, '
+        'client_secret = excluded.client_secret, '
+        'api_key = excluded.api_key',
+        [service, clientId, clientSecret, apiKey],
+      );
       replyTo?.send({'status': 'ok'});
     } else {
       logger.w("Unknown message type: ${data['type']}");

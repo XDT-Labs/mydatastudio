@@ -1,30 +1,20 @@
-import 'package:mydatatools/database_manager.dart';
-import 'package:drift/drift.dart';
-
-@UseRowClass(Album, constructor: 'fromDb')
-class Albums extends Table {
-  TextColumn get id => text()();
-  TextColumn get name => text()();
-
-  // TODO: add reference to files
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
-class Album implements Insertable<Album> {
+class Album {
   String id;
   String name;
 
   Album({required this.id, required this.name});
 
-  Album.fromDb({required this.id, required this.name});
+  factory Album.fromDbMap(Map<String, dynamic> map) {
+    return Album(
+      id: map['id'] as String,
+      name: map['name'] as String,
+    );
+  }
 
-  @override
-  Map<String, Expression<Object>> toColumns(bool nullToAbsent) {
-    return AlbumsCompanion(
-      id: Value(id),
-      name: Value(name),
-    ).toColumns(nullToAbsent);
+  Map<String, dynamic> toDbMap() {
+    return {
+      'id': id,
+      'name': name,
+    };
   }
 }

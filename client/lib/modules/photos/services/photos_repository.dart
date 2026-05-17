@@ -10,25 +10,26 @@ class PhotosRepository {
 
   Future<List<File>> photos() async {
     AppDatabase? db = DatabaseManager.instance.database;
+    if (db == null) return [];
 
-    return await (db?.select(db.files)?..where(
-          (e) => e.contentType.equals(FilesConstants.mimeTypeImage),
-        ))?.get() ??
-        [];
-    // TODO add sort  SORT(dateCreated DESC)
+    final rows = await db.select(
+      "SELECT * FROM files WHERE content_type = ? ORDER BY date_created DESC",
+      [FilesConstants.mimeTypeImage],
+    );
+    return rows.map((r) => File.fromDbMap(r)).toList();
   }
 
   Future<Map<String, List<File>>> photosByDate() async {
     AppDatabase? db = DatabaseManager.instance.database;
+    if (db == null) return {};
     DateFormat dateFormat = DateFormat("yyyy-MM-dd");
     Map<String, List<File>> groupedImages = {};
-    List<File> p =
-        await (db?.select(db.files)?..where(
-          (e) => e.contentType.equals(FilesConstants.mimeTypeImage),
-        ))?.get() ??
-        [];
 
-    // TODO add sort SORT(dateCreated ASC)
+    final rows = await db.select(
+      "SELECT * FROM files WHERE content_type = ? ORDER BY date_created ASC",
+      [FilesConstants.mimeTypeImage],
+    );
+    List<File> p = rows.map((r) => File.fromDbMap(r)).toList();
 
     for (var f in p) {
       String group = dateFormat.format(f.dateCreated);

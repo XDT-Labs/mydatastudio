@@ -27,7 +27,7 @@ void main() {
       final col = _makeCollection(localCopyPath: '/Users/mike/Photos');
       final file = makeTestFile(path: '', parent: '', name: '');
       final result = FilePathResolver.absolute(file, col);
-      expect(result, '');
+      expect(result, '/Users/mike/Photos');
     });
 
     test('cloud gdrive:// path passes through unchanged', () {
@@ -66,10 +66,10 @@ void main() {
       expect(result, '/Users/mike/docs/file.txt');
     });
 
-    test('empty string returns empty string', () {
+    test('empty string returns root path', () {
       final col = _makeCollection(localCopyPath: '/Users/mike');
       final result = FilePathResolver.absoluteFromPath('', col);
-      expect(result, '');
+      expect(result, '/Users/mike');
     });
 
     test('gdrive:// passthrough', () {

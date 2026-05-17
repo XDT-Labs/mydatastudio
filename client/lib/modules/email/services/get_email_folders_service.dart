@@ -56,10 +56,14 @@ class GetEmailFoldersService
     // Only set up the persistent Drift watch if we don't already have one for
     // this collectionId. This prevents subscription leaks on repeated calls.
     if (!_watchSubs.containsKey(collectionId)) {
-      final query = _database.select(_database.emailFolders)
-        ..where((t) => t.collectionId.equals(collectionId));
+      final stream = _database.stream(
+        "SELECT * FROM email_folders WHERE collection_id = ?",
+        [collectionId],
+      ).map((rows) {
+        return rows.map((r) => EmailFolder.fromDbMap(r)).toList();
+      });
 
-      _watchSubs[collectionId] = query.watch().listen((updatedFolders) {
+      _watchSubs[collectionId] = stream.listen((updatedFolders) {
         sink.add(updatedFolders);
       });
     }

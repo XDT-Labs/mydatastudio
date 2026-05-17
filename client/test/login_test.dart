@@ -1,37 +1,48 @@
 import 'dart:io';
-import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mydatatools/models/tables/app_user.dart';
 import 'package:mydatatools/database_manager.dart';
+import 'package:mydatatools/repositories/user_repository.dart';
 import 'package:mydatatools/widgets/login_form.dart';
 import 'package:password_dart/password_dart.dart';
 import 'package:uuid/uuid.dart';
 
 void main() {
-  setUp(() async {
-    // Use in-memory database
-    DatabaseManager.instance.useMemoryDb = true;
+  late Directory tempDir;
+  late DatabaseManager databaseManager;
 
-    // Initialize database manually to avoid path_provider errors in tests
-    DatabaseManager.instance.appDatabase = AppDatabase(
-      null,
-      null,
-      null,
-      true,
+  setUp(() async {
+    tempDir = await Directory.systemTemp.createTemp('login_test_');
+
+    const MethodChannel channel = MethodChannel(
+      'plugins.flutter.io/path_provider',
     );
+    // ignore: deprecated_member_use
+    channel.setMockMethodCallHandler((MethodCall methodCall) async {
+      return tempDir.path;
+    });
+
+    databaseManager = DatabaseManager.instance;
+    databaseManager.useMemoryDb = false;
+    await databaseManager.initializeDatabase();
 
     // Mock Secure Storage
     FlutterSecureStorage.setMockInitialValues({});
   });
 
   tearDown(() async {
-    await DatabaseManager.instance.appDatabase?.close();
+    databaseManager.dispose();
+    if (tempDir.existsSync()) {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    }
   });
 
   testWidgets('LoginForm login success test', (WidgetTester tester) async {
-    // 1. Create a user in the DB
     final password = 'password123';
     final algorithm = PBKDF2(
       blockLength: 64,
@@ -40,7 +51,7 @@ void main() {
     );
     final hash = Password.hash(password, algorithm);
 
-    final String tempPath = '/tmp/mydatatools_test_${const Uuid().v4()}';
+    final String tempPath = '${tempDir.path}/mydatatools_test_${const Uuid().v4()}';
     final user = AppUser(
       id: const Uuid().v4(),
       name: 'testuser',
@@ -55,10 +66,11 @@ void main() {
     File('${keyDir.path}/public.pem').writeAsStringSync('public-key');
     File('${keyDir.path}/private.pem').writeAsStringSync('private-key');
 
-    // We can't use UserRepository.saveUser because it tries to write keys to disk.
-    // So we insert directly into DB.
-    final db = DatabaseManager.instance.database;
-    await db?.into(db.appUsers).insert(user);
+    // Run database insert in runAsync since it uses ports/isolates
+    await tester.runAsync(() async {
+      final userRepo = UserRepository(databaseManager.database!);
+      await userRepo.saveUser(user);
+    });
 
     // 2. Pump the widget
     bool loginSuccess = false;
@@ -80,7 +92,13 @@ void main() {
 
     // 4. Tap login button
     await tester.tap(find.text('Login'));
-    await tester.pumpAndSettle(); // Wait for async operations
+    await tester.pump();
+
+    // Run the async event loop to let the password hashing and DB select execute
+    await tester.runAsync(() async {
+      await Future.delayed(const Duration(seconds: 2));
+    });
+    await tester.pumpAndSettle();
 
     // 5. Verify success
     expect(loginSuccess, isTrue);
@@ -93,7 +111,6 @@ void main() {
   testWidgets('LoginForm login keys missing error test', (
     WidgetTester tester,
   ) async {
-    // 1. Create a user in the DB BUT NO KEYS ON DISK
     final password = 'password123';
     final algorithm = PBKDF2(
       blockLength: 64,
@@ -102,7 +119,7 @@ void main() {
     );
     final hash = Password.hash(password, algorithm);
 
-    final String tempPath = '/tmp/mydatatools_test_nokeys_${const Uuid().v4()}';
+    final String tempPath = '${tempDir.path}/mydatatools_test_nokeys_${const Uuid().v4()}';
     final user = AppUser(
       id: const Uuid().v4(),
       name: 'testuser',
@@ -111,8 +128,10 @@ void main() {
       localStoragePath: tempPath,
     );
 
-    final db = DatabaseManager.instance.database;
-    await db?.into(db.appUsers).insert(user);
+    await tester.runAsync(() async {
+      final userRepo = UserRepository(databaseManager.database!);
+      await userRepo.saveUser(user);
+    });
 
     // 2. Pump the widget
     await tester.pumpWidget(
@@ -125,9 +144,14 @@ void main() {
 
     // 4. Tap login button
     await tester.tap(find.text('Login'));
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      await Future.delayed(const Duration(seconds: 2));
+    });
     await tester.pumpAndSettle();
 
-    // 5. Verify that the button is RE-ENABLED (not null) and an error is shown
+    // 5. Verify that the button is RE-ENABLED (not null)
     final loginButton = tester.widget<MaterialButton>(
       find.widgetWithText(MaterialButton, 'Login'),
     );
@@ -137,7 +161,7 @@ void main() {
       reason: 'Button should be re-enabled after error',
     );
 
-    // Wait for toast timer to finish
+    // Wait for FToast timers to finish
     await tester.pump(const Duration(seconds: 5));
   });
 
@@ -153,9 +177,14 @@ void main() {
 
     // 3. Tap login button
     await tester.tap(find.text('Login'));
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      await Future.delayed(const Duration(seconds: 2));
+    });
     await tester.pumpAndSettle();
 
-    // Wait for toast timer to finish
+    // Wait for FToast timers to finish
     await tester.pump(const Duration(seconds: 5));
   });
 }

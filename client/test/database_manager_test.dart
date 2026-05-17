@@ -75,8 +75,8 @@ void main() {
       configFile.createSync(recursive: true);
       configFile.writeAsStringSync(jsonEncode({'path': tempDir!.path}));
 
-      // Use memory DB for testing
-      DatabaseManager.instance.useMemoryDb = true;
+      // Use a real temp DB file for testing with resqlite
+      DatabaseManager.instance.useMemoryDb = false;
 
       await DatabaseManager.instance.initializeDatabase();
 
@@ -86,7 +86,7 @@ void main() {
 
       // Cleanup
       configFile.deleteSync();
-      // Close DB if possible, or just leave it for now as it's a singleton
+      DatabaseManager.instance.dispose();
     });
 
     // Note: writerPort and stopDbWriterIsolate are hard to test in unit tests

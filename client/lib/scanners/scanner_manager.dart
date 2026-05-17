@@ -242,10 +242,13 @@ class ScannerManager {
   }
 
   Future<List<Collection>> getAllCollections() async {
-    return await database.select(database.collections).get();
+    final rows = await database.select("SELECT * FROM collections");
+    return rows.map((r) => Collection.fromDbMap(r)).toList();
   }
 
   Stream<List<Collection>> watchCollections() {
-    return database.select(database.collections).watch();
+    return database.stream("SELECT * FROM collections").map((rows) {
+      return rows.map((r) => Collection.fromDbMap(r)).toList();
+    });
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mydatatools/database_manager.dart';
+import 'package:mydatatools/models/tables/provider.dart';
 import 'package:go_router/go_router.dart';
 
 
@@ -55,8 +56,12 @@ class _SettingsPageState extends State<SettingsPage> {
     if (db == null) return;
 
     for (final service in _supportedProviders) {
-      final provider = await (db.select(db.providers)..where((tbl) => tbl.service.equals(service))).getSingleOrNull();
-      if (provider != null) {
+      final rows = await db.select(
+        "SELECT * FROM providers WHERE service = ?",
+        [service],
+      );
+      if (rows.isNotEmpty) {
+        final provider = Provider.fromDbMap(rows.first);
         _clientIdControllers[service]?.text = provider.clientId ?? '';
         _clientSecretControllers[service]?.text = provider.clientSecret ?? '';
         _apiKeyControllers[service]?.text = provider.apiKey ?? '';

@@ -5,6 +5,8 @@ import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatatools/models/tables/provider.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/oauth/desktop_oauth_manager.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
@@ -75,9 +77,12 @@ extension LoginProviderExtension on LoginProviders {
   Future<String> get clientId async {
     final db = DatabaseManager.instance.database;
     if (db != null) {
-      final provider = await (db.select(db.providers)..where((tbl) => tbl.service.equals(key))).getSingleOrNull();
-      if (provider != null && provider.clientId != null && provider.clientId!.isNotEmpty) {
-        return provider.clientId!;
+      final rows = await db.select("SELECT * FROM providers WHERE service = ?", [key]);
+      if (rows.isNotEmpty) {
+        final provider = Provider.fromDbMap(rows.first);
+        if (provider.clientId != null && provider.clientId!.isNotEmpty) {
+          return provider.clientId!;
+        }
       }
     }
 
@@ -104,9 +109,12 @@ extension LoginProviderExtension on LoginProviders {
   Future<String> get clientSecret async {
     final db = DatabaseManager.instance.database;
     if (db != null) {
-      final provider = await (db.select(db.providers)..where((tbl) => tbl.service.equals(key))).getSingleOrNull();
-      if (provider != null && provider.clientSecret != null && provider.clientSecret!.isNotEmpty) {
-        return provider.clientSecret!;
+      final rows = await db.select("SELECT * FROM providers WHERE service = ?", [key]);
+      if (rows.isNotEmpty) {
+        final provider = Provider.fromDbMap(rows.first);
+        if (provider.clientSecret != null && provider.clientSecret!.isNotEmpty) {
+          return provider.clientSecret!;
+        }
       }
     }
 
@@ -234,12 +242,12 @@ extension LoginProviderExtension on LoginProviders {
           'collection': collection,
         });
       } else {
-        // Fallback for testing or when writer is unavailable
         final db = DatabaseManager.instance.database!;
+        final repo = CollectionRepository(db);
         if (existing != null) {
-          await db.update(db.collections).replace(collection);
+          await repo.updateCollection(collection);
         } else {
-          await db.into(db.collections).insert(collection);
+          await repo.addCollection(collection);
         }
       }
 
@@ -365,10 +373,11 @@ extension LoginProviderExtension on LoginProviders {
         });
       } else {
         final db = DatabaseManager.instance.database!;
+        final repo = CollectionRepository(db);
         if (existing != null) {
-          await db.update(db.collections).replace(collection);
+          await repo.updateCollection(collection);
         } else {
-          await db.into(db.collections).insert(collection);
+          await repo.addCollection(collection);
         }
       }
 
@@ -520,10 +529,11 @@ extension LoginProviderExtension on LoginProviders {
         });
       } else {
         final db = DatabaseManager.instance.database!;
+        final repo = CollectionRepository(db);
         if (existing != null) {
-          await db.update(db.collections).replace(collection);
+          await repo.updateCollection(collection);
         } else {
-          await db.into(db.collections).insert(collection);
+          await repo.addCollection(collection);
         }
       }
 

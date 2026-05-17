@@ -1,40 +1,6 @@
-import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/file_asset.dart';
 
-import 'package:drift/drift.dart';
-
-//part 'file.g.dart';
-
-@UseRowClass(File, constructor: 'fromDb')
-@TableIndex(name: 'file_path_idx', columns: {#path})
-@TableIndex(name: 'file_parent_idx', columns: {#parent})
-@TableIndex(name: 'file_collection_id_idx', columns: {#collectionId})
-@TableIndex(name: 'file_contenttype_idx', columns: {#contentType})
-@TableIndex(name: 'file_email_id_idx', columns: {#emailId})
-class Files extends Table {
-  TextColumn get id => text()();
-  TextColumn get name => text()();
-  TextColumn get path => text()();
-  TextColumn get parent => text()();
-  DateTimeColumn get dateCreated => dateTime()();
-  DateTimeColumn get dateLastModified => dateTime()();
-  DateTimeColumn get lastScannedDate => dateTime().nullable()();
-  TextColumn get collectionId => text()();
-  TextColumn get contentType => text()();
-  IntColumn get size => integer()();
-  BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
-  TextColumn get thumbnail => text().nullable()();
-  TextColumn get downloadUrl => text().nullable()();
-  TextColumn get emailId => text().nullable()();
-  RealColumn get latitude => real().nullable()();
-  RealColumn get longitude => real().nullable()();
-  TextColumn get localPath => text().nullable()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
-class File implements FileAsset, Insertable<File> {
+class File implements FileAsset {
   @override
   String id;
   @override
@@ -81,46 +47,47 @@ class File implements FileAsset, Insertable<File> {
     this.localPath,
   });
 
-  File.fromDb({
-    required this.id,
-    required this.name,
-    required this.path,
-    required this.parent,
-    required this.dateCreated,
-    required this.dateLastModified,
-    this.lastScannedDate,
-    required this.collectionId,
-    required this.contentType,
-    required this.size,
-    required this.isDeleted,
-    this.thumbnail,
-    this.downloadUrl,
-    this.emailId,
-    this.latitude,
-    this.longitude,
-    this.localPath,
-  });
+  factory File.fromDbMap(Map<String, dynamic> map) {
+    return File(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      path: map['path'] as String,
+      parent: map['parent'] as String,
+      dateCreated: DateTime.fromMillisecondsSinceEpoch(map['date_created'] as int),
+      dateLastModified: DateTime.fromMillisecondsSinceEpoch(map['date_last_modified'] as int),
+      lastScannedDate: map['last_scanned_date'] != null ? DateTime.fromMillisecondsSinceEpoch(map['last_scanned_date'] as int) : null,
+      collectionId: map['collection_id'] as String,
+      contentType: map['content_type'] as String,
+      size: map['size'] as int,
+      isDeleted: (map['is_deleted'] as int? ?? 0) != 0,
+      thumbnail: map['thumbnail'] as String?,
+      downloadUrl: map['download_url'] as String?,
+      emailId: map['email_id'] as String?,
+      latitude: map['latitude'] != null ? (map['latitude'] as num).toDouble() : null,
+      longitude: map['longitude'] != null ? (map['longitude'] as num).toDouble() : null,
+      localPath: map['local_path'] as String?,
+    );
+  }
 
-  @override
-  Map<String, Expression> toColumns(bool nullToAbsent) {
-    return FilesCompanion(
-      id: Value(id),
-      name: Value(name),
-      path: Value(path),
-      parent: Value(parent),
-      dateCreated: Value(dateCreated),
-      dateLastModified: Value(dateLastModified),
-      lastScannedDate: Value(lastScannedDate),
-      collectionId: Value(collectionId),
-      contentType: Value(contentType),
-      size: Value(size),
-      isDeleted: Value(isDeleted),
-      thumbnail: Value(thumbnail),
-      downloadUrl: Value(downloadUrl),
-      emailId: Value(emailId),
-      latitude: Value(latitude),
-      longitude: Value(longitude),
-      localPath: Value(localPath),
-    ).toColumns(nullToAbsent);
+  Map<String, dynamic> toDbMap() {
+    return {
+      'id': id,
+      'name': name,
+      'path': path,
+      'parent': parent,
+      'date_created': dateCreated.millisecondsSinceEpoch,
+      'date_last_modified': dateLastModified.millisecondsSinceEpoch,
+      'last_scanned_date': lastScannedDate?.millisecondsSinceEpoch,
+      'collection_id': collectionId,
+      'content_type': contentType,
+      'size': size,
+      'is_deleted': isDeleted ? 1 : 0,
+      'thumbnail': thumbnail,
+      'download_url': downloadUrl,
+      'email_id': emailId,
+      'latitude': latitude,
+      'longitude': longitude,
+      'local_path': localPath,
+    };
   }
 }

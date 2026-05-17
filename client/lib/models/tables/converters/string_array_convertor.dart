@@ -1,15 +1,13 @@
 // stores preferences as strings
-import 'package:drift/drift.dart';
 
-class StringArrayConverter extends TypeConverter<List<String>, String> {
+class StringArrayConverter {
   const StringArrayConverter();
 
-  @override
   List<String> fromSql(String fromDb) {
+    if (fromDb.isEmpty) return [];
     return fromDb.split(",");
   }
 
-  @override
   String toSql(List<String> value) {
     return value.join(",");
   }

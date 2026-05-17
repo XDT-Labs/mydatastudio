@@ -232,6 +232,7 @@ class _RxFilesPage extends State<RxFilesPage> {
 
   @override
   Widget build(BuildContext context) {
+    print('RxFilesPage.build: collections.length = ${collections.length}, collection = $collection');
     if (collections.isEmpty) {
       return const NewFileCollectionPage();
     }
