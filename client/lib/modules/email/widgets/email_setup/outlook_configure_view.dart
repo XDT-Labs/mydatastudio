@@ -3,16 +3,16 @@ import 'package:mydatatools/database_manager.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
-class GoogleDriveConfigureView extends StatefulWidget {
+class OutlookConfigureView extends StatefulWidget {
   final VoidCallback onConfigured;
 
-  const GoogleDriveConfigureView({super.key, required this.onConfigured});
+  const OutlookConfigureView({super.key, required this.onConfigured});
 
   @override
-  State<GoogleDriveConfigureView> createState() => _GoogleDriveConfigureViewState();
+  State<OutlookConfigureView> createState() => _OutlookConfigureViewState();
 }
 
-class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
+class _OutlookConfigureViewState extends State<OutlookConfigureView> {
   final _clientIdController = TextEditingController();
   final _clientSecretController = TextEditingController();
   bool _isSaving = false;
@@ -48,7 +48,7 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
       if (writer != null) {
         await writer.send({
           'type': 'save_provider',
-          'service': 'google',
+          'service': 'azure',
           'clientId': clientId,
           'clientSecret': clientSecret,
           'apiKey': '',
@@ -77,24 +77,24 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Image.asset('assets/images/google-drive.png', height: 72),
+        const Icon(Icons.email, size: 72, color: Color(0xFF0078D4)),
         const SizedBox(height: 24),
         const Text(
-          'Configure Google Drive',
+          'Configure Outlook',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         Text(
-          'To connect to Google Drive, you must provide your own OAuth Client ID and Secret.',
+          'To connect to Outlook, you must provide your own OAuth Client ID and Secret.',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.5),
         ),
         const SizedBox(height: 8),
         InkWell(
-          onTap: () => launchUrl(Uri.parse('https://console.cloud.google.com/apis/credentials')),
+          onTap: () => launchUrl(Uri.parse('https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade')),
           child: const Text(
-            'Get Credentials from Google Cloud Console',
+            'Get Credentials from Microsoft Azure Portal',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 14, color: Colors.blue, decoration: TextDecoration.underline),
           ),
@@ -121,9 +121,11 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
           onPressed: _isSaving ? null : _save,
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 16),
+            backgroundColor: const Color(0xFF0078D4),
+            foregroundColor: Colors.white,
           ),
           child: _isSaving 
-            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
             : const Text('Save & Continue', style: TextStyle(fontSize: 16)),
         ),
       ],

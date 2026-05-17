@@ -14,7 +14,7 @@ import 'package:mydatatools/modules/files/files_constants.dart';
 import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
 import 'dart:io' as io;
 import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/modules/email/services/email_repository.dart';
+
 import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:uuid/uuid.dart';
 
@@ -100,20 +100,24 @@ class OutlookScannerIsolate {
             ),
           );
         } else if (message['type'] == 'cleanup_uids') {
-          final db = DatabaseManager.instance.appDatabase;
-          if (db != null) {
-            isCleanupInProgress = true;
-            final repo = EmailRepository(db);
-            repo
-                .cleanupDeletedOutlook(
-                  collection,
-                  message['folder'],
-                  (message['uids'] as List).cast<int>(),
-                )
-                .then((_) {
-                  isCleanupInProgress = false;
-                  checkDone();
-                });
+          // Route cleanup through the writer isolate to avoid SQLITE_BUSY.
+          // The cleanup involves DELETE operations that would compete with
+          // ongoing scanner writes if done on the main thread's connection.
+          isCleanupInProgress = true;
+          final writer = DatabaseManager.instance.writerIsolateClient;
+          if (writer != null) {
+            writer.send({
+              'type': 'cleanup_deleted_outlook',
+              'collection': collection,
+              'folder': message['folder'],
+              'uids': (message['uids'] as List).cast<int>(),
+            }).then((_) {
+              isCleanupInProgress = false;
+              checkDone();
+            });
+          } else {
+            isCleanupInProgress = false;
+            checkDone();
           }
         }
 

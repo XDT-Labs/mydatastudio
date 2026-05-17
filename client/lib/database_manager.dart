@@ -587,20 +587,12 @@ class AppDatabase extends _$AppDatabase {
         }
       },
       beforeOpen: (OpeningDetails details) async {
-        // WAL (Write-Ahead Logging) allows the DbIsolateWriter to bulk-write
-        // while the main connection reads concurrently. Without WAL, a write
-        // transaction blocks ALL readers at the SQLite level, even if they're
-        // on separate connections/isolates.
-        //
-        // These PRAGMAs are connection-scoped and safe to re-apply on every open.
-        await customStatement('PRAGMA journal_mode=WAL;');
-
-        // Allow up to 5 seconds of retry before returning SQLITE_BUSY.
-        // Prevents sporadic errors when the writer and reader briefly contend
-        // (e.g. during PST bulk import).
-        await customStatement('PRAGMA busy_timeout=5000;');
-
-        logger.i('Database opened: journal_mode=WAL, busy_timeout=5000ms');
+        // PRAGMAs (journal_mode, busy_timeout, cache_size, mmap_size, etc.)
+        // are configured in the NativeDatabase setup callback in _openConnection.
+        // Do NOT set them here — this runs on ALL connections including the
+        // read-only embedding isolate, and PRAGMA journal_mode=WAL is a write
+        // operation that can trigger lock contention during scanning.
+        logger.i('Database opened (schema v${details.versionNow})');
       },
     );
   }
@@ -767,8 +759,19 @@ LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb, bool 
           file,
           logStatements: false,
           setup: (db) {
-            db.execute('PRAGMA busy_timeout=5000;');
+            db.execute('PRAGMA busy_timeout=15000;');
             db.execute('PRAGMA journal_mode=WAL;');
+            // Disable auto-checkpointing on the writer isolate's connection.
+            // WAL auto-checkpoint triggers an exclusive lock on the main DB
+            // file which competes with the main thread's connection during
+            // heavy scanning. Let the main thread handle checkpoints instead.
+            db.execute('PRAGMA wal_autocheckpoint=0;');
+            // Performance: 20MB page cache, 256MB memory-mapped I/O,
+            // NORMAL sync (safe with WAL), temp tables in RAM.
+            db.execute('PRAGMA cache_size=-20000;');
+            db.execute('PRAGMA mmap_size=268435456;');
+            db.execute('PRAGMA synchronous=NORMAL;');
+            db.execute('PRAGMA temp_store=MEMORY;');
           },
           sqlite3: _loadExtensions,
         );
@@ -782,8 +785,19 @@ LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb, bool 
         file,
         logStatements: false,
         setup: (db) {
-          db.execute('PRAGMA busy_timeout=5000;');
+          db.execute('PRAGMA busy_timeout=15000;');
           db.execute('PRAGMA journal_mode=WAL;');
+          // Increase auto-checkpoint threshold to reduce frequency of
+          // checkpoint-driven write lock contention. Default is 1000 pages;
+          // 4000 pages (~16MB WAL) gives the writer isolate more breathing
+          // room during heavy scanning.
+          db.execute('PRAGMA wal_autocheckpoint=4000;');
+          // Performance: 20MB page cache, 256MB memory-mapped I/O,
+          // NORMAL sync (safe with WAL), temp tables in RAM.
+          db.execute('PRAGMA cache_size=-20000;');
+          db.execute('PRAGMA mmap_size=268435456;');
+          db.execute('PRAGMA synchronous=NORMAL;');
+          db.execute('PRAGMA temp_store=MEMORY;');
         },
         sqlite3: _loadExtensions,
       );

@@ -14,7 +14,7 @@ import 'package:mydatatools/modules/files/widgets/file_table.dart';
 import 'package:mydatatools/modules/files/widgets/file_details_drawer.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/modules/files/services/delete_file_service.dart';
+
 import 'package:mydatatools/helpers/file_path_resolver.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io' as io;
@@ -608,11 +608,10 @@ class _RxFilesPage extends State<RxFilesPage> {
           if (await ioFile.exists()) {
             await ioFile.delete();
           }
-          final db = DatabaseManager.instance.database;
-          if (db != null) {
-            await DeleteFileService.instance.invoke(
-              DeleteFileServiceCommand(item, db),
-            );
+          // Delete from database via writer isolate to avoid SQLITE_BUSY
+          final writer = DatabaseManager.instance.writerIsolateClient;
+          if (writer != null) {
+            await writer.send({'type': 'delete_file', 'file': item});
           }
           deletedCount++;
         } catch (e) {

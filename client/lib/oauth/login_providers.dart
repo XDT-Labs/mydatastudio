@@ -6,7 +6,6 @@ import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/oauth/desktop_oauth_manager.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
@@ -228,10 +227,20 @@ extension LoginProviderExtension on LoginProviders {
         needsReAuth: false,
       );
 
-      if (existing != null) {
-        await CollectionRepository().updateCollection(collection);
+      final writer = DatabaseManager.instance.writerIsolateClient;
+      if (writer != null) {
+        await writer.send({
+          'type': existing != null ? 'update_collection' : 'add_collection',
+          'collection': collection,
+        });
       } else {
-        await CollectionRepository().addCollection(collection);
+        // Fallback for testing or when writer is unavailable
+        final db = DatabaseManager.instance.database!;
+        if (existing != null) {
+          await db.update(db.collections).replace(collection);
+        } else {
+          await db.into(db.collections).insert(collection);
+        }
       }
 
       // Notify the email collections list to refresh
@@ -348,10 +357,19 @@ extension LoginProviderExtension on LoginProviders {
         downloadLocalCopy: downloadLocalCopy,
       );
 
-      if (existing != null) {
-        await CollectionRepository().updateCollection(collection);
+      final writer = DatabaseManager.instance.writerIsolateClient;
+      if (writer != null) {
+        await writer.send({
+          'type': existing != null ? 'update_collection' : 'add_collection',
+          'collection': collection,
+        });
       } else {
-        await CollectionRepository().addCollection(collection);
+        final db = DatabaseManager.instance.database!;
+        if (existing != null) {
+          await db.update(db.collections).replace(collection);
+        } else {
+          await db.into(db.collections).insert(collection);
+        }
       }
 
       // Notify the file collections list to refresh
@@ -494,10 +512,19 @@ extension LoginProviderExtension on LoginProviders {
         needsReAuth: false,
       );
 
-      if (existing != null) {
-        await CollectionRepository().updateCollection(collection);
+      final writer = DatabaseManager.instance.writerIsolateClient;
+      if (writer != null) {
+        await writer.send({
+          'type': existing != null ? 'update_collection' : 'add_collection',
+          'collection': collection,
+        });
       } else {
-        await CollectionRepository().addCollection(collection);
+        final db = DatabaseManager.instance.database!;
+        if (existing != null) {
+          await db.update(db.collections).replace(collection);
+        } else {
+          await db.into(db.collections).insert(collection);
+        }
       }
 
       // Notify the email collections list to refresh

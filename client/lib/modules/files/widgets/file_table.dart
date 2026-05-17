@@ -15,7 +15,7 @@ import 'package:mydatatools/modules/files/notifications/path_changed_notificatio
 import 'package:mydatatools/modules/files/notifications/sort_changed_notification.dart';
 import 'package:flutter/material.dart';
 import 'package:moment_dart/moment_dart.dart';
-import 'package:mydatatools/modules/files/services/delete_file_service.dart';
+
 import 'package:mydatatools/database_manager.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -445,12 +445,10 @@ class _FileTable extends State<FileTable> {
         await ioFile.delete();
       }
 
-      // 2. Delete from database
-      final db = DatabaseManager.instance.database;
-      if (db != null) {
-        await DeleteFileService.instance.invoke(
-          DeleteFileServiceCommand(file, db),
-        );
+      // 2. Delete from database via writer isolate to avoid SQLITE_BUSY
+      final writer = DatabaseManager.instance.writerIsolateClient;
+      if (writer != null) {
+        await writer.send({'type': 'delete_file', 'file': file});
       }
 
       // 3. Notify parent to refresh

@@ -12,7 +12,6 @@ import 'package:uuid/uuid.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -24,6 +23,8 @@ import 'package:mydatatools/modules/email/widgets/email_setup/gmail_idle_view.da
 import 'package:mydatatools/modules/email/widgets/email_setup/gmail_loading_view.dart';
 import 'package:mydatatools/modules/email/widgets/email_setup/gmail_success_view.dart';
 import 'package:mydatatools/modules/email/widgets/email_setup/gmail_error_view.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/gmail_configure_view.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/outlook_configure_view.dart';
 import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_idle_view.dart';
 import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_loading_view.dart';
 import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_success_view.dart';
@@ -104,7 +105,7 @@ class _NewEmailPage extends State<NewEmailPage> {
 // Gmail Tab — stateful OAuth flow mirroring Google Drive
 // =============================================================================
 
-enum _GmailAuthState { idle, loading, success, error }
+enum _GmailAuthState { idle, loading, success, error, configure }
 
 class _GmailTab extends StatefulWidget {
   const _GmailTab();
@@ -114,9 +115,36 @@ class _GmailTab extends StatefulWidget {
 }
 
 class _GmailTabState extends State<_GmailTab> {
-  _GmailAuthState _authState = _GmailAuthState.idle;
+  _GmailAuthState _authState = _GmailAuthState.loading;
   String? _errorMessage;
   String? _connectedEmail;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkConfiguration();
+  }
+
+  Future<void> _checkConfiguration() async {
+    setState(() {
+      _authState = _GmailAuthState.loading;
+    });
+
+    final clientId = await LoginProviders.google.clientId;
+    final clientSecret = await LoginProviders.google.clientSecret;
+
+    if (!mounted) return;
+
+    if (clientId.isEmpty || clientSecret.isEmpty) {
+      setState(() {
+        _authState = _GmailAuthState.configure;
+      });
+    } else {
+      setState(() {
+        _authState = _GmailAuthState.idle;
+      });
+    }
+  }
 
   Future<void> _connectGmail() async {
     setState(() {
@@ -169,6 +197,7 @@ class _GmailTabState extends State<_GmailTab> {
             _GmailAuthState.success => _buildSuccess(),
             _GmailAuthState.error => _buildError(),
             _GmailAuthState.idle => _buildIdle(),
+            _GmailAuthState.configure => _buildConfigure(),
           },
         ),
       ),
@@ -203,6 +232,13 @@ class _GmailTabState extends State<_GmailTab> {
         errorMessage: _errorMessage,
         onRetry: _connectGmail,
       ),
+    );
+  }
+
+  Widget _buildConfigure() {
+    return _cardContainer(
+      key: const ValueKey('configure'),
+      child: GmailConfigureView(onConfigured: _checkConfiguration),
     );
   }
 
@@ -283,7 +319,10 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
         needsReAuth: false,
       );
 
-      await CollectionRepository().addCollection(collection);
+      final writer = DatabaseManager.instance.writerIsolateClient;
+      if (writer != null) {
+        await writer.send({'type': 'add_collection', 'collection': collection});
+      }
 
       // Start the one-time scan isolate immediately
       final writerPort = await DatabaseManager.instance.writerPort;
@@ -579,7 +618,7 @@ class _YahooTabState extends State<_YahooTab> {
 // Outlook Tab — stateful OAuth flow
 // =============================================================================
 
-enum _OutlookAuthState { idle, loading, success, error }
+enum _OutlookAuthState { idle, loading, success, error, configure }
 
 class _OutlookTab extends StatefulWidget {
   const _OutlookTab();
@@ -589,9 +628,36 @@ class _OutlookTab extends StatefulWidget {
 }
 
 class _OutlookTabState extends State<_OutlookTab> {
-  _OutlookAuthState _authState = _OutlookAuthState.idle;
+  _OutlookAuthState _authState = _OutlookAuthState.loading;
   String? _errorMessage;
   String? _connectedEmail;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkConfiguration();
+  }
+
+  Future<void> _checkConfiguration() async {
+    setState(() {
+      _authState = _OutlookAuthState.loading;
+    });
+
+    final clientId = await LoginProviders.outlook.clientId;
+    final clientSecret = await LoginProviders.outlook.clientSecret;
+
+    if (!mounted) return;
+
+    if (clientId.isEmpty || clientSecret.isEmpty) {
+      setState(() {
+        _authState = _OutlookAuthState.configure;
+      });
+    } else {
+      setState(() {
+        _authState = _OutlookAuthState.idle;
+      });
+    }
+  }
 
   Future<void> _connectOutlook() async {
     setState(() {
@@ -644,6 +710,7 @@ class _OutlookTabState extends State<_OutlookTab> {
             _OutlookAuthState.success => _buildSuccess(),
             _OutlookAuthState.error => _buildError(),
             _OutlookAuthState.idle => _buildIdle(),
+            _OutlookAuthState.configure => _buildConfigure(),
           },
         ),
       ),
@@ -753,6 +820,13 @@ class _OutlookTabState extends State<_OutlookTab> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildConfigure() {
+    return _cardContainer(
+      key: const ValueKey('configure'),
+      child: OutlookConfigureView(onConfigured: _checkConfiguration),
     );
   }
 

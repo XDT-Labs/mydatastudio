@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:go_router/go_router.dart';
-import 'package:drift/drift.dart' as drift;
+
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -69,32 +69,20 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _saveProvider(String service) async {
-    final db = DatabaseManager.instance.database;
-    if (db == null) return;
-
     final clientId = _clientIdControllers[service]?.text.trim() ?? '';
     final clientSecret = _clientSecretControllers[service]?.text.trim() ?? '';
     final apiKey = _apiKeyControllers[service]?.text.trim() ?? '';
 
-    final existing = await (db.select(db.providers)..where((tbl) => tbl.service.equals(service))).getSingleOrNull();
-
-    if (existing != null) {
-      await (db.update(db.providers)..where((tbl) => tbl.service.equals(service))).write(
-        ProvidersCompanion(
-          clientId: drift.Value(clientId),
-          clientSecret: drift.Value(clientSecret),
-          apiKey: drift.Value(apiKey),
-        ),
-      );
-    } else {
-      await db.into(db.providers).insert(
-        ProvidersCompanion(
-          service: drift.Value(service),
-          clientId: drift.Value(clientId),
-          clientSecret: drift.Value(clientSecret),
-          apiKey: drift.Value(apiKey),
-        ),
-      );
+    // Route through writer isolate to avoid SQLITE_BUSY during scanning
+    final writer = DatabaseManager.instance.writerIsolateClient;
+    if (writer != null) {
+      await writer.send({
+        'type': 'save_provider',
+        'service': service,
+        'clientId': clientId,
+        'clientSecret': clientSecret,
+        'apiKey': apiKey,
+      });
     }
 
     if (mounted) {

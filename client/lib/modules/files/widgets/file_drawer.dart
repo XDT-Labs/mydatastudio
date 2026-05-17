@@ -5,7 +5,6 @@ import 'package:mydatatools/modules/files/pages/rx_files_page.dart';
 import 'package:mydatatools/modules/files/widgets/file_drawer/accordion_header_widget.dart';
 import 'package:mydatatools/modules/files/widgets/file_drawer/collection_tile_widget.dart';
 import 'package:mydatatools/modules/files/widgets/file_drawer/section_sub_header_widget.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/database_manager.dart';
@@ -365,7 +364,13 @@ class _FileDrawer extends State<FileDrawer> {
                   Navigator.of(dialogContext).pop();
 
                   // Delete the collection and all related metadata (files, folders, etc.)
-                  await CollectionRepository().deleteCollection(collection.id);
+                  final writer = DatabaseManager.instance.writerIsolateClient;
+                  if (writer != null) {
+                    await writer.send({
+                      'type': 'delete_collection',
+                      'id': collection.id,
+                    });
+                  }
 
                   // Reload collections list
                   GetCollectionsService.instance.invoke(

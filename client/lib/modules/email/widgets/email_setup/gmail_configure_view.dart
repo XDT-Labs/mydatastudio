@@ -3,16 +3,16 @@ import 'package:mydatatools/database_manager.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
-class GoogleDriveConfigureView extends StatefulWidget {
+class GmailConfigureView extends StatefulWidget {
   final VoidCallback onConfigured;
 
-  const GoogleDriveConfigureView({super.key, required this.onConfigured});
+  const GmailConfigureView({super.key, required this.onConfigured});
 
   @override
-  State<GoogleDriveConfigureView> createState() => _GoogleDriveConfigureViewState();
+  State<GmailConfigureView> createState() => _GmailConfigureViewState();
 }
 
-class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
+class _GmailConfigureViewState extends State<GmailConfigureView> {
   final _clientIdController = TextEditingController();
   final _clientSecretController = TextEditingController();
   bool _isSaving = false;
@@ -77,16 +77,16 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Image.asset('assets/images/google-drive.png', height: 72),
+        const Icon(Icons.email, size: 72, color: Colors.red),
         const SizedBox(height: 24),
         const Text(
-          'Configure Google Drive',
+          'Configure Gmail',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         Text(
-          'To connect to Google Drive, you must provide your own OAuth Client ID and Secret.',
+          'To connect to Gmail, you must provide your own OAuth Client ID and Secret.',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.5),
         ),

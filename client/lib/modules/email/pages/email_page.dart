@@ -539,10 +539,16 @@ class _EmailPage extends State<EmailPage> {
         }
       }
 
-      // 2. Local Delete
-      await EmailRepository(
-        DatabaseManager.instance.appDatabase!,
-      ).deleteEmails(ids);
+      // 2. Local Delete via writer isolate to avoid SQLITE_BUSY
+      final writer = DatabaseManager.instance.writerIsolateClient;
+      if (writer != null) {
+        await writer.send({'type': 'delete_emails', 'ids': ids});
+      } else {
+        // Fallback for testing
+        await EmailRepository(
+          DatabaseManager.instance.appDatabase!,
+        ).deleteEmails(ids);
+      }
 
       _refreshEmails();
       if (mounted) {

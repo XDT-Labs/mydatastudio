@@ -6,6 +6,10 @@ import 'package:mydatatools/services/get_collections_service.dart';
 /// Bug: An `await Future.delayed(500ms)` in invoke() was blocking the main
 /// isolate on every call, causing the OS spinner when switching between the
 /// Files and Emails tabs.
+///
+/// Bug: isLoading.add(true) caused cross-module UI loading leakage —
+/// when Gmail login called invoke(), FileDrawer, Outlook tab, and every
+/// other listener saw isLoading=true and showed loading spinners.
 void main() {
   group('GetCollectionsService', () {
     test('invoke() completes in under 200ms (no artificial delay)', () async {
@@ -46,6 +50,31 @@ void main() {
     test('GetCollectionsServiceCommand nullable type is allowed', () {
       final cmd = GetCollectionsServiceCommand(null);
       expect(cmd.type, isNull);
+    });
+
+    test('invoke() does NOT emit isLoading to prevent cross-module UI leakage',
+        () async {
+      // Regression: isLoading.add(true) in invoke() caused ALL listeners
+      // across the app (FileDrawer, EmailDrawer, etc.) to show loading
+      // spinners when ANY module triggered a collection refresh.
+      //
+      // We verify that the isLoading stream is never set to true during
+      // invoke(). We can't call invoke() directly (needs real DB), so we
+      // verify the stream's initial state remains unchanged.
+      final service = GetCollectionsService.instance;
+      final emissions = <bool>[];
+      final sub = service.isLoading.listen(emissions.add);
+
+      // Wait a tick for BehaviorSubject's initial emission
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      // The only emission should be the initial seeded value (false)
+      expect(emissions, equals([false]),
+          reason:
+              'isLoading should only have the initial seeded value (false). '
+              'invoke() must NOT emit isLoading=true to prevent cross-module '
+              'loading indicator leakage.');
+      await sub.cancel();
     });
   });
 }

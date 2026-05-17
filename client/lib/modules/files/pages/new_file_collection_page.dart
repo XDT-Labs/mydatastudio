@@ -9,7 +9,7 @@ import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_d
 import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_configure_view.dart';
 import 'package:mydatatools/modules/files/widgets/file_collection_setup/local_files_tab_view.dart';
 import 'package:mydatatools/oauth/login_providers.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:file_picker/file_picker.dart';
@@ -96,17 +96,18 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
         needsReAuth: false,
       );
 
-      CollectionRepository().addCollection(fc).then((value) {
-        if (value != null) {
+      final writer = DatabaseManager.instance.writerIsolateClient;
+      if (writer != null) {
+        writer.send({'type': 'add_collection', 'collection': fc}).then((_) {
           GetCollectionsService.instance.invoke(
             GetCollectionsServiceCommand(null),
           );
           ScannerManager.getInstance()
-              .getScanner(value)
-              ?.start(value, value.path, true, true);
-          RxFilesPage.selectedCollection.add(value);
-        }
-      });
+              .getScanner(fc)
+              ?.start(fc, fc.path, true, true);
+          RxFilesPage.selectedCollection.add(fc);
+        });
+      }
 
       GoRouter.of(context).go('/files');
     } else {
@@ -119,7 +120,7 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
 // Google Drive Tab — lives in its own StatefulWidget to keep auth state local
 // =============================================================================
 
-enum _DriveAuthState { idle, loading, success, error, configure }
+enum _DriveAuthState { idle, checking, loading, success, error, configure }
 
 class _GoogleDriveTab extends StatefulWidget {
   const _GoogleDriveTab();
@@ -142,7 +143,7 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
 
   Future<void> _checkConfiguration() async {
     setState(() {
-      _authState = _DriveAuthState.loading;
+      _authState = _DriveAuthState.checking;
     });
 
     final clientId = await LoginProviders.googleDrive.clientId;
@@ -226,6 +227,13 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
             ),
           ),
           child: switch (_authState) {
+            _DriveAuthState.checking => const Center(
+                key: ValueKey('checking'),
+                child: Padding(
+                  padding: EdgeInsets.all(48),
+                  child: CircularProgressIndicator(),
+                ),
+              ),
             _DriveAuthState.loading => _cardContainer(
                 key: const ValueKey('loading'),
                 child: const GoogleDriveLoadingView(),
