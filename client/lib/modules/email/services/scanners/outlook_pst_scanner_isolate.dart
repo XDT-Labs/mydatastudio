@@ -142,7 +142,7 @@ class OutlookPstScannerIsolateWorker {
       Isolate.exit(clientPort, {'error': 'api_failed'});
     }
 
-    final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName, false);
+    final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName);
 
     // Keep track of internal IDs
     final Map<String, String> folderPathToId = {};

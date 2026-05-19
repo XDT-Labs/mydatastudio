@@ -25,7 +25,6 @@ void main() {
     });
 
     databaseManager = DatabaseManager.instance;
-    databaseManager.useMemoryDb = false;
     await databaseManager.initializeDatabase();
 
     repository = EmailFolderRepository(databaseManager.database!);

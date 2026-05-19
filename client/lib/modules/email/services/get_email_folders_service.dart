@@ -13,9 +13,9 @@ class EmailFolderServiceCommand {
 /// A reactive service that loads email folders for a collection.
 ///
 /// **Subscription management:** Each unique [collectionId] gets exactly one
-/// persistent Drift `watch()` subscription. Calling [invoke] multiple times
-/// for the same collectionId will NOT create duplicate subscriptions — it
-/// simply returns the last-known value immediately via [sink]. Call
+/// persistent stream subscription. Calling [invoke] multiple times for the
+/// same collectionId will NOT create duplicate subscriptions — it simply
+/// returns the last-known value immediately via [sink]. Call
 /// [disposeCollection] when an account is removed to clean up its subscription.
 class GetEmailFoldersService
     extends RxService<EmailFolderServiceCommand, List<EmailFolder>> {
@@ -53,7 +53,7 @@ class GetEmailFoldersService
     sink.add(folders);
     isLoading.add(false);
 
-    // Only set up the persistent Drift watch if we don't already have one for
+    // Only set up the persistent stream if we don't already have one for
     // this collectionId. This prevents subscription leaks on repeated calls.
     if (!_watchSubs.containsKey(collectionId)) {
       final stream = _database.stream(

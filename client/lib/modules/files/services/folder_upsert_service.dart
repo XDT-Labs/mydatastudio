@@ -44,9 +44,8 @@ class FolderUpsertService
   ///
   /// SQLite returns code 5 when the database write lock is held by another
   /// connection longer than the configured busy_timeout. This happens when
-  /// multiple connections (e.g., main thread and DbIsolateWriter) compete
-  /// for the single write lock. Retrying with backoff resolves transient
-  /// contention.
+  /// multiple connections compete for the write lock. Retrying with backoff
+  /// resolves transient contention.
   Future<Folder?> _upsertWithRetry(
     FolderDesktopRepository repo,
     Folder folderData,

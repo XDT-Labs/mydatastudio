@@ -40,9 +40,8 @@ import 'package:path/path.dart' as p;
 /// be transferred. Instead we pass raw strings (providerKey, accessToken,
 /// refreshToken) and rebuild the provider inside.
 ///
-/// ## Message protocol with [DbIsolateWriter]
-/// Uses the same `batch_file` / `folder` / `cleanup_deleted` messages as
-/// [LocalFileIsolate] — no changes to the DB writer are needed.
+/// Writes `batch_file`, `folder`, and `cleanup_deleted` operations directly
+/// to the database via the repository layer.
 class CloudFileIsolate extends CollectionScanner {
   final SendPort? loggerIsolatePort;
   final String? storagePath;
@@ -230,7 +229,6 @@ class CloudFileIsolateWorker {
         null,
         args['storagePath'] as String,
         args['dbName'] as String,
-        false,
       );
 
       final worker = CloudFileIsolateWorker(appDb, loggerPort);

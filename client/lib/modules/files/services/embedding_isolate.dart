@@ -120,7 +120,7 @@ class EmbeddingIsolate {
 
     logger.i("EmbeddingIsolate starting loop");
 
-    final db = await AppDatabase.create(null, storagePath, dbName, false);
+    final db = await AppDatabase.create(null, storagePath, dbName);
     final repo = DatabaseRepository(db);
 
     // Initial delay to let everything settle

@@ -106,7 +106,7 @@ class GetFileAndFoldersService
       sink.add(_currentItems);
 
       // ── 2. THEN trigger scanner in background ────────────────────
-      // Fire-and-forget: the scanner writes to the DB via DbIsolateWriter.
+      // Fire-and-forget: the scanner writes to the DB directly.
       // When isScanning transitions false→true→false the page auto-refreshes.
       if (!command.refreshOnly && command.offset == 0) {
         ScannerManager.getInstance()

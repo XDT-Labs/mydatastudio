@@ -196,7 +196,7 @@ class LocalFileIsolateWorker {
   void _scan(Map<String, dynamic> args) async {
     logger = AppLogger(loggerPort);
 
-    final appDb = await AppDatabase.create(null, storagePath, dbName, false);
+    final appDb = await AppDatabase.create(null, storagePath, dbName);
 
     String path = args['path'];
     // Normalize path: Remove trailing slash if it exists (unless it's just '/')

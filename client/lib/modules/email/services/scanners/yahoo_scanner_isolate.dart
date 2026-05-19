@@ -244,7 +244,7 @@ class YahooScannerIsolateWorker {
         return;
       }
 
-      final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName, false);
+      final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName);
 
       final scanStartTime = DateTime.now();
       int totalFound = 0;

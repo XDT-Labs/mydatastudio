@@ -16,61 +16,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:mydatatools/modules/files/services/embedding_isolate.dart';
 import 'package:uuid/uuid.dart';
 
-// Custom stub variables to make Drift code compile during migration
-class Variable {
-  final Object? value;
-  const Variable(this.value);
-  static Variable withString(String v) => Variable(v);
-  static Variable withBlob(List<int> v) => Variable(v);
-  static Variable withInt(int v) => Variable(v);
-  static Variable withBool(bool v) => Variable(v ? 1 : 0);
-  static Variable withReal(double v) => Variable(v);
-}
-
-class ResqliteQueryRow {
-  final Map<String, Object?> _data;
-  ResqliteQueryRow(this._data);
-
-  T read<T>(String columnName) {
-    final val = _data[columnName];
-    if (val == null) {
-      if (null is T) return null as T;
-      throw Exception("Column $columnName is null, but expected a non-nullable type.");
-    }
-    if (T == DateTime) {
-      if (val is int) {
-        return DateTime.fromMillisecondsSinceEpoch(val) as T;
-      } else if (val is String) {
-        return DateTime.parse(val) as T;
-      }
-    }
-    if (T == bool) {
-      if (val is int) {
-        return (val != 0) as T;
-      }
-    }
-    return val as T;
-  }
-}
-
-class ResqliteSelectable<T> {
-  final Future<List<T>> _future;
-  ResqliteSelectable(this._future);
-
-  Future<List<T>> get() => _future;
-  Future<T> getSingle() async {
-    final list = await _future;
-    return list.first;
-  }
-  Future<T?> getSingleOrNull() async {
-    final list = await _future;
-    return list.isEmpty ? null : list.first;
-  }
-  
-  ResqliteSelectable<R> map<R>(R Function(T row) mapper) {
-    return ResqliteSelectable<R>(_future.then((list) => list.map(mapper).toList()));
-  }
-}
 
 class DatabaseManager {
   static final DatabaseManager _singleton = DatabaseManager._();
@@ -80,9 +25,6 @@ class DatabaseManager {
 
   /// Notifies listeners when the database initialization is complete
   static ValueNotifier<bool> isInitializedNotifier = ValueNotifier(false);
-
-  /// Flag to determine if an in-memory database should be used (for testing)
-  bool useMemoryDb = false;
 
   /// Flag to skip loading native extensions (for testing environments)
   static bool skipExtensionLoading = false;
@@ -146,9 +88,7 @@ class DatabaseManager {
   }
 
   Future<AppDatabase> initializeDatabase() async {
-    if (useMemoryDb) {
-      storagePath = '.';
-    } else if (isTesting) {
+    if (isTesting) {
       storagePath = p.dirname(await _getConfigPath());
     } else {
       io.File file = io.File(await _getConfigPath());
@@ -198,24 +138,18 @@ class DatabaseManager {
         return this.database!;
       }
 
-      if (!useMemoryDb) {
-        //make sure root dir exists
-        io.Directory(storagePath).createSync(recursive: true);
-        //make sure data, files, and keys sub dirs have been created
-        var dbDir = io.Directory(p.join(storagePath, 'data'));
-        io.Directory(dbDir.path).createSync(recursive: true);
-        var keyDir = io.Directory(p.join(storagePath, 'keys'));
-        io.Directory(keyDir.path).createSync(recursive: true);
-        var fileDir = io.Directory(p.join(storagePath, 'files'));
-        io.Directory(fileDir.path).createSync(recursive: true);
-      }
+      //make sure root dir exists
+      io.Directory(storagePath).createSync(recursive: true);
+      //make sure data, files, and keys sub dirs have been created
+      io.Directory(p.join(storagePath, 'data')).createSync(recursive: true);
+      io.Directory(p.join(storagePath, 'keys')).createSync(recursive: true);
+      io.Directory(p.join(storagePath, 'files')).createSync(recursive: true);
 
       //on app startup, start db.
       AppDatabase database = await AppDatabase.create(
         null,
         storagePath,
         AppConstants.dbName,
-        useMemoryDb,
       );
       logger.i("DB Started | schema version=${database.schemaVersion}");
 
@@ -277,21 +211,15 @@ class AppDatabase {
     String? connection,
     String? storagePath,
     String? dbName,
-    bool useMemoryDb,
   ) async {
-    Database db;
-    if (useMemoryDb) {
-      db = await Database.open(':memory:');
-    } else {
-      if (storagePath == null || dbName == null) {
-        throw Exception("Path or Name not provided for database opening");
-      }
-      final dbFile = io.File(p.join(storagePath, 'data', dbName));
-      if (!dbFile.parent.existsSync()) {
-        dbFile.parent.createSync(recursive: true);
-      }
-      db = await Database.open(dbFile.path);
+    if (storagePath == null || dbName == null) {
+      throw Exception("Path or Name not provided for database opening");
     }
+    final dbFile = io.File(p.join(storagePath, 'data', dbName));
+    if (!dbFile.parent.existsSync()) {
+      dbFile.parent.createSync(recursive: true);
+    }
+    final Database db = await Database.open(dbFile.path);
 
     final appDb = AppDatabase(db);
     appDb.path = storagePath;
@@ -307,23 +235,6 @@ class AppDatabase {
   Future<T> transaction<T>(Future<T> Function(Transaction tx) body) => _db.transaction(body);
   Stream<List<Map<String, Object?>>> stream(String sql, [List<Object?> params = const []]) => _db.stream(sql, params);
   Future<void> close() => _db.close();
-
-  // Compatibility stubs for Drift APIs
-  Future<void> customStatement(String sql, [List<Object?> params = const []]) async {
-    await _db.execute(sql, params);
-  }
-
-  ResqliteSelectable<ResqliteQueryRow> customSelect(
-    String sql, {
-    List<Variable> variables = const [],
-    List<Object?> params = const [],
-  }) {
-    final list = params.isNotEmpty ? params : variables.map((v) => v.value).toList();
-    final Future<List<ResqliteQueryRow>> futureRows = _db.select(sql, list).then(
-      (rows) => rows.map((r) => ResqliteQueryRow(r)).toList(),
-    );
-    return ResqliteSelectable<ResqliteQueryRow>(futureRows);
-  }
 
   Future<void> initSchema() async {
     // Check if table 'apps' already exists to determine if initialization is required

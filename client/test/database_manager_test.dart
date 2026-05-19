@@ -75,9 +75,6 @@ void main() {
       configFile.createSync(recursive: true);
       configFile.writeAsStringSync(jsonEncode({'path': tempDir!.path}));
 
-      // Use a real temp DB file for testing with resqlite
-      DatabaseManager.instance.useMemoryDb = false;
-
       await DatabaseManager.instance.initializeDatabase();
 
       expect(DatabaseManager.instance.database, isNotNull);
@@ -89,9 +86,5 @@ void main() {
       DatabaseManager.instance.dispose();
     });
 
-    // Note: writerPort and stopDbWriterIsolate are hard to test in unit tests
-    // because they involve isolates which might not work perfectly in this
-    // simple test environment without more complex mocking or integration tests.
-    // However, we can check if the methods exist and don't crash on basic calls if possible.
   });
 }

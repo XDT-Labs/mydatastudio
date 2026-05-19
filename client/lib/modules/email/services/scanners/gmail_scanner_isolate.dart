@@ -165,7 +165,7 @@ class GmailScannerIsolateWorker {
       Isolate.exit(clientPort, {'error': 'auth_failed'});
     }
 
-    final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName, false);
+    final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName);
 
     final authHttpClient = AuthenticatedHttpClient.bearer(accessToken);
     final GmailApi gmailApi = GmailApi(authHttpClient);

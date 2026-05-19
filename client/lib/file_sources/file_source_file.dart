@@ -1,7 +1,7 @@
 /// A provider-agnostic representation of a file or folder returned by a
 /// [FileSourceProvider]. This is a lightweight DTO used for listing and UI
 /// actions — it is intentionally separate from the DB model ([File]/[Folder])
-/// so the provider layer does not depend on Drift/SQLite.
+/// so the provider layer does not depend on SQLite.
 class FileSourceFile {
   /// Provider-native identifier.
   /// - Local files: the absolute filesystem path.
