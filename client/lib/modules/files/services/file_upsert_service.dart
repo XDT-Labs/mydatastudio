@@ -4,7 +4,7 @@ import 'package:mydatatools/modules/files/services/repositories/file_repository.
 
 import 'package:mydatatools/services/rx_service.dart';
 import 'package:flutter/material.dart';
-import 'package:sqlite3/sqlite3.dart' show SqliteException;
+import 'package:resqlite/resqlite.dart' show ResqliteQueryException;
 
 class FileUpsertService extends RxService<FileUpsertServiceCommand, File> {
   static final FileUpsertService _singleton = FileUpsertService();
@@ -49,8 +49,8 @@ class FileUpsertService extends RxService<FileUpsertServiceCommand, File> {
         } else {
           return await repo.update(fileData);
         }
-      } on SqliteException catch (e) {
-        if (e.resultCode == 5 && attempt < _maxRetries) {
+      } on ResqliteQueryException catch (e) {
+        if (e.sqliteCode == 5 && attempt < _maxRetries) {
           final delay = _retryBaseDelay * (1 << attempt);
           debugPrint(
             'FileUpsertService: SQLITE_BUSY (attempt ${attempt + 1}/$_maxRetries), '

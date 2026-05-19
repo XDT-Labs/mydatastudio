@@ -4,7 +4,7 @@ import 'package:mydatatools/modules/files/services/repositories/folder_repositor
 
 import 'package:mydatatools/services/rx_service.dart';
 import 'package:flutter/material.dart';
-import 'package:sqlite3/sqlite3.dart' show SqliteException;
+import 'package:resqlite/resqlite.dart' show ResqliteQueryException;
 
 class FolderUpsertService
     extends RxService<FolderUpsertServiceCommand, Folder?> {
@@ -59,8 +59,8 @@ class FolderUpsertService
           folderData.id = existing.id; // Preserve existing database ID
           return await repo.update(folderData);
         }
-      } on SqliteException catch (e) {
-        if (e.resultCode == 5 && attempt < _maxRetries) {
+      } on ResqliteQueryException catch (e) {
+        if (e.sqliteCode == 5 && attempt < _maxRetries) {
           // SQLITE_BUSY — wait with exponential backoff then retry
           final delay = _retryBaseDelay * (1 << attempt);
           debugPrint(

@@ -3,7 +3,7 @@ import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:mydatatools/modules/email/services/email_folder_repository.dart';
 import 'package:mydatatools/services/rx_service.dart';
-import 'package:sqlite3/sqlite3.dart' show SqliteException;
+import 'package:resqlite/resqlite.dart' show ResqliteQueryException;
 
 class EmailFolderUpsertService extends RxService<EmailFolderUpsertServiceCommand, EmailFolder> {
   static final EmailFolderUpsertService _singleton = EmailFolderUpsertService();
@@ -34,8 +34,8 @@ class EmailFolderUpsertService extends RxService<EmailFolderUpsertServiceCommand
       try {
         await repo.upsertFolder(command.folder);
         return;
-      } on SqliteException catch (e) {
-        if (e.resultCode == 5 && attempt < _maxRetries) {
+      } on ResqliteQueryException catch (e) {
+        if (e.sqliteCode == 5 && attempt < _maxRetries) {
           final delay = _retryBaseDelay * (1 << attempt);
           debugPrint(
             'EmailFolderUpsertService: SQLITE_BUSY (attempt ${attempt + 1}/$_maxRetries), '

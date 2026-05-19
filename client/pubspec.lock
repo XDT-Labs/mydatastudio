@@ -1386,30 +1386,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.0.0"
-  sqlite3:
-    dependency: "direct main"
-    description:
-      name: sqlite3
-      sha256: caa693ad15a587a2b4fde093b728131a1827903872171089dedb16f7665d3a91
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.2.0"
-  sqlite3_flutter_libs:
-    dependency: "direct main"
-    description:
-      name: sqlite3_flutter_libs
-      sha256: "3ed7553eee7bb368f8950f58ba29f634e06e813c029aff6a0d60862b96de8454"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.6.0+eol"
-  sqlite_vector:
-    dependency: "direct main"
-    description:
-      name: sqlite_vector
-      sha256: "318dab75a5bf4a642d979b202a7c73953986555f47a70e238f64888fe21f62aa"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.9.93"
   stack_trace:
     dependency: transitive
     description:
