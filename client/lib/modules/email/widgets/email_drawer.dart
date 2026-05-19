@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
@@ -193,8 +192,6 @@ class _EmailDrawer extends State<EmailDrawer> {
                         if (col.scanner ==
                             AppConstants.scannerEmailOutlookPst) {
                           // For PST we run one-time import isolate
-                          final writerPort =
-                              await DatabaseManager.instance.writerPort;
                           final serverUrl = MainApp.llmServiceUrl.valueOrNull;
                           final appDataDir =
                               MainApp.appDataDirectory.valueOrNull;
@@ -202,7 +199,6 @@ class _EmailDrawer extends State<EmailDrawer> {
                           if (serverUrl != null && appDataDir != null) {
                             final pstIsolate = OutlookPstScannerIsolate(
                               token: RootIsolateToken.instance,
-                              dbWriterPort: writerPort,
                               appDir: appDataDir,
                               serverUrl: serverUrl,
                             );
@@ -300,19 +296,8 @@ class _EmailDrawer extends State<EmailDrawer> {
                     collection.id,
                   );
 
-                  // 4. Send delete command to background isolate
-                  final writer = DatabaseManager.instance.writerIsolateClient;
-                  if (writer != null) {
-                    await writer.send({
-                      'type': 'delete_collection',
-                      'id': collection.id,
-                    });
-                  } else {
-                    // Fallback to repository if writer is unavailable
-                    await CollectionRepository().deleteCollection(
-                      collection.id,
-                    );
-                  }
+                  // 4. Delete collection
+                  await CollectionRepository().deleteCollection(collection.id);
 
                   // 5. Refresh and cleanup
                   _collectionsService.invoke(

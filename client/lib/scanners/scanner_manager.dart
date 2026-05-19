@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:isolate';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 import 'package:mydatatools/app_constants.dart';
@@ -165,22 +164,24 @@ class ScannerManager {
       switch (c.scanner) {
         case AppConstants.scannerFileLocal:
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          SendPort? writerPort = await DatabaseManager.instance.writerPort;
-          scanner = LocalFileIsolate(null, writerPort);
+          scanner = LocalFileIsolate(
+            null,
+            storagePath: DatabaseManager.instance.storagePath!,
+            dbName: AppConstants.dbName,
+          );
           break;
 
         case AppConstants.scannerFileGDrive:
           logger.i("Registering GDrive scanner for ${c.name} (ID: ${c.id})");
-          SendPort driveWriterPort = await DatabaseManager.instance.writerPort;
           scanner = CloudFileIsolate(
-            null, // Central logger port not used yet
-            driveWriterPort,
+            null,
+            storagePath: DatabaseManager.instance.storagePath!,
+            dbName: AppConstants.dbName,
           );
           break;
 
         case AppConstants.scannerEmailGmail:
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
           scanner = GmailScanner(
             dbPath: p.join(
               DatabaseManager.instance.storagePath!,
@@ -189,13 +190,11 @@ class ScannerManager {
             ),
             collection: c,
             appDir: DatabaseManager.instance.storagePath!,
-            dbWriterPort: emailWriterPort,
           );
           break;
 
         case AppConstants.scannerEmailYahoo:
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
           scanner = YahooScanner(
             dbPath: p.join(
               DatabaseManager.instance.storagePath!,
@@ -204,13 +203,11 @@ class ScannerManager {
             ),
             collection: c,
             appDir: DatabaseManager.instance.storagePath!,
-            dbWriterPort: emailWriterPort,
           );
           break;
 
         case AppConstants.scannerEmailOutlook:
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
           scanner = OutlookScanner(
             dbPath: p.join(
               DatabaseManager.instance.storagePath!,
@@ -219,7 +216,6 @@ class ScannerManager {
             ),
             collection: c,
             appDir: DatabaseManager.instance.storagePath!,
-            dbWriterPort: emailWriterPort,
           );
           break;
 

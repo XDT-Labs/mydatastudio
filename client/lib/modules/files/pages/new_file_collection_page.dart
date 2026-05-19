@@ -1,6 +1,7 @@
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/modules/files/pages/rx_files_page.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/modules/files/widgets/file_collection_setup/coming_soon_tab_view.dart';
 import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_error_view.dart';
 import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_idle_view.dart';
@@ -96,18 +97,15 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
         needsReAuth: false,
       );
 
-      final writer = DatabaseManager.instance.writerIsolateClient;
-      if (writer != null) {
-        writer.send({'type': 'add_collection', 'collection': fc}).then((_) {
-          GetCollectionsService.instance.invoke(
-            GetCollectionsServiceCommand(null),
-          );
-          ScannerManager.getInstance()
-              .getScanner(fc)
-              ?.start(fc, fc.path, true, true);
-          RxFilesPage.selectedCollection.add(fc);
-        });
-      }
+      CollectionRepository(DatabaseManager.instance.database!).addCollection(fc).then((_) {
+        GetCollectionsService.instance.invoke(
+          GetCollectionsServiceCommand(null),
+        );
+        ScannerManager.getInstance()
+            .getScanner(fc)
+            ?.start(fc, fc.path, true, true);
+        RxFilesPage.selectedCollection.add(fc);
+      });
 
       GoRouter.of(context).go('/files');
     } else {

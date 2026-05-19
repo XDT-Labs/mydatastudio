@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -319,13 +320,11 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
         needsReAuth: false,
       );
 
-      final writer = DatabaseManager.instance.writerIsolateClient;
-      if (writer != null) {
-        await writer.send({'type': 'add_collection', 'collection': collection});
-      }
+      await CollectionRepository(
+        DatabaseManager.instance.database!,
+      ).addCollection(collection);
 
       // Start the one-time scan isolate immediately
-      final writerPort = await DatabaseManager.instance.writerPort;
       final serverUrl = MainApp.llmServiceUrl.valueOrNull;
       if (serverUrl == null) {
         throw Exception('LLM Service url is not configured');
@@ -333,7 +332,6 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
 
       final pstIsolate = OutlookPstScannerIsolate(
         token: RootIsolateToken.instance,
-        dbWriterPort: writerPort,
         appDir: appDataDir,
         serverUrl: serverUrl,
       );

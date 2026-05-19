@@ -43,18 +43,16 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
     });
 
     try {
-      // Route through writer isolate to avoid SQLITE_BUSY
-      final writer = DatabaseManager.instance.writerIsolateClient;
-      if (writer != null) {
-        await writer.send({
-          'type': 'save_provider',
-          'service': 'google',
-          'clientId': clientId,
-          'clientSecret': clientSecret,
-          'apiKey': '',
-        });
-      }
-      
+      await DatabaseManager.instance.database!.execute(
+        'INSERT INTO providers (service, client_id, client_secret, api_key) '
+        'VALUES (?, ?, ?, ?) '
+        'ON CONFLICT(service) DO UPDATE SET '
+        'client_id = excluded.client_id, '
+        'client_secret = excluded.client_secret, '
+        'api_key = excluded.api_key',
+        ['google', clientId, clientSecret, ''],
+      );
+
       widget.onConfigured();
     } catch (e) {
       if (mounted) {

@@ -10,6 +10,11 @@ import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/folder.dart';
+import 'package:mydatatools/modules/files/services/batch_file_upsert_service.dart';
+import 'package:mydatatools/modules/files/services/cleanup_deleted_files_service.dart';
+import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
@@ -40,11 +45,12 @@ import 'package:path/path.dart' as p;
 /// [LocalFileIsolate] — no changes to the DB writer are needed.
 class CloudFileIsolate extends CollectionScanner {
   final SendPort? loggerIsolatePort;
-  final SendPort dbWriterIsolatePort;
+  final String? storagePath;
+  final String? dbName;
   Isolate? _isolate;
   AppLogger? _logger;
 
-  CloudFileIsolate(this.loggerIsolatePort, this.dbWriterIsolatePort) : super() {
+  CloudFileIsolate(this.loggerIsolatePort, {this.storagePath, this.dbName}) : super() {
     _logger = AppLogger(loggerIsolatePort);
   }
 
@@ -86,13 +92,13 @@ class CloudFileIsolate extends CollectionScanner {
     final Map<String, dynamic> args = {
       'token': token,
       'port': p.sendPort,
-      'dbWriterPort': dbWriterIsolatePort,
+      'storagePath': storagePath,
+      'dbName': dbName,
       'loggerPort': p.sendPort, // Send logs back through our own ReceivePort
       'collectionId': collection.id,
       'collectionName': collection.name,
       'collectionPath': collection.path,
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
-      'storagePath': DatabaseManager.instance.storagePath,
       'downloadLocalCopy': collection.downloadLocalCopy,
       // The root folder ID to start scanning from (e.g. 'root' or a specific folder ID)
       'rootFolderId': actualPath,
@@ -193,7 +199,7 @@ class CloudFileIsolate extends CollectionScanner {
 /// All execution inside the Drive isolate. Receives raw token strings and
 /// rebuilds the Drive API client before scanning.
 class CloudFileIsolateWorker {
-  final SendPort dbWriterPort;
+  final AppDatabase appDb;
   final SendPort? loggerPort;
   late final AppLogger logger;
 
@@ -206,7 +212,7 @@ class CloudFileIsolateWorker {
   static const int _maxConcurrentDownloads = 3;
   bool _isScanning = false;
 
-  CloudFileIsolateWorker(this.dbWriterPort, this.loggerPort) {
+  CloudFileIsolateWorker(this.appDb, this.loggerPort) {
     logger = AppLogger(loggerPort);
   }
 
@@ -220,10 +226,14 @@ class CloudFileIsolateWorker {
       final token = args['token'] as RootIsolateToken;
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
 
-      final worker = CloudFileIsolateWorker(
-        args['dbWriterPort'] as SendPort,
-        loggerPort,
+      final appDb = await AppDatabase.create(
+        null,
+        args['storagePath'] as String,
+        args['dbName'] as String,
+        false,
       );
+
+      final worker = CloudFileIsolateWorker(appDb, loggerPort);
 
       await worker._scan(args);
     } catch (e, stack) {
@@ -343,30 +353,28 @@ class CloudFileIsolateWorker {
       );
 
       if (!skipCleanup) {
-        // Signal the DB writer to mark anything not seen this scan as deleted
-        // (Only for full walks or forced refreshes)
-        final ReceivePort syncPort = ReceivePort();
-        dbWriterPort.send({
-          'type': 'cleanup_deleted',
-          'collectionId': collectionId,
-          'path': rootFolderId == collectionPath ? '' : rootFolderId,
-          'scanStartTime': scanStartTime,
-          'recursive': recursive,
-          'isCloud': true,
-          'isFullScan': isFullScan,
-          'replyTo': syncPort.sendPort,
-        });
-        await syncPort.first;
-        syncPort.close();
+        // Mark anything not seen this scan as deleted (full walks / forced refreshes)
+        await CleanupDeletedFilesService.instance.invoke(
+          CleanupDeletedFilesServiceCommand(
+            collectionId,
+            rootFolderId == collectionPath ? '' : rootFolderId,
+            scanStartTime,
+            appDb,
+            recursive: recursive,
+            isCloud: true,
+            isFullScan: isFullScan,
+          ),
+        );
       }
 
       // Update lastScanDate in the DB
-      dbWriterPort.send({
-        'type': 'update_collection_status',
-        'id': collectionId,
-        'status': 'ready',
-        'lastScan': scanStartTime.toIso8601String(),
-      });
+      final colRepo = CollectionRepository(appDb);
+      final col = await colRepo.collectionById(collectionId);
+      if (col != null) {
+        col.scanStatus = 'ready';
+        col.lastScanDate = scanStartTime;
+        await colRepo.updateCollection(col);
+      }
 
       _isScanning = false;
       (args['port'] as SendPort).send({'type': 'scan_complete'});
@@ -374,40 +382,27 @@ class CloudFileIsolateWorker {
       if (downloadLocalCopy && storagePath != null) {
         // Query DB for files with null localPath
         logger.i('CloudFileIsolate: querying DB for files needing download...');
-        final ReceivePort downloadListPort = ReceivePort();
-        dbWriterPort.send({
-          'type': 'get_files_to_download',
-          'collectionId': collectionId,
-          'replyTo': downloadListPort.sendPort,
-        });
+        final List<File> allFilesNeedingDownload =
+            await FileDesktopRepository(appDb).getFilesToDownload(collectionId);
+        _downloadQueue.clear();
 
-        final response = await downloadListPort.first;
-        downloadListPort.close();
-
-        if (response is Map && response['status'] == 'ok') {
-          final List<File> allFilesNeedingDownload =
-              (response['files'] as List).cast<File>();
-          _downloadQueue.clear();
-
-          // Filter out Google native formats (Docs, Sheets, etc.) that we can't download as full media
-          for (final file in allFilesNeedingDownload) {
-            if (!_isGoogleNativeFormat(file.contentType)) {
-              _downloadQueue.add(file);
-            }
+        // Filter out Google native formats (Docs, Sheets, etc.) that we can't download as full media
+        for (final file in allFilesNeedingDownload) {
+          if (!_isGoogleNativeFormat(file.contentType)) {
+            _downloadQueue.add(file);
           }
-
-          logger.i(
-            'CloudFileIsolate: processing download queue (${_downloadQueue.length} items)',
-          );
-          await _processQueue(
-            driveApi,
-            storagePath,
-            collectionName,
-            collectionPath,
-          );
-        } else {
-          logger.e('CloudFileIsolate: failed to fetch download list from DB');
         }
+
+        logger.i(
+          'CloudFileIsolate: processing download queue (${_downloadQueue.length} items)',
+        );
+        await _processQueue(
+          driveApi,
+          storagePath,
+          collectionName,
+          collectionPath,
+        );
+
       }
     } catch (e, stack) {
       logger.e(
@@ -467,7 +462,9 @@ class CloudFileIsolateWorker {
             scanStartTime: scanStartTime,
           );
           if (folder != null) {
-            dbWriterPort.send({'type': 'folder', 'folder': folder});
+            await FolderUpsertService.instance.invoke(
+              FolderUpsertServiceCommand(folder, appDb),
+            );
             logger.i('Found NEW/CHANGED folder: ${f.name} (${f.id})');
           }
         } else {
@@ -483,10 +480,9 @@ class CloudFileIsolateWorker {
             logger.i('Found NEW/CHANGED file: ${f.name} (${f.id})');
 
             if (fileBatch.length >= 100) {
-              dbWriterPort.send({
-                'type': 'batch_file',
-                'files': List<File>.from(fileBatch),
-              });
+              await BatchFileUpsertService.instance.invoke(
+                BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+              );
               fileBatch.clear();
             }
           }
@@ -496,10 +492,9 @@ class CloudFileIsolateWorker {
     } while (pageToken != null);
 
     if (fileBatch.isNotEmpty) {
-      dbWriterPort.send({
-        'type': 'batch_file',
-        'files': List<File>.from(fileBatch),
-      });
+      await BatchFileUpsertService.instance.invoke(
+        BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+      );
     }
 
     return count;
@@ -559,7 +554,9 @@ class CloudFileIsolateWorker {
             scanStartTime: scanStartTime,
           );
           if (folder != null) {
-            dbWriterPort.send({'type': 'folder', 'folder': folder});
+            await FolderUpsertService.instance.invoke(
+              FolderUpsertServiceCommand(folder, appDb),
+            );
             logger.i('Found Drive folder: ${f.name} (${f.id})');
 
             if (recursive) {
@@ -593,10 +590,9 @@ class CloudFileIsolateWorker {
               logger.d(
                 'CloudFileIsolate: Sending batch of ${fileBatch.length} files to DB writer',
               );
-              dbWriterPort.send({
-                'type': 'batch_file',
-                'files': List<File>.from(fileBatch),
-              });
+              await BatchFileUpsertService.instance.invoke(
+                BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+              );
               fileBatch.clear();
             }
           }
@@ -611,10 +607,9 @@ class CloudFileIsolateWorker {
       logger.d(
         'CloudFileIsolate: Sending final batch of ${fileBatch.length} files to DB writer',
       );
-      dbWriterPort.send({
-        'type': 'batch_file',
-        'files': List<File>.from(fileBatch),
-      });
+      await BatchFileUpsertService.instance.invoke(
+        BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+      );
       fileBatch.clear();
     }
 
@@ -660,11 +655,10 @@ class CloudFileIsolateWorker {
       final destFile = io.File(destPath);
       if (await destFile.exists()) {
         logger.d('File already exists on disk: $destPath');
-        dbWriterPort.send({
-          'type': 'update_file_local_path',
-          'id': file.id,
-          'localPath': destPath,
-        });
+        await appDb.execute(
+          'UPDATE files SET local_path = ? WHERE id = ?',
+          [destPath, file.id],
+        );
         return;
       }
 
@@ -680,12 +674,10 @@ class CloudFileIsolateWorker {
       try {
         await media.stream.pipe(sink);
         logger.i('Downloaded: ${file.name}');
-        
-        dbWriterPort.send({
-          'type': 'update_file_local_path',
-          'id': file.id,
-          'localPath': destPath,
-        });
+        await appDb.execute(
+          'UPDATE files SET local_path = ? WHERE id = ?',
+          [destPath, file.id],
+        );
       } finally {
         await sink.flush();
         await sink.close();

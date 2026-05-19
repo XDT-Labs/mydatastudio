@@ -2,10 +2,16 @@ import 'dart:async';
 import 'dart:io' as io;
 import 'dart:isolate';
 import 'package:mydatatools/app_logger.dart';
+import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/folder.dart';
 import 'package:mydatatools/modules/files/files_constants.dart';
+import 'package:mydatatools/modules/files/services/batch_file_upsert_service.dart';
+import 'package:mydatatools/modules/files/services/cleanup_deleted_files_service.dart';
+import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
@@ -27,11 +33,12 @@ import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator
 class LocalFileIsolate extends CollectionScanner {
   RootIsolateToken? token;
   SendPort? loggerIsolatePort;
-  SendPort? dbWriterIsolatePort;
+  String? storagePath;
+  String? dbName;
   Isolate? isolate;
   AppLogger? logger;
 
-  LocalFileIsolate(this.loggerIsolatePort, this.dbWriterIsolatePort) : super() {
+  LocalFileIsolate(this.loggerIsolatePort, {this.storagePath, this.dbName}) : super() {
     logger = AppLogger(loggerIsolatePort);
   }
 
@@ -79,7 +86,8 @@ class LocalFileIsolate extends CollectionScanner {
     LocalFileIsolateWorker worker = LocalFileIsolateWorker(
       token,
       p.sendPort,
-      dbWriterIsolatePort!,
+      storagePath!,
+      dbName!,
       loggerIsolatePort,
     );
     logger?.i('Spawning local file scanner isolate for $path');
@@ -157,7 +165,8 @@ class LocalFileIsolate extends CollectionScanner {
 class LocalFileIsolateWorker {
   RootIsolateToken? token;
   SendPort receiverPort;
-  SendPort dbWriterPort;
+  String storagePath;
+  String dbName;
   SendPort? loggerPort;
   AppLogger? logger;
 
@@ -173,7 +182,8 @@ class LocalFileIsolateWorker {
   LocalFileIsolateWorker(
     this.token,
     this.receiverPort,
-    this.dbWriterPort,
+    this.storagePath,
+    this.dbName,
     this.loggerPort,
   ) {
     // Ensure the background binary messenger is initialized so plugins/platform channels work
@@ -185,7 +195,9 @@ class LocalFileIsolateWorker {
   // start scanning
   void _scan(Map<String, dynamic> args) async {
     logger = AppLogger(loggerPort);
-    
+
+    final appDb = await AppDatabase.create(null, storagePath, dbName, false);
+
     String path = args['path'];
     // Normalize path: Remove trailing slash if it exists (unless it's just '/')
     if (path.length > 1 && path.endsWith('/')) {
@@ -211,22 +223,11 @@ class LocalFileIsolateWorker {
     // Fetch existing file metadata to avoid redundant processing
     final Map<String, File> metadataCache = {};
     try {
-      final ReceivePort metadataPort = ReceivePort();
-      dbWriterPort.send({
-        'type': 'get_collection_metadata',
-        'collectionId': collectionId,
-        'replyTo': metadataPort.sendPort,
-      });
-      final response = await metadataPort.first;
-      metadataPort.close();
-
-      if (response is Map && response['status'] == 'ok') {
-        final List<File> files = (response['files'] as List).cast<File>();
-        for (final f in files) {
-          metadataCache[f.id] = f;
-        }
-        logger?.i('LocalScan: Loaded ${metadataCache.length} existing file records for caching');
+      final List<File> files = await FileDesktopRepository(appDb).getScanMetadata(collectionId);
+      for (final f in files) {
+        metadataCache[f.id] = f;
       }
+      logger?.i('LocalScan: Loaded ${metadataCache.length} existing file records for caching');
     } catch (e) {
       logger?.e('LocalScan: Failed to fetch metadata cache: $e');
     }
@@ -236,6 +237,7 @@ class LocalFileIsolateWorker {
     DateTime scanStartTime = DateTime.now();
 
     var results = await _scanDir(
+      appDb,
       collectionId,
       path,
       rootPath,
@@ -248,32 +250,29 @@ class LocalFileIsolateWorker {
     cacheHits = results['cacheHits'] ?? 0;
     generatedThumbnails = results['generatedThumbnails'] ?? 0;
     totalFiles = results['total'] ?? 0;
-    
+
     logger?.i('LocalScan: Scan finished. Found $fileCount items. Stats: Total=$totalFiles, CacheHits=$cacheHits, NewThumbs=$generatedThumbnails');
 
-    // Final cleanup — send the RELATIVE path so the repo can match stored records.
+    // Final cleanup — mark anything not seen this scan as deleted.
     final cleanupRelPath = p.relative(path, from: rootPath);
-    final ReceivePort syncPort = ReceivePort();
-    dbWriterPort.send({
-      'type': 'cleanup_deleted',
-      'collectionId': collectionId,
-      'path': cleanupRelPath == '.' ? '' : cleanupRelPath,
-      'scanStartTime': scanStartTime,
-      'recursive': recursive,
-      'replyTo': syncPort.sendPort,
-    });
-
-    // Wait for the DB writer to finish the cleanup task
-    await syncPort.first;
-    syncPort.close();
+    await CleanupDeletedFilesService.instance.invoke(
+      CleanupDeletedFilesServiceCommand(
+        collectionId,
+        cleanupRelPath == '.' ? '' : cleanupRelPath,
+        scanStartTime,
+        appDb,
+        recursive: recursive,
+      ),
+    );
 
     // Update collection lastScanDate and status
-    dbWriterPort.send({
-      'type': 'update_collection_status',
-      'id': collectionId,
-      'status': 'idle',
-      'lastScan': scanStartTime.toIso8601String(),
-    });
+    final colRepo = CollectionRepository(appDb);
+    final col = await colRepo.collectionById(collectionId);
+    if (col != null) {
+      col.scanStatus = 'idle';
+      col.lastScanDate = scanStartTime;
+      await colRepo.updateCollection(col);
+    }
 
     // return file count
     print('Worker: Exiting isolate with count $fileCount');
@@ -281,6 +280,7 @@ class LocalFileIsolateWorker {
   }
 
   Future<Map<String, int>> _scanDir(
+    AppDatabase appDb,
     String collectionId,
     String path, // absolute path used for filesystem operations
     String rootPath, // absolute collection root for computing relative paths
@@ -294,7 +294,7 @@ class LocalFileIsolateWorker {
     int cacheHits = 0;
     int generatedThumbnails = 0;
     int totalFiles = 0;
-    
+
     List<File> fileBatch = currentBatch ?? [];
     AppLogger logger = AppLogger(loggerPort);
 
@@ -327,7 +327,7 @@ class LocalFileIsolateWorker {
           metadataCache: metadataCache,
           llmServiceUrl: llmServiceUrl,
         );
-        
+
         final file = validation['file'] as File?;
         if (validation['isCacheHit'] == true) cacheHits++;
         if (validation['isGenerated'] == true) generatedThumbnails++;
@@ -336,10 +336,9 @@ class LocalFileIsolateWorker {
           fileBatch.add(file);
           if (fileBatch.length >= 100) {
             logger.i('Found ${fileBatch.length} files, saving batch');
-            dbWriterPort.send({
-              'type': 'batch_file',
-              'files': List.from(fileBatch),
-            });
+            await BatchFileUpsertService.instance.invoke(
+              BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+            );
             fileBatch.clear();
           }
         }
@@ -355,11 +354,14 @@ class LocalFileIsolateWorker {
         );
         if (folder != null) {
           logger.i('Found folder: ${folder.path}');
-          dbWriterPort.send({'type': 'folder', 'folder': folder});
+          await FolderUpsertService.instance.invoke(
+            FolderUpsertServiceCommand(folder, appDb),
+          );
 
           try {
             if (recursive) {
               final subResults = await _scanDir(
+                appDb,
                 collectionId,
                 asset.path, // absolute path for filesystem traversal
                 rootPath,
@@ -385,7 +387,9 @@ class LocalFileIsolateWorker {
 
     if (currentBatch == null && fileBatch.isNotEmpty) {
       logger.i('Found ${fileBatch.length} files, saving final batch');
-      dbWriterPort.send({'type': 'batch_file', 'files': List.from(fileBatch)});
+      await BatchFileUpsertService.instance.invoke(
+        BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+      );
       fileBatch.clear();
     }
 

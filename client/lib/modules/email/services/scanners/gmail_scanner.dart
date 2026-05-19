@@ -18,7 +18,6 @@ import 'package:flutter/services.dart';
 /// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
 ///    syncs (path == null) and targeted folder scans (path != null).
 class GmailScanner extends CollectionScanner {
-  final SendPort? dbWriterPort;
   final String dbPath;
   final Collection collection;
   final String appDir;
@@ -31,7 +30,6 @@ class GmailScanner extends CollectionScanner {
     required this.dbPath,
     required this.collection,
     required this.appDir,
-    this.dbWriterPort,
   });
 
   /// Starts the Gmail scanning process.
@@ -93,7 +91,6 @@ class GmailScanner extends CollectionScanner {
     RootIsolateToken? token = RootIsolateToken.instance;
     isolate = GmailScannerIsolate(
       token: token,
-      dbWriterPort: dbWriterPort,
       appDir: appDir,
     );
     await isolate!.start(

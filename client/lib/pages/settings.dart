@@ -78,17 +78,15 @@ class _SettingsPageState extends State<SettingsPage> {
     final clientSecret = _clientSecretControllers[service]?.text.trim() ?? '';
     final apiKey = _apiKeyControllers[service]?.text.trim() ?? '';
 
-    // Route through writer isolate to avoid SQLITE_BUSY during scanning
-    final writer = DatabaseManager.instance.writerIsolateClient;
-    if (writer != null) {
-      await writer.send({
-        'type': 'save_provider',
-        'service': service,
-        'clientId': clientId,
-        'clientSecret': clientSecret,
-        'apiKey': apiKey,
-      });
-    }
+    await DatabaseManager.instance.database!.execute(
+      'INSERT INTO providers (service, client_id, client_secret, api_key) '
+      'VALUES (?, ?, ?, ?) '
+      'ON CONFLICT(service) DO UPDATE SET '
+      'client_id = excluded.client_id, '
+      'client_secret = excluded.client_secret, '
+      'api_key = excluded.api_key',
+      [service, clientId, clientSecret, apiKey],
+    );
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

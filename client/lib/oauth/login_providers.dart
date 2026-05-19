@@ -235,20 +235,11 @@ extension LoginProviderExtension on LoginProviders {
         needsReAuth: false,
       );
 
-      final writer = DatabaseManager.instance.writerIsolateClient;
-      if (writer != null) {
-        await writer.send({
-          'type': existing != null ? 'update_collection' : 'add_collection',
-          'collection': collection,
-        });
+      final repo = CollectionRepository(DatabaseManager.instance.database!);
+      if (existing != null) {
+        await repo.updateCollection(collection);
       } else {
-        final db = DatabaseManager.instance.database!;
-        final repo = CollectionRepository(db);
-        if (existing != null) {
-          await repo.updateCollection(collection);
-        } else {
-          await repo.addCollection(collection);
-        }
+        await repo.addCollection(collection);
       }
 
       // Notify the email collections list to refresh
@@ -365,20 +356,11 @@ extension LoginProviderExtension on LoginProviders {
         downloadLocalCopy: downloadLocalCopy,
       );
 
-      final writer = DatabaseManager.instance.writerIsolateClient;
-      if (writer != null) {
-        await writer.send({
-          'type': existing != null ? 'update_collection' : 'add_collection',
-          'collection': collection,
-        });
+      final repo = CollectionRepository(DatabaseManager.instance.database!);
+      if (existing != null) {
+        await repo.updateCollection(collection);
       } else {
-        final db = DatabaseManager.instance.database!;
-        final repo = CollectionRepository(db);
-        if (existing != null) {
-          await repo.updateCollection(collection);
-        } else {
-          await repo.addCollection(collection);
-        }
+        await repo.addCollection(collection);
       }
 
       // Notify the file collections list to refresh
@@ -521,20 +503,11 @@ extension LoginProviderExtension on LoginProviders {
         needsReAuth: false,
       );
 
-      final writer = DatabaseManager.instance.writerIsolateClient;
-      if (writer != null) {
-        await writer.send({
-          'type': existing != null ? 'update_collection' : 'add_collection',
-          'collection': collection,
-        });
+      final repo = CollectionRepository(DatabaseManager.instance.database!);
+      if (existing != null) {
+        await repo.updateCollection(collection);
       } else {
-        final db = DatabaseManager.instance.database!;
-        final repo = CollectionRepository(db);
-        if (existing != null) {
-          await repo.updateCollection(collection);
-        } else {
-          await repo.addCollection(collection);
-        }
+        await repo.addCollection(collection);
       }
 
       // Notify the email collections list to refresh

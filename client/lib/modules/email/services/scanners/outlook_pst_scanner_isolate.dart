@@ -4,14 +4,21 @@ import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
+import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/email.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/folder.dart';
+import 'package:mydatatools/modules/email/services/email_folder_upsert_service.dart';
+import 'package:mydatatools/modules/email/services/email_upsert_service.dart';
 import 'package:mydatatools/modules/email/services/get_emails_service.dart';
 import 'package:mydatatools/modules/files/files_constants.dart';
+import 'package:mydatatools/modules/files/services/file_upsert_service.dart';
+import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:http/http.dart' as http;
@@ -29,7 +36,6 @@ import 'package:http/http.dart' as http;
 ///    syncs (path == null) and targeted folder scans (path != null).
 class OutlookPstScannerIsolate {
   final RootIsolateToken? token;
-  final SendPort? dbWriterPort;
   final String appDir;
   final String serverUrl;
   Isolate? _isolate;
@@ -37,7 +43,6 @@ class OutlookPstScannerIsolate {
 
   OutlookPstScannerIsolate({
     this.token,
-    this.dbWriterPort,
     required this.appDir,
     required this.serverUrl,
   });
@@ -55,16 +60,11 @@ class OutlookPstScannerIsolate {
       return;
     }
 
-    if (dbWriterPort == null) {
-      throw Exception("dbWriterPort is required for OutlookPstScannerIsolate");
-    }
-
     ReceivePort receivePort = ReceivePort("OutlookPstScannerIsolateClient");
 
     Map<String, dynamic> args = {
       'token': token ?? RootIsolateToken.instance,
       'port': receivePort.sendPort,
-      'dbWriterPort': dbWriterPort,
       'collection': collection,
       'appDir': appDir,
       'serverUrl': serverUrl,
@@ -99,7 +99,6 @@ class OutlookPstScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> workerArgs) async {
     final RootIsolateToken? token = workerArgs['token'];
     final SendPort clientPort = workerArgs['port'];
-    final SendPort dbWriterPort = workerArgs['dbWriterPort'];
     final Collection collection = workerArgs['collection'];
     final String appDir = workerArgs['appDir'];
     final String? serverUrl = workerArgs['serverUrl'];
@@ -111,7 +110,6 @@ class OutlookPstScannerIsolateWorker {
     final AppLogger logger = AppLogger(clientPort);
 
     // 1. Prepare extraction root for attachments
-    // Using a folder relative to the collection name in the storage workspace
     final extractionRoot = p.join(appDir, 'files', 'email', collection.id);
     if (!io.Directory(extractionRoot).existsSync()) {
       io.Directory(extractionRoot).createSync(recursive: true);
@@ -144,137 +142,134 @@ class OutlookPstScannerIsolateWorker {
       Isolate.exit(clientPort, {'error': 'api_failed'});
     }
 
+    final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName, false);
+
     // Keep track of internal IDs
     final Map<String, String> folderPathToId = {};
     // Track directories already emitted as Folder records for the file module.
     final Set<String> emittedFolderPaths = {};
     int count = 0;
 
-    // 3. Listen to stream output
-    await response.stream
+    // 3. Listen to stream output — use await-for to support async service calls
+    await for (final line in response.stream
         .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((line) {
-          try {
-            if (line.trim().isEmpty) return;
-            final data = jsonDecode(line);
+        .transform(const LineSplitter())) {
+      try {
+        if (line.trim().isEmpty) continue;
+        final data = jsonDecode(line);
 
-            if (data['type'] == 'folder') {
-              final folderId = const Uuid().v4();
-              folderPathToId[data['path']] = folderId;
+        if (data['type'] == 'folder') {
+          final folderId = const Uuid().v4();
+          folderPathToId[data['path']] = folderId;
 
-              logger.d(
-                "PST Folder: ${data['name']} (Path: ${data['path']}, Messages: ${data['count']})",
-              );
+          logger.d(
+            "PST Folder: ${data['name']} (Path: ${data['path']}, Messages: ${data['count']})",
+          );
 
-              final folder = EmailFolder(
-                id: folderId,
-                collectionId: collection.id,
-                name: data['name'],
-                type: 'user',
-                parentId:
-                    p.dirname(data['path']) == "" ||
-                            p.dirname(data['path']) == "."
-                        ? null
-                        : folderPathToId[p.dirname(data['path'])],
-              );
+          final folder = EmailFolder(
+            id: folderId,
+            collectionId: collection.id,
+            name: data['name'],
+            type: 'user',
+            parentId:
+                p.dirname(data['path']) == "" ||
+                        p.dirname(data['path']) == "."
+                    ? null
+                    : folderPathToId[p.dirname(data['path'])],
+          );
 
-              dbWriterPort.send({'type': 'email_folder', 'folder': folder});
-            } else if (data['type'] == 'email') {
-              final emailId = const Uuid().v4();
-              final folderId = folderPathToId[data['folder']] ?? 'INBOX';
+          await EmailFolderUpsertService.instance.invoke(
+            EmailFolderUpsertServiceCommand(folder, appDb),
+          );
+        } else if (data['type'] == 'email') {
+          final emailId = const Uuid().v4();
+          final folderId = folderPathToId[data['folder']] ?? 'INBOX';
 
-              final email = Email(
-                id: emailId,
-                collectionId: collection.id,
-                date: DateTime.tryParse(data['date'] ?? "") ?? DateTime.now(),
-                from: data['sender'] ?? "Unknown",
-                to:
-                    (data['to'] as List?)?.map((e) => e.toString()).toList() ??
-                    [],
-                cc:
-                    (data['cc'] as List?)?.map((e) => e.toString()).toList() ??
-                    [],
-                subject: data['subject'] ?? "(No Subject)",
-                plainBody: data['body'] ?? "",
-                htmlBody: data['html_body'] ?? "",
-                folderId: folderId,
-                isRead: true,
-                hasAttachments:
-                    (data['attachments'] as List?)?.isNotEmpty ?? false,
-                isDeleted: false,
-              );
+          final email = Email(
+            id: emailId,
+            collectionId: collection.id,
+            date: DateTime.tryParse(data['date'] ?? "") ?? DateTime.now(),
+            from: data['sender'] ?? "Unknown",
+            to:
+                (data['to'] as List?)?.map((e) => e.toString()).toList() ??
+                [],
+            cc:
+                (data['cc'] as List?)?.map((e) => e.toString()).toList() ??
+                [],
+            subject: data['subject'] ?? "(No Subject)",
+            plainBody: data['body'] ?? "",
+            htmlBody: data['html_body'] ?? "",
+            folderId: folderId,
+            isRead: true,
+            hasAttachments:
+                (data['attachments'] as List?)?.isNotEmpty ?? false,
+            isDeleted: false,
+          );
 
-              dbWriterPort.send({
-                'type': 'batch_email',
-                'emails': [email],
-              });
+          await EmailUpsertService.instance.invoke(
+            EmailUpsertServiceCommand([email], appDb),
+          );
 
-              // Process attachments — also emit Folder records so the file module
-              // can navigate the directory tree (e.g., INBOX → 2010 → files).
-              for (var att in data['attachments']) {
-                final fileId = const Uuid().v4();
-                final attPath = att['path'] as String? ?? '';
+          // Process attachments — also emit Folder records so the file module
+          // can navigate the directory tree (e.g., INBOX → 2010 → files).
+          for (var att in data['attachments']) {
+            final fileId = const Uuid().v4();
+            final attPath = att['path'] as String? ?? '';
 
-                // Validate path stays within extraction root
-                if (attPath.isNotEmpty &&
-                    !p.canonicalize(attPath).startsWith(p.canonicalize(extractionRoot))) {
-                  logger.w('PST Scanner: Skipping attachment with path outside extraction root');
-                  continue;
-                }
-
-                // Ensure every directory level from extractionRoot down to the
-                // attachment's parent has a Folder record in the file module DB.
-                if (attPath.isNotEmpty) {
-                  _ensureFolderPath(
-                    attPath: attPath,
-                    extractionRoot: extractionRoot,
-                    collectionId: collection.id,
-                    emailDate: email.date,
-                    emittedFolderPaths: emittedFolderPaths,
-                    dbWriterPort: dbWriterPort,
-                  );
-                }
-
-                final file = File(
-                  id: fileId,
-                  name: att['name'],
-                  path: attPath,
-                  // Use p.dirname(attPath) so the file lives under its
-                  // INBOX/2010 sub-folder within the extraction root.
-                  // This makes it browsable when the file module opens at
-                  // extractionRoot.
-                  parent:
-                      attPath.isNotEmpty ? p.dirname(attPath) : extractionRoot,
-                  dateCreated: email.date,
-                  dateLastModified: email.date,
-                  collectionId: collection.id,
-                  contentType: _mapMimeType(
-                    att['contentType'] as String? ?? 'application/octet-stream',
-                  ),
-                  size: (att['size'] as num).toInt(),
-                  isDeleted: false,
-                  emailId: emailId,
-                );
-                dbWriterPort.send({'type': 'file', 'file': file});
-              }
-
-              count++;
-              if (count % 50 == 0) {
-                // Refresh rate of 50 emails keeps UI updates visible without
-                // hammering the main thread with DB queries.
-                clientPort.send({'type': 'refresh'});
-              }
-            } else if (data['type'] == 'debug') {
-              logger.d("PST Parser Debug: ${data['message']}");
-            } else if (data['type'] == 'error') {
-              logger.e("PST Parser Error: ${data['message']}");
+            // Validate path stays within extraction root
+            if (attPath.isNotEmpty &&
+                !p.canonicalize(attPath).startsWith(p.canonicalize(extractionRoot))) {
+              logger.w('PST Scanner: Skipping attachment with path outside extraction root');
+              continue;
             }
-          } catch (e) {
-            logger.e("PST Isolate: Failed to parse line: $line. Error: $e");
+
+            // Ensure every directory level from extractionRoot down to the
+            // attachment's parent has a Folder record in the file module DB.
+            if (attPath.isNotEmpty) {
+              await _ensureFolderPath(
+                attPath: attPath,
+                extractionRoot: extractionRoot,
+                collectionId: collection.id,
+                emailDate: email.date,
+                emittedFolderPaths: emittedFolderPaths,
+                appDb: appDb,
+              );
+            }
+
+            final file = File(
+              id: fileId,
+              name: att['name'],
+              path: attPath,
+              parent:
+                  attPath.isNotEmpty ? p.dirname(attPath) : extractionRoot,
+              dateCreated: email.date,
+              dateLastModified: email.date,
+              collectionId: collection.id,
+              contentType: _mapMimeType(
+                att['contentType'] as String? ?? 'application/octet-stream',
+              ),
+              size: (att['size'] as num).toInt(),
+              isDeleted: false,
+              emailId: emailId,
+            );
+            await FileUpsertService.instance.invoke(
+              FileUpsertServiceCommand(file, appDb),
+            );
           }
-        })
-        .asFuture();
+
+          count++;
+          if (count % 50 == 0) {
+            clientPort.send({'type': 'refresh'});
+          }
+        } else if (data['type'] == 'debug') {
+          logger.d("PST Parser Debug: ${data['message']}");
+        } else if (data['type'] == 'error') {
+          logger.e("PST Parser Error: ${data['message']}");
+        }
+      } catch (e) {
+        logger.e("PST Isolate: Failed to parse line: $line. Error: $e");
+      }
+    }
 
     // 4. Cleanup
     logger.i(
@@ -282,20 +277,20 @@ class OutlookPstScannerIsolateWorker {
     );
 
     // Update collection status
-    dbWriterPort.send({
-      'type': 'update_collection_status',
-      'id': collection.id,
-      'status': 'complete',
-      'lastScan': DateTime.now().toIso8601String(),
-    });
+    final collectionRepo = CollectionRepository(appDb);
+    final col = await collectionRepo.collectionById(collection.id);
+    if (col != null) {
+      col.scanStatus = 'complete';
+      col.lastScanDate = DateTime.now();
+      await collectionRepo.updateCollection(col);
+    }
 
     clientPort.send({'type': 'refresh'});
     Isolate.exit(clientPort, {'done': true});
   }
 
   /// Maps a standard MIME type (e.g. "image/jpeg") to the internal
-  /// [FilesConstants] value used throughout the app.  Falls back to
-  /// [FilesConstants.mimeTypeUnKnown] if the type is not recognised.
+  /// [FilesConstants] value used throughout the app.
   static String _mapMimeType(String mimeType) {
     if (mimeType.startsWith('image/')) return FilesConstants.mimeTypeImage;
     if (mimeType.startsWith('video/')) return FilesConstants.mimeTypeMovie;
@@ -306,22 +301,14 @@ class OutlookPstScannerIsolateWorker {
 
   /// Ensures every directory level from [extractionRoot] down to the parent
   /// of [attPath] has a [Folder] record in the file-module database.
-  ///
-  /// Works by collecting all ancestor paths (exclusive of extractionRoot itself,
-  /// since the file module already browses from there) and emitting a
-  /// `{'type': 'folder', 'folder': Folder}` message for each one that hasn't
-  /// been emitted yet.  Paths already in [emittedFolderPaths] are skipped to
-  /// avoid duplicate inserts.
-  static void _ensureFolderPath({
+  static Future<void> _ensureFolderPath({
     required String attPath,
     required String extractionRoot,
     required String collectionId,
     required DateTime emailDate,
     required Set<String> emittedFolderPaths,
-    required SendPort dbWriterPort,
-  }) {
-    // Build the list of ancestor dirs between extractionRoot and attPath's
-    // parent, ordered from shallowest to deepest.
+    required AppDatabase appDb,
+  }) async {
     final List<String> dirs = [];
     String current = p.dirname(attPath);
     while (current != extractionRoot && current.startsWith(extractionRoot)) {
@@ -330,7 +317,6 @@ class OutlookPstScannerIsolateWorker {
       if (up == current) break; // filesystem root guard
       current = up;
     }
-    // Also include extractionRoot itself so the first level is visible.
     dirs.insert(0, extractionRoot);
 
     for (final dirPath in dirs) {
@@ -342,14 +328,14 @@ class OutlookPstScannerIsolateWorker {
         id: '$collectionId:$dirPath',
         name: p.basename(dirPath),
         path: dirPath,
-        // extractionRoot has the collection.id as its notional parent, which
-        // keeps it anchored to the collection without a real parent record.
         parent: parentPath == dirPath ? collectionId : parentPath,
         dateCreated: emailDate,
         dateLastModified: emailDate,
         collectionId: collectionId,
       );
-      dbWriterPort.send({'type': 'folder', 'folder': folder});
+      await FolderUpsertService.instance.invoke(
+        FolderUpsertServiceCommand(folder, appDb),
+      );
     }
   }
 }

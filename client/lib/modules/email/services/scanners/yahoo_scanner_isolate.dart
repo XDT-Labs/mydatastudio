@@ -2,19 +2,26 @@ import 'dart:isolate';
 import 'package:enough_mail/enough_mail.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
+import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/email.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:mydatatools/models/tables/file.dart' as db_file;
 import 'package:mydatatools/models/tables/folder.dart' as db_folder;
+import 'package:mydatatools/modules/email/services/email_folder_upsert_service.dart';
+import 'package:mydatatools/modules/email/services/email_repository.dart';
+import 'package:mydatatools/modules/email/services/email_upsert_service.dart';
 import 'package:mydatatools/modules/email/services/get_emails_service.dart';
 import 'package:mydatatools/modules/files/files_constants.dart';
+import 'package:mydatatools/modules/files/services/file_upsert_service.dart';
+import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
 import 'dart:io' as io;
-import 'package:mydatatools/database_manager.dart';
 
 import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
 
 /// [YahooScannerIsolate] is the client-side manager for the Yahoo scanning
@@ -30,26 +37,18 @@ import 'package:uuid/uuid.dart';
 ///    syncs (path == null) and targeted folder scans (path != null).
 class YahooScannerIsolate {
   final RootIsolateToken? token;
-  final SendPort? dbWriterPort;
   final String appDir;
   Isolate? _isolate;
   final AppLogger logger = AppLogger(null);
 
-  YahooScannerIsolate({this.token, this.dbWriterPort, required this.appDir});
+  YahooScannerIsolate({this.token, required this.appDir});
 
-  /// Spawns the Yahoo background worker isolate.
-  ///
-  /// [collection] The collection to synchronize.
-  /// [folderId] Optional folder ID to restrict the scan.
-  /// [force] If false, returns immediately (Rule 2).
-  /// [statusPort] Optional port to receive status/heartbeat messages.
   /// Spawns the Yahoo background worker isolate.
   ///
   /// [collection] The collection to synchronize.
   /// [folderId] Mode selector:
   ///   - If NULL: **Full Sync**. Synchronizes all folders.
-  ///   - If NOT NULL: **Targeted Scan**. Focuses ONLY on the specified folder ID
-  ///     (e.g., 'INBOX', 'Sent').
+  ///   - If NOT NULL: **Targeted Scan**. Focuses ONLY on the specified folder ID.
   /// [force] If false, returns immediately (Rule 2).
   /// [statusPort] Optional port to receive status/heartbeat messages.
   Future<void> start(
@@ -63,16 +62,11 @@ class YahooScannerIsolate {
       return;
     }
 
-    if (dbWriterPort == null) {
-      throw Exception("dbWriterPort is required for YahooScannerIsolate");
-    }
-
     ReceivePort receivePort = ReceivePort("YahooScannerIsolateClient");
 
     Map<String, dynamic> args = {
       'token': token ?? RootIsolateToken.instance,
       'port': receivePort.sendPort,
-      'dbWriterPort': dbWriterPort,
       'collection': collection,
       'folderId': folderId,
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
@@ -105,23 +99,18 @@ class YahooScannerIsolate {
             ),
           );
         } else if (message['type'] == 'cleanup_uids') {
-          // Route cleanup through the writer isolate to avoid SQLITE_BUSY.
           isCleanupInProgress = true;
-          final writer = DatabaseManager.instance.writerIsolateClient;
-          if (writer != null) {
-            writer.send({
-              'type': 'cleanup_deleted_yahoo',
-              'collection': collection,
-              'folder': message['folder'],
-              'uids': (message['uids'] as List).cast<int>(),
-            }).then((_) {
-              isCleanupInProgress = false;
-              checkDone();
-            });
-          } else {
+          final db = DatabaseManager.instance.database!;
+          EmailRepository(db)
+              .cleanupDeletedYahoo(
+                collection,
+                message['folder'] as String,
+                (message['uids'] as List).cast<int>(),
+              )
+              .then((_) {
             isCleanupInProgress = false;
             checkDone();
-          }
+          });
         }
 
         if (message['status'] == 'done') {
@@ -148,7 +137,6 @@ class YahooScannerIsolate {
   }) async {
     Map<String, dynamic> args = {
       'token': token ?? RootIsolateToken.instance,
-      'dbWriterPort': dbWriterPort,
       'collection': collection,
       'folderId': folderId,
       'uids': uids,
@@ -182,7 +170,6 @@ class YahooScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> args) async {
     final RootIsolateToken? token = args['token'];
     final SendPort? clientPort = args['port'];
-    final SendPort dbWriterPort = args['dbWriterPort'];
     final Collection collection = args['collection'];
     final String? folderId = args['folderId'];
     final String type = args['type'] ?? 'sync';
@@ -190,6 +177,7 @@ class YahooScannerIsolateWorker {
     final DateTime? lastScanDate =
         lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
     final bool force = args['force'] ?? false;
+    final String appDir = args['appDir'] as String;
     final List<int>? uidsToMove =
         args['uids'] != null ? (args['uids'] as List).cast<int>() : null;
 
@@ -211,7 +199,6 @@ class YahooScannerIsolateWorker {
           uidsToMove != null &&
           uidsToMove.isNotEmpty) {
         final mailboxes = await client.listMailboxes();
-        // Use flag-based discovery first, then fall back to common names
         final trashMailbox =
             mailboxes.where((m) => m.isTrash).firstOrNull ??
             mailboxes
@@ -241,7 +228,6 @@ class YahooScannerIsolateWorker {
           logger.e(
             "Error during IMAP MOVE: $e. Attempting Copy/Delete fallback.",
           );
-          // Fallback: Copy -> Delete -> Expunge
           try {
             await client.uidCopy(sequence, targetMailboxPath: trashPath);
             await client.uidStore(sequence, [
@@ -258,6 +244,8 @@ class YahooScannerIsolateWorker {
         return;
       }
 
+      final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName, false);
+
       final scanStartTime = DateTime.now();
       int totalFound = 0;
       int newEmails = 0;
@@ -273,7 +261,9 @@ class YahooScannerIsolateWorker {
           name: mailbox.name,
           type: _getFolderType(mailbox.name),
         );
-        dbWriterPort.send({'type': 'email_folder', 'folder': folder});
+        await EmailFolderUpsertService.instance.invoke(
+          EmailFolderUpsertServiceCommand(folder, appDb),
+        );
       }
 
       // 2. Sync Emails
@@ -355,10 +345,9 @@ class YahooScannerIsolateWorker {
 
               // Refine incremental check with second-level precision
               if (!force && lastScanDate != null) {
-                // Truncate both to seconds for reliable comparison
                 final lastScanSecs = lastScanDate.millisecondsSinceEpoch ~/ 1000;
                 final msgSecs = msgDate.millisecondsSinceEpoch ~/ 1000;
-                
+
                 if (msgSecs <= lastScanSecs) {
                   skipped++;
                   continue;
@@ -369,8 +358,8 @@ class YahooScannerIsolateWorker {
                 message: message,
                 collection: collection,
                 targetFolder: targetFolder,
-                appDir: args['appDir'] as String,
-                dbWriterPort: dbWriterPort,
+                appDir: appDir,
+                appDb: appDb,
                 logger: logger,
               );
               emailBatch.add(emailObj);
@@ -378,7 +367,9 @@ class YahooScannerIsolateWorker {
             }
 
             if (emailBatch.isNotEmpty) {
-              dbWriterPort.send({'type': 'batch_email', 'emails': emailBatch});
+              await EmailUpsertService.instance.invoke(
+                EmailUpsertServiceCommand(emailBatch, appDb),
+              );
               clientPort?.send({'type': 'refresh'});
             }
           } catch (e) {
@@ -392,12 +383,13 @@ class YahooScannerIsolateWorker {
       );
 
       // Update lastScanDate in the DB
-      dbWriterPort.send({
-        'type': 'update_collection_status',
-        'id': collection.id,
-        'status': 'ready',
-        'lastScan': scanStartTime.toIso8601String(),
-      });
+      final collectionRepo = CollectionRepository(appDb);
+      final col = await collectionRepo.collectionById(collection.id);
+      if (col != null) {
+        col.scanStatus = 'ready';
+        col.lastScanDate = scanStartTime;
+        await collectionRepo.updateCollection(col);
+      }
 
       clientPort?.send({'type': 'refresh', 'status': 'done'});
     } catch (e, stack) {
@@ -424,10 +416,8 @@ class YahooScannerIsolateWorker {
     required String messageId,
     required DateTime msgDate,
     required List<MimePart> parts,
-    required String targetFolderPath, // absolute path on disk
-    required String
-    extractionRoot, // absolute collection root → for relative-path computation
-    required SendPort dbWriterPort,
+    required String targetFolderPath,
+    required String extractionRoot,
     required AppLogger logger,
   }) async {
     List<db_file.File> files = [];
@@ -464,9 +454,6 @@ class YahooScannerIsolateWorker {
           );
           await file.writeAsBytes(content);
 
-          // Store relative paths so FilePathResolver + GetFileAndFoldersService
-          // can resolve them back to absolute using collection.localCopyPath.
-          // Generate thumbnail if it's an image
           String? thumbnail;
           if (_mapMimeType(part.mediaType.text) ==
               FilesConstants.mimeTypeImage) {
@@ -523,38 +510,40 @@ class YahooScannerIsolateWorker {
   }
 
   static Future<void> _ensureFolderHierarchy({
-    required SendPort dbWriterPort,
+    required AppDatabase appDb,
     required Collection collection,
     required String extractionRoot,
     required String labelName,
     required String year,
     required DateTime msgDate,
   }) async {
-    // Absolute paths are used only for the folder ID (stable UUID seed);
-    // path/parent stored in the DB are relative to extractionRoot.
     final labelAbsPath = p.normalize(p.join(extractionRoot, labelName));
     final yearAbsPath = p.normalize(p.join(labelAbsPath, year));
 
-    dbWriterPort.send({
-      'type': 'folder',
-      'folder': _createFolderObj(
-        absPath: labelAbsPath,
-        extractionRoot: extractionRoot,
-        name: labelName,
-        collectionId: collection.id,
-        date: msgDate,
+    await FolderUpsertService.instance.invoke(
+      FolderUpsertServiceCommand(
+        _createFolderObj(
+          absPath: labelAbsPath,
+          extractionRoot: extractionRoot,
+          name: labelName,
+          collectionId: collection.id,
+          date: msgDate,
+        ),
+        appDb,
       ),
-    });
-    dbWriterPort.send({
-      'type': 'folder',
-      'folder': _createFolderObj(
-        absPath: yearAbsPath,
-        extractionRoot: extractionRoot,
-        name: year,
-        collectionId: collection.id,
-        date: msgDate,
+    );
+    await FolderUpsertService.instance.invoke(
+      FolderUpsertServiceCommand(
+        _createFolderObj(
+          absPath: yearAbsPath,
+          extractionRoot: extractionRoot,
+          name: year,
+          collectionId: collection.id,
+          date: msgDate,
+        ),
+        appDb,
       ),
-    });
+    );
   }
 
   /// Builds a [Folder] with relative path/parent so it matches the queries
@@ -603,7 +592,7 @@ class YahooScannerIsolateWorker {
     required Collection collection,
     required String targetFolder,
     required String appDir,
-    required SendPort dbWriterPort,
+    required AppDatabase appDb,
     required AppLogger logger,
   }) async {
     final messageId = message.getHeaderValue('Message-ID');
@@ -651,8 +640,6 @@ class YahooScannerIsolateWorker {
     if (collection.downloadLocalCopy) {
       final labelName = targetFolder;
       final year = msgDate.year.toString();
-      // Use the app-managed extraction root (not collection.path which is an
-      // email address for Yahoo accounts) so paths are absolute on disk.
       final extractionRoot = p.normalize(
         p.join(appDir, 'files', 'email', collection.id),
       );
@@ -661,7 +648,7 @@ class YahooScannerIsolateWorker {
       );
 
       await _ensureFolderHierarchy(
-        dbWriterPort: dbWriterPort,
+        appDb: appDb,
         collection: collection,
         extractionRoot: extractionRoot,
         labelName: labelName,
@@ -676,14 +663,14 @@ class YahooScannerIsolateWorker {
         msgDate: msgDate,
         parts: attachmentParts,
         targetFolderPath: absoluteYearPath,
-        extractionRoot:
-            extractionRoot, // ← pass root for relative-path computation
-        dbWriterPort: dbWriterPort,
+        extractionRoot: extractionRoot,
         logger: logger,
       );
       emailObj.attachments = attachments;
       for (var file in attachments) {
-        dbWriterPort.send({'type': 'file', 'file': file});
+        await FileUpsertService.instance.invoke(
+          FileUpsertServiceCommand(file, appDb),
+        );
       }
     }
     return emailObj;

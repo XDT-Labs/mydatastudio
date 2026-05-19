@@ -1,4 +1,3 @@
-import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/services/rx_service.dart';
@@ -29,14 +28,7 @@ class GetCollectionsService
   }
 
   void addCollection(Collection c) async {
-    // Route through DbIsolateWriter to avoid write contention
-    final writer = DatabaseManager.instance.writerIsolateClient;
-    if (writer != null) {
-      await writer.send({'type': 'add_collection', 'collection': c});
-    } else {
-      CollectionRepository repo = CollectionRepository();
-      await repo.addCollection(c);
-    }
+    await CollectionRepository().addCollection(c);
     //refresh list with current command type (if defined)
     invoke(GetCollectionsServiceCommand(currentCommand?.type));
   }

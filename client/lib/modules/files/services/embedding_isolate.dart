@@ -20,7 +20,6 @@ class EmbeddingIsolate {
   Future<void> start(
     String storagePath,
     String dbName,
-    SendPort writerPort,
     RootIsolateToken token,
   ) async {
     if (_isolate != null) return;
@@ -31,7 +30,6 @@ class EmbeddingIsolate {
       'replyTo': _receivePort!.sendPort,
       'storagePath': storagePath,
       'dbName': dbName,
-      'writerPort': writerPort,
       'loggerPort': _receivePort!.sendPort,
       'token': token,
     };
@@ -104,7 +102,6 @@ class EmbeddingIsolate {
       cfg['token'] as RootIsolateToken,
     );
 
-    final SendPort writerPort = cfg['writerPort'];
     final String storagePath = cfg['storagePath'];
     final String dbName = cfg['dbName'];
     final AppLogger logger = AppLogger(cfg['loggerPort'] as SendPort?);
@@ -166,16 +163,7 @@ class EmbeddingIsolate {
             logger.d("Processed file ${file.path} in $duration");
 
             if (embedding != null) {
-              // Send to DbIsolateWriter
-              final responsePort = ReceivePort();
-              writerPort.send({
-                'type': 'embedding',
-                'fileId': file.id,
-                'embedding': embedding,
-                'replyTo': responsePort.sendPort,
-              });
-              await responsePort.first;
-              responsePort.close();
+              await repo.upsertFileEmbedding(file.id, embedding);
               logger.d("Saved embedding for file: ${file.path}");
             }
             // Batch complete

@@ -8,6 +8,7 @@ import 'package:mydatatools/modules/files/widgets/file_drawer/section_sub_header
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/database_manager.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -364,13 +365,7 @@ class _FileDrawer extends State<FileDrawer> {
                   Navigator.of(dialogContext).pop();
 
                   // Delete the collection and all related metadata (files, folders, etc.)
-                  final writer = DatabaseManager.instance.writerIsolateClient;
-                  if (writer != null) {
-                    await writer.send({
-                      'type': 'delete_collection',
-                      'id': collection.id,
-                    });
-                  }
+                  await CollectionRepository(DatabaseManager.instance.database!).deleteCollection(collection.id);
 
                   // Reload collections list
                   GetCollectionsService.instance.invoke(

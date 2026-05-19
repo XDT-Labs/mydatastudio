@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
-import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/repositories/database_repository.dart';
-import 'package:mydatatools/repositories/db_isolate_writer.dart';
 import 'package:path/path.dart' as p;
 import 'package:resqlite/resqlite.dart';
 import 'package:mydatatools/custom_path_provider.dart';
@@ -16,11 +14,6 @@ import 'package:mydatatools/main.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:mydatatools/modules/files/services/embedding_isolate.dart';
-import 'package:mydatatools/modules/files/services/file_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/batch_file_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/cleanup_deleted_files_service.dart';
-import 'package:mydatatools/models/tables/file.dart';
 import 'package:uuid/uuid.dart';
 
 // Custom stub variables to make Drift code compile during migration
@@ -98,10 +91,6 @@ class DatabaseManager {
   static bool isTesting = io.Platform.environment.containsKey('FLUTTER_TEST');
   String? storagePath;
   AppDatabase? appDatabase;
-  DbIsolateWriterClient? _writerIsolateClient;
-  ReceivePort? _testWriterPort;
-  StreamSubscription? _testWriterSubscription;
-  SendPort? _writerPort;
   EmbeddingIsolate? _embeddingIsolate;
   DatabaseRepository? _repository;
   final AppLogger logger = AppLogger(null);
@@ -111,10 +100,6 @@ class DatabaseManager {
   /// Returns the [DatabaseRepository] instance
   DatabaseRepository? get repository {
     return _repository;
-  }
-
-  DbIsolateWriterClient? get writerIsolateClient {
-    return _writerIsolateClient;
   }
 
   /// Returns the [AppDatabase] instance
@@ -195,12 +180,7 @@ class DatabaseManager {
     // start database repository
     _repository = DatabaseRepository(appDatabase!);
  
-    if (isTesting) {
-      _startTestWriterPort(appDatabase!);
-    } else {
-      // start writer isolate (bridged main-thread ReceivePort)
-      await _startWriterIsolate(appDatabase!, path);
-
+    if (!isTesting) {
       // start scanners
       await _startScanners();
 
@@ -250,95 +230,27 @@ class DatabaseManager {
     }
   }
 
-  void _startTestWriterPort(AppDatabase db) {
-    _testWriterSubscription?.cancel();
-    _testWriterPort?.close();
-    
-    _testWriterPort = ReceivePort();
-    _writerPort = _testWriterPort!.sendPort;
-    _testWriterSubscription = _testWriterPort!.listen((data) async {
-      if (data is! Map) return;
-      SendPort? replyTo = data['replyTo'] as SendPort?;
-      try {
-        await DbIsolateWriterClient.processMessage(data, db, logger, replyTo);
-      } catch (e) {
-        logger.e("TestWriterPort error: $e");
-        replyTo?.send({'status': 'error', 'message': e.toString()});
-      }
-    });
-  }
-
-  Future<void> _startWriterIsolate(
-    AppDatabase database,
-    String storagePath,
-  ) async {
-    _writerIsolateClient = DbIsolateWriterClient();
-    await _writerIsolateClient!.start(
-      storagePath,
-      AppConstants.dbName,
-      useMemoryDb: useMemoryDb,
-    );
-    _writerPort = _writerIsolateClient!.getSendPort();
-  }
-
   Future<void> _startEmbeddingIsolate(String storagePath) async {
     _embeddingIsolate = EmbeddingIsolate();
     await _embeddingIsolate!.start(
       storagePath,
       AppConstants.dbName,
-      _writerPort!,
       RootIsolateToken.instance!,
     );
   }
 
   void dispose() {
-    _testWriterSubscription?.cancel();
-    _testWriterPort?.close();
-    _testWriterPort = null;
-    _testWriterSubscription = null;
-
-    _writerIsolateClient?.stop();
-    _writerIsolateClient = null;
-
     _embeddingIsolate?.stop();
     _embeddingIsolate = null;
-    
+
     appDatabase?.close();
     appDatabase = null;
-    _writerPort = null;
     _repository = null;
     isInitializedNotifier.value = false;
     _originalSupportPath = null;
     if (PathProviderPlatform.instance is CustomPathProviderPlatform) {
       PathProviderPlatform.instance = (PathProviderPlatform.instance as CustomPathProviderPlatform).original;
     }
-  }
-
-  /// Returns the [SendPort] for the writer isolate
-  Future<SendPort> get writerPort async {
-    if (_writerPort == null) {
-      throw Exception(
-        "Unkown error initializing Database and/or writer isolate",
-      );
-    }
-    return Future.value(_writerPort!);
-  }
-
-  /// Stop helper to be called from app shell
-  /// Stops the database writer isolate
-  Future<void> stopDbWriterIsolate() async {
-    try {
-      if (_testWriterSubscription != null) {
-        await _testWriterSubscription!.cancel();
-        _testWriterPort?.close();
-        _testWriterSubscription = null;
-        _testWriterPort = null;
-      }
-      if (_writerIsolateClient != null) {
-        await _writerIsolateClient!.stop();
-        _writerIsolateClient = null;
-      }
-    } catch (_) {}
   }
 
   Future<void> _startScanners() async {

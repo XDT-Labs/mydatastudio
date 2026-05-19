@@ -18,7 +18,6 @@ import 'package:flutter/services.dart';
 /// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
 ///    syncs (path == null) and targeted folder scans (path != null).
 class YahooScanner extends CollectionScanner {
-  final SendPort? dbWriterPort;
   final String dbPath;
   final Collection collection;
   final String appDir;
@@ -31,7 +30,6 @@ class YahooScanner extends CollectionScanner {
     required this.dbPath,
     required this.collection,
     required this.appDir,
-    this.dbWriterPort,
   });
 
   /// Starts the Yahoo scanning process.
@@ -79,7 +77,7 @@ class YahooScanner extends CollectionScanner {
     RootIsolateToken? token = RootIsolateToken.instance;
     isolate = YahooScannerIsolate(
       token: token,
-      dbWriterPort: dbWriterPort,
+
       appDir: appDir,
     );
     await isolate!.start(
@@ -103,7 +101,7 @@ class YahooScanner extends CollectionScanner {
     // Lazy-init isolate if needed
     isolate ??= YahooScannerIsolate(
       token: RootIsolateToken.instance,
-      dbWriterPort: dbWriterPort,
+
       appDir: appDir,
     );
     

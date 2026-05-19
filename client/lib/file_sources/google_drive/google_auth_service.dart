@@ -5,6 +5,7 @@ import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/oauth/login_providers.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 
 /// Manages Google OAuth token lifecycle for all Google collections
 /// (Gmail and Drive).
@@ -145,10 +146,7 @@ class GoogleAuthService {
       collection.expiration = result.expiration;
       collection.needsReAuth = false;
 
-      final writer = DatabaseManager.instance.writerIsolateClient;
-      if (writer != null) {
-        await writer.send({'type': 'update_collection', 'collection': collection});
-      }
+      await CollectionRepository(DatabaseManager.instance.database!).updateCollection(collection);
       _logger.i(
         'Token refreshed successfully for "${collection.name}" — expires ${result.expiration}',
       );
@@ -157,10 +155,7 @@ class GoogleAuthService {
     } on GoogleAuthException {
       // Mark collection as needing re-auth so the UI can prompt the user
       collection.needsReAuth = true;
-      final writer = DatabaseManager.instance.writerIsolateClient;
-      if (writer != null) {
-        await writer.send({'type': 'update_collection', 'collection': collection});
-      }
+      await CollectionRepository(DatabaseManager.instance.database!).updateCollection(collection);
       rethrow;
     }
   }
