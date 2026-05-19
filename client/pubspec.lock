@@ -1240,9 +1240,10 @@ packages:
   resqlite:
     dependency: "direct main"
     description:
-      path: "/Users/mikenimer/Development/github/resqlite"
-      relative: false
-    source: path
+      name: resqlite
+      sha256: "27cad72c0477073dc0398bda2c8a8a477ea79afbe88539f57acdf92cbe0a01df"
+      url: "https://pub.dev"
+    source: hosted
     version: "0.3.1"
   rsa_encrypt:
     dependency: "direct main"

@@ -76,8 +76,7 @@ dependencies:
   image: ^4.0.17
   native_exif: ^0.6.0
   exif: ^3.1.4
-  resqlite:
-    path: /Users/mikenimer/Development/github/resqlite
+  resqlite: ^0.3.1
   path: ^1.8.3
   path_provider_platform_interface: ^2.1.1
   plugin_platform_interface: ^2.1.8
