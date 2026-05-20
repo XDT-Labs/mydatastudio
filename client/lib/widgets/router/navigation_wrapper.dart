@@ -41,7 +41,7 @@ class _NavigationWrapperState extends State<NavigationWrapper> {
                           ? Container(
                               width: 250, 
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: theme.colorScheme.surface,
                               ),
                               child: widget.drawer,
                             )
@@ -78,11 +78,31 @@ class _NavigationWrapperState extends State<NavigationWrapper> {
           SizedBox(
             height: 22,
             child: Container(
-              padding: const EdgeInsets.only(left: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest, // optional subtle separation
+                color: theme.colorScheme.surfaceContainerLow,
+                border: Border(
+                  top: BorderSide(
+                    color: theme.colorScheme.outlineVariant,
+                    width: 0.5,
+                  ),
+                ),
               ),
-              child: const Row(children: [StatusMessage()]),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: DefaultTextStyle(
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant.withOpacity(0.7),
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0,
+                        fontSize: 9,
+                      ) ?? const TextStyle(),
+                      child: const StatusMessage(),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],

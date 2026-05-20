@@ -11,8 +11,8 @@ class SectionSubHeaderWidget extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
+      decoration: const BoxDecoration(
+        color: Colors.transparent,
       ),
       child: Text(
         title.toUpperCase(),

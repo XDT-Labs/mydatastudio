@@ -15,6 +15,7 @@ import 'package:mydatatools/modules/files/widgets/file_details_drawer.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatatools/app_constants.dart';
 
 import 'package:mydatatools/helpers/file_path_resolver.dart';
 import 'package:file_picker/file_picker.dart';
@@ -89,8 +90,14 @@ class _RxFilesPage extends State<RxFilesPage> {
         collections = value;
       });
       if (value.isNotEmpty) {
-        //select default collection
-        RxFilesPage.selectedCollection.add(value.first);
+        // Find first local file collection to select by default, or fallback to first collection
+        final defaultCollection = value.firstWhere(
+          (c) =>
+              c.type == 'file' &&
+              c.scanner == AppConstants.scannerFileLocal,
+          orElse: () => value.first,
+        );
+        RxFilesPage.selectedCollection.add(defaultCollection);
       }
     });
 
@@ -233,6 +240,7 @@ class _RxFilesPage extends State<RxFilesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     print('RxFilesPage.build: collections.length = ${collections.length}, collection = $collection');
     if (collections.isEmpty) {
       return const NewFileCollectionPage();
@@ -244,27 +252,27 @@ class _RxFilesPage extends State<RxFilesPage> {
     //parse path into a breadcrumb
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        title: getBreadcrumb(collection!, path ?? collection!.path),
+        title: getBreadcrumb(theme, collection!, path ?? collection!.path),
         bottom:
             (_isLoadingMore || _isServiceLoading || isScanning)
-                ? const PreferredSize(
-                  preferredSize: Size.fromHeight(2.0),
+                ? PreferredSize(
+                  preferredSize: const Size.fromHeight(2.0),
                   child: LinearProgressIndicator(
                     minHeight: 2,
                     backgroundColor: Colors.transparent,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                    valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
                   ),
                 )
                 : null,
         actions: <Widget>[
           IconButton(
-            icon: const Icon(Icons.add, color: Colors.black, weight: 200),
+            icon: Icon(Icons.add, color: theme.colorScheme.onSurface, weight: 200),
             tooltip: 'Upload file',
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
@@ -276,7 +284,7 @@ class _RxFilesPage extends State<RxFilesPage> {
           ),
           IconButton(
             // TODO: disable is no files are checked
-            icon: const Icon(Icons.refresh, color: Colors.black, weight: 100),
+            icon: Icon(Icons.refresh, color: theme.colorScheme.onSurface, weight: 100),
             tooltip: 'Refresh',
             onPressed: () async {
               if (collection != null) {
@@ -300,14 +308,14 @@ class _RxFilesPage extends State<RxFilesPage> {
               }
             },
           ),
-          const VerticalDivider(
-            color: Colors.grey,
+          VerticalDivider(
+            color: theme.colorScheme.outlineVariant,
             thickness: 1,
             indent: 10,
             endIndent: 10,
           ),
           IconButton(
-            icon: const Icon(Icons.download, color: Colors.black, weight: 200),
+            icon: Icon(Icons.download, color: theme.colorScheme.onSurface, weight: 200),
             tooltip: 'Download File(s)',
             onPressed:
                 selectedItems.isEmpty
@@ -315,7 +323,7 @@ class _RxFilesPage extends State<RxFilesPage> {
                     : () => _downloadSelectedFiles(context),
           ),
           IconButton(
-            icon: const Icon(Icons.delete, color: Colors.black, weight: 300),
+            icon: Icon(Icons.delete, color: theme.colorScheme.error, weight: 300),
             tooltip: 'Delete File(s)',
             onPressed:
                 selectedItems.isEmpty
@@ -466,11 +474,11 @@ class _RxFilesPage extends State<RxFilesPage> {
     );
   }
 
-  BreadCrumb getBreadcrumb(Collection collection, String path) {
+  BreadCrumb getBreadcrumb(ThemeData theme, Collection collection, String path) {
     return BreadCrumb(
       items: <BreadCrumbItem>[
         BreadCrumbItem(
-          content: const Icon(Icons.home, color: Colors.black),
+          content: Icon(Icons.home, color: theme.colorScheme.onSurface),
           onTap: () {
             setState(() {
               this.path = '';
@@ -483,7 +491,14 @@ class _RxFilesPage extends State<RxFilesPage> {
           },
         ),
         BreadCrumbItem(
-          content: Text(collection.name),
+          content: Text(
+            collection.name,
+            style: TextStyle(
+              color: theme.colorScheme.onSurface,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
           onTap: () {
             setState(() {
               this.path = '';
@@ -500,7 +515,13 @@ class _RxFilesPage extends State<RxFilesPage> {
           final index = entry.key;
           final crumb = entry.value;
           return BreadCrumbItem(
-            content: Text(crumb.name),
+            content: Text(
+              crumb.name,
+              style: TextStyle(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontSize: 14,
+              ),
+            ),
             onTap: () {
               // Navigate to this level and trim everything after it
               setState(() {
@@ -515,7 +536,7 @@ class _RxFilesPage extends State<RxFilesPage> {
           );
         }),
       ],
-      divider: const Icon(Icons.chevron_right, color: Colors.black),
+      divider: Icon(Icons.chevron_right, color: theme.colorScheme.onSurfaceVariant),
       overflow: const WrapOverflow(
         keepLastDivider: false,
         direction: Axis.horizontal,

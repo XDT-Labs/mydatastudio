@@ -84,7 +84,7 @@ class _FileTable extends State<FileTable> {
               dataRowMaxHeight: 40,
               dataRowMinHeight: 40,
               headingRowHeight: 40,
-              headingRowColor: WidgetStateProperty.all(Colors.white),
+              headingRowColor: WidgetStateProperty.all(Colors.transparent),
               columnSpacing: spacing,
               horizontalMargin: 12,
               showCheckboxColumn: true,
@@ -105,15 +105,15 @@ class _FileTable extends State<FileTable> {
                 }
               },
               dataTextStyle: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w200,
-                fontSize: 15,
-                color: Colors.black87,
+                fontWeight: FontWeight.normal,
+                fontSize: 14,
+                color: theme.colorScheme.onSurfaceVariant,
               ),
               headingTextStyle: theme.textTheme.titleSmall?.copyWith(
-                fontWeight:
-                    FontWeight.w200, // Keep headers slightly bolder than data
-                fontSize: 15,
-                color: Colors.black87,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+                color: theme.colorScheme.onSurfaceVariant.withOpacity(0.8),
+                letterSpacing: 1.0,
               ),
             ),
           ),
@@ -125,10 +125,7 @@ class _FileTable extends State<FileTable> {
   List<DataColumn> getColumns(BuildContext context) {
     return <DataColumn>[
       DataColumn(
-        label: const Text(
-          'Name',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        label: const Text('NAME'),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
           sortColumn = 'name';
@@ -138,10 +135,7 @@ class _FileTable extends State<FileTable> {
       ),
       DataColumn(
         numeric: true,
-        label: const Text(
-          'Type',
-          style: TextStyle(fontWeight: FontWeight.normal),
-        ),
+        label: const Text('TYPE'),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
           sortColumn = 'contentType';
@@ -151,10 +145,7 @@ class _FileTable extends State<FileTable> {
       ),
       DataColumn(
         numeric: true,
-        label: const Text(
-          'Size',
-          style: TextStyle(fontWeight: FontWeight.normal),
-        ),
+        label: const Text('SIZE'),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
           sortColumn = 'size';
@@ -164,10 +155,9 @@ class _FileTable extends State<FileTable> {
       ),
       DataColumn(
         label: const Text(
-          'Date\nCreated',
+          'DATE\nCREATED',
           maxLines: 2,
           softWrap: true,
-          style: TextStyle(fontWeight: FontWeight.normal),
         ),
         onSort: (columnIndex, sortAscending) {
           sortColumnIndex = columnIndex;
@@ -178,10 +168,7 @@ class _FileTable extends State<FileTable> {
       ),
       const DataColumn(
         label: Center(
-          child: Text(
-            'Actions',
-            style: TextStyle(fontWeight: FontWeight.normal),
-          ),
+          child: Text('ACTIONS'),
         ),
       ),
     ];
@@ -192,6 +179,7 @@ class _FileTable extends State<FileTable> {
     List<FileAsset> assets,
     double nameWidth,
   ) {
+    final theme = Theme.of(context);
     List<DataRow> rows = [];
 
     //Create a row for every item returns from DB
@@ -216,16 +204,26 @@ class _FileTable extends State<FileTable> {
                     children: [
                       (f.thumbnail == null && !isImage)
                           ? SizedBox(
-                            width: 50,
-                            height: 32,
-                            child: Center(
-                              child: Icon(getIconForMimeType(f.contentType)),
-                            ),
-                          )
+                              width: 50,
+                              height: 32,
+                              child: Center(
+                                child: Icon(
+                                  getIconForMimeType(f.contentType),
+                                  color: _getIconColor(f.contentType),
+                                ),
+                              ),
+                            )
                           : getImageComponent(f),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(f.name, overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          f.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -238,7 +236,7 @@ class _FileTable extends State<FileTable> {
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 80),
                   child: Text(
-                    f.contentType.split("/").last,
+                    _formatType(f.contentType, f.name),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -281,7 +279,11 @@ class _FileTable extends State<FileTable> {
                         child: IconButton(
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.info_outline, size: 20),
+                          icon: Icon(
+                            Icons.info_outline,
+                            size: 20,
+                            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.8),
+                          ),
                           tooltip: 'Details',
                           onPressed: () {
                             FileSelectedNotification(f).dispatch(context);
@@ -292,7 +294,11 @@ class _FileTable extends State<FileTable> {
                         child: IconButton(
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.open_in_new, size: 20),
+                          icon: Icon(
+                            Icons.open_in_new,
+                            size: 20,
+                            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.8),
+                          ),
                           tooltip: 'Open',
                           onPressed: () async {
                             if (f.path.startsWith('gdrive://')) {
@@ -310,8 +316,11 @@ class _FileTable extends State<FileTable> {
                         child: IconButton(
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.delete, size: 20),
-                          color: Colors.red.withOpacity(0.7),
+                          icon: Icon(
+                            Icons.delete,
+                            size: 20,
+                            color: theme.colorScheme.error.withOpacity(0.8),
+                          ),
                           tooltip: 'Delete',
                           onPressed:
                               () => _showDeleteConfirmationDialog(context, f),
@@ -336,6 +345,10 @@ class _FileTable extends State<FileTable> {
         );
       } else {
         //Folder Row
+        var moment = Moment.fromMillisecondsSinceEpoch(
+          f.dateCreated.millisecondsSinceEpoch,
+          isUtc: true,
+        );
         rows.add(
           DataRow(
             selected: selectedRows.contains(f.path),
@@ -355,7 +368,14 @@ class _FileTable extends State<FileTable> {
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(f.name, overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          f.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -368,10 +388,21 @@ class _FileTable extends State<FileTable> {
                   ).dispatch(context);
                 },
               ),
-              const DataCell(Text('')),
-              const DataCell(Text('')),
-              const DataCell(Text('')),
-              const DataCell(Text('')),
+              DataCell(
+                Text(
+                  f.name.toLowerCase().contains('library') ? 'Library' : 'Folder',
+                ),
+              ),
+              const DataCell(Text('--')),
+              DataCell(
+                Text(
+                  moment.fromNowPrecise(
+                    form: Abbreviation.full,
+                    includeWeeks: true,
+                  ),
+                ),
+              ),
+              const DataCell(SizedBox.shrink()),
             ],
             onSelectChanged: (bool? e) {
               setState(() {
@@ -518,14 +549,40 @@ class _FileTable extends State<FileTable> {
   }
 
   IconData? getIconForMimeType(String contentType) {
-    switch (contentType) {
-      case FilesConstants.mimeTypeImage:
-        return Icons.image;
-      case FilesConstants.mimeTypePdf:
-        return Icons.picture_as_pdf;
-      default:
-        return Icons.file_present;
+    if (contentType == 'application/pdf') {
+      return Icons.picture_as_pdf;
+    } else if (contentType == 'text/csv' || contentType.contains('csv') || contentType.contains('spreadsheet')) {
+      return Icons.table_chart;
+    } else if (contentType.contains('zip') || contentType.contains('archive') || contentType.contains('compressed')) {
+      return Icons.folder_zip;
+    } else if (contentType.startsWith('image/')) {
+      return Icons.image;
     }
+    return Icons.insert_drive_file;
+  }
+
+  Color _getIconColor(String contentType) {
+    if (contentType == 'application/pdf') {
+      return Colors.red.shade400;
+    } else if (contentType == 'text/csv' || contentType.contains('csv') || contentType.contains('spreadsheet')) {
+      return Colors.green.shade400;
+    } else if (contentType.contains('zip') || contentType.contains('archive') || contentType.contains('compressed')) {
+      return Colors.amber.shade400;
+    }
+    return Colors.grey.shade400;
+  }
+
+  String _formatType(String contentType, String name) {
+    if (contentType == 'application/pdf') {
+      return 'PDF Document';
+    } else if (contentType == 'text/csv') {
+      return 'CSV Spreadsheet';
+    } else if (contentType == 'application/zip' || contentType == 'application/x-zip-compressed' || name.endsWith('.zip')) {
+      return 'ZIP Archive';
+    } else if (contentType.startsWith('image/')) {
+      return contentType;
+    }
+    return contentType.split('/').last.toUpperCase();
   }
 
   String _formatBytes(num bytes) {
