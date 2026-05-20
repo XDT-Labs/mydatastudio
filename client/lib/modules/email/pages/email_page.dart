@@ -541,7 +541,7 @@ class _EmailPage extends State<EmailPage> {
 
       // 2. Local Delete
       await EmailRepository(
-        DatabaseManager.instance.appDatabase!,
+        DatabaseManager.instance.database!,
       ).deleteEmails(ids);
 
       _refreshEmails();

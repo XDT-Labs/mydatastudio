@@ -87,7 +87,7 @@ make clean            # Remove all build artifacts
 cd client
 flutter pub get                      # Install dependencies
 dart run build_runner build          # Regenerate Drift DB code and JSON serializers (required after schema changes)
-flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=mydata.tools
+flutter build macos --release --no-tree-shake-icons
 flutter test                         # Run Flutter tests
 ```
 

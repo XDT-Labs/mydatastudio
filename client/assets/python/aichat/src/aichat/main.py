@@ -99,10 +99,11 @@ def main() -> None:
     
     # Run the server
     import uvicorn
+    port = int(os.environ.get("AICHAT_PORT", 0))
     uvicorn.run(
         app, 
         host="127.0.0.1",
-        port=0,
+        port=port,
         log_level="info",
         reload=False  # Set to True for development
     )

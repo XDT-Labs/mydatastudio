@@ -22,6 +22,7 @@ class PythonManager {
 
   String? _pythonDir;
   static ValueNotifier<bool> isLLMServiceRunning = ValueNotifier(false);
+  static ValueNotifier<String> startupProgress = ValueNotifier('Starting...');
 
   final AppLogger logger = AppLogger(null);
 
@@ -39,6 +40,17 @@ class PythonManager {
   bool get isRunning => _pythonProc != null;
 
   Future<void> startAiChatService() async {
+    const remoteUrl = String.fromEnvironment('PYTHON_SERVER_URL');
+    if (remoteUrl.isNotEmpty) {
+      logger.i('[python] Using remote AI Chat service at: $remoteUrl');
+      print('[python] Using remote AI Chat service at: $remoteUrl');
+      MainApp.llmServiceUrl.add(remoteUrl);
+      isLLMServiceRunning.value = true;
+      PythonManager.startupProgress.value = 'Connected to remote AI service';
+      return Future.value();
+    }
+
+    PythonManager.startupProgress.value = 'Preparing AI service...';
     // Use a completer to ensure the aichat assets are available before proceeding.
     Completer<void> completer = Completer<void>();
 
@@ -146,6 +158,8 @@ class PythonManager {
         if (line.contains('[LOADER]')) {
           logger.s(line.replaceAll('[LOADER]', '').trim());
         }
+        // Update splash screen progress
+        PythonManager.startupProgress.value = line;
       });
 
       final urlRegex = RegExp(r'(http?:\/\/[^\s]+)');
@@ -155,6 +169,9 @@ class PythonManager {
         if (line.contains('[LOADER]')) {
           logger.s(line.replaceAll('[LOADER]', '').trim());
         }
+        // Update splash screen progress
+        PythonManager.startupProgress.value = line;
+        
         final match = urlRegex.firstMatch(line);
         if (match != null) {
           final url = match.group(1);
@@ -233,6 +250,7 @@ class PythonManager {
         _stdoutController.add(
           'aichat directory already exists at ${destDir.path}; skipping unzip.',
         );
+        PythonManager.startupProgress.value = 'Starting AI service...';
         return;
       }
 
@@ -299,34 +317,79 @@ class PythonManager {
 
       if (Platform.isWindows) {
         // On Windows, use PowerShell to expand the archive
-        final result = await Process.run('powershell', [
+        PythonManager.startupProgress.value =
+            'Extracting AI Chat service (this may take a few minutes)...';
+        final proc = await Process.start('powershell', [
           '-command',
           'Expand-Archive -Path "$zipPath" -DestinationPath "${tempDir.path}" -Force',
         ]);
-        if (result.exitCode != 0) {
-          _stderrController.add(
-            'Expand-Archive failed (exit ${result.exitCode}): ${result.stderr}',
-          );
+        int lastUpdate = DateTime.now().millisecondsSinceEpoch;
+        proc.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen((line) {
+              int now = DateTime.now().millisecondsSinceEpoch;
+              if (now - lastUpdate > 1000) {
+                if (line.trim().isNotEmpty) {
+                  PythonManager.startupProgress.value = 'Extracting... $line';
+                  lastUpdate = now;
+                }
+              }
+            });
+        proc.stderr
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen((line) {
+              _stderrController.add('Expand-Archive err: $line');
+            });
+
+        final exitCode = await proc.exitCode;
+        if (exitCode != 0) {
+          _stderrController.add('Expand-Archive failed (exit $exitCode)');
           return;
         } else {
           _stdoutController.add('Unzip completed via PowerShell');
         }
       } else {
         // Use system `unzip` for macOS/Linux
-        final result = await Process.run('unzip', [
+        PythonManager.startupProgress.value = 'Unzipping AI Chat service...';
+        final proc = await Process.start('unzip', [
           '-o',
           zipPath,
           '-d',
           tempDir.path,
         ]);
-        if (result.exitCode != 0) {
-          _stderrController.add(
-            'unzip failed (exit ${result.exitCode}): ${result.stderr}',
-          );
+
+        int lastUpdate = DateTime.now().millisecondsSinceEpoch;
+        proc.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen((line) {
+              if (line.contains('inflating:')) {
+                int now = DateTime.now().millisecondsSinceEpoch;
+                if (now - lastUpdate > 100) {
+                  String file = line.split('inflating:')[1].trim();
+                  if (file.length > 50)
+                    file = '...' + file.substring(file.length - 47);
+                  PythonManager.startupProgress.value = 'Unzipping: $file';
+                  lastUpdate = now;
+                }
+              }
+            });
+
+        proc.stderr
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen((line) {
+              _stderrController.add('unzip err: $line');
+            });
+
+        final exitCode = await proc.exitCode;
+        if (exitCode != 0) {
+          _stderrController.add('unzip failed (exit $exitCode)');
           return;
         } else {
-          final out = (result.stdout ?? '').toString();
-          _stdoutController.add('Unzip completed: ${out.trim()}');
+          _stdoutController.add('Unzip completed');
         }
       }
 
@@ -339,6 +402,7 @@ class PythonManager {
 
       if (contents.length == 1 && contents.first is Directory) {
         // It's a nested folder structure (e.g. aichat-macos/), move it to destDir
+        PythonManager.startupProgress.value = 'Finalizing setup...';
         final nestedDir = contents.first as Directory;
         _stdoutController.add(
           'Moving nested folder `${nestedDir.path}` to `${destDir.path}`',
@@ -347,6 +411,7 @@ class PythonManager {
         tempDir.deleteSync(recursive: true);
       } else {
         // Flat structure, rename tempDir to destDir
+        PythonManager.startupProgress.value = 'Finalizing setup...';
         _stdoutController.add('Moving `${tempDir.path}` to `${destDir.path}`');
         tempDir.renameSync(destDir.path);
       }

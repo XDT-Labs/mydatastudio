@@ -11,7 +11,6 @@ void main() {
             body: GoogleDriveErrorView(
               errorMessage: null,
               onRetry: () {},
-              onCancel: () {},
             ),
           ),
         ),
@@ -27,7 +26,6 @@ void main() {
             body: GoogleDriveErrorView(
               errorMessage: 'Auth timeout',
               onRetry: () {},
-              onCancel: () {},
             ),
           ),
         ),
@@ -43,7 +41,6 @@ void main() {
             body: GoogleDriveErrorView(
               errorMessage: null,
               onRetry: () {},
-              onCancel: () {},
             ),
           ),
         ),
@@ -60,7 +57,6 @@ void main() {
             body: GoogleDriveErrorView(
               errorMessage: null,
               onRetry: () => called = true,
-              onCancel: () {},
             ),
           ),
         ),
@@ -72,24 +68,19 @@ void main() {
       expect(called, isTrue);
     });
 
-    testWidgets('cancel button calls onCancel', (tester) async {
-      bool called = false;
+    testWidgets('Cancel button is NOT present', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
             body: GoogleDriveErrorView(
               errorMessage: null,
               onRetry: () {},
-              onCancel: () => called = true,
             ),
           ),
         ),
       );
 
-      await tester.tap(find.text('Cancel'));
-      await tester.pump();
-
-      expect(called, isTrue);
+      expect(find.text('Cancel'), findsNothing);
     });
   });
 }

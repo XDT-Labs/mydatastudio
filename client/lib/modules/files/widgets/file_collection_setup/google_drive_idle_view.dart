@@ -5,21 +5,25 @@ class GoogleDriveIdleView extends StatelessWidget {
   const GoogleDriveIdleView({
     super.key,
     required this.onConnect,
-    required this.onCancel,
+    required this.saveLocalCopy,
+    required this.onSaveLocalCopyChanged,
   });
 
   final VoidCallback onConnect;
-  final VoidCallback onCancel;
+  final bool saveLocalCopy;
+  final ValueChanged<bool?> onSaveLocalCopyChanged;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Image.asset('assets/images/google-drive.png', height: 72),
         const SizedBox(height: 24),
         const Text(
           'Connect Google Drive',
+          textAlign: TextAlign.center,
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
@@ -50,20 +54,19 @@ class GoogleDriveIdleView extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 28),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: onCancel,
-                child: const Text('Cancel'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 2,
-              child: GoogleDriveSignInButton(onTap: onConnect),
-            ),
-          ],
+        GoogleDriveSignInButton(onTap: onConnect),
+        const SizedBox(height: 12),
+        CheckboxListTile(
+          value: saveLocalCopy,
+          onChanged: onSaveLocalCopyChanged,
+          title: const Text(
+            'Save a local copy of all cloud files, as a local backup',
+            style: TextStyle(fontSize: 13),
+          ),
+          controlAffinity: ListTileControlAffinity.leading,
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          visualDensity: VisualDensity.compact,
         ),
       ],
     );

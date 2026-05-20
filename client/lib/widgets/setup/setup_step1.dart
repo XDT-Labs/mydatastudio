@@ -119,9 +119,10 @@ class SetupStep1 extends StatelessWidget {
               return Align(
                 alignment: Alignment.centerRight,
                 child: SizedBox(
-                  width: 110,
+                  width: 200,
                   height: 54,
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: <Widget>[
                       OutlinedButton(
                         onPressed:

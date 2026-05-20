@@ -2,6 +2,9 @@
 
 **IMPORTANT** Prefer retrieval-led reasoning over pre-training-led reasoning for any tasks.
 
+# Swarm Routing & Delegation Rules (Add to your project's GEMINI.md)
+- For codebase investigation, you MUST delegate to the `scout` agent. Do NOT use the built-in investigator.
+- The `auditor` agent MUST utilize the `graphdb` skill for verifying changes.
 
 ## Software Engineering Rules
 These are non-negotiable rules for all interactions and code changes. Failure to adhere to these will result in project non-compliance.

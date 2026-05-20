@@ -4,7 +4,6 @@ import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/file.dart';
-import 'package:drift/drift.dart';
 
 class DatabaseRepository {
   AppDatabase db;
@@ -12,13 +11,10 @@ class DatabaseRepository {
 
   DatabaseRepository(this.db);
 
-  ///
-  /// Helper SQL Methods
-  ///
-
   Future<int> countAllRows(String table) async {
-    var rows = db.customSelect("select count(*) as count from $table;");
-    return (await rows.getSingle()).read("count");
+    final rows = await db.select("select count(*) as count from $table;");
+    if (rows.isEmpty) return 0;
+    return rows.first['count'] as int;
   }
 
   // ---------------------------------------------------------------------------
@@ -26,7 +22,7 @@ class DatabaseRepository {
   // ---------------------------------------------------------------------------
 
   /// Upserts the Qwen3-8B embedding for [fileId] into the `files_embeddings`
-  /// Drift table, storing values as a packed Float32 BLOB via `vector_as_f32()`.
+  /// table, storing values as a packed Float32 BLOB via `vector_as_f32()`.
   ///
   /// [embedding] must be 2048 elements (Qwen3-8B output dimensionality).
   ///
@@ -39,20 +35,17 @@ class DatabaseRepository {
     // Build JSON array string that sqlite_vector's vector_as_f32() accepts.
     final jsonArray = '[${embedding.join(',')}]';
 
-    await db.transaction(() async {
+    await db.transaction((tx) async {
       try {
         // Use vector_as_f32() to pack the JSON float array into a BLOB.
-        await db.customInsert(
+        await tx.execute(
           '''
           INSERT INTO files_embeddings (file_id, qwen3_8b_embedding)
           VALUES (?, vector_as_f32(?))
           ON CONFLICT(file_id) DO UPDATE SET
             qwen3_8b_embedding = excluded.qwen3_8b_embedding
           ''',
-          variables: [
-            Variable.withString(fileId),
-            Variable.withString(jsonArray),
-          ],
+          [fileId, jsonArray],
         );
       } catch (e) {
         // Fallback: store as raw Float32 BLOB when extension is not loaded
@@ -60,17 +53,14 @@ class DatabaseRepository {
         // won't work, but upsert/delete operations succeed.
         logger.w('vector_as_f32 unavailable, storing raw BLOB: $e');
         final blob = Float32List.fromList(embedding).buffer.asUint8List();
-        await db.customInsert(
+        await tx.execute(
           '''
           INSERT INTO files_embeddings (file_id, qwen3_8b_embedding)
           VALUES (?, ?)
           ON CONFLICT(file_id) DO UPDATE SET
             qwen3_8b_embedding = excluded.qwen3_8b_embedding
           ''',
-          variables: [
-            Variable.withString(fileId),
-            Variable.withBlob(blob),
-          ],
+          [fileId, blob],
         );
       }
     });
@@ -82,8 +72,8 @@ class DatabaseRepository {
   ///
   /// Should be called when the corresponding file is permanently deleted.
   Future<void> deleteFileEmbedding(String fileId) async {
-    await db.transaction(() async {
-      await db.customStatement(
+    await db.transaction((tx) async {
+      await tx.execute(
         'DELETE FROM files_embeddings WHERE file_id = ?',
         [fileId],
       );
@@ -104,7 +94,7 @@ class DatabaseRepository {
   }) async {
     final jsonArray = '[${queryEmbedding.join(',')}]';
 
-    final rows = await db.customSelect(
+    final rows = await db.select(
       '''
       SELECT e.file_id, v.distance
       FROM files_embeddings AS e
@@ -116,17 +106,14 @@ class DatabaseRepository {
       ) AS v ON e.rowid = v.rowid
       ORDER BY v.distance ASC
       ''',
-      variables: [
-        Variable.withString(jsonArray),
-        Variable.withInt(limit),
-      ],
-    ).get();
+      [jsonArray, limit],
+    );
 
     return rows
         .map(
           (row) => (
-            fileId: row.read<String>('file_id'),
-            distance: row.read<double>('distance'),
+            fileId: row['file_id'] as String,
+            distance: (row['distance'] as num).toDouble(),
           ),
         )
         .toList();
@@ -136,29 +123,28 @@ class DatabaseRepository {
   /// `files_embeddings` table, limited to [limit] results.
   /// Filters for image content types.
   Future<List<File>> getFilesWithMissingEmbeddings({int limit = 10}) async {
-    final query = db.select(db.files).join([
-      leftOuterJoin(
-        db.filesEmbeddings,
-        db.filesEmbeddings.fileId.equalsExp(db.files.id),
-      ),
-      innerJoin(
-        db.collections,
-        db.collections.id.equalsExp(db.files.collectionId),
-      ),
-    ])
-      ..where(
-        db.filesEmbeddings.fileId.isNull() &
-            db.files.contentType.like('image/%') &
-            db.files.isDeleted.equals(false),
-      )
-      ..limit(limit);
-
-    final rows = await query.get();
-    return rows.map((row) => row.readTable(db.files)).toList();
+    final rows = await db.select(
+      '''
+      SELECT f.*
+      FROM files f
+      LEFT OUTER JOIN files_embeddings fe ON fe.file_id = f.id
+      INNER JOIN collections c ON c.id = f.collection_id
+      WHERE fe.file_id IS NULL
+        AND f.content_type LIKE 'image/%'
+        AND f.is_deleted = 0
+      LIMIT ?
+      ''',
+      [limit],
+    );
+    return rows.map((row) => File.fromDbMap(row)).toList();
   }
 
   Future<Collection?> getCollection(String id) async {
-    return (db.select(db.collections)..where((t) => t.id.equals(id)))
-        .getSingleOrNull();
+    final rows = await db.select(
+      "SELECT * FROM collections WHERE id = ? LIMIT 1",
+      [id],
+    );
+    if (rows.isEmpty) return null;
+    return Collection.fromDbMap(rows.first);
   }
 }

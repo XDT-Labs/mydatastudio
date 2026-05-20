@@ -25,20 +25,11 @@ HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
 HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
 HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
 
-# Python/AI Chat Config
-PYTHON_DIR = client/assets/python/aichat
-APP_DIR = client/app
-APP_ZIP_NAME = aichat-macos.zip
-APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
-HF_MODEL = bartowski/google_gemma-3-4b-it-GGUF
-HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
-HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
-HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
+
 
 # Flutter Config
 FLUTTER_DIR = client
-# Default realm name, overridden in set-bundle-id
-REALM_NAME = mydata.tools
+
 
 # --- Targets ---
 
@@ -110,6 +101,7 @@ build-client: set-bundle-id
 	@echo "--- 🚀 Building Flutter Desktop client (macOS) ---"
 	@REALM=$$(cat .realm_name | cut -d= -f2); \
 	cd $(FLUTTER_DIR) && \
+		cp pubspec.prod.yaml pubspec.yaml && \
 		flutter pub get && \
 		flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
 	@echo "--- ✅ Flutter build complete ---"
@@ -128,14 +120,6 @@ local-install-python: build-python
 	rm -fr ~/Library/Application\ Support/$$REALM/aichat
 	@echo "--- ✅ Copy complete ---"
 
-# Cloud Run Deployment
-.PHONY: deploy-download-service
-deploy-download-service: init
-	@echo "--- 🚀 Deploying $(SERVICE_NAME) to Cloud Run ---"
-	cd services/download-models && gcloud builds submit . \
-		--config cloudbuild.yaml \
-		--region=$(REGION) \
-		--substitutions _SERVICE_NAME=$(SERVICE_NAME),_REGION=$(REGION),_GCS_BUCKET=mydata-tools_downloads,_GCS_FOLDER_PREFIX=local-llm-models/,_REPO_NAME=$(IMAGE_REPO)
 
 
 # Cleanup

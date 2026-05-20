@@ -5,13 +5,23 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "client",
+            "name": "client (dev)",
             "cwd": "client",
             "request": "launch",
             "type": "dart",
+            "preLaunchTask": "Use Dev Pubspec",
             "args": [
-                "--dart-define-from-file=config/secrets-dev.json"
+                "--dart-define=PYTHON_SERVER_URL=http://127.0.0.1:8000"
             ]
+        },
+        {
+            "name": "client (prod)",
+            "cwd": "client",
+            "request": "launch",
+            "type": "dart",
+            "preLaunchTask": "Use Prod Pubspec",
+            "flutterMode": "release",
+            "args": []
         },
         {
             "name": "client (impeller)",
@@ -19,9 +29,21 @@
             "request": "launch",
             "type": "dart",
             "args": [
-                "--enable-impeller",
-                "--dart-define-from-file=config/secrets-dev.json"
+                "--enable-impeller"
             ]
+        },
+        {
+            "name": "aichat server (python)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/client/assets/python/aichat/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/client/assets/python/aichat",
+            "justMyCode": true,
+            "python": "${workspaceFolder}/client/assets/python/aichat/.venv/bin/python",
+            "env": {
+                "AICHAT_PORT": "8000"
+            }
         },
         {
             "name": "client (profile mode)",
@@ -29,19 +51,13 @@
             "request": "launch",
             "type": "dart",
             "flutterMode": "profile",
-            "args": [
-                "--dart-define-from-file=config/secrets-dev.json"
-            ]
-        },
+            "args": []
+        }
+    ],
+    "compounds": [
         {
-            "name": "client (release mode)",
-            "cwd": "client",
-            "request": "launch",
-            "type": "dart",
-            "flutterMode": "release",
-            "args": [
-                "--dart-define-from-file=config/secrets.json"
-            ]
+            "name": "client + server (dev)",
+            "configurations": ["aichat server (python)", "client (dev)"]
         }
     ]
 }

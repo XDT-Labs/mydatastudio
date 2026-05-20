@@ -28,17 +28,18 @@ class FilePathResolver {
   static String absoluteFromPath(String relativePath, Collection collection) {
     // Cloud or already-absolute paths pass through unchanged.
     if (relativePath.startsWith('gdrive://') ||
-        relativePath.startsWith('/') ||
-        relativePath.isEmpty) {
+        relativePath.startsWith('/')) {
       return relativePath;
     }
 
     // Google Drive folders store their ID as the path, which is absolute
     if (collection.scanner == AppConstants.scannerFileGDrive) {
-      return relativePath; 
+      return relativePath;
     }
 
     final root = collection.localCopyPath ?? collection.path;
+    if (relativePath.isEmpty) return root;
+    
     if (root.isEmpty) return relativePath;
     return p.join(root, relativePath);
   }

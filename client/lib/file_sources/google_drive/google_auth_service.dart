@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:mydatatools/app_logger.dart';
+import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/oauth/login_providers.dart';
 import 'package:mydatatools/repositories/collection_repository.dart';
@@ -89,6 +90,13 @@ class GoogleAuthService {
     final provider = LoginProviders.google;
     final url = Uri.parse(provider.tokenEndpoint);
 
+    final clientId = await provider.clientId;
+    final clientSecret = await provider.clientSecret;
+
+    if (clientId.isEmpty || clientSecret.isEmpty) {
+      throw ProviderConfigurationException('Please configure Client ID and Secret in Settings for ${provider.key}.');
+    }
+
     // Google requires client_secret for desktop app token refresh,
     // even with PKCE enabled.
     final response = await http.post(
@@ -96,8 +104,8 @@ class GoogleAuthService {
       headers: {'Accept': 'application/json'},
       body: {
         'refresh_token': refreshToken,
-        'client_id': provider.clientId,
-        'client_secret': provider.clientSecret,
+        'client_id': clientId,
+        'client_secret': clientSecret,
         'grant_type': 'refresh_token',
       },
     );
@@ -138,7 +146,7 @@ class GoogleAuthService {
       collection.expiration = result.expiration;
       collection.needsReAuth = false;
 
-      await CollectionRepository().updateCollection(collection);
+      await CollectionRepository(DatabaseManager.instance.database!).updateCollection(collection);
       _logger.i(
         'Token refreshed successfully for "${collection.name}" — expires ${result.expiration}',
       );
@@ -147,7 +155,7 @@ class GoogleAuthService {
     } on GoogleAuthException {
       // Mark collection as needing re-auth so the UI can prompt the user
       collection.needsReAuth = true;
-      await CollectionRepository().updateCollection(collection);
+      await CollectionRepository(DatabaseManager.instance.database!).updateCollection(collection);
       rethrow;
     }
   }

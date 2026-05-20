@@ -24,6 +24,8 @@ import 'package:mydatatools/modules/email/widgets/email_setup/gmail_idle_view.da
 import 'package:mydatatools/modules/email/widgets/email_setup/gmail_loading_view.dart';
 import 'package:mydatatools/modules/email/widgets/email_setup/gmail_success_view.dart';
 import 'package:mydatatools/modules/email/widgets/email_setup/gmail_error_view.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/gmail_configure_view.dart';
+import 'package:mydatatools/modules/email/widgets/email_setup/outlook_configure_view.dart';
 import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_idle_view.dart';
 import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_loading_view.dart';
 import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_success_view.dart';
@@ -71,7 +73,7 @@ class _NewEmailPage extends State<NewEmailPage> {
       body: Center(
         child: SizedBox.expand(
           child: DefaultTabController(
-            length: 3,
+            length: 4,
             child: Scaffold(
               appBar: AppBar(
                 toolbarHeight: 0,
@@ -79,6 +81,7 @@ class _NewEmailPage extends State<NewEmailPage> {
                   tabs: [
                     Tab(icon: Icon(Icons.email), text: 'Gmail'),
                     Tab(icon: Icon(Icons.email), text: 'Yahoo Mail'),
+                    Tab(icon: Icon(Icons.email), text: 'Outlook'),
                     Tab(icon: Icon(Icons.email), text: 'Outlook PST'),
                   ],
                 ),
@@ -87,6 +90,7 @@ class _NewEmailPage extends State<NewEmailPage> {
                 children: [
                   const _GmailTab(),
                   const _YahooTab(),
+                  const _OutlookTab(),
                   const _OutlookPstTab(),
                 ],
               ),
@@ -102,7 +106,7 @@ class _NewEmailPage extends State<NewEmailPage> {
 // Gmail Tab — stateful OAuth flow mirroring Google Drive
 // =============================================================================
 
-enum _GmailAuthState { idle, loading, success, error }
+enum _GmailAuthState { idle, loading, success, error, configure }
 
 class _GmailTab extends StatefulWidget {
   const _GmailTab();
@@ -112,9 +116,36 @@ class _GmailTab extends StatefulWidget {
 }
 
 class _GmailTabState extends State<_GmailTab> {
-  _GmailAuthState _authState = _GmailAuthState.idle;
+  _GmailAuthState _authState = _GmailAuthState.loading;
   String? _errorMessage;
   String? _connectedEmail;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkConfiguration();
+  }
+
+  Future<void> _checkConfiguration() async {
+    setState(() {
+      _authState = _GmailAuthState.loading;
+    });
+
+    final clientId = await LoginProviders.google.clientId;
+    final clientSecret = await LoginProviders.google.clientSecret;
+
+    if (!mounted) return;
+
+    if (clientId.isEmpty || clientSecret.isEmpty) {
+      setState(() {
+        _authState = _GmailAuthState.configure;
+      });
+    } else {
+      setState(() {
+        _authState = _GmailAuthState.idle;
+      });
+    }
+  }
 
   Future<void> _connectGmail() async {
     setState(() {
@@ -167,6 +198,7 @@ class _GmailTabState extends State<_GmailTab> {
             _GmailAuthState.success => _buildSuccess(),
             _GmailAuthState.error => _buildError(),
             _GmailAuthState.idle => _buildIdle(),
+            _GmailAuthState.configure => _buildConfigure(),
           },
         ),
       ),
@@ -201,6 +233,13 @@ class _GmailTabState extends State<_GmailTab> {
         errorMessage: _errorMessage,
         onRetry: _connectGmail,
       ),
+    );
+  }
+
+  Widget _buildConfigure() {
+    return _cardContainer(
+      key: const ValueKey('configure'),
+      child: GmailConfigureView(onConfigured: _checkConfiguration),
     );
   }
 
@@ -281,10 +320,11 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
         needsReAuth: false,
       );
 
-      await CollectionRepository().addCollection(collection);
+      await CollectionRepository(
+        DatabaseManager.instance.database!,
+      ).addCollection(collection);
 
       // Start the one-time scan isolate immediately
-      final writerPort = await DatabaseManager.instance.writerPort;
       final serverUrl = MainApp.llmServiceUrl.valueOrNull;
       if (serverUrl == null) {
         throw Exception('LLM Service url is not configured');
@@ -292,7 +332,6 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
 
       final pstIsolate = OutlookPstScannerIsolate(
         token: RootIsolateToken.instance,
-        dbWriterPort: writerPort,
         appDir: appDataDir,
         serverUrl: serverUrl,
       );
@@ -472,7 +511,7 @@ class _YahooTabState extends State<_YahooTab> {
         accessToken: appPassword, // Store app password in accessToken field
         userId: email,
         needsReAuth: false,
-        downloadAttachments: true,
+        downloadLocalCopy: true,
       );
 
       GetCollectionsService.instance.addCollection(c);
@@ -569,6 +608,232 @@ class _YahooTabState extends State<_YahooTab> {
       elevation: 1,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(padding: const EdgeInsets.all(32), child: child),
+    );
+  }
+}
+
+// =============================================================================
+// Outlook Tab — stateful OAuth flow
+// =============================================================================
+
+enum _OutlookAuthState { idle, loading, success, error, configure }
+
+class _OutlookTab extends StatefulWidget {
+  const _OutlookTab();
+
+  @override
+  State<_OutlookTab> createState() => _OutlookTabState();
+}
+
+class _OutlookTabState extends State<_OutlookTab> {
+  _OutlookAuthState _authState = _OutlookAuthState.loading;
+  String? _errorMessage;
+  String? _connectedEmail;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkConfiguration();
+  }
+
+  Future<void> _checkConfiguration() async {
+    setState(() {
+      _authState = _OutlookAuthState.loading;
+    });
+
+    final clientId = await LoginProviders.outlook.clientId;
+    final clientSecret = await LoginProviders.outlook.clientSecret;
+
+    if (!mounted) return;
+
+    if (clientId.isEmpty || clientSecret.isEmpty) {
+      setState(() {
+        _authState = _OutlookAuthState.configure;
+      });
+    } else {
+      setState(() {
+        _authState = _OutlookAuthState.idle;
+      });
+    }
+  }
+
+  Future<void> _connectOutlook() async {
+    setState(() {
+      _authState = _OutlookAuthState.loading;
+      _errorMessage = null;
+    });
+
+    try {
+      final collection = await LoginProviderExtension.handleOutlookMail(context);
+
+      if (!mounted) return;
+
+      if (collection == null) {
+        setState(() {
+          _authState = _OutlookAuthState.error;
+          _errorMessage = 'Sign-in was cancelled or failed. Please try again.';
+        });
+        return;
+      }
+
+      setState(() {
+        _authState = _OutlookAuthState.success;
+        _connectedEmail = collection.name;
+      });
+
+      EmailPage.selectedCollection.add(collection);
+      ScannerManager.getInstance().startScanner(collection);
+
+      await Future.delayed(const Duration(milliseconds: 900));
+      if (!mounted) return;
+      GoRouter.of(context).go('/email');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _authState = _OutlookAuthState.error;
+        _errorMessage = e.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          child: switch (_authState) {
+            _OutlookAuthState.loading => _buildLoading(),
+            _OutlookAuthState.success => _buildSuccess(),
+            _OutlookAuthState.error => _buildError(),
+            _OutlookAuthState.idle => _buildIdle(),
+            _OutlookAuthState.configure => _buildConfigure(),
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIdle() {
+    return _cardContainer(
+      key: const ValueKey('idle'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.email, size: 72, color: Color(0xFF0078D4)),
+          const SizedBox(height: 24),
+          const Text(
+            'Connect Outlook',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Sign in with your Microsoft account to scan and backup your emails '
+            'directly to this app.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey.shade600,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 28),
+          ElevatedButton.icon(
+            onPressed: _connectOutlook,
+            icon: const Icon(Icons.login, size: 24),
+            label: const Text('Sign in with Microsoft'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0078D4),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoading() {
+    return _cardContainer(
+      key: const ValueKey('loading'),
+      child: const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 24),
+          Text('Connecting to Microsoft...'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSuccess() {
+    return _cardContainer(
+      key: const ValueKey('success'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.check_circle, color: Colors.green, size: 64),
+          const SizedBox(height: 24),
+          const Text(
+            'Successfully Connected!',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Connected as $_connectedEmail',
+            style: const TextStyle(fontSize: 14, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildError() {
+    return _cardContainer(
+      key: const ValueKey('error'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.error_outline, color: Colors.red, size: 64),
+          const SizedBox(height: 24),
+          const Text(
+            'Connection Failed',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _errorMessage ?? 'Unknown error occurred.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 14, color: Colors.grey),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: () => setState(() => _authState = _OutlookAuthState.idle),
+            child: const Text('Try Again'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConfigure() {
+    return _cardContainer(
+      key: const ValueKey('configure'),
+      child: OutlookConfigureView(onConfigured: _checkConfiguration),
+    );
+  }
+
+  Widget _cardContainer({required Widget child, required Key key}) {
+    return Card(
+      key: key,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(padding: const EdgeInsets.all(36), child: child),
     );
   }
 }

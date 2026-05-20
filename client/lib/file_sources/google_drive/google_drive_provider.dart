@@ -53,7 +53,7 @@ class GoogleDriveProvider implements FileSourceProvider {
     Collection collection, {
     String? folderId,
   }) async {
-    final api = await _buildApi(collection);
+    final api = await buildApi(collection);
     final parentId =
         folderId ?? collection.path; // fall back to collection root
 
@@ -104,7 +104,7 @@ class GoogleDriveProvider implements FileSourceProvider {
 
     _logger.i('Downloading Drive file "${file.name}" → $destPath');
 
-    final api = await _buildApi(collection);
+    final api = await buildApi(collection);
 
     // Drive v3 media download: pass DownloadOptions.fullMedia
     final media =
@@ -138,7 +138,7 @@ class GoogleDriveProvider implements FileSourceProvider {
   Future<bool> deleteFile(Collection collection, FileSourceFile file) async {
     try {
       _logger.i('Trashing Drive file "${file.name}" ($file.id)');
-      final api = await _buildApi(collection);
+      final api = await buildApi(collection);
 
       // Update the `trashed` field to move to trash rather than permanently delete
       await api.files.update(drive.File()..trashed = true, file.id);
@@ -175,7 +175,9 @@ class GoogleDriveProvider implements FileSourceProvider {
   ///
   /// Uses [GoogleAuthService] to obtain a valid (auto-refreshed if needed)
   /// access token, then wraps it in an [AuthenticatedHttpClient].
-  Future<drive.DriveApi> _buildApi(Collection collection) async {
+  @protected
+  @visibleForTesting
+  Future<drive.DriveApi> buildApi(Collection collection) async {
     final accessToken = await GoogleAuthService.getValidAccessToken(
       collection,
     );

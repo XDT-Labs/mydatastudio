@@ -1,7 +1,6 @@
 import 'dart:async';
-import 'dart:isolate';
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
-
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/database_manager.dart';
@@ -10,13 +9,16 @@ import 'package:mydatatools/modules/files/services/scanners/google_file_scanner.
 import 'package:mydatatools/modules/files/services/scanners/local_file_isolate.dart';
 import 'package:mydatatools/modules/email/services/scanners/gmail_scanner.dart';
 import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
+import 'package:mydatatools/modules/email/services/scanners/outlook_scanner.dart';
 
 import 'package:mydatatools/modules/email/services/scanners/yahoo_scanner.dart';
 import 'package:mydatatools/scanners/collection_scanner.dart';
 
+typedef ScannerFactory = Future<CollectionScanner> Function(Collection c);
+
 class ScannerManager {
   final AppLogger logger = AppLogger(null);
-  static final ScannerManager _instance = ScannerManager._internal();
+  static final ScannerManager _instance = ScannerManager.internal();
   List<Collection> collections = [];
   Map<String, CollectionScanner> scanners = {};
   Map<String, OutlookPstScannerIsolate> pstScanners = {};
@@ -24,6 +26,9 @@ class ScannerManager {
   late AppDatabase database;
   //class reference to keep change listeners running
   StreamSubscription<List<Collection>>? collectionSubs;
+
+  @visibleForTesting
+  ScannerFactory? scannerFactory;
 
   // todo: pass in a dedicated writer thread
   factory ScannerManager(AppDatabase database) {
@@ -35,29 +40,29 @@ class ScannerManager {
     return _instance;
   }
 
-  ScannerManager._internal() {
+  @visibleForTesting
+  ScannerManager.internal() {
     // initialization logic
     //_instance.startScanners();
   }
 
-  void startScanners() async {
+  Future<void> startScanners() async {
     // Delay scanner startup to let the app UI finish initializing and prevent startup lockups
     await Future.delayed(const Duration(seconds: 5));
 
-    //start scanner for all existing collections
-    var collections = await database.select(database.collections).get();
+    //register scanners for all existing collections (no full scan on startup)
+    var collections = await getAllCollections();
     for (var c in collections) {
       if (c.scanner == AppConstants.scannerEmailOutlookPst) {
         continue;
       }
-      await Future.delayed(const Duration(seconds: 5));
-      logger.d('${c.id} | ${c.path}');
-      registerScanner(c);
+      await Future.delayed(const Duration(seconds: 1));
+      logger.i('Registering scanner for ${c.name} | ${c.path}');
+      await registerScanner(c);
     }
 
     //listen for new collections and add them at runtime
-    Stream<List<Collection>> collectionWatch =
-        database.select(database.collections).watch();
+    Stream<List<Collection>> collectionWatch = watchCollections();
 
     collectionWatch.listen((changes) {
       logger.d('Value from controller: $changes');
@@ -148,27 +153,35 @@ class ScannerManager {
   }
 
   Future<CollectionScanner> _doRegisterScanner(Collection c) async {
+    if (scannerFactory != null) {
+      final scanner = await scannerFactory!(c);
+      scanners[c.id] = scanner;
+      return scanner;
+    }
+
     try {
       CollectionScanner scanner;
       switch (c.scanner) {
         case AppConstants.scannerFileLocal:
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          SendPort? writerPort = await DatabaseManager.instance.writerPort;
-          scanner = LocalFileIsolate(null, writerPort);
+          scanner = LocalFileIsolate(
+            null,
+            storagePath: DatabaseManager.instance.storagePath!,
+            dbName: AppConstants.dbName,
+          );
           break;
 
         case AppConstants.scannerFileGDrive:
           logger.i("Registering GDrive scanner for ${c.name} (ID: ${c.id})");
-          SendPort driveWriterPort = await DatabaseManager.instance.writerPort;
           scanner = CloudFileIsolate(
-            null, // Central logger port not used yet
-            driveWriterPort,
+            null,
+            storagePath: DatabaseManager.instance.storagePath!,
+            dbName: AppConstants.dbName,
           );
           break;
 
         case AppConstants.scannerEmailGmail:
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
           scanner = GmailScanner(
             dbPath: p.join(
               DatabaseManager.instance.storagePath!,
@@ -177,13 +190,11 @@ class ScannerManager {
             ),
             collection: c,
             appDir: DatabaseManager.instance.storagePath!,
-            dbWriterPort: emailWriterPort,
           );
           break;
 
         case AppConstants.scannerEmailYahoo:
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          SendPort emailWriterPort = await DatabaseManager.instance.writerPort;
           scanner = YahooScanner(
             dbPath: p.join(
               DatabaseManager.instance.storagePath!,
@@ -192,7 +203,19 @@ class ScannerManager {
             ),
             collection: c,
             appDir: DatabaseManager.instance.storagePath!,
-            dbWriterPort: emailWriterPort,
+          );
+          break;
+
+        case AppConstants.scannerEmailOutlook:
+          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
+          scanner = OutlookScanner(
+            dbPath: p.join(
+              DatabaseManager.instance.storagePath!,
+              'data',
+              AppConstants.dbName,
+            ),
+            collection: c,
+            appDir: DatabaseManager.instance.storagePath!,
           );
           break;
 
@@ -212,5 +235,16 @@ class ScannerManager {
     } finally {
       _registrationFutures.remove(c.id);
     }
+  }
+
+  Future<List<Collection>> getAllCollections() async {
+    final rows = await database.select("SELECT * FROM collections");
+    return rows.map((r) => Collection.fromDbMap(r)).toList();
+  }
+
+  Stream<List<Collection>> watchCollections() {
+    return database.stream("SELECT * FROM collections").map((rows) {
+      return rows.map((r) => Collection.fromDbMap(r)).toList();
+    });
   }
 }

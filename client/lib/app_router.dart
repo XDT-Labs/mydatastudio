@@ -17,8 +17,11 @@ import 'package:mydatatools/modules/social/pages/twitter_page.dart';
 import 'package:mydatatools/modules/social/widgets/social_drawer.dart';
 import 'package:mydatatools/pages/home.dart';
 import 'package:mydatatools/pages/login.dart';
+import 'package:mydatatools/pages/settings.dart';
+import 'package:mydatatools/pages/settings_drawer.dart';
 import 'package:mydatatools/pages/setup.dart';
 import 'package:mydatatools/services/get_user_service.dart';
+import 'package:mydatatools/repositories/user_repository.dart';
 import 'package:mydatatools/widgets/router/navigation_wrapper.dart';
 import 'package:mydatatools/widgets/router/route_page.dart';
 import 'package:flutter/material.dart';
@@ -44,6 +47,12 @@ class AppRouter {
       //check if user is logged in
       AppUser? user = GetUserService.instance.sink.valueOrNull;
       if (user == null) {
+        // Check if there are any users in the database at all
+        UserRepository repo = UserRepository(DatabaseManager.instance.database);
+        AppUser? existingUser = await repo.userExists();
+        if (existingUser == null) {
+          return '/setup';
+        }
         return '/login';
       }
 
@@ -78,6 +87,18 @@ class AppRouter {
                 key: UniqueKey(),
                 isStandalone: true,
                 body: const SetupPage(),
+              );
+            },
+          ),
+
+          GoRoute(
+            path: '/settings',
+            pageBuilder: (BuildContext context, GoRouterState state) {
+              return const RoutePage(
+                body: NavigationWrapper(
+                  body: SettingsPage(),
+                  drawer: SettingsDrawer(),
+                ),
               );
             },
           ),

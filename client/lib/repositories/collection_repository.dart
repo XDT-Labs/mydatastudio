@@ -14,100 +14,150 @@ class CollectionRepository {
   AppLogger logger = AppLogger(null);
 
   Future<List<Collection>> collections() async {
-    List<Collection> results = await db.select(db.collections).get();
-
-    return results;
+    final rows = await db.select("SELECT * FROM collections");
+    return rows.map((r) => Collection.fromDbMap(r)).toList();
   }
 
   Future<List<Collection>> collectionsByType(String type) async {
-    List<Collection> r =
-        await (db.select(db.collections)
-          ..where((element) => element.type.equals(type))).get();
-    return r;
+    final rows = await db.select("SELECT * FROM collections WHERE type = ?", [type]);
+    return rows.map((r) => Collection.fromDbMap(r)).toList();
   }
 
   Future<Collection?> collectionById(String val) async {
-    List<Collection> r =
-        await (db.select(db.collections)
-          ..where((element) => element.id.equals(val))).get();
-    return r.firstOrNull;
+    final rows = await db.select("SELECT * FROM collections WHERE id = ?", [val]);
+    if (rows.isEmpty) return null;
+    return Collection.fromDbMap(rows.first);
   }
 
   Future<Collection?> getCollectionByPath(String path) async {
-    List<Collection> r =
-        await (db.select(db.collections)
-          ..where((element) => element.path.equals(path))).get();
-    return r.firstOrNull;
+    final rows = await db.select("SELECT * FROM collections WHERE path = ?", [path]);
+    if (rows.isEmpty) return null;
+    return Collection.fromDbMap(rows.first);
   }
 
-  ///
   /// Create new collection
   Future<Collection?> addCollection(Collection val) async {
-    await db.into(db.collections).insert(val);
-    return Future(() => val);
+    await db.execute(
+      "INSERT INTO collections (id, name, path, type, scanner, scan_status, oauth_service, "
+      "access_token, refresh_token, id_token, user_id, expiration, last_scan_date, "
+      "needs_re_auth, download_local_copy, local_copy_path) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [
+        val.id,
+        val.name,
+        val.path,
+        val.type,
+        val.scanner,
+        val.scanStatus,
+        val.oauthService,
+        val.accessToken,
+        val.refreshToken,
+        val.idToken,
+        val.userId,
+        val.expiration?.millisecondsSinceEpoch,
+        val.lastScanDate?.millisecondsSinceEpoch,
+        val.needsReAuth ? 1 : 0,
+        val.downloadLocalCopy ? 1 : 0,
+        val.localCopyPath,
+      ],
+    );
+    return val;
   }
 
-  ///
   /// Update an existing collection (used for re-auth token refresh)
   Future<Collection?> updateCollection(Collection val) async {
-    await db.update(db.collections).replace(val);
-    return Future(() => val);
+    await db.execute(
+      "UPDATE collections SET "
+      "name = ?, path = ?, type = ?, scanner = ?, scan_status = ?, "
+      "oauth_service = ?, access_token = ?, refresh_token = ?, id_token = ?, user_id = ?, "
+      "expiration = ?, last_scan_date = ?, needs_re_auth = ?, "
+      "download_local_copy = ?, local_copy_path = ? "
+      "WHERE id = ?",
+      [
+        val.name,
+        val.path,
+        val.type,
+        val.scanner,
+        val.scanStatus,
+        val.oauthService,
+        val.accessToken,
+        val.refreshToken,
+        val.idToken,
+        val.userId,
+        val.expiration?.millisecondsSinceEpoch,
+        val.lastScanDate?.millisecondsSinceEpoch,
+        val.needsReAuth ? 1 : 0,
+        val.downloadLocalCopy ? 1 : 0,
+        val.localCopyPath,
+        val.id,
+      ],
+    );
+    return val;
   }
 
-  ///
   /// Update the scan date for services that check external systems on a schedule, such as email
   void updateLastScanDate(Collection collection, DateTime? value) async {
-    //update date
     collection.lastScanDate = DateTime.now();
-    await db.update(db.collections).write(collection);
+    await updateCollection(collection);
   }
 
   Future<void> deleteCollection(String id) async {
     // 1. Fetch collection info before deleting it
-    final collection = await (db.select(db.collections)..where((t) => t.id.equals(id))).getSingleOrNull();
+    final collection = await collectionById(id);
     if (collection == null) return;
 
-      await db.transaction(() async {
-        // 2. Delete all file embeddings associated with files in this collection
-        final fileIdsInCollection = db.selectOnly(db.files)
-          ..addColumns([db.files.id])
-          ..where(db.files.collectionId.equals(id));
-        final fileIdList = await fileIdsInCollection.map((row) => row.read(db.files.id)!).get();
-        
-        if (fileIdList.isNotEmpty) {
-           await (db.delete(db.filesEmbeddings)..where((t) => t.fileId.isIn(fileIdList))).go();
-        }
+    await db.transaction((tx) async {
+      // 2. Find and delete all file embeddings associated with files in this collection
+      final fileRows = await tx.select("SELECT id FROM files WHERE collection_id = ?", [id]);
+      final fileIds = fileRows.map((r) => r['id'] as String).toList();
+      
+      if (fileIds.isNotEmpty) {
+        final placeholders = List.filled(fileIds.length, '?').join(',');
+        await tx.execute("DELETE FROM files_embeddings WHERE file_id IN ($placeholders)", fileIds);
+      }
 
-        // 3. Delete all files linked to this collection
-        await (db.delete(db.files)..where((t) => t.collectionId.equals(id))).go();
+      // 3. Delete all files linked to this collection
+      await tx.execute("DELETE FROM files WHERE collection_id = ?", [id]);
 
-        // 4. Delete all folders linked to this collection
-        await (db.delete(db.folders)..where((t) => t.collectionId.equals(id))).go();
+      // 4. Delete all folders linked to this collection
+      await tx.execute("DELETE FROM folders WHERE collection_id = ?", [id]);
 
-        // 5. Delete all emails linked to this collection
-        await (db.delete(db.emails)..where((t) => t.collectionId.equals(id))).go();
+      // 5. Delete all emails linked to this collection
+      await tx.execute("DELETE FROM emails WHERE collection_id = ?", [id]);
 
-        // 6. Delete all email folders linked to this collection
-        await (db.delete(db.emailFolders)..where((t) => t.collectionId.equals(id))).go();
+      // 6. Delete all email folders linked to this collection
+      await tx.execute("DELETE FROM email_folders WHERE collection_id = ?", [id]);
 
-        // 7. Finally delete the collection itself
-        await (db.delete(db.collections)..where((t) => t.id.equals(id))).go();
-      });
+      // 7. Finally delete the collection itself
+      await tx.execute("DELETE FROM collections WHERE id = ?", [id]);
+    });
 
-      // 8. Physical disk cleanup (especially for email attachments/cache)
+    // 8. Physical disk cleanup (especially for email attachments/cache)
+    String? appDir = MainApp.appDataDirectory.value;
+    if (appDir != null) {
       if (collection.type == 'email') {
         try {
-          String? appDir = MainApp.appDataDirectory.value;
-          if (appDir != null) {
-            final collectionDiskPath = p.join(appDir, 'files', 'email', collection.id);
-            final dir = io.Directory(collectionDiskPath);
-            if (await dir.exists()) {
-              await dir.delete(recursive: true);
-              logger.i("Deleted collection disk path: $collectionDiskPath");
-            }
+          final collectionDiskPath = p.join(appDir, 'files', 'email', collection.id);
+          final dir = io.Directory(collectionDiskPath);
+          if (await dir.exists()) {
+            await dir.delete(recursive: true);
+            logger.i("Deleted email collection disk path: $collectionDiskPath");
           }
         } catch (e) {
-          logger.e("Failed to delete collection files from disk: $e");
+          logger.e("Failed to delete email collection files from disk: $e");
+        }
+      } else if (collection.type == 'file' && collection.scanner.contains('gdrive')) {
+        try {
+          // Google Drive files are saved under files/gdrive/{collection.name}
+          final collectionDiskPath = p.join(appDir, 'files', 'gdrive', collection.name);
+          final dir = io.Directory(collectionDiskPath);
+          if (await dir.exists()) {
+            await dir.delete(recursive: true);
+            logger.i("Deleted GDrive collection disk path: $collectionDiskPath");
+          }
+        } catch (e) {
+          logger.e("Failed to delete GDrive collection files from disk: $e");
+        }
       }
     }
   }

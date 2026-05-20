@@ -78,7 +78,7 @@ class _SetupStep2State extends State<SetupStep2> {
   @override
   Widget build(BuildContext context) {
     //handle async setup for validators
-    var dir = MainApp.supportDirectory.value;
+    var dir = MainApp.supportDirectory.valueOrNull;
     var field = storageForm.findControl('storageLocation');
     if (field != null) {
       field.value = (dir is String) ? dir : dir?.path;

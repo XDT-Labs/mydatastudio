@@ -1,7 +1,7 @@
+// [ignoring loop detection]
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/folder.dart';
-import 'package:drift/drift.dart' as drift;
 
 class FolderDesktopRepository {
   AppLogger logger = AppLogger(null);
@@ -10,11 +10,12 @@ class FolderDesktopRepository {
   FolderDesktopRepository(this.db);
 
   Future<Folder?> getByPath(Folder f) async {
-    Folder? folder =
-      await (db.select(db.folders)
-          ..where((t) => t.path.equals(f.path) & t.collectionId.equals(f.collectionId))).getSingleOrNull();
-
-    return Future(() => folder);
+    final rows = await db.select(
+      "SELECT * FROM folders WHERE path = ? AND collection_id = ? LIMIT 1",
+      [f.path, f.collectionId],
+    );
+    if (rows.isEmpty) return null;
+    return Folder.fromDbMap(rows.first);
   }
 
   Future<List<Folder>> getByParentPath(
@@ -23,41 +24,61 @@ class FolderDesktopRepository {
     int limit = 500,
     int offset = 0,
   }) async {
-    final query =
-        db.select(db.folders)
-          ..where(
-            (t) =>
-                t.collectionId.equals(collectionId) & t.parent.equals(path),
-          )
-          ..orderBy([(t) => drift.OrderingTerm(expression: t.name)])
-          ..limit(limit, offset: offset);
-
-    return query.get();
+    final rows = await db.select(
+      "SELECT * FROM folders WHERE collection_id = ? AND parent = ? ORDER BY name LIMIT ? OFFSET ?",
+      [collectionId, path, limit, offset],
+    );
+    return rows.map((r) => Folder.fromDbMap(r)).toList();
   }
 
   Future<Folder?> create(Folder f) async {
-    await db.into(db.folders).insert(f);
-    //grab latest
-    Folder? folder =
-        await (db.select(db.folders)
-          ..where((t) => t.id.equals(f.id))).getSingleOrNull();
-
-    return Future(() => folder);
+    await db.execute(
+      "INSERT INTO folders (id, name, path, parent, date_created, date_last_modified, "
+      "last_scanned_date, thumbnail, download_url, email_id, collection_id) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [
+        f.id,
+        f.name,
+        f.path,
+        f.parent,
+        f.dateCreated.millisecondsSinceEpoch,
+        f.dateLastModified.millisecondsSinceEpoch,
+        f.lastScannedDate?.millisecondsSinceEpoch,
+        f.thumbnail,
+        f.downloadUrl,
+        f.emailId,
+        f.collectionId,
+      ],
+    );
+    return f;
   }
 
   Future<Folder?> update(Folder f) async {
-    await db.update(db.folders).replace(f);
-    //grab latest
-    Folder? folder =
-        await (db.select(db.folders)
-          ..where((t) => t.id.equals(f.id))).getSingleOrNull();
-
-    return Future(() => folder);
+    await db.execute(
+      "UPDATE folders SET "
+      "name = ?, path = ?, parent = ?, date_created = ?, date_last_modified = ?, "
+      "last_scanned_date = ?, thumbnail = ?, download_url = ?, email_id = ?, collection_id = ? "
+      "WHERE id = ?",
+      [
+        f.name,
+        f.path,
+        f.parent,
+        f.dateCreated.millisecondsSinceEpoch,
+        f.dateLastModified.millisecondsSinceEpoch,
+        f.lastScannedDate?.millisecondsSinceEpoch,
+        f.thumbnail,
+        f.downloadUrl,
+        f.emailId,
+        f.collectionId,
+        f.id,
+      ],
+    );
+    return f;
   }
 
   Future<Folder?> delete(Folder f) async {
-    await db.delete(db.folders).delete(f);
-    return Future(() => null);
+    await db.execute("DELETE FROM folders WHERE id = ?", [f.id]);
+    return null;
   }
 
   Future<void> deleteMissing(String collectionId, String scannedPath, DateTime scanStartTime, {bool recursive = true, bool isCloud = false, bool isFullScan = false}) async {
@@ -66,17 +87,34 @@ class FolderDesktopRepository {
       searchPath += '/';
     }
 
-    await (db.delete(db.folders)
-          ..where((t) =>
-              t.collectionId.equals(collectionId) &
-              (isCloud 
-                  ? (recursive && isFullScan ? const drift.Constant(true) : t.parent.equals(scannedPath))
-                  : (recursive ? (t.parent.equals(scannedPath) | t.parent.like('$searchPath%')) : t.parent.equals(scannedPath))) &
-              (t.lastScannedDate.isNull() | t.lastScannedDate.isSmallerThanValue(scanStartTime))))
-        .go();
+    String query = "DELETE FROM folders WHERE collection_id = ? ";
+    List<dynamic> args = [collectionId];
+
+    if (isCloud) {
+      if (recursive && isFullScan) {
+        // no extra parent condition
+      } else {
+        query += "AND parent = ? ";
+        args.add(scannedPath);
+      }
+    } else {
+      if (recursive) {
+        query += "AND (parent = ? OR parent LIKE ?) ";
+        args.add(scannedPath);
+        args.add('$searchPath%');
+      } else {
+        query += "AND parent = ? ";
+        args.add(scannedPath);
+      }
+    }
+
+    query += "AND (last_scanned_date IS NULL OR last_scanned_date < ?) ";
+    args.add(scanStartTime.millisecondsSinceEpoch);
+
+    await db.execute(query, args);
   }
 
   Future<void> deleteAllByCollectionId(String collectionId) async {
-    await (db.delete(db.folders)..where((t) => t.collectionId.equals(collectionId))).go();
+    await db.execute("DELETE FROM folders WHERE collection_id = ?", [collectionId]);
   }
 }

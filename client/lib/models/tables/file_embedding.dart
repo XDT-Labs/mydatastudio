@@ -1,24 +1,26 @@
-import 'package:drift/drift.dart';
-import 'package:mydatatools/models/tables/converters/float_list_converter.dart';
+import 'dart:typed_data';
 
-/// Stores vector embeddings for files, one column per embedding model.
-///
-/// This design allows adding new embedding models over time by adding new
-/// nullable BLOB columns without disturbing existing data. Each column holds
-/// a Float32 BLOB of [dimensions * 4] bytes.
-///
-/// Linked to [Files] via [fileId] (1-to-1).
-@TableIndex(name: 'file_embeddings_file_id_idx', columns: {#fileId})
-class FilesEmbeddings extends Table {
-  /// Primary key — matches the corresponding [Files.id].
-  TextColumn get fileId => text()();
+class FileEmbedding {
+  final String fileId;
+  final List<double> qwen3_8bEmbedding;
 
-  /// 2048-dimensional embedding from Qwen3-Embedding-8B (or Qwen3-VL variant).
-  /// Stored as a raw Float32 BLOB via [FloatListConverter].
-  BlobColumn get qwen3_8bEmbedding =>
-      blob().nullable().map(const FloatListConverter())();
+  FileEmbedding({
+    required this.fileId,
+    required this.qwen3_8bEmbedding,
+  });
 
-  @override
-  Set<Column> get primaryKey => {fileId};
+  factory FileEmbedding.fromDbMap(Map<String, dynamic> map) {
+    final rawBlob = map['qwen3_8b_embedding'] as Uint8List;
+    return FileEmbedding(
+      fileId: map['file_id'] as String,
+      qwen3_8bEmbedding: Float32List.view(rawBlob.buffer).toList(),
+    );
+  }
+
+  Map<String, dynamic> toDbMap() {
+    return {
+      'file_id': fileId,
+      'qwen3_8b_embedding': Float32List.fromList(qwen3_8bEmbedding).buffer.asUint8List(),
+    };
+  }
 }
-

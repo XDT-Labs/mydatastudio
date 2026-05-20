@@ -10,11 +10,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 import os
 import json
-<<<<<<< HEAD
 from PIL import Image
-=======
-import os
->>>>>>> develop
 
 from .models import ChatRequest, StartSessionRequest, EmbeddingRequest, PstImportRequest, ThumbnailRequest
 from .pst_parser import PstParser

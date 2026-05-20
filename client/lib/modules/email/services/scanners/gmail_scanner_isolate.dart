@@ -5,33 +5,60 @@ import 'dart:isolate';
 import 'package:flutter/services.dart';
 import 'package:googleapis/gmail/v1.dart';
 import 'package:path/path.dart' as p;
+import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
+import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/models/tables/email.dart';
 import 'package:mydatatools/models/tables/email_folder.dart';
 import 'package:mydatatools/models/tables/file.dart';
 import 'package:mydatatools/models/tables/folder.dart';
+import 'package:mydatatools/modules/email/services/email_folder_upsert_service.dart';
+import 'package:mydatatools/modules/email/services/email_upsert_service.dart';
 import 'package:mydatatools/modules/email/services/get_emails_service.dart';
+import 'package:mydatatools/modules/files/services/file_upsert_service.dart';
+import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
 
+/// [GmailScannerIsolate] is the client-side manager for the Gmail scanning
+/// background isolate. It handles spawning the worker, parameter propagation,
+/// and bidirectional communication during the sync process.
+///
+/// Synchronization Rules:
+/// 1. [Registration-Only Startup] Scanners MUST only register on startup.
+/// 2. [Force Safety Gate] start() MUST return immediately if force is false.
+/// 3. [Manual Sync] User-initiated syncs MUST call start(force: true).
+/// 4. [Discovery vs Sync] Discover items quickly, sync heavy metadata incrementally.
+/// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
+///    syncs (path == null) and targeted folder scans (path != null).
 class GmailScannerIsolate {
   final RootIsolateToken? token;
-  final SendPort? dbWriterPort;
   final String appDir;
   Isolate? _isolate;
   final AppLogger logger = AppLogger(null);
 
-  GmailScannerIsolate({this.token, this.dbWriterPort, required this.appDir});
+  GmailScannerIsolate({this.token, required this.appDir});
 
+  /// Spawns the Gmail background worker isolate.
+  ///
+  /// [collection] The collection to synchronize.
+  /// [folderId] Mode selector:
+  ///   - If NULL: **Full Sync**. Synchronizes all labels/folders.
+  ///   - If NOT NULL: **Targeted Scan**. Focuses ONLY on the specified label ID
+  ///     (e.g., 'INBOX', 'Sent').
+  /// [force] If false, returns immediately (Rule 2).
+  /// [statusPort] Optional port to receive status/heartbeat messages.
   Future<void> start(
     Collection collection, {
-    String? folderId, // Optional Gmail label ID
+    String? folderId,
     bool force = false,
-    SendPort? statusPort, // Added statusPort to forward worker messages
+    SendPort? statusPort,
   }) async {
-    if (dbWriterPort == null) {
-      throw Exception("dbWriterPort is required for GmailScannerIsolate");
+    if (!force) {
+      logger.i("Registration-only mode: skipping scan for ${collection.name}");
+      return;
     }
 
     ReceivePort receivePort = ReceivePort("GmailScannerIsolateClient");
@@ -39,13 +66,14 @@ class GmailScannerIsolate {
     Map<String, dynamic> args = {
       'token': token ?? RootIsolateToken.instance,
       'port': receivePort.sendPort,
-      'dbWriterPort': dbWriterPort,
       'collection': collection,
       'folderId': folderId,
+      'lastScanDate': collection.lastScanDate?.toIso8601String(),
+      'force': force,
       'appDir': appDir,
     };
 
-    _isolate = await Isolate.spawn(GmailScannerIsolateWorker.worker, args);
+    _isolate = await spawnIsolate(GmailScannerIsolateWorker.worker, args);
 
     receivePort.listen((message) {
       // Forward status messages if requested
@@ -73,19 +101,35 @@ class GmailScannerIsolate {
     }
   }
 
+  /// Immediately terminates the background isolate.
   void stop() {
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
   }
+
+  /// Overridable for testing to avoid real isolate spawning
+  Future<Isolate?> spawnIsolate(
+    Function(Map<String, dynamic>) entryPoint,
+    Map<String, dynamic> args,
+  ) async {
+    return await Isolate.spawn(entryPoint, args);
+  }
 }
 
+/// Entry point and logic for the Gmail background scan.
+///
+/// The worker runs in a separate isolate, opens its own AppDatabase connection,
+/// and writes results directly via upsert services.
 class GmailScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> args) async {
     final RootIsolateToken? token = args['token'];
     final SendPort clientPort = args['port'];
-    final SendPort dbWriterPort = args['dbWriterPort'];
     final Collection collection = args['collection'];
     final String? folderId = args['folderId'];
+    final String? lastScanDateStr = args['lastScanDate'];
+    final DateTime? lastScanDate =
+        lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
+    final bool force = args['force'] ?? false;
     final String appDir = args['appDir'];
 
     if (token != null) {
@@ -121,6 +165,8 @@ class GmailScannerIsolateWorker {
       Isolate.exit(clientPort, {'error': 'auth_failed'});
     }
 
+    final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName);
+
     final authHttpClient = AuthenticatedHttpClient.bearer(accessToken);
     final GmailApi gmailApi = GmailApi(authHttpClient);
 
@@ -132,39 +178,68 @@ class GmailScannerIsolateWorker {
 
       for (var label in labels) {
         final folder = mapLabelToFolder(label, collection.id);
-        dbWriterPort.send({'type': 'email_folder', 'folder': folder});
+        await EmailFolderUpsertService.instance.invoke(
+          EmailFolderUpsertServiceCommand(folder, appDb),
+        );
       }
+
+      final scanStartTime = DateTime.now();
+      int totalFound = 0;
+      int newEmails = 0;
+      int skipped = 0;
 
       // 2. Sync Emails
       if (folderId != null) {
         logger.s("Syncing folder: $folderId");
-        await _pullEmails(
+        final results = await _pullEmails(
           gmailApi,
-          dbWriterPort,
+          appDb,
           clientPort,
           collection,
           appDir,
           accessToken,
           labelId: folderId,
+          lastScanDate: lastScanDate,
+          force: force,
         );
+        totalFound += results['total'] ?? 0;
+        newEmails += results['new'] ?? 0;
+        skipped += results['skipped'] ?? 0;
       } else {
         // Default sync: Inbox, Sent, Trash, Spam
         const defaultLabels = ['INBOX', 'SENT', 'TRASH', 'SPAM'];
         for (var label in defaultLabels) {
           logger.s("Syncing label: $label");
-          await _pullEmails(
+          final results = await _pullEmails(
             gmailApi,
-            dbWriterPort,
+            appDb,
             clientPort,
             collection,
             appDir,
             accessToken,
             labelId: label,
+            lastScanDate: lastScanDate,
+            force: force,
           );
+          totalFound += results['total'] ?? 0;
+          newEmails += results['new'] ?? 0;
+          skipped += results['skipped'] ?? 0;
         }
       }
 
-      logger.s("Gmail sync complete.");
+      logger.i(
+        "Gmail sync complete: $totalFound found, $newEmails new, $skipped skipped.",
+      );
+
+      // Update lastScanDate in the DB
+      final collectionRepo = CollectionRepository(appDb);
+      final col = await collectionRepo.collectionById(collection.id);
+      if (col != null) {
+        col.scanStatus = 'ready';
+        col.lastScanDate = scanStartTime;
+        await collectionRepo.updateCollection(col);
+      }
+
       clientPort.send({'type': 'refresh', 'status': 'done'});
     } catch (e, stack) {
       logger.e("Error in Gmail Isolate: $e", error: e, stackTrace: stack);
@@ -173,27 +248,48 @@ class GmailScannerIsolateWorker {
     }
   }
 
-  static Future<void> _pullEmails(
+  static Future<Map<String, int>> _pullEmails(
     GmailApi gmailApi,
-    SendPort dbWriterPort,
+    AppDatabase appDb,
     SendPort clientPort,
     Collection collection,
     String appDir,
     String accessToken, {
     String? labelId,
     String? pageToken,
+    DateTime? lastScanDate,
+    bool force = false,
   }) async {
     final logger = AppLogger(clientPort);
+    int total = 0;
+    int newCount = 0;
+    int skippedCount = 0;
+
+    String? query;
+    if (!force && lastScanDate != null) {
+      // Gmail search query 'after:' uses seconds since epoch or YYYY/MM/DD
+      // Using seconds (Unix timestamp) is most precise.
+      final seconds = lastScanDate.millisecondsSinceEpoch ~/ 1000;
+      query = 'after:$seconds';
+      logger.i("Gmail: Performing incremental sync ($query)");
+    }
 
     final response = await gmailApi.users.messages.list(
       'me',
+      q: query,
       labelIds: labelId != null ? [labelId] : null,
       pageToken: pageToken,
       maxResults: 50, // Small batch for responsiveness
     );
 
     final messages = response.messages ?? [];
-    if (messages.isEmpty) return;
+    if (messages.isEmpty) {
+      return {
+        'total': 0,
+        'new': 0,
+        'skipped': 0,
+      };
+    }
 
     List<Email> emailBatch = [];
 
@@ -251,7 +347,19 @@ class GmailScannerIsolateWorker {
           hasAttachments: hasAttachments,
           isDeleted: m.labelIds?.contains('TRASH') ?? false,
         );
+
+        // Double-check precision even with 'after:' query to handle same-second changes
+        if (!force && lastScanDate != null) {
+          final lastScanSecs = lastScanDate.millisecondsSinceEpoch ~/ 1000;
+          final msgSecs = msgDate.millisecondsSinceEpoch ~/ 1000;
+          if (msgSecs <= lastScanSecs) {
+            skippedCount++;
+            continue;
+          }
+        }
+
         emailBatch.add(email);
+        newCount++;
 
         if (hasAttachments) {
           final labelName = labelMap[labelId] ?? 'Email';
@@ -269,7 +377,7 @@ class GmailScannerIsolateWorker {
 
           // 1. Ensure folder hierarchy (Collection -> Label -> Year)
           await _ensureFolderHierarchy(
-            dbWriterPort: dbWriterPort,
+            appDb: appDb,
             collection: collection,
             labelName: labelName,
             year: year,
@@ -285,13 +393,14 @@ class GmailScannerIsolateWorker {
             msgDate,
             [m.payload!],
             targetFolderPath: absoluteYearPath,
-            dbWriterPort: dbWriterPort,
             logger: logger,
           );
           email.attachments = attachments;
 
           for (var file in attachments) {
-            dbWriterPort.send({'type': 'file', 'file': file});
+            await FileUpsertService.instance.invoke(
+              FileUpsertServiceCommand(file, appDb),
+            );
           }
         }
       } catch (e) {
@@ -300,22 +409,35 @@ class GmailScannerIsolateWorker {
     }
 
     if (emailBatch.isNotEmpty) {
-      dbWriterPort.send({'type': 'batch_email', 'emails': emailBatch});
+      await EmailUpsertService.instance.invoke(
+        EmailUpsertServiceCommand(emailBatch, appDb),
+      );
       clientPort.send({'type': 'refresh'});
     }
 
     if (response.nextPageToken != null) {
-      await _pullEmails(
+      final subResults = await _pullEmails(
         gmailApi,
-        dbWriterPort,
+        appDb,
         clientPort,
         collection,
         appDir,
         accessToken,
         labelId: labelId,
         pageToken: response.nextPageToken,
+        lastScanDate: lastScanDate,
+        force: force,
       );
+      total += subResults['total'] ?? 0;
+      newCount += subResults['new'] ?? 0;
+      skippedCount += subResults['skipped'] ?? 0;
     }
+
+    return {
+      'total': total + messages.length,
+      'new': newCount,
+      'skipped': skippedCount,
+    };
   }
 
   static String? _getHeader(List<MessagePartHeader>? headers, String name) {
@@ -358,7 +480,6 @@ class GmailScannerIsolateWorker {
     String messageId,
     DateTime msgDate,
     List<MessagePart> parts, {
-    SendPort? dbWriterPort,
     String? targetFolderPath,
     AppLogger? logger,
   }) async {
@@ -420,7 +541,6 @@ class GmailScannerIsolateWorker {
             messageId,
             msgDate,
             part.parts!,
-            dbWriterPort: dbWriterPort,
             targetFolderPath: effectiveFolderPath,
             logger: logger,
           ),
@@ -431,7 +551,7 @@ class GmailScannerIsolateWorker {
   }
 
   static Future<void> _ensureFolderHierarchy({
-    required SendPort dbWriterPort,
+    required AppDatabase appDb,
     required Collection collection,
     required String labelName,
     required String year,
@@ -441,29 +561,21 @@ class GmailScannerIsolateWorker {
 
     // 1. Label Folder
     final labelPath = p.normalize(p.join(rootPath, labelName));
-    dbWriterPort.send({
-      'type': 'folder',
-      'folder': _createFolderObj(
-        labelPath,
-        rootPath,
-        labelName,
-        collection.id,
-        msgDate,
+    await FolderUpsertService.instance.invoke(
+      FolderUpsertServiceCommand(
+        _createFolderObj(labelPath, rootPath, labelName, collection.id, msgDate),
+        appDb,
       ),
-    });
+    );
 
     // 2. Year Folder
     final yearPath = p.normalize(p.join(labelPath, year));
-    dbWriterPort.send({
-      'type': 'folder',
-      'folder': _createFolderObj(
-        yearPath,
-        labelPath,
-        year,
-        collection.id,
-        msgDate,
+    await FolderUpsertService.instance.invoke(
+      FolderUpsertServiceCommand(
+        _createFolderObj(yearPath, labelPath, year, collection.id, msgDate),
+        appDb,
       ),
-    });
+    );
   }
 
   static Folder _createFolderObj(

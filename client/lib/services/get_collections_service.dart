@@ -11,23 +11,24 @@ class GetCollectionsService
 
   @override
   Future<List<Collection>> invoke(GetCollectionsServiceCommand command) async {
-    isLoading.add(true);
     currentCommand = command;
     CollectionRepository repo = CollectionRepository();
     
     // Always push all collections to the sink. 
     // Observers can then filter by type (file, email) as needed.
+    // Note: We deliberately do NOT emit isLoading here. This is a fast
+    // DB query and the shared isLoading stream would cause unrelated
+    // UI sections to show loading spinners (e.g., FileDrawer showing
+    // a spinner when only Gmail login triggered a refresh).
     final allCollections = await repo.collections();
+    print('GetCollectionsService.invoke: found ${allCollections.length} collections');
     sink.add(allCollections);
     
-    isLoading.add(false);
     return Future(() => allCollections);
   }
 
-  void addCollection(Collection c) {
-    CollectionRepository repo = CollectionRepository();
-    //save
-    repo.addCollection(c);
+  void addCollection(Collection c) async {
+    await CollectionRepository().addCollection(c);
     //refresh list with current command type (if defined)
     invoke(GetCollectionsServiceCommand(currentCommand?.type));
   }

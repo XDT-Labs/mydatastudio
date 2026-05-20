@@ -1,39 +1,21 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
-import 'dart:isolate';
-import 'package:collection/collection.dart';
-import 'package:flutter/material.dart' hide Table;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/repositories/database_repository.dart';
-import 'package:mydatatools/repositories/db_isolate_writer.dart';
 import 'package:path/path.dart' as p;
-import 'package:drift/drift.dart';
-import 'package:drift/native.dart';
+import 'package:resqlite/resqlite.dart';
 import 'package:mydatatools/custom_path_provider.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:sqlite3/sqlite3.dart';
-import 'package:sqlite_vector/sqlite_vector.dart';
-import 'package:mydatatools/models/tables/album.dart';
-import 'package:mydatatools/models/tables/app.dart';
-import 'package:mydatatools/models/tables/app_user.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/converters/string_array_convertor.dart';
-import 'package:mydatatools/models/tables/converters/float_list_converter.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/file_embedding.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:flutter/services.dart';
 import 'package:mydatatools/modules/files/services/embedding_isolate.dart';
 import 'package:uuid/uuid.dart';
 
-part 'database_manager.g.dart';
 
 class DatabaseManager {
   static final DatabaseManager _singleton = DatabaseManager._();
@@ -44,12 +26,13 @@ class DatabaseManager {
   /// Notifies listeners when the database initialization is complete
   static ValueNotifier<bool> isInitializedNotifier = ValueNotifier(false);
 
-  /// Flag to determine if an in-memory database should be used (for testing)
-  bool useMemoryDb = false;
+  /// Flag to skip loading native extensions (for testing environments)
+  static bool skipExtensionLoading = false;
+
+  /// Flag to indicate if the app is running in a test environment
+  static bool isTesting = io.Platform.environment.containsKey('FLUTTER_TEST');
   String? storagePath;
   AppDatabase? appDatabase;
-  DbIsolateWriterClient? _writerIsolateClient;
-  SendPort? _writerPort;
   EmbeddingIsolate? _embeddingIsolate;
   DatabaseRepository? _repository;
   final AppLogger logger = AppLogger(null);
@@ -59,10 +42,6 @@ class DatabaseManager {
   /// Returns the [DatabaseRepository] instance
   DatabaseRepository? get repository {
     return _repository;
-  }
-
-  DbIsolateWriterClient? get writerIsolateClient {
-    return _writerIsolateClient;
   }
 
   /// Returns the [AppDatabase] instance
@@ -78,15 +57,6 @@ class DatabaseManager {
       supportPath = io.Directory(_originalSupportPath!);
     } else {
       supportPath = await getApplicationSupportDirectory();
-
-      // macOS path_provider quirk: ensure the directory matches our realm name if on develop
-      if (io.Platform.isMacOS && AppConstants.realmName.endsWith('.dev')) {
-        if (!supportPath.path.endsWith(AppConstants.realmName)) {
-          // Adjust path to use the .dev version
-          final parent = supportPath.parent.path;
-          supportPath = io.Directory(p.join(parent, AppConstants.realmName));
-        }
-      }
       _originalSupportPath = supportPath.path;
     }
 
@@ -106,11 +76,25 @@ class DatabaseManager {
     return file.existsSync();
   }
 
-  /// Initializes the database, repository, writer isolate, and scanners
-  Future<AppDatabase> initializeDatabase() async {
+  /// Updates the database configuration path
+  Future<void> updateConfigPath(String newPath) async {
     io.File file = io.File(await _getConfigPath());
-    var config = jsonDecode(file.readAsStringSync());
-    storagePath = config['path'];
+    var config = <String, dynamic>{};
+    if (file.existsSync()) {
+      config = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+    }
+    config['path'] = newPath;
+    file.writeAsStringSync(jsonEncode(config));
+  }
+
+  Future<AppDatabase> initializeDatabase() async {
+    if (isTesting) {
+      storagePath = p.dirname(await _getConfigPath());
+    } else {
+      io.File file = io.File(await _getConfigPath());
+      var config = jsonDecode(file.readAsStringSync());
+      storagePath = config['path'];
+    }
     String path = storagePath!;
 
     // Ensure the global appDataDirectory subject has the value
@@ -122,6 +106,12 @@ class DatabaseManager {
         PathProviderPlatform.instance,
         path,
       );
+    } else {
+      final original = (PathProviderPlatform.instance as CustomPathProviderPlatform).original;
+      PathProviderPlatform.instance = CustomPathProviderPlatform(
+        original,
+        path,
+      );
     }
 
     // start database
@@ -129,15 +119,14 @@ class DatabaseManager {
 
     // start database repository
     _repository = DatabaseRepository(appDatabase!);
+ 
+    if (!isTesting) {
+      // start scanners
+      await _startScanners();
 
-    // start writer isolate
-    await _startWriterIsolate(appDatabase!, path);
-
-    // start scanners
-    await _startScanners();
-
-    // start embedding isolate
-    await _startEmbeddingIsolate(path);
+      // start embedding isolate
+      await _startEmbeddingIsolate(path);
+    }
 
     isInitializedNotifier.value = true;
     return appDatabase!;
@@ -152,19 +141,15 @@ class DatabaseManager {
       //make sure root dir exists
       io.Directory(storagePath).createSync(recursive: true);
       //make sure data, files, and keys sub dirs have been created
-      var dbDir = io.Directory(p.join(storagePath, 'data'));
-      io.Directory(dbDir.path).createSync(recursive: true);
-      var keyDir = io.Directory(p.join(storagePath, 'keys'));
-      io.Directory(keyDir.path).createSync(recursive: true);
-      var fileDir = io.Directory(p.join(storagePath, 'files'));
-      io.Directory(fileDir.path).createSync(recursive: true);
+      io.Directory(p.join(storagePath, 'data')).createSync(recursive: true);
+      io.Directory(p.join(storagePath, 'keys')).createSync(recursive: true);
+      io.Directory(p.join(storagePath, 'files')).createSync(recursive: true);
 
       //on app startup, start db.
-      AppDatabase database = AppDatabase(
+      AppDatabase database = await AppDatabase.create(
         null,
         storagePath,
         AppConstants.dbName,
-        useMemoryDb,
       );
       logger.i("DB Started | schema version=${database.schemaVersion}");
 
@@ -172,21 +157,11 @@ class DatabaseManager {
     } catch (err) {
       //unknown error
       logger.e(err);
+      if (err is io.FileSystemException) {
+        rethrow;
+      }
       throw Exception(err);
     }
-  }
-
-  Future<void> _startWriterIsolate(
-    AppDatabase database,
-    String storagePath,
-  ) async {
-    _writerIsolateClient = DbIsolateWriterClient();
-    await _writerIsolateClient!.start(
-      storagePath,
-      AppConstants.dbName,
-      useMemoryDb: false,
-    );
-    _writerPort = _writerIsolateClient!.getSendPort();
   }
 
   Future<void> _startEmbeddingIsolate(String storagePath) async {
@@ -194,30 +169,22 @@ class DatabaseManager {
     await _embeddingIsolate!.start(
       storagePath,
       AppConstants.dbName,
-      _writerPort!,
       RootIsolateToken.instance!,
     );
   }
 
-  /// Returns the [SendPort] for the writer isolate
-  Future<SendPort> get writerPort async {
-    if (_writerPort == null) {
-      throw Exception(
-        "Unkown error initializing Database and/or writer isolate",
-      );
-    }
-    return Future(() => _writerPort!);
-  }
+  void dispose() {
+    _embeddingIsolate?.stop();
+    _embeddingIsolate = null;
 
-  /// Stop helper to be called from app shell
-  /// Stops the database writer isolate
-  Future<void> stopDbWriterIsolate() async {
-    try {
-      if (_writerIsolateClient != null) {
-        await _writerIsolateClient!.stop();
-        _writerIsolateClient = null;
-      }
-    } catch (_) {}
+    appDatabase?.close();
+    appDatabase = null;
+    _repository = null;
+    isInitializedNotifier.value = false;
+    _originalSupportPath = null;
+    if (PathProviderPlatform.instance is CustomPathProviderPlatform) {
+      PathProviderPlatform.instance = (PathProviderPlatform.instance as CustomPathProviderPlatform).original;
+    }
   }
 
   Future<void> _startScanners() async {
@@ -227,269 +194,66 @@ class DatabaseManager {
   }
 }
 
-@DriftDatabase(
-  tables: [
-    Apps,
-    AppUsers,
-    Collections,
-    Emails,
-    EmailFolders,
-    Files,
-    Folders,
-    Albums,
-    FilesEmbeddings,
-  ],
-)
-class AppDatabase extends _$AppDatabase {
+class AppDatabase {
+  final Database _db;
   final AppLogger logger = AppLogger(null);
-
-  AppDatabase([
-    QueryExecutor? executor,
-    String? path,
-    String? name,
-    bool useMemoryDb = false,
-  ]) : super(executor ?? _openConnection(path, name, useMemoryDb));
 
   String? path;
   String? name;
 
-  @override
-  int get schemaVersion => 13;
+  AppDatabase(this._db);
 
-  @override
-  MigrationStrategy get migration {
-    return MigrationStrategy(
-      onCreate: (Migrator m) async {
-        logger.i("Creating all Tables");
-        await m.createAll();
-        logger.i("Load initial data");
-        await _loadInitialData(m);
-        // Initialize the vector index for qwen3_8b embeddings (2048-dim Float32)
-        logger.i("Initializing vector index for files_embeddings");
-        await _initVectorIndex();
-      },
-      onUpgrade: (Migrator m, int from, int to) async {
-        if (from < 2) {
-          logger.i(
-            "Upgrade to v2: Adding last_scanned_date to Files and Folders",
-          );
-          await m.addColumn(files, files.lastScannedDate);
-          await m.addColumn(folders, folders.lastScannedDate);
-        }
-        if (from < 3) {
-          logger.i(
-            "Upgrade to v3: Adding download_url to Files and Folders, thumbnail to Folders",
-          );
-          await m.addColumn(files, files.downloadUrl);
-          await m.addColumn(folders, folders.thumbnail);
-          await m.addColumn(folders, folders.downloadUrl);
-        }
-        if (from < 4) {
-          logger.i(
-            "Upgrade to v4: Adding files_embeddings table and vector index",
-          );
-          await m.createTable(filesEmbeddings);
-          await _initVectorIndex();
-        }
-        if (from < 5) {
-          logger.i(
-            "Upgrade to v5: Re-initializing vector index for sqlite_vector",
-          );
-          await _initVectorIndex();
-        }
-        if (from < 6) {
-          logger.i(
-            "Upgrade to v6: Adding EmailFolders table and folder/metadata columns to Emails",
-          );
-          await m.createTable(emailFolders);
-          await m.addColumn(emails, emails.folderId);
-          await m.addColumn(emails, emails.messageId);
-          await m.addColumn(emails, emails.threadId);
-          await m.addColumn(emails, emails.isRead);
-          await m.addColumn(emails, emails.hasAttachments);
-        }
-        if (from < 7) {
-          logger.i("Upgrade to v7: Adding emailId column to Files table");
-          await m.addColumn(files, files.emailId);
-        }
-        if (from < 10) {
-          logger.i("Upgrade to v10: Adding uid column to Emails table");
-          try {
-            await m.addColumn(emails, emails.uid);
-          } catch (e) {
-            if (e.toString().contains('duplicate column name')) {
-              logger.w("uid column already exists in Emails table, skipping.");
-            } else {
-              rethrow;
-            }
-          }
-        }
-        if (from < 11) {
-          logger.i(
-            "Upgrade to v11: Adding composite indexes for faster email lookups",
-          );
-          try {
-            await m.createIndex(
-              Index(
-                'email_folderid_idx',
-                'CREATE INDEX email_folderid_idx ON emails (folder_id)',
-              ),
-            );
-            await m.createIndex(
-              Index(
-                'email_comp_sync_idx',
-                'CREATE INDEX email_comp_sync_idx ON emails (collection_id, folder_id, date)',
-              ),
-            );
-          } catch (e) {
-            logger.w("Indexes already exist in Emails table, skipping.");
-          }
-        }
-        if (from < 12) {
-          logger.i(
-            'Upgrade to v12: Adding localCopyPath to Collections '
-            'and migrating files/folders to relative paths',
-          );
-          await m.addColumn(collections, collections.localCopyPath);
+  int get schemaVersion => 16;
 
-          // Data migration using raw SQL — the Drift table accessors are not
-          // available inside onUpgrade (m.database is GeneratedDatabase, not
-          // AppDatabase). We use customStatement / m.database.customSelect
-          // to do the data work safely.
-          //
-          // Step 1: For each collection, set local_copy_path = path.
-          await m.database.customStatement(
-            'UPDATE collections SET local_copy_path = path WHERE path IS NOT NULL AND path != \'\'',
-          );
+  Database get rawDb => _db;
 
-          // Step 2: Strip absolute prefix from files.path, files.parent.
-          // We do this in Dart by loading rows and updating them.
-          final colRows =
-              await m.database
-                  .customSelect(
-                    'SELECT id, path FROM collections WHERE path IS NOT NULL AND path != \'\'',
-                  )
-                  .get();
+  static Future<AppDatabase> create(
+    String? connection,
+    String? storagePath,
+    String? dbName,
+  ) async {
+    if (storagePath == null || dbName == null) {
+      throw Exception("Path or Name not provided for database opening");
+    }
+    final dbFile = io.File(p.join(storagePath, 'data', dbName));
+    if (!dbFile.parent.existsSync()) {
+      dbFile.parent.createSync(recursive: true);
+    }
+    final Database db = await Database.open(dbFile.path);
 
-          for (final colRow in colRows) {
-            final colId = colRow.read<String>('id');
-            final root = colRow.read<String>('path');
-            final prefix = root.endsWith('/') ? root : '$root/';
+    final appDb = AppDatabase(db);
+    appDb.path = storagePath;
+    appDb.name = dbName;
 
-            // Update files — only migrate rows whose path still contains
-            // the absolute prefix (not yet migrated). Rows already using
-            // a relative path are left untouched.
-            final fileRows =
-                await m.database
-                    .customSelect(
-                      'SELECT id, path, parent FROM files WHERE collection_id = ? AND path LIKE ?',
-                      variables: [
-                        Variable.withString(colId),
-                        Variable.withString('$prefix%'),
-                      ],
-                    )
-                    .get();
-            for (final row in fileRows) {
-              final oldId = row.read<String>('id');
-              final oldPath = row.read<String>('path');
-              final oldParent = row.read<String>('parent');
-              final relPath = oldPath.substring(prefix.length);
-              final relParent =
-                  oldParent.startsWith(prefix)
-                      ? oldParent.substring(prefix.length)
-                      : (oldParent == root ? '' : oldParent);
-              final newId = '$colId:$relPath';
-              if (newId == oldId) continue; // already migrated, skip
-              // Delete any conflicting row with the new id first so we don't
-              // hit the UNIQUE constraint.
-              await m.database.customStatement(
-                'DELETE FROM files WHERE id = ? AND id != ?',
-                [newId, oldId],
-              );
-              await m.database.customStatement(
-                'UPDATE files SET id = ?, path = ?, parent = ? WHERE id = ?',
-                [newId, relPath, relParent, oldId],
-              );
-            }
-
-            // Update folders — same idempotent logic.
-            final folderRows =
-                await m.database
-                    .customSelect(
-                      'SELECT id, path, parent FROM folders WHERE collection_id = ? AND path LIKE ?',
-                      variables: [
-                        Variable.withString(colId),
-                        Variable.withString('$prefix%'),
-                      ],
-                    )
-                    .get();
-            for (final row in folderRows) {
-              final oldId = row.read<String>('id');
-              final oldPath = row.read<String>('path');
-              final oldParent = row.read<String>('parent');
-              final relPath = oldPath.substring(prefix.length);
-              final relParent =
-                  oldParent.startsWith(prefix)
-                      ? oldParent.substring(prefix.length)
-                      : (oldParent == root ? '' : oldParent);
-              final newId = '$colId:$relPath';
-              if (newId == oldId) continue;
-              await m.database.customStatement(
-                'DELETE FROM folders WHERE id = ? AND id != ?',
-                [newId, oldId],
-              );
-              await m.database.customStatement(
-                'UPDATE folders SET id = ?, path = ?, parent = ? WHERE id = ?',
-                [newId, relPath, relParent, oldId],
-              );
-            }
-          }
-          logger.i('v12 data migration complete');
-        }
-        if (from < 13) {
-          logger.i(
-            'Upgrade to v13: Mark Google OAuth collections for PKCE re-auth',
-          );
-          // Tokens obtained with the old Authorization Code Grant (which
-          // embedded client_secret) won't refresh without the secret. Flag
-          // every Google collection so the UI prompts re-authentication
-          // through the new PKCE flow.
-          await m.database.customStatement(
-            "UPDATE collections SET needs_re_auth = 1 "
-            "WHERE oauth_service = 'google'",
-          );
-          logger.i('v13 migration complete');
-        }
-      },
-      beforeOpen: (OpeningDetails details) async {
-        // WAL (Write-Ahead Logging) allows the DbIsolateWriter to bulk-write
-        // while the main connection reads concurrently. Without WAL, a write
-        // transaction blocks ALL readers at the SQLite level, even if they're
-        // on separate connections/isolates.
-        //
-        // These PRAGMAs are connection-scoped and safe to re-apply on every open.
-        await customStatement('PRAGMA journal_mode=WAL;');
-
-        // Allow up to 5 seconds of retry before returning SQLITE_BUSY.
-        // Prevents sporadic errors when the writer and reader briefly contend
-        // (e.g. during PST bulk import).
-        await customStatement('PRAGMA busy_timeout=5000;');
-
-        logger.i('Database opened: journal_mode=WAL, busy_timeout=5000ms');
-      },
-    );
+    await appDb.initSchema();
+    return appDb;
   }
 
-  /// Initializes the sqlite_vector ANN index on the qwen3_8b_embedding column.
-  ///
-  /// sqlite_vector uses a regular BLOB column + a side-car index created via
-  /// `vector_init()`. This is different from the old vec0 virtual table.
-  /// The index persists in the database file after first creation.
-  ///
-  /// Gracefully no-ops if the extension is not loaded (tests without native lib).
+  Future<List<Map<String, Object?>>> select(String sql, [List<Object?> params = const []]) => _db.select(sql, params);
+  Future<WriteResult> execute(String sql, [List<Object?> params = const []]) => _db.execute(sql, params);
+  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) => _db.executeBatch(sql, paramSets);
+  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) => _db.transaction(body);
+  Stream<List<Map<String, Object?>>> stream(String sql, [List<Object?> params = const []]) => _db.stream(sql, params);
+  Future<void> close() => _db.close();
+
+  Future<void> initSchema() async {
+    // Check if table 'apps' already exists to determine if initialization is required
+    final tables = await _db.select("SELECT name FROM sqlite_master WHERE type='table' AND name='apps'");
+    if (tables.isEmpty) {
+      logger.i("AppDatabase: Initializing schema...");
+      for (final sql in schemaDDL) {
+        await _db.execute(sql);
+      }
+      logger.i("AppDatabase: Loading initial data...");
+      await _loadInitialData(_db);
+      logger.i("AppDatabase: Initializing vector index...");
+      await _initVectorIndex();
+    }
+  }
+
   Future<void> _initVectorIndex() async {
     try {
-      await customStatement(
+      await _db.execute(
         "SELECT vector_init('files_embeddings', 'qwen3_8b_embedding', 'type=FLOAT32,dimension=2048')",
       );
     } catch (e) {
@@ -497,156 +261,238 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
-  /// Make sure each app is in database
-  Future<int> _loadInitialData(Migrator m) async {
+  static Future<int> _loadInitialData(Database db) async {
     try {
       int appsAdded = 0;
-      //Load initial data
-      TableInfo<Table, dynamic>? appsTable = m.database.allTables
-          .firstWhereOrNull((e) => e.actualTableName == 'apps');
-      //List<dynamic> apps = await m.database.select(appsTable!).get();
-      //apps
-      await m.database
-          .into(appsTable!)
-          .insertOnConflictUpdate(
-            App(
-              id: const Uuid().v4().toString(),
-              name: "Files",
-              slug: 'files',
-              group: "collections",
-              order: 10,
-              icon: 0xe2a3,
-              route: "/files",
-            ),
-          );
-      appsAdded++;
 
-      await m.database
-          .into(appsTable)
-          .insertOnConflictUpdate(
-            App(
-              id: const Uuid().v4().toString(),
-              name: "Email",
-              slug: 'email',
-              group: "collections",
-              order: 30,
-              icon: 0xf705,
-              route: "/email",
-            ),
-          );
-      appsAdded++;
+      final apps = [
+        {
+          'id': const Uuid().v4().toString(),
+          'name': 'Files',
+          'slug': 'files',
+          'group': 'collections',
+          'order': 10,
+          'icon': 0xe2a3,
+          'route': '/files',
+        },
+        {
+          'id': const Uuid().v4().toString(),
+          'name': 'Email',
+          'slug': 'email',
+          'group': 'collections',
+          'order': 30,
+          'icon': 0xf705,
+          'route': '/email',
+        },
+        {
+          'id': const Uuid().v4().toString(),
+          'name': 'Social Networks',
+          'slug': 'social',
+          'group': 'collections',
+          'order': 50,
+          'icon': 0xe486,
+          'route': '/social',
+        },
+        {
+          'id': const Uuid().v4().toString(),
+          'name': 'Photos',
+          'slug': 'photos',
+          'group': 'app',
+          'order': 20,
+          'icon': 0xf80d,
+          'route': '/photos',
+        },
+        {
+          'id': const Uuid().v4().toString(),
+          'name': 'AI Chat',
+          'slug': 'aichat',
+          'group': 'app',
+          'order': 15,
+          'icon': 0xe0b7,
+          'route': '/aichat',
+        },
+      ];
 
-      await m.database
-          .into(appsTable)
-          .insertOnConflictUpdate(
-            App(
-              id: const Uuid().v4().toString(),
-              name: "Social Networks",
-              slug: 'social',
-              group: "collections",
-              order: 50,
-              icon: 0xe486,
-              route: "/social",
-            ),
-          );
-      appsAdded++;
+      for (final app in apps) {
+        await db.execute(
+          'INSERT INTO apps (id, name, slug, "group", "order", icon, route) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?) '
+          'ON CONFLICT(slug) DO UPDATE SET '
+          'name = excluded.name, '
+          '"group" = excluded."group", '
+          '"order" = excluded."order", '
+          'icon = excluded.icon, '
+          'route = excluded.route',
+          [
+            app['id'],
+            app['name'],
+            app['slug'],
+            app['group'],
+            app['order'],
+            app['icon'],
+            app['route'],
+          ],
+        );
+        appsAdded++;
+      }
 
-      await m.database
-          .into(appsTable)
-          .insertOnConflictUpdate(
-            App(
-              id: const Uuid().v4().toString(),
-              name: "Photos",
-              slug: 'photos',
-              group: "app",
-              order: 20,
-              icon: 0xf80d,
-              route: "/photos",
-            ),
-          );
-      appsAdded++;
-
-      await m.database
-          .into(appsTable)
-          .insertOnConflictUpdate(
-            App(
-              id: const Uuid().v4().toString(),
-              name: "AI Chat",
-              slug: 'aichat',
-              group: "app",
-              order: 15,
-              icon: 0xe0b7,
-              route: "/aichat",
-            ),
-          );
-      appsAdded++;
-
-      return Future(() => appsAdded);
+      return appsAdded;
     } catch (err) {
-      logger.e(err);
+      AppLogger(null).e(err);
       rethrow;
     }
   }
-}
 
-/// Returns a configured [Sqlite3] instance with the sqlite_vector extension
-/// loaded. Used as the `sqlite3:` factory for [NativeDatabase].
-///
-/// sqlite_vector handles bundling the native library for all platforms
-/// automatically via Dart native assets — no manual dylib copying needed.
-///
-/// Gracefully no-ops (with a warning) if the extension fails to load so
-/// dev/test builds without native assets still work.
-Sqlite3 _loadExtensions() {
-  try {
-    sqlite3.loadSqliteVectorExtension();
-    AppLogger(null).d('sqlite_vector extension loaded');
-  } catch (e) {
-    AppLogger(
-      null,
-    ).w('sqlite_vector not loaded (vector search unavailable): $e');
-  }
-  return sqlite3;
-}
-
-LazyDatabase _openConnection(String? path, String? name, bool useMemoryDb) {
-  if (!useMemoryDb && (path == null || name == null)) {
-    throw ("Path or Name not provided, can not start scanner");
-  }
-
-  // the LazyDatabase util lets us find the right location for the file async.
-  return LazyDatabase(() async {
-    AppLogger(null).i('Initialize Database | path=$path');
-
-    if (!useMemoryDb) {
-      // check app startup initialization
-      io.File file = io.File(p.join(path!, 'data', name));
-      path = file.path;
-
-      // Make sqlite3 pick a more suitable location for temporary files - the
-      // one from the system may be inaccessible due to ios/mac app sandbox.
-      sqlite3.tempDirectory = (await getTemporaryDirectory()).path;
-
-      AppLogger(null).i("Opening Database | $path");
-      // createInBackground moves all SQLite I/O to a dedicated background
-      // isolate managed by Drift. This prevents any DB query from blocking
-      // frames on the main UI thread, fixing jank during email queries and
-      // PST imports.
-      return NativeDatabase.createInBackground(
-        file,
-        logStatements: false,
-        setup: (db) {
-          db.execute('PRAGMA busy_timeout=5000;');
-          db.execute('PRAGMA journal_mode=WAL;');
-        },
-        sqlite3: _loadExtensions,
-      );
-    } else {
-      return NativeDatabase.memory(
-        logStatements: false,
-        cachePreparedStatements: false,
-        sqlite3: _loadExtensions,
-      );
-    }
-  });
+  static const List<String> schemaDDL = [
+    // apps
+    '''
+    CREATE TABLE IF NOT EXISTS apps (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      slug TEXT UNIQUE NOT NULL,
+      "group" TEXT NOT NULL DEFAULT 'collections',
+      "order" INTEGER NOT NULL DEFAULT 0,
+      icon INTEGER,
+      route TEXT NOT NULL DEFAULT '/'
+    );
+    ''',
+    // app_users
+    '''
+    CREATE TABLE IF NOT EXISTS app_users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      password TEXT NOT NULL,
+      local_storage_path TEXT NOT NULL
+    );
+    ''',
+    // collections
+    '''
+    CREATE TABLE IF NOT EXISTS collections (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      path TEXT NOT NULL,
+      type TEXT NOT NULL,
+      scanner TEXT NOT NULL,
+      scan_status TEXT NOT NULL,
+      oauth_service TEXT,
+      access_token TEXT,
+      refresh_token TEXT,
+      id_token TEXT,
+      user_id TEXT,
+      expiration INTEGER,
+      last_scan_date INTEGER,
+      needs_re_auth INTEGER NOT NULL DEFAULT 0,
+      download_local_copy INTEGER NOT NULL DEFAULT 0,
+      local_copy_path TEXT
+    );
+    ''',
+    // emails
+    '''
+    CREATE TABLE IF NOT EXISTS emails (
+      id TEXT PRIMARY KEY,
+      collection_id TEXT NOT NULL,
+      date INTEGER NOT NULL,
+      "from" TEXT NOT NULL,
+      "to" TEXT NOT NULL,
+      cc TEXT,
+      subject TEXT NOT NULL,
+      snippet TEXT,
+      html_body TEXT,
+      plain_body TEXT,
+      labels TEXT,
+      headers TEXT,
+      folder_id TEXT,
+      message_id TEXT,
+      thread_id TEXT,
+      is_read INTEGER NOT NULL DEFAULT 0,
+      has_attachments INTEGER NOT NULL DEFAULT 0,
+      is_deleted INTEGER NOT NULL DEFAULT 0,
+      uid INTEGER
+    );
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS email_folderid_idx ON emails (folder_id);
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS email_comp_sync_idx ON emails (collection_id, folder_id, date);
+    ''',
+    // email_folders
+    '''
+    CREATE TABLE IF NOT EXISTS email_folders (
+      id TEXT NOT NULL,
+      collection_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'user',
+      messages_total INTEGER NOT NULL,
+      messages_unread INTEGER NOT NULL,
+      parent_id TEXT,
+      PRIMARY KEY (id, collection_id),
+      FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
+    );
+    ''',
+    // files
+    '''
+    CREATE TABLE IF NOT EXISTS files (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      path TEXT NOT NULL,
+      parent TEXT NOT NULL,
+      date_created INTEGER,
+      date_last_modified INTEGER,
+      last_scanned_date INTEGER,
+      collection_id TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      is_deleted INTEGER NOT NULL DEFAULT 0,
+      thumbnail TEXT,
+      download_url TEXT,
+      email_id TEXT,
+      latitude REAL,
+      longitude REAL,
+      local_path TEXT
+    );
+    ''',
+    // folders
+    '''
+    CREATE TABLE IF NOT EXISTS folders (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      path TEXT NOT NULL,
+      parent TEXT NOT NULL,
+      date_created INTEGER,
+      date_last_modified INTEGER,
+      last_scanned_date INTEGER,
+      thumbnail TEXT,
+      download_url TEXT,
+      email_id TEXT,
+      collection_id TEXT NOT NULL
+    );
+    ''',
+    // albums
+    '''
+    CREATE TABLE IF NOT EXISTS albums (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL
+    );
+    ''',
+    // files_embeddings
+    '''
+    CREATE TABLE IF NOT EXISTS files_embeddings (
+      file_id TEXT PRIMARY KEY,
+      qwen3_8b_embedding BLOB NOT NULL,
+      FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
+    ''',
+    // providers
+    '''
+    CREATE TABLE IF NOT EXISTS providers (
+      service TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      client_secret TEXT NOT NULL,
+      api_key TEXT NOT NULL,
+      permissions TEXT
+    );
+    ''',
+  ];
 }

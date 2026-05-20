@@ -5,10 +5,11 @@ import 'package:mydatatools/database_manager.dart';
 class AppRepository {
   AppLogger logger = AppLogger(null);
 
-  ///
   /// Get a list of all Apps
   Future<List<App>> apps() async {
     AppDatabase? database = DatabaseManager.instance.database;
-    return await database?.select(database.apps).get() ?? [];
+    if (database == null) return [];
+    final rows = await database.select('SELECT * FROM apps ORDER BY "order" ASC');
+    return rows.map((r) => App.fromDbMap(r)).toList();
   }
 }

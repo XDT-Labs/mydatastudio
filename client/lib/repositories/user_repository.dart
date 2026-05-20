@@ -11,43 +11,45 @@ class UserRepository {
   UserRepository(this.db);
 
   Future<List<AppUser>> users() async {
-    return await db?.select(db!.appUsers).get() ?? [];
+    if (db == null) return [];
+    final rows = await db!.select("SELECT * FROM app_users");
+    return rows.map((row) => AppUser.fromDbMap(row)).toList();
   }
 
   Future<AppUser?> userExists() async {
-    AppUser? user = await db?.select(db!.appUsers).getSingleOrNull();
-    return user;
+    if (db == null) return null;
+    final rows = await db!.select("SELECT * FROM app_users LIMIT 1");
+    if (rows.isEmpty) return null;
+    return AppUser.fromDbMap(rows.first);
   }
 
   /// Search for user by password that has been hashed with a PBKDF2 algorithm
   Future<AppUser?> user(String password) async {
-    AppUser? user =
-        await (db?.select(db!.appUsers)
-          ?..where((e) => e.password.equals(password)))?.getSingleOrNull();
+    if (db == null) return null;
+    final rows = await db!.select(
+      "SELECT * FROM app_users WHERE password = ? LIMIT 1",
+      [password],
+    );
+    if (rows.isEmpty) return null;
 
-    if (user != null) {
-      String keyDir = '${user.localStoragePath}${Platform.pathSeparator}keys';
-      String publicFilePath = '$keyDir/public.pem';
-      String privateFilePath = '$keyDir/private.pem';
-      if (!File(publicFilePath).existsSync() &&
-          !File(privateFilePath).existsSync()) {
-        throw Exception("Keys not found at $keyDir. Stopping application.");
-      }
-      // TODO: read/write from app /keys folder
-      user.publicKey = File(publicFilePath).readAsStringSync();
-      user.privateKey = File(privateFilePath).readAsStringSync();
-      return user;
-    } else {
-      return null;
+    final user = AppUser.fromDbMap(rows.first);
+
+    String keyDir = '${user.localStoragePath}${Platform.pathSeparator}keys';
+    String publicFilePath = '$keyDir/public.pem';
+    String privateFilePath = '$keyDir/private.pem';
+    if (!File(publicFilePath).existsSync() &&
+        !File(privateFilePath).existsSync()) {
+      throw Exception("Keys not found at $keyDir. Stopping application.");
     }
+    
+    user.publicKey = File(publicFilePath).readAsStringSync();
+    user.privateKey = File(privateFilePath).readAsStringSync();
+    return user;
   }
 
   /// Save user to database
   /// Save public/private keys to /key folder
   Future<AppUser?> saveUser(AppUser user) async {
-    //AppDatabase? db = DatabaseManager.instance.database;
-    //Save key into secure storage
-    //save keys
     String keyDir = '${user.localStoragePath}${Platform.pathSeparator}keys';
     String publicFilePath = '$keyDir/public.pem';
     String privateFilePath = '$keyDir/private.pem';
@@ -64,21 +66,21 @@ class UserRepository {
       }
     }
 
-    //FlutterSecureStorage storage = const FlutterSecureStorage();
-    //await storage.write(key: AppConstants.securePassword, value: user.password);
-
     if (db == null) {
       throw Exception("Database not initialized");
     }
 
-    int rowsUpdated = await db!.into(db!.appUsers).insertOnConflictUpdate(user);
+    await db!.execute(
+      "INSERT INTO app_users (id, name, email, password, local_storage_path) "
+      "VALUES (?, ?, ?, ?, ?) "
+      "ON CONFLICT(id) DO UPDATE SET "
+      "name = excluded.name, "
+      "email = excluded.email, "
+      "password = excluded.password, "
+      "local_storage_path = excluded.local_storage_path",
+      [user.id, user.name, user.email, user.password, user.localStoragePath],
+    );
 
-    if (rowsUpdated == 0) {
-      throw Exception("Error saving user");
-    }
-
-    // TODO: register user, with only the Public Key to server
-
-    return Future(() => user);
+    return user;
   }
 }

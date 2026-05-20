@@ -5,7 +5,7 @@
             "previewLimit": 50,
             "driver": "SQLite",
             "name": "local db",
-            "database": "/users/mikenimer/Library/Application Support/mydata.tools.dev/data/mydata.db"
+            "database": "/Volumes/Drobo5N/drb125101a02610/1/MyDataTools/data/mydata.db"
         }
     ]
 }

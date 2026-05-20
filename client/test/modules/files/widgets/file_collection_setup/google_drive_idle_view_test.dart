@@ -8,7 +8,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: GoogleDriveIdleView(onConnect: () {}, onCancel: () {}),
+            body: GoogleDriveIdleView(
+              onConnect: () {},
+              saveLocalCopy: true,
+              onSaveLocalCopyChanged: (_) {},
+            ),
           ),
         ),
       );
@@ -20,7 +24,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: GoogleDriveIdleView(onConnect: () {}, onCancel: () {}),
+            body: GoogleDriveIdleView(
+              onConnect: () {},
+              saveLocalCopy: true,
+              onSaveLocalCopyChanged: (_) {},
+            ),
           ),
         ),
       );
@@ -28,23 +36,20 @@ void main() {
       expect(find.textContaining('Drive access'), findsOneWidget);
     });
 
-    testWidgets('cancel button calls onCancel', (tester) async {
-      bool called = false;
+    testWidgets('Cancel button is NOT present', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
             body: GoogleDriveIdleView(
               onConnect: () {},
-              onCancel: () => called = true,
+              saveLocalCopy: true,
+              onSaveLocalCopyChanged: (_) {},
             ),
           ),
         ),
       );
 
-      await tester.tap(find.text('Cancel'));
-      await tester.pump();
-
-      expect(called, isTrue);
+      expect(find.text('Cancel'), findsNothing);
     });
 
     testWidgets('sign in button calls onConnect', (tester) async {
@@ -54,7 +59,8 @@ void main() {
           home: Scaffold(
             body: GoogleDriveIdleView(
               onConnect: () => called = true,
-              onCancel: () {},
+              saveLocalCopy: true,
+              onSaveLocalCopyChanged: (_) {},
             ),
           ),
         ),
@@ -64,6 +70,29 @@ void main() {
       await tester.pump();
 
       expect(called, isTrue);
+    });
+
+    testWidgets('checkbox toggles local copy preference', (tester) async {
+      bool? lastValue;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GoogleDriveIdleView(
+              onConnect: () {},
+              saveLocalCopy: true,
+              onSaveLocalCopyChanged: (val) => lastValue = val,
+            ),
+          ),
+        ),
+      );
+
+      final checkbox = find.byType(Checkbox);
+      expect(checkbox, findsOneWidget);
+
+      await tester.tap(find.textContaining('Save a local copy'));
+      await tester.pump();
+
+      expect(lastValue, isFalse);
     });
   });
 }

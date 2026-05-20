@@ -1,12 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/helpers/encryption_helper.dart';
 import 'package:mydatatools/main.dart';
 import 'package:mydatatools/models/tables/app_user.dart';
+import 'package:mydatatools/repositories/user_repository.dart';
 import 'package:mydatatools/services/get_user_service.dart';
 
 import 'package:mydatatools/widgets/setup/setup_step1.dart';
@@ -31,7 +31,6 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
   final AppLogger logger = AppLogger(null);
   final windowManager = WindowManager.instance;
   final encHelper = EncryptionHelper();
-  SendPort? dbWriterPort;
   AppUser? appUser;
   int currentStep = 0;
 
@@ -94,12 +93,6 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
       // Initialize database
       await DatabaseManager.instance.initializeDatabase();
 
-      //final theme = Theme.of(context);
-      dbWriterPort = await DatabaseManager.instance.writerPort;
-      if (dbWriterPort == null) {
-        throw Exception('Failed to get db writer port');
-      }
-
       //Create new instance of User
       AppUser u = AppUser(
         id: appUser!.id,
@@ -112,34 +105,21 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
       u.publicKey = appUser!.publicKey;
 
       //save user to database
-      final receivePort = ReceivePort();
-      dbWriterPort?.send({
-        'type': 'user',
-        'user': u,
-        'replyTo': receivePort.sendPort,
-      });
-
-      final response = await receivePort.first;
-      if (response == null) {
+      final savedUser = await UserRepository(
+        DatabaseManager.instance.database!,
+      ).saveUser(u);
+      if (savedUser == null) {
         throw Exception('Failed to save user');
-      } else {
-        //do full login to check everything is ok
-        AppUser? newUser = await GetUserService.instance.invoke(
-          GetUserServiceCommand(appUser!.password),
-        );
-        if (newUser != null) {
-          if (context.mounted) {
-            GoRouter.of(context).go("/");
-          }
-        } else {
-          // TODO: do something on save
-        }
       }
-      receivePort.close();
 
-      if (response is Map && response.containsKey('error')) {
-        logger.e("Error saving user: ${response['error']}");
-        return;
+      //do full login to check everything is ok
+      AppUser? newUser = await GetUserService.instance.invoke(
+        GetUserServiceCommand(appUser!.password),
+      );
+      if (newUser != null) {
+        if (context.mounted) {
+          GoRouter.of(context).go("/");
+        }
       }
 
       if (context.mounted) {

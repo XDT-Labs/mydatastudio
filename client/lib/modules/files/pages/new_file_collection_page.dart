@@ -1,14 +1,16 @@
 import 'package:mydatatools/app_constants.dart';
 import 'package:mydatatools/models/tables/collection.dart';
 import 'package:mydatatools/modules/files/pages/rx_files_page.dart';
+import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/modules/files/widgets/file_collection_setup/coming_soon_tab_view.dart';
 import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_error_view.dart';
 import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_idle_view.dart';
 import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_loading_view.dart';
 import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_success_view.dart';
+import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_configure_view.dart';
 import 'package:mydatatools/modules/files/widgets/file_collection_setup/local_files_tab_view.dart';
 import 'package:mydatatools/oauth/login_providers.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:file_picker/file_picker.dart';
@@ -95,16 +97,14 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
         needsReAuth: false,
       );
 
-      CollectionRepository().addCollection(fc).then((value) {
-        if (value != null) {
-          GetCollectionsService.instance.invoke(
-            GetCollectionsServiceCommand(null),
-          );
-          ScannerManager.getInstance()
-              .getScanner(value)
-              ?.start(value, value.path, true, true);
-          RxFilesPage.selectedCollection.add(value);
-        }
+      CollectionRepository(DatabaseManager.instance.database!).addCollection(fc).then((_) {
+        GetCollectionsService.instance.invoke(
+          GetCollectionsServiceCommand(null),
+        );
+        ScannerManager.getInstance()
+            .getScanner(fc)
+            ?.start(fc, fc.path, true, true);
+        RxFilesPage.selectedCollection.add(fc);
       });
 
       GoRouter.of(context).go('/files');
@@ -118,7 +118,7 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
 // Google Drive Tab — lives in its own StatefulWidget to keep auth state local
 // =============================================================================
 
-enum _DriveAuthState { idle, loading, success, error }
+enum _DriveAuthState { idle, checking, loading, success, error, configure }
 
 class _GoogleDriveTab extends StatefulWidget {
   const _GoogleDriveTab();
@@ -128,9 +128,37 @@ class _GoogleDriveTab extends StatefulWidget {
 }
 
 class _GoogleDriveTabState extends State<_GoogleDriveTab> {
-  _DriveAuthState _authState = _DriveAuthState.idle;
+  _DriveAuthState _authState = _DriveAuthState.loading;
   String? _errorMessage;
   String? _connectedEmail;
+  bool _saveLocalCopy = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkConfiguration();
+  }
+
+  Future<void> _checkConfiguration() async {
+    setState(() {
+      _authState = _DriveAuthState.checking;
+    });
+
+    final clientId = await LoginProviders.googleDrive.clientId;
+    final clientSecret = await LoginProviders.googleDrive.clientSecret;
+
+    if (!mounted) return;
+
+    if (clientId.isEmpty || clientSecret.isEmpty) {
+      setState(() {
+        _authState = _DriveAuthState.configure;
+      });
+    } else {
+      setState(() {
+        _authState = _DriveAuthState.idle;
+      });
+    }
+  }
 
   Future<void> _connectGoogleDrive() async {
     setState(() {
@@ -139,7 +167,10 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
     });
 
     try {
-      final collection = await LoginProviderExtension.handleGoogleDrive(context);
+      final collection = await LoginProviderExtension.handleGoogleDrive(
+        context,
+        downloadLocalCopy: _saveLocalCopy,
+      );
 
       if (!mounted) return;
 
@@ -194,6 +225,13 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
             ),
           ),
           child: switch (_authState) {
+            _DriveAuthState.checking => const Center(
+                key: ValueKey('checking'),
+                child: Padding(
+                  padding: EdgeInsets.all(48),
+                  child: CircularProgressIndicator(),
+                ),
+              ),
             _DriveAuthState.loading => _cardContainer(
                 key: const ValueKey('loading'),
                 child: const GoogleDriveLoadingView(),
@@ -207,14 +245,24 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
                 child: GoogleDriveErrorView(
                   errorMessage: _errorMessage,
                   onRetry: _connectGoogleDrive,
-                  onCancel: () => GoRouter.of(context).go('/files'),
+                ),
+              ),
+            _DriveAuthState.configure => _cardContainer(
+                key: const ValueKey('configure'),
+                child: GoogleDriveConfigureView(
+                  onConfigured: _checkConfiguration,
                 ),
               ),
             _DriveAuthState.idle => _cardContainer(
                 key: const ValueKey('idle'),
                 child: GoogleDriveIdleView(
                   onConnect: _connectGoogleDrive,
-                  onCancel: () => GoRouter.of(context).go('/files'),
+                  saveLocalCopy: _saveLocalCopy,
+                  onSaveLocalCopyChanged: (value) {
+                    setState(() {
+                      _saveLocalCopy = value ?? true;
+                    });
+                  },
                 ),
               ),
           },

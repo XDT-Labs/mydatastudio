@@ -1,32 +1,6 @@
-import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/models/tables/file_asset.dart';
-import 'package:drift/drift.dart';
 
-//part 'folder.g.dart';
-
-@UseRowClass(Folder, constructor: 'fromDb')
-@TableIndex(name: 'folder_path_idx', columns: {#path})
-@TableIndex(name: 'folder_parent_idx', columns: {#parent})
-@TableIndex(name: 'folder_collection_id_idx', columns: {#collectionId})
-@TableIndex(name: 'folder_email_id_idx', columns: {#emailId})
-class Folders extends Table {
-  TextColumn get id => text()();
-  TextColumn get name => text()();
-  TextColumn get path => text()();
-  TextColumn get parent => text()();
-  DateTimeColumn get dateCreated => dateTime()();
-  DateTimeColumn get dateLastModified => dateTime()();
-  DateTimeColumn get lastScannedDate => dateTime().nullable()();
-  TextColumn get thumbnail => text().nullable()();
-  TextColumn get downloadUrl => text().nullable()();
-  TextColumn get emailId => text().nullable()();
-  TextColumn get collectionId => text()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
-class Folder implements FileAsset, Insertable<Folder> {
+class Folder implements FileAsset {
   @override
   String id;
   @override
@@ -61,34 +35,35 @@ class Folder implements FileAsset, Insertable<Folder> {
     this.emailId,
   });
 
-  Folder.fromDb({
-    required this.id,
-    required this.name,
-    required this.path,
-    required this.parent,
-    required this.dateCreated,
-    required this.dateLastModified,
-    this.lastScannedDate,
-    required this.collectionId,
-    this.thumbnail,
-    this.downloadUrl,
-    this.emailId,
-  });
+  factory Folder.fromDbMap(Map<String, dynamic> map) {
+    return Folder(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      path: map['path'] as String,
+      parent: map['parent'] as String,
+      dateCreated: DateTime.fromMillisecondsSinceEpoch(map['date_created'] as int),
+      dateLastModified: DateTime.fromMillisecondsSinceEpoch(map['date_last_modified'] as int),
+      lastScannedDate: map['last_scanned_date'] != null ? DateTime.fromMillisecondsSinceEpoch(map['last_scanned_date'] as int) : null,
+      collectionId: map['collection_id'] as String,
+      thumbnail: map['thumbnail'] as String?,
+      downloadUrl: map['download_url'] as String?,
+      emailId: map['email_id'] as String?,
+    );
+  }
 
-  @override
-  Map<String, Expression> toColumns(bool nullToAbsent) {
-    return FoldersCompanion(
-      id: Value(id),
-      name: Value(name),
-      path: Value(path),
-      parent: Value(parent),
-      dateCreated: Value(dateCreated),
-      dateLastModified: Value(dateLastModified),
-      lastScannedDate: Value(lastScannedDate),
-      collectionId: Value(collectionId),
-      thumbnail: Value(thumbnail),
-      downloadUrl: Value(downloadUrl),
-      emailId: Value(emailId),
-    ).toColumns(nullToAbsent);
+  Map<String, dynamic> toDbMap() {
+    return {
+      'id': id,
+      'name': name,
+      'path': path,
+      'parent': parent,
+      'date_created': dateCreated.millisecondsSinceEpoch,
+      'date_last_modified': dateLastModified.millisecondsSinceEpoch,
+      'last_scanned_date': lastScannedDate?.millisecondsSinceEpoch,
+      'collection_id': collectionId,
+      'thumbnail': thumbnail,
+      'download_url': downloadUrl,
+      'email_id': emailId,
+    };
   }
 }
