@@ -92,10 +92,10 @@ void main() {
 
     //write to temp folder
     var publicFile = await io.File(
-      'test_resources/public.pem',
+      'test/resources/public.pem',
     ).writeAsString(publickeyString);
     var privateFile = await io.File(
-      'test_resources/private.pem',
+      'test/resources/private.pem',
     ).writeAsString(privatekeyString);
 
     //read from disk / temp folder
@@ -173,7 +173,7 @@ void main() {
       "Key generation took ${DateTime.now().difference(start).inMilliseconds} ms",
     );
 
-    String filePath = "test_resources/128-536x354-32kb.jpg";
+    String filePath = "test/resources/128-536x354-32kb.jpg";
     var fileBytes = await io.File(filePath).readAsBytes();
     Uint8List byteList = fileBytes.buffer.asUint8List();
 
@@ -193,6 +193,6 @@ void main() {
 
     //print(base64.encode(byteList));
     //print(hex.encode(byteList));
-    //io.File("test_resources/128-536x354-32kb_decrypted.jpg").writeAsBytes(decryptedFile);
+    //io.File("test/resources/128-536x354-32kb_decrypted.jpg").writeAsBytes(decryptedFile);
   });
 }
