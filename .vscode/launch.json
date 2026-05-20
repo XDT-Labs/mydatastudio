@@ -34,13 +34,13 @@
         },
         {
             "name": "aichat server (python)",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/client/assets/python/aichat/main.py",
+            "program": "${workspaceFolder}/aiserver/main.py",
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}/client/assets/python/aichat",
+            "cwd": "${workspaceFolder}/aiserver",
             "justMyCode": true,
-            "python": "${workspaceFolder}/client/assets/python/aichat/.venv/bin/python",
+            "python": "${workspaceFolder}/aiserver/.venv/bin/python",
             "env": {
                 "AICHAT_PORT": "8000"
             }

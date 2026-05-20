@@ -70,7 +70,7 @@ User adds collection
     widgets/       # Reusable UI components
     l10n/          # Localization/i18n
   assets/
-    python/aichat/ # Python FastAPI LLM service
+/aiserver/         # Python FastAPI LLM service
 /models/           # Downloaded ML models (GGUF)
 /services/         # Cloud deployment configs (Google Cloud Run)
 ```

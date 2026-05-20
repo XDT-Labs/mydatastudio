@@ -8,7 +8,7 @@ MyData/Tools Desktop is a local-first personal data archive & management tool. L
 
 The app has two runtime components:
 1. **Flutter macOS desktop client** (`client/`) — the UI and data layer
-2. **Python FastAPI service** (`client/assets/python/aichat/`) — embedded in the flutter app and spawned as a subprocess at startup, handles all LLM inference and embeddings over HTTP on localhost
+2. **Python FastAPI service** (`aiserver/`) — embedded in the flutter app and spawned as a subprocess at startup, handles all LLM inference and embeddings over HTTP on localhost
 
 ## GSTACK
 gstack is a process, not a collection of tools. The skills run in the order a sprint runs:
@@ -93,10 +93,10 @@ flutter test                         # Run Flutter tests
 
 > `dart run build_runner build` must be re-run whenever you modify Drift table definitions or classes annotated with `@JsonSerializable`.
 
-## Python Service (`client/assets/python/aichat/`)
+## Python Service (`aiserver/`)
 
 ```bash
-cd client/assets/python/aichat
+cd aiserver
 pdm install                          # Install dependencies
 python main.py                       # Run dev server (Uvicorn on random port)
 pytest tests/ -v                     # Run full test suite (120+ tests)

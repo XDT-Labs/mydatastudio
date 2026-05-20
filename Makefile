@@ -16,7 +16,7 @@ SERVICE_NAME = gcs-file-downloader
 IMAGE_REPO = cloud-run-source-deploy
 
 # Python/AI Chat Config
-PYTHON_DIR = client/assets/python/aichat
+PYTHON_DIR = aiserver
 APP_DIR = client/app
 APP_ZIP_NAME = aichat-macos.zip
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
@@ -75,10 +75,10 @@ build-python:
 	@cd $(PYTHON_DIR) && \
 		pdm install && \
 		FORCE_CMAKE=1 CMAKE_ARGS="-DGGML_METAL=on -DGGML_NATIVE=off" pdm run pyinstaller -y main.spec && \
-		mkdir -p ../../../app && \
-		rm -f ../../../app/$(APP_ZIP_NAME) && \
+		mkdir -p ../client/app && \
+		rm -f ../client/app/$(APP_ZIP_NAME) && \
 		cd dist/aichat && \
-		zip -r ../../../../../app/$(APP_ZIP_NAME) .
+		zip -r ../../../client/app/$(APP_ZIP_NAME) .
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
 
 .PHONY: set-bundle-id

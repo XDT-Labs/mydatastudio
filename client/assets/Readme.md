@@ -4,7 +4,7 @@ PDM is simply a package manager (like Node's NPM) that installs Python dependenc
 
 To create the standalone `aichat` executable that your Flutter app expects to run, you must compile the code using `PyInstaller`.
 ```bash
-cd client/assets/python/aichat
+cd aiserver
 
 # 1. Install dependencies
 pdm install
@@ -18,8 +18,8 @@ pdm run pyinstaller -y main.spec
 
 # 3. Zip the compiled output for Flutter
 cd dist/aichat
-zip -r ../../../../../app/aichat-macos.zip .
-cd ../../../../../app/
+zip -r ../../../client/app/aichat-macos.zip .
+cd ../../../client/app/
 
 # 4. Copy to your application support directory to test locally
 cp ./*.zip ~/Library/Application\ Support/mydata.tools/
@@ -27,7 +27,7 @@ cp ./*.zip ~/Library/Application\ Support/mydata.tools/
 
 ## All in one
 ```
-clear && cd client/assets/python/aichat && pdm install && pdm run pyinstaller -y main.spec && cd dist/aichat && zip -r ../../../../../app/aichat-macos.zip . && cd ../../../../../app/ && cp ./*.zip ~/Library/Application\ Support/mydata.tools/ && cd ../..
+clear && cd aiserver && pdm install && pdm run pyinstaller -y main.spec && cd dist/aichat && zip -r ../../../client/app/aichat-macos.zip . && cd ../../../client/app/ && cp ./*.zip ~/Library/Application\ Support/mydata.tools/ && cd ../..
 ```
 
 
