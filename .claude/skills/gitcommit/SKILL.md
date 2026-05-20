@@ -2,7 +2,7 @@
 description: write git commit message
 ---
 
-Automatically stage the modified files by running 'git add .' before getting a diff of changes. Write a git commit message for the changes made to the modified files.
+Automatically stage the modified files by running 'git add .' before getting a diff of the staged changes using 'git diff --cached'. Write a git commit message for the changes made to the modified files.
 
 **Critical Rules**
 - DO NOT run the `git commit` command, generate the message only. The user will copy/paste this message and run the command.
