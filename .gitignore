@@ -1,7 +1,8 @@
 *.tar.gz
 app/
-dist/aichat
-dist/aichat.exe
+aiserver/dist/
+aiserver/models/
+
 
 # Miscellaneous
 *.class
