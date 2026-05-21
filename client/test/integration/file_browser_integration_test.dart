@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io' as io;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/main.dart';
@@ -12,8 +13,10 @@ import 'package:mydatatools/repositories/user_repository.dart';
 import 'package:mydatatools/repositories/collection_repository.dart';
 import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatatools/services/get_user_service.dart';
+import 'package:mydatatools/modules/files/services/get_files_and_folders_service.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:uuid/uuid.dart';
+import 'package:rxdart/rxdart.dart';
 import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/app_constants.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
@@ -29,6 +32,12 @@ void main() {
   late AppDatabase db;
 
   setUp(() async {
+    // 0. Reset singleton services and subjects
+    GetCollectionsService.instance.reset();
+    GetFileAndFoldersService.instance.reset();
+    RxFilesPage.selectedCollection = PublishSubject();
+    RxFilesPage.selectedPath = PublishSubject();
+
     // 1. Create a clean temporary directory for each test
     tempDir = await io.Directory.systemTemp.createTemp('file_browser_integration_test');
     
@@ -211,5 +220,179 @@ void main() {
     expect(find.text('subdir'), findsOneWidget);
     
     print('Test: Integration test passed!');
+  });
+
+  testWidgets('Lightroom full-screen preview toggling via Space and Escape keys', (WidgetTester tester) async {
+    final colId = 'integration-test-col';
+    final collectionPath = p.join(tempDir.path, 'test_files');
+    io.Directory(collectionPath).createSync();
+    
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    final user = AppUser(
+      id: const Uuid().v4(),
+      name: 'Integration Test User',
+      email: 'test@example.com',
+      password: 'password',
+      localStoragePath: tempDir.path,
+    );
+
+    await tester.runAsync(() async {
+      final dbMgr = DatabaseManager.instance;
+      final userRepo = UserRepository(dbMgr.database!);
+      await userRepo.saveUser(user);
+    });
+
+    GetUserService.instance.sink.add(user);
+    DatabaseManager.isInitializedNotifier.value = true;
+
+    final colRepo = CollectionRepository(DatabaseManager.instance.database!);
+    await tester.runAsync(() async {
+      await colRepo.addCollection(Collection(
+        id: colId,
+        name: 'Integration Collection',
+        path: collectionPath,
+        type: 'local',
+        scanner: AppConstants.scannerFileLocal,
+        scanStatus: 'idle',
+        needsReAuth: false,
+      ));
+    });
+
+    // Seed test files
+    io.File(p.join(collectionPath, 'test1.txt')).createSync();
+    io.File(p.join(collectionPath, 'image.png')).createSync();
+
+    final scannerManager = ScannerManager(db);
+    late Collection collection;
+    
+    await tester.runAsync(() async {
+      final fetchedCollection = await colRepo.collectionById(colId);
+      collection = fetchedCollection!;
+      await scannerManager.startScanner(collection);
+    });
+    
+    // Wait for database persistence
+    final fileRepo = FileDesktopRepository(DatabaseManager.instance.database!);
+    await tester.runAsync(() async {
+      int retries = 0;
+      int count = 0;
+      while (retries < 40) {
+        final files = await fileRepo.getByParentPath(colId, '');
+        count = files.length;
+        print('Second Test: DB file count inside wait loop = $count');
+        if (count >= 2) break;
+        await Future.delayed(const Duration(milliseconds: 500));
+        retries++;
+      }
+      expect(count, greaterThanOrEqualTo(2), reason: 'Should have found at least 2 files in root');
+    });
+
+    await tester.runAsync(() async {
+      final collectionsInDb = await colRepo.collections();
+      GetCollectionsService.instance.sink.add(collectionsInDb);
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: RxFilesPage(),
+          ),
+        ),
+      );
+
+      RxFilesPage.selectedCollection.add(collection);
+
+      // Wait for files to load in UI
+      int pumpRetries = 0;
+      while (pumpRetries < 40) {
+        await tester.pump(const Duration(milliseconds: 100));
+        if (find.text('image.png').evaluate().isNotEmpty) {
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 100));
+        pumpRetries++;
+      }
+    });
+
+    // Diagnostics print
+    for (final element in find.byType(Text).evaluate()) {
+      final textWidget = element.widget as Text;
+      print('Rendered Text in Test 2: "${textWidget.data}"');
+    }
+
+    // 1. Verify drawer starts closed and lightbox doesn't exist
+    expect(find.byType(InteractiveViewer), findsNothing);
+    expect(find.text('File Details'), findsNothing);
+
+    // 2. Select file (image.png) to open details drawer
+    await tester.tap(find.text('image.png'));
+    await tester.pumpAndSettle();
+
+    // Details drawer should now be open
+    expect(find.text('File Details'), findsOneWidget);
+
+    // 3. Press Space bar -> Lightbox should open
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+
+    // Verify lightbox is open
+    expect(find.byTooltip('Close Preview (Esc)'), findsOneWidget);
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+
+    // 4. Press Space bar again -> Lightbox should close
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Close Preview (Esc)'), findsNothing);
+
+    // 5. Press Space bar -> Lightbox open
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Close Preview (Esc)'), findsOneWidget);
+
+    // 6. Press Escape key -> Lightbox close
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Close Preview (Esc)'), findsNothing);
+
+    // 7. Test focus interaction: when input is focused, space bar does NOT open lightbox
+    final focusNode = FocusNode();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: [
+              Focus(
+                focusNode: focusNode,
+                child: EditableText(
+                  controller: TextEditingController(),
+                  focusNode: FocusNode(),
+                  style: const TextStyle(),
+                  cursorColor: Colors.black,
+                  backgroundCursorColor: Colors.black,
+                ),
+              ),
+              const RxFilesPage(),
+            ],
+          ),
+        ),
+      ),
+    );
+    RxFilesPage.selectedCollection.add(collection);
+    await tester.pumpAndSettle();
+    
+    // Select image.png again
+    await tester.tap(find.text('image.png'));
+    await tester.pumpAndSettle();
+
+    // Focus the text field
+    focusNode.requestFocus();
+    await tester.pump();
+
+    // Press space bar -> Lightbox should NOT open because input is focused!
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Close Preview (Esc)'), findsNothing);
   });
 }

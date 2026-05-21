@@ -39,7 +39,7 @@ class FileMetadataSection extends StatelessWidget {
           modifiedMoment.fromNow(),
           tooltip: modifiedMoment.format(fullDateFormat),
         ),
-        infoRowSelectable('Path', file.path),
+
         if (file.downloadUrl != null)
           infoRowSelectable('Download URL', file.downloadUrl!),
       ],

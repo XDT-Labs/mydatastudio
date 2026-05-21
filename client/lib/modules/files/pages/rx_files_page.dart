@@ -1,4 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:ui';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:mydatatools/modules/files/widgets/file_details/image_preview_widget.dart';
+import 'package:mydatatools/modules/files/widgets/file_details/pdf_preview_widget.dart';
+import 'package:mydatatools/modules/files/widgets/file_details/stl_preview_widget.dart';
+import 'package:mydatatools/modules/files/widgets/video_file_preview.dart';
 
 import 'package:mydatatools/app_logger.dart';
 import 'package:mydatatools/models/tables/collection.dart';
@@ -78,7 +86,8 @@ class _RxFilesPage extends State<RxFilesPage> {
   bool sortAsc = true;
   List<FileAsset> selectedItems = [];
   FileAsset? selectedAsset;
-  double _drawerWidth = 300;
+  FileAsset? _lastSelectedAsset;
+  bool _showLightbox = false;
 
   @override
   void initState() {
@@ -140,6 +149,7 @@ class _RxFilesPage extends State<RxFilesPage> {
         _breadcrumbTrail = []; // reset trail on collection change
         selectedItems = []; // reset selection on collection change
         selectedAsset = null; // close details drawer on collection change
+        _showLightbox = false;
       });
     });
 
@@ -240,6 +250,9 @@ class _RxFilesPage extends State<RxFilesPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (selectedAsset == null) {
+      _showLightbox = false;
+    }
     final theme = Theme.of(context);
     print('RxFilesPage.build: collections.length = ${collections.length}, collection = $collection');
     if (collections.isEmpty) {
@@ -249,236 +262,279 @@ class _RxFilesPage extends State<RxFilesPage> {
     if (collection == null) {
       return Container();
     }
-    //parse path into a breadcrumb
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        centerTitle: false,
-        title: getBreadcrumb(theme, collection!, path ?? collection!.path),
-        bottom:
-            (_isLoadingMore || _isServiceLoading || isScanning)
-                ? PreferredSize(
-                  preferredSize: const Size.fromHeight(2.0),
-                  child: LinearProgressIndicator(
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: (FocusNode node, KeyEvent event) {
+          if (event is KeyDownEvent) {
+            if (event.logicalKey == LogicalKeyboardKey.space) {
+              if (selectedAsset != null && !_isTextInputFocused()) {
+                setState(() {
+                  _showLightbox = !_showLightbox;
+                });
+                return KeyEventResult.handled;
+              }
+            } else if (event.logicalKey == LogicalKeyboardKey.escape) {
+              if (_showLightbox) {
+                setState(() {
+                  _showLightbox = false;
+                });
+                return KeyEventResult.handled;
+              } else if (selectedAsset != null) {
+                setState(() {
+                  selectedAsset = null;
+                });
+                return KeyEventResult.handled;
+              }
+            }
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Stack(
+          children: [
+            // ─── Main Content (Column: header bar + body row) ──
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_isLoadingMore || _isServiceLoading || isScanning)
+                  LinearProgressIndicator(
                     minHeight: 2,
                     backgroundColor: Colors.transparent,
                     valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
                   ),
-                )
-                : null,
-        actions: <Widget>[
-          IconButton(
-            icon: Icon(Icons.add, color: theme.colorScheme.onSurface, weight: 200),
-            tooltip: 'Upload file',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('todo: add file to current folder'),
-                ),
-              );
-            },
-          ),
-          IconButton(
-            // TODO: disable is no files are checked
-            icon: Icon(Icons.refresh, color: theme.colorScheme.onSurface, weight: 100),
-            tooltip: 'Refresh',
-            onPressed: () async {
-              if (collection != null) {
-                logger.s("Refreshing folder $path");
-
-                // Get absolute path for scanning
-                final absPath = FilePathResolver.absoluteFromPath(
-                  path ?? '',
-                  collection!,
-                );
-
-                // Start a scan for this specific folder (non-recursive)
-                final mgr = ScannerManager.getInstance();
-                final scanner = await mgr.getScannerAsync(collection!);
-                await scanner.start(collection!, absPath, false, true);
-
-                // Also refresh the UI from the database
-                _filesAndFoldersService!.invoke(
-                  GetFileAndFoldersServiceCommand(collection!, path ?? ''),
-                );
-              }
-            },
-          ),
-          VerticalDivider(
-            color: theme.colorScheme.outlineVariant,
-            thickness: 1,
-            indent: 10,
-            endIndent: 10,
-          ),
-          IconButton(
-            icon: Icon(Icons.download, color: theme.colorScheme.onSurface, weight: 200),
-            tooltip: 'Download File(s)',
-            onPressed:
-                selectedItems.isEmpty
-                    ? null
-                    : () => _downloadSelectedFiles(context),
-          ),
-          IconButton(
-            icon: Icon(Icons.delete, color: theme.colorScheme.error, weight: 300),
-            tooltip: 'Delete File(s)',
-            onPressed:
-                selectedItems.isEmpty
-                    ? null
-                    : () => _showBulkDeleteConfirmationDialog(context),
-          ),
-        ],
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: Row(
-              mainAxisSize: MainAxisSize.max,
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Stack(
-                    children: [
-                      if (filesAndFolders.isEmpty &&
-                          (_isLoadingMore || _isServiceLoading))
-                        const Center(child: CircularProgressIndicator())
-                      else if (filesAndFolders.isEmpty && isScanning)
-                        _buildScanningPlaceholder()
-                      else
-                        NotificationListener<FiledNotification>(
-                          child: FileTable(
-                            data: filesAndFolders,
-                            collection: collection,
-                            scrollController: _scrollController,
-                          ),
-                          onNotification: (FiledNotification n) {
-                            if (n is PathChangedNotification) {
-                              if (n.asset.path != path) {
-                                //make sure path changed before triggering reload
-                                setState(() {
-                                  path = n.asset.path;
-                                  // Push this folder onto the breadcrumb trail
-                                  _breadcrumbTrail = [
-                                    ..._breadcrumbTrail,
-                                    _BreadcrumbEntry(
-                                      name: n.asset.name,
-                                      path: n.asset.path,
-                                    ),
-                                  ];
-                                  selectedItems =
-                                      []; // reset selection on path change
-                                  selectedAsset =
-                                      null; // close drawer when drilling into folder
-                                });
-                                // Reset pagination before loading the new path.
-                                _fileOffset = 0;
-                                _hasMoreFiles = true;
-                                _filesAndFoldersService!.invoke(
-                                  GetFileAndFoldersServiceCommand(
-                                    collection!,
-                                    n.asset.path,
-                                  ),
-                                );
-                                return true;
-                              }
-                            }
-                            if (n is SortChangedNotification) {
-                              sortColumn = n.sortColumn;
-                              sortAsc = n.sortAsc;
-                              setState(() {
-                                filesAndFolders = _mergeAndSortRowData(
-                                  filesAndFolders,
-                                  sortColumn,
-                                  sortAsc,
-                                );
-                              });
-                              return true;
-                            }
-                            if (n is FileDeletedNotification) {
-                              _filesAndFoldersService!.invoke(
-                                GetFileAndFoldersServiceCommand(
-                                  collection!,
-                                  path ?? '',
-                                  refreshOnly: true,
-                                ),
-                              );
-                              return true;
-                            }
-                            if (n is SelectionChangedNotification) {
-                              setState(() {
-                                selectedItems = n.selectedItems;
-                              });
-                              return true;
-                            }
-                            if (n is FileSelectedNotification) {
-                              setState(() {
-                                selectedAsset = n.asset;
-                              });
-                              return true;
-                            }
-                            return false;
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Container(
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainer,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+                        width: 1,
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: getBreadcrumb(theme, collection!, path ?? collection!.path),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.add_box_outlined, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                          tooltip: 'Upload file',
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('todo: add file to current folder'),
+                              ),
+                            );
                           },
                         ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: Icon(Icons.refresh, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                          tooltip: 'Refresh',
+                          onPressed: () async {
+                            if (collection != null) {
+                              logger.s("Refreshing folder $path");
+                              final absPath = FilePathResolver.absoluteFromPath(
+                                path ?? '',
+                                collection!,
+                              );
+                              final mgr = ScannerManager.getInstance();
+                              final scanner = await mgr.getScannerAsync(collection!);
+                              await scanner.start(collection!, absPath, false, true);
+                              _filesAndFoldersService!.invoke(
+                                GetFileAndFoldersServiceCommand(collection!, path ?? ''),
+                              );
+                            }
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          height: 20,
+                          width: 1,
+                          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.download_outlined, size: 20),
+                          color: theme.colorScheme.onSurfaceVariant,
+                          disabledColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                          tooltip: 'Download File(s)',
+                          onPressed: selectedItems.isEmpty
+                              ? null
+                              : () => _downloadSelectedFiles(context),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          color: theme.colorScheme.error,
+                          disabledColor: theme.colorScheme.error.withValues(alpha: 0.3),
+                          tooltip: 'Delete File(s)',
+                          onPressed: selectedItems.isEmpty
+                              ? null
+                              : () => _showBulkDeleteConfirmationDialog(context),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // ─── Body Row: table + optional details panel ──
+                Expanded(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // File table fills all remaining horizontal space
+                      Expanded(child: _buildFileTableArea()),
+                      // Details panel animates in alongside the table
+                      _buildDetailsPanel(theme),
                     ],
                   ),
                 ),
-                if (selectedAsset != null) ...[
-                  // ─── Drag handle ───────────────────────────
-                  MouseRegion(
-                    cursor: SystemMouseCursors.resizeColumn,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onHorizontalDragUpdate: (details) {
-                        setState(() {
-                          _drawerWidth = (_drawerWidth - details.delta.dx)
-                              .clamp(200.0, 700.0);
-                        });
-                      },
-                      child: Container(
-                        width: 6,
-                        color: Colors.transparent,
-                        child: Center(
-                          child: Container(
-                            width: 2,
-                            color: Colors.grey.shade300,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  // ─── Drawer ────────────────────────────────
-                  SizedBox(
-                    width: _drawerWidth,
-                    child: FileDetailsDrawer(
-                      asset: selectedAsset!,
-                      collection: collection!,
-                      width: _drawerWidth,
-                      onClose: () => setState(() => selectedAsset = null),
-                      onExpand:
-                          () => setState(() {
-                            _drawerWidth =
-                                _drawerWidth >= 700.0 ? 300.0 : 700.0;
-                          }),
-                    ),
-                  ),
-                ],
               ],
             ),
-          ),
-        ],
+            // ─── Lightbox fullscreen overlay (on top of everything) ──
+            _buildLightboxOverlay(theme),
+          ],
+        ),
       ),
     );
   }
 
+  /// Builds the file table area with loading/scanning/empty states.
+  Widget _buildFileTableArea() {
+    if (filesAndFolders.isEmpty && (_isLoadingMore || _isServiceLoading)) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (filesAndFolders.isEmpty && isScanning) {
+      return _buildScanningPlaceholder();
+    }
+    return NotificationListener<FiledNotification>(
+      onNotification: (FiledNotification n) {
+        if (n is PathChangedNotification) {
+          if (n.asset.path != path) {
+            setState(() {
+              path = n.asset.path;
+              _breadcrumbTrail = [
+                ..._breadcrumbTrail,
+                _BreadcrumbEntry(name: n.asset.name, path: n.asset.path),
+              ];
+              selectedItems = [];
+              selectedAsset = null;
+              _showLightbox = false;
+            });
+            _fileOffset = 0;
+            _hasMoreFiles = true;
+            _filesAndFoldersService!.invoke(
+              GetFileAndFoldersServiceCommand(collection!, n.asset.path),
+            );
+            return true;
+          }
+        }
+        if (n is SortChangedNotification) {
+          sortColumn = n.sortColumn;
+          sortAsc = n.sortAsc;
+          setState(() {
+            filesAndFolders =
+                _mergeAndSortRowData(filesAndFolders, sortColumn, sortAsc);
+          });
+          return true;
+        }
+        if (n is FileDeletedNotification) {
+          _filesAndFoldersService!.invoke(
+            GetFileAndFoldersServiceCommand(
+              collection!,
+              path ?? '',
+              refreshOnly: true,
+            ),
+          );
+          return true;
+        }
+        if (n is SelectionChangedNotification) {
+          setState(() => selectedItems = n.selectedItems);
+          return true;
+        }
+        if (n is FileSelectedNotification) {
+          setState(() {
+            selectedAsset = n.asset;
+            _lastSelectedAsset = n.asset;
+            _showLightbox = false;
+          });
+          return true;
+        }
+        return false;
+      },
+      child: FileTable(
+        data: filesAndFolders,
+        collection: collection,
+        scrollController: _scrollController,
+      ),
+    );
+  }
+
+  /// Builds the inline file-details card that sits to the right of the table.
+  /// Animates in/out smoothly without overlaying the table.
+  Widget _buildDetailsPanel(ThemeData theme) {
+    final asset = selectedAsset ?? _lastSelectedAsset;
+    final isVisible = selectedAsset != null;
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      alignment: Alignment.topRight,
+      child: isVisible
+          ? Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, top: 0, bottom: 0),
+              child: SizedBox(
+                width: 300,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainer,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: theme.colorScheme.outlineVariant
+                          .withValues(alpha: 0.2),
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 16,
+                        spreadRadius: 0,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: FileDetailsDrawer(
+                    asset: asset!,
+                    collection: collection!,
+                    width: 300,
+                    onClose: () => setState(() {
+                      selectedAsset = null;
+                      _showLightbox = false;
+                    }),
+                  ),
+                ),
+              ),
+            )
+          : const SizedBox.shrink(),
+    );
+  }
+
   BreadCrumb getBreadcrumb(ThemeData theme, Collection collection, String path) {
+    final isCollectionActive = _breadcrumbTrail.isEmpty;
     return BreadCrumb(
       items: <BreadCrumbItem>[
         BreadCrumbItem(
-          content: Icon(Icons.home, color: theme.colorScheme.onSurface),
+          content: Icon(
+            Icons.home_outlined,
+            color: theme.colorScheme.onSurfaceVariant,
+            size: 20,
+          ),
           onTap: () {
             setState(() {
               this.path = '';
@@ -494,8 +550,8 @@ class _RxFilesPage extends State<RxFilesPage> {
           content: Text(
             collection.name,
             style: TextStyle(
-              color: theme.colorScheme.onSurface,
-              fontWeight: FontWeight.bold,
+              color: isCollectionActive ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant,
+              fontWeight: isCollectionActive ? FontWeight.bold : FontWeight.normal,
               fontSize: 14,
             ),
           ),
@@ -514,11 +570,13 @@ class _RxFilesPage extends State<RxFilesPage> {
         ..._breadcrumbTrail.asMap().entries.map((entry) {
           final index = entry.key;
           final crumb = entry.value;
+          final isLast = index == _breadcrumbTrail.length - 1;
           return BreadCrumbItem(
             content: Text(
               crumb.name,
               style: TextStyle(
-                color: theme.colorScheme.onSurfaceVariant,
+                color: isLast ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant,
+                fontWeight: isLast ? FontWeight.bold : FontWeight.normal,
                 fontSize: 14,
               ),
             ),
@@ -536,7 +594,11 @@ class _RxFilesPage extends State<RxFilesPage> {
           );
         }),
       ],
-      divider: Icon(Icons.chevron_right, color: theme.colorScheme.onSurfaceVariant),
+      divider: Icon(
+        Icons.chevron_right,
+        color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+        size: 16,
+      ),
       overflow: const WrapOverflow(
         keepLastDivider: false,
         direction: Axis.horizontal,
@@ -742,6 +804,261 @@ class _RxFilesPage extends State<RxFilesPage> {
           ),
         ],
       ),
+    );
+  }
+
+  bool _isTextInputFocused() {
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    if (primaryFocus == null) return false;
+    final context = primaryFocus.context;
+    if (context == null) return false;
+
+    bool isInput = false;
+    context.visitAncestorElements((element) {
+      if (element.widget is EditableText) {
+        isInput = true;
+        return false;
+      }
+      return true;
+    });
+    return isInput || context.widget is EditableText;
+  }
+
+  bool _isImage(File file) {
+    if (file.contentType.startsWith('image/')) return true;
+    final ext = p.extension(file.name).toLowerCase();
+    return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.psd']
+        .contains(ext);
+  }
+
+  bool _isPdf(File file) {
+    if (file.contentType == 'application/pdf' || file.contentType == 'application/x-pdf') return true;
+    return p.extension(file.name).toLowerCase() == '.pdf';
+  }
+
+  bool _isText(File file) {
+    final ext = p.extension(file.name).toLowerCase();
+    const textExts = [
+      '.txt', '.html', '.xml', '.xsl', '.xslt',
+      '.md', '.markdown', '.json', '.yaml', '.yml',
+      '.dart', '.py', '.js', '.css',
+    ];
+    return textExts.contains(ext) || file.contentType.startsWith('text/');
+  }
+
+  String _resolvedPath(File file) => FilePathResolver.absolute(file, collection!);
+
+  Future<List<int>?> _getGDriveFileBytes(File file) async {
+    try {
+      final token = await GoogleDriveAuthService.getValidAccessToken(collection!);
+
+      Uri uri;
+      if (file.path.startsWith('gdrive://')) {
+        final fileId = file.path.replaceFirst('gdrive://', '');
+        uri = Uri.parse(
+          'https://www.googleapis.com/drive/v3/files/$fileId?alt=media',
+        );
+      } else if (file.downloadUrl != null) {
+        uri = Uri.parse(file.downloadUrl!);
+        final queryParams = Map<String, String>.from(uri.queryParameters);
+        queryParams.remove('authuser');
+        uri = uri.replace(queryParameters: queryParams);
+      } else {
+        return null;
+      }
+
+      final response = await http.get(
+        uri,
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (response.statusCode == 200) {
+        return response.bodyBytes;
+      }
+    } catch (e) {
+      debugPrint('Error downloading GDrive file for preview: $e');
+    }
+    return null;
+  }
+
+  Future<String> _loadTextContent(File file) async {
+    try {
+      if (file.path.startsWith('gdrive://')) {
+        final bytes = await _getGDriveFileBytes(file);
+        if (bytes != null) {
+          return utf8.decode(bytes);
+        }
+      } else {
+        final ioFile = io.File(_resolvedPath(file));
+        if (await ioFile.exists()) {
+          return await ioFile.readAsString();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading lightbox text preview: $e');
+    }
+    return 'Could not load file content.';
+  }
+
+  Widget _buildLightboxOverlay(ThemeData theme) {
+    if (!_showLightbox || _lastSelectedAsset == null) {
+      return const SizedBox.shrink();
+    }
+
+    final asset = _lastSelectedAsset!;
+    final ext = p.extension(asset.name).toLowerCase();
+    
+    Widget content;
+    if (asset is File) {
+      if (_isPdf(asset)) {
+        content = PdfPreviewWidget(
+          filePath: asset.path.startsWith('gdrive://')
+              ? asset.path
+              : _resolvedPath(asset),
+          previewHeight: double.infinity,
+        );
+      } else if (ext == '.stl') {
+        content = StlPreviewWidget(
+          file: asset,
+          previewHeight: double.infinity,
+          resolvedPath: _resolvedPath(asset),
+          onDownloadGDrive: asset.path.startsWith('gdrive://')
+              ? () => _getGDriveFileBytes(asset)
+              : null,
+        );
+      } else if (asset.contentType.startsWith('video/') ||
+          ['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm'].contains(ext)) {
+        content = VideoFilePreview(
+          path: _resolvedPath(asset),
+          height: double.infinity,
+          isGDrive: asset.path.startsWith('gdrive://'),
+          onDownloadGDrive: () => _getGDriveFileBytes(asset),
+        );
+      } else if (_isImage(asset) || asset.path.startsWith('gdrive://')) {
+        content = ImagePreviewWidget(
+          file: asset,
+          resolvedPath: _resolvedPath(asset),
+        );
+      } else if (_isText(asset)) {
+        content = Container(
+          color: Colors.grey.shade900,
+          padding: const EdgeInsets.all(24),
+          child: SingleChildScrollView(
+            child: FutureBuilder<String>(
+              future: _loadTextContent(asset),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError || !snapshot.hasData) {
+                  return const Text('Error loading preview', style: TextStyle(color: Colors.white));
+                }
+                if (ext == '.md' || ext == '.markdown') {
+                  return MarkdownBody(
+                    data: snapshot.data!,
+                    styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+                      p: const TextStyle(color: Colors.white70),
+                      h1: const TextStyle(color: Colors.white),
+                      h2: const TextStyle(color: Colors.white),
+                      code: const TextStyle(backgroundColor: Colors.black38, color: Colors.amberAccent),
+                    ),
+                  );
+                }
+                return Text(
+                  snapshot.data!,
+                  style: const TextStyle(fontFamily: 'Courier', fontSize: 13, color: Colors.white70),
+                );
+              },
+            ),
+          ),
+        );
+      } else {
+        content = Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.insert_drive_file_outlined, size: 80, color: Colors.white54),
+            const SizedBox(height: 16),
+            Text(
+              asset.name,
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Preview not supported for this file type in Lightroom.',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+          ],
+        );
+      }
+    } else {
+      content = Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.folder_outlined, size: 80, color: Colors.amber),
+          const SizedBox(height: 16),
+          Text(
+            asset.name,
+            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+        ],
+      );
+    }
+
+    return Stack(
+      children: [
+        // Blur & Black Dim Backdrop
+        GestureDetector(
+          onTap: () => setState(() => _showLightbox = false),
+          child: ClipRect(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.85),
+                width: double.infinity,
+                height: double.infinity,
+              ),
+            ),
+          ),
+        ),
+        // Content Area
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.all(48.0),
+            child: Container(
+              constraints: const BoxConstraints(
+                maxWidth: 1200,
+                maxHeight: 900,
+              ),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                color: Colors.transparent,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: InteractiveViewer(
+                  maxScale: 4.0,
+                  child: content,
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Close Button (Top-Right)
+        Positioned(
+          top: 24,
+          right: 24,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.5),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white, size: 24),
+              tooltip: 'Close Preview (Esc)',
+              onPressed: () => setState(() => _showLightbox = false),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

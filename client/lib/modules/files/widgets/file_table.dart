@@ -15,6 +15,7 @@ import 'package:mydatatools/modules/files/notifications/path_changed_notificatio
 import 'package:mydatatools/modules/files/notifications/sort_changed_notification.dart';
 import 'package:flutter/material.dart';
 import 'package:moment_dart/moment_dart.dart';
+import 'package:path/path.dart' as p;
 
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
@@ -42,6 +43,13 @@ class _FileTable extends State<FileTable> {
   bool sortAsc = true;
   List<String> selectedRows = [];
 
+  // ── Responsive breakpoints ─────────────────────────────────────────────
+  // Columns are hidden in order: type → size → date → individual actions.
+  static const double _kHideType = 525;
+  static const double _kHideSize = 415;
+  static const double _kHideDate = 305;
+  static const double _kMenuActions = 280;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -50,30 +58,74 @@ class _FileTable extends State<FileTable> {
       builder: (context, constraints) {
         final totalWidth = constraints.maxWidth;
 
-        // Define fixed widths for other columns + spacers
+        // Visibility flags derived from available width
+        final showType = totalWidth >= _kHideType;
+        final showSize = totalWidth >= _kHideSize;
+        final showDate = totalWidth >= _kHideDate;
+        final useMenuActions = totalWidth < _kMenuActions;
+
+        // Fixed column widths (only count visible ones)
         const checkboxWidth = 48.0;
         const typeWidth = 80.0;
         const sizeWidth = 80.0;
-        const dateWidth = 140.0;
-        const actionsWidth = 150.0;
+        const dateWidth = 120.0;
+        const actionsWidth = 130.0;
+        const menuWidth = 48.0;
         const spacing = 16.0;
-        const margin = 24.0; // 12 on each side
+        const margin = 24.0;
 
-        // Total width occupied by other columns and spacing
-        final fixedWidths =
-            checkboxWidth +
-            typeWidth +
-            sizeWidth +
-            dateWidth +
-            actionsWidth +
-            (4 * spacing) +
-            margin;
+        // Number of spacing gaps = number of visible non-name columns
+        int visibleExtra = 0;
+        double fixedWidths = checkboxWidth + margin;
+        if (showType) {
+          fixedWidths += typeWidth;
+          visibleExtra++;
+        }
+        if (showSize) {
+          fixedWidths += sizeWidth;
+          visibleExtra++;
+        }
+        if (showDate) {
+          fixedWidths += dateWidth;
+          visibleExtra++;
+        }
+        fixedWidths += useMenuActions ? menuWidth : actionsWidth;
+        visibleExtra++;
+        fixedWidths += visibleExtra * spacing;
 
-        // Remaining space for Name column
-        final nameWidth = max(200.0, totalWidth - fixedWidths);
+        final nameWidth = max(160.0, totalWidth - fixedWidths);
 
-        List<DataColumn> columns = getColumns(context);
-        List<DataRow> rows = getRows(context, widget.data, nameWidth);
+        // Keep sort index in range when columns disappear
+        final maxSortIndex =
+            1 + (showType ? 1 : 0) + (showSize ? 1 : 0) + (showDate ? 1 : 0);
+        if (sortColumnIndex > maxSortIndex) {
+          sortColumnIndex = 0;
+        }
+
+        final columns = getColumns(
+          context,
+          nameWidth: nameWidth,
+          typeWidth: typeWidth,
+          sizeWidth: sizeWidth,
+          dateWidth: dateWidth,
+          actionsWidth: useMenuActions ? menuWidth : actionsWidth,
+          showType: showType,
+          showSize: showSize,
+          showDate: showDate,
+        );
+        final rows = getRows(
+          context,
+          widget.data,
+          nameWidth: nameWidth,
+          typeWidth: typeWidth,
+          sizeWidth: sizeWidth,
+          dateWidth: dateWidth,
+          actionsWidth: useMenuActions ? menuWidth : actionsWidth,
+          showType: showType,
+          showSize: showSize,
+          showDate: showDate,
+          useMenuActions: useMenuActions,
+        );
 
         return Container(
           constraints: const BoxConstraints.expand(),
@@ -112,7 +164,9 @@ class _FileTable extends State<FileTable> {
               headingTextStyle: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.bold,
                 fontSize: 12,
-                color: theme.colorScheme.onSurfaceVariant.withOpacity(0.8),
+                color: theme.colorScheme.onSurfaceVariant.withValues(
+                  alpha: 0.8,
+                ),
                 letterSpacing: 1.0,
               ),
             ),
@@ -122,303 +176,420 @@ class _FileTable extends State<FileTable> {
     );
   }
 
-  List<DataColumn> getColumns(BuildContext context) {
-    return <DataColumn>[
-      DataColumn(
-        label: const Text('NAME'),
-        onSort: (columnIndex, sortAscending) {
-          sortColumnIndex = columnIndex;
-          sortColumn = 'name';
-          sortAsc = sortAscending;
-          SortChangedNotification(sortColumn, sortAscending).dispatch(context);
-        },
+  List<DataColumn> getColumns(
+    BuildContext context, {
+    required double nameWidth,
+    required double typeWidth,
+    required double sizeWidth,
+    required double dateWidth,
+    required double actionsWidth,
+    required bool showType,
+    required bool showSize,
+    required bool showDate,
+  }) {
+    DataColumn nameCol = DataColumn(
+      label: SizedBox(
+        width: nameWidth,
+        child: const Align(
+          alignment: Alignment.centerLeft,
+          child: Text('NAME'),
+        ),
       ),
-      DataColumn(
+      onSort: (idx, asc) {
+        sortColumnIndex = idx;
+        sortColumn = 'name';
+        sortAsc = asc;
+        SortChangedNotification(sortColumn, asc).dispatch(context);
+      },
+    );
+    DataColumn? typeCol;
+    if (showType) {
+      typeCol = DataColumn(
         numeric: true,
-        label: const Text('TYPE'),
-        onSort: (columnIndex, sortAscending) {
-          sortColumnIndex = columnIndex;
+        label: SizedBox(
+          width: typeWidth,
+          child: const Align(
+            alignment: Alignment.centerRight,
+            child: Text('TYPE'),
+          ),
+        ),
+        onSort: (i, asc) {
+          sortColumnIndex = i;
           sortColumn = 'contentType';
-          sortAsc = sortAscending;
-          SortChangedNotification(sortColumn, sortAscending).dispatch(context);
+          sortAsc = asc;
+          SortChangedNotification(sortColumn, asc).dispatch(context);
         },
-      ),
-      DataColumn(
+      );
+    }
+
+    DataColumn? sizeCol;
+    if (showSize) {
+      sizeCol = DataColumn(
         numeric: true,
-        label: const Text('SIZE'),
-        onSort: (columnIndex, sortAscending) {
-          sortColumnIndex = columnIndex;
+        label: SizedBox(
+          width: sizeWidth,
+          child: const Align(
+            alignment: Alignment.centerRight,
+            child: Text('SIZE'),
+          ),
+        ),
+        onSort: (i, asc) {
+          sortColumnIndex = i;
           sortColumn = 'size';
-          sortAsc = sortAscending;
-          SortChangedNotification(sortColumn, sortAscending).dispatch(context);
+          sortAsc = asc;
+          SortChangedNotification(sortColumn, asc).dispatch(context);
         },
-      ),
-      DataColumn(
-        label: const Text(
-          'DATE\nCREATED',
-          maxLines: 2,
-          softWrap: true,
+      );
+    }
+
+    DataColumn? dateCol;
+    if (showDate) {
+      dateCol = DataColumn(
+        label: SizedBox(
+          width: dateWidth,
+          child: const Align(
+            alignment: Alignment.centerLeft,
+            child: Text('DATE\nCREATED', maxLines: 2, softWrap: true),
+          ),
         ),
-        onSort: (columnIndex, sortAscending) {
-          sortColumnIndex = columnIndex;
+        onSort: (i, asc) {
+          sortColumnIndex = i;
           sortColumn = 'date_created';
-          sortAsc = sortAscending;
-          SortChangedNotification(sortColumn, sortAscending).dispatch(context);
+          sortAsc = asc;
+          SortChangedNotification(sortColumn, asc).dispatch(context);
         },
+      );
+    }
+
+    final actionsCol = DataColumn(
+      label: SizedBox(
+        width: actionsWidth,
+        child: const Center(child: Text('')),
       ),
-      const DataColumn(
-        label: Center(
-          child: Text('ACTIONS'),
-        ),
-      ),
+    );
+
+    return [
+      nameCol,
+      if (typeCol != null) typeCol,
+      if (sizeCol != null) sizeCol,
+      if (dateCol != null) dateCol,
+      actionsCol,
     ];
   }
 
   List<DataRow> getRows(
     BuildContext context,
-    List<FileAsset> assets,
-    double nameWidth,
-  ) {
+    List<FileAsset> assets, {
+    required double nameWidth,
+    required double typeWidth,
+    required double sizeWidth,
+    required double dateWidth,
+    required double actionsWidth,
+    required bool showType,
+    required bool showSize,
+    required bool showDate,
+    required bool useMenuActions,
+  }) {
     final theme = Theme.of(context);
-    List<DataRow> rows = [];
+    final List<DataRow> rows = [];
 
-    //Create a row for every item returns from DB
     for (var f in assets) {
-      if (f is File) {
-        //File Cells
-        var moment = Moment.fromMillisecondsSinceEpoch(
-          f.dateCreated.millisecondsSinceEpoch,
-          isUtc: true,
-        );
-        bool isImage = f.contentType == FilesConstants.mimeTypeImage;
-
-        rows.add(
-          DataRow(
-            selected: selectedRows.contains(f.path),
-            cells: [
-              DataCell(
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: nameWidth),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    children: [
-                      (f.thumbnail == null && !isImage)
-                          ? SizedBox(
-                              width: 50,
-                              height: 32,
-                              child: Center(
-                                child: Icon(
-                                  getIconForMimeType(f.contentType),
-                                  color: _getIconColor(f.contentType),
-                                ),
-                              ),
-                            )
-                          : getImageComponent(f),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          f.name,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                onTap: () {
-                  FileSelectedNotification(f).dispatch(context);
-                },
-              ),
-              DataCell(
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 80),
-                  child: Text(
-                    _formatType(f.contentType, f.name),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-              DataCell(
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 80),
-                  child: Text(
-                    _formatBytes(f.size),
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
-                  ),
-                ),
-              ),
-              DataCell(
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 140),
-                  child: Tooltip(
-                    message:
-                        '${f.dateCreated.toLocal().toString()} and ${assets.length - 1} more',
-                    child: Text(
-                      moment.fromNowPrecise(
-                        form: Abbreviation.full,
-                        includeWeeks: true,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                    ),
-                  ),
-                ),
-                showEditIcon: false,
-              ),
-              DataCell(
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 150),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: Icon(
-                            Icons.info_outline,
-                            size: 20,
-                            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.8),
-                          ),
-                          tooltip: 'Details',
-                          onPressed: () {
-                            FileSelectedNotification(f).dispatch(context);
-                          },
-                        ),
-                      ),
-                      Flexible(
-                        child: IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: Icon(
-                            Icons.open_in_new,
-                            size: 20,
-                            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.8),
-                          ),
-                          tooltip: 'Open',
-                          onPressed: () async {
-                            if (f.path.startsWith('gdrive://')) {
-                              final id = f.path.substring(9);
-                              final url =
-                                  'https://drive.google.com/file/d/$id/view';
-                              await launchUrl(Uri.parse(url));
-                            } else {
-                              await OpenFilex.open(f.path);
-                            }
-                          },
-                        ),
-                      ),
-                      Flexible(
-                        child: IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: Icon(
-                            Icons.delete,
-                            size: 20,
-                            color: theme.colorScheme.error.withOpacity(0.8),
-                          ),
-                          tooltip: 'Delete',
-                          onPressed:
-                              () => _showDeleteConfirmationDialog(context, f),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-            onSelectChanged: (bool? e) {
-              setState(() {
-                if (e != null && e) {
-                  selectedRows.add(f.path);
-                } else {
-                  selectedRows.remove(f.path);
-                }
-              });
-              _notifySelectionChanged(context);
-            },
-          ),
-        );
-      } else {
-        //Folder Row
-        var moment = Moment.fromMillisecondsSinceEpoch(
-          f.dateCreated.millisecondsSinceEpoch,
-          isUtc: true,
-        );
-        rows.add(
-          DataRow(
-            selected: selectedRows.contains(f.path),
-            cells: [
-              DataCell(
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: nameWidth),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    children: [
-                      const SizedBox(
+      final fileAsset = f is File ? f : null;
+      final moment = Moment.fromMillisecondsSinceEpoch(
+        f.dateCreated.millisecondsSinceEpoch,
+        isUtc: true,
+      );
+      final nameCell = DataCell(
+        SizedBox(
+          width: nameWidth,
+          child: Row(
+            children: [
+              fileAsset != null
+                  ? (fileAsset.thumbnail == null && !_isImageFile(fileAsset))
+                      ? SizedBox(
                         width: 50,
                         height: 32,
                         child: Center(
-                          child: Icon(Icons.folder, color: Colors.amber),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          f.name,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onSurface,
+                          child: Icon(
+                            getIconForMimeType(fileAsset.contentType),
+                            color: _getIconColor(fileAsset.contentType),
                           ),
                         ),
-                      ),
-                    ],
+                      )
+                      : getImageComponent(fileAsset)
+                  : const SizedBox(
+                    width: 50,
+                    height: 32,
+                    child: Center(
+                      child: Icon(Icons.folder, color: Colors.amber),
+                    ),
                   ),
-                ),
-                onTap: () {
-                  PathChangedNotification(
-                    f,
-                    sortColumn,
-                    sortAsc,
-                  ).dispatch(context);
-                },
-              ),
-              DataCell(
-                Text(
-                  f.name.toLowerCase().contains('library') ? 'Library' : 'Folder',
-                ),
-              ),
-              const DataCell(Text('--')),
-              DataCell(
-                Text(
-                  moment.fromNowPrecise(
-                    form: Abbreviation.full,
-                    includeWeeks: true,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  f.name,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
               ),
-              const DataCell(SizedBox.shrink()),
             ],
-            onSelectChanged: (bool? e) {
-              setState(() {
-                if (e != null && e) {
-                  selectedRows.add(f.path);
-                } else {
-                  selectedRows.remove(f.path);
-                }
-              });
-              _notifySelectionChanged(context);
-            },
           ),
-        );
-      }
+        ),
+        onTap: () {
+          if (fileAsset != null) {
+            FileSelectedNotification(fileAsset).dispatch(context);
+          } else {
+            PathChangedNotification(f, sortColumn, sortAsc).dispatch(context);
+          }
+        },
+      );
+
+      // ── Type cell ─────────────────────────────────────────────
+      final typeCell = DataCell(
+        SizedBox(
+          width: typeWidth,
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              fileAsset != null
+                  ? _formatType(fileAsset.contentType, fileAsset.name)
+                  : f.name.toLowerCase().contains('library')
+                  ? 'Library'
+                  : 'Folder',
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      );
+
+      // ── Size cell ─────────────────────────────────────────────
+      final sizeCell = DataCell(
+        SizedBox(
+          width: sizeWidth,
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              fileAsset != null ? _formatBytes(fileAsset.size) : '--',
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
+        ),
+      );
+
+      // ── Date cell ─────────────────────────────────────────────
+      final dateCell = DataCell(
+        SizedBox(
+          width: dateWidth,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Tooltip(
+              message: f.dateCreated.toLocal().toString(),
+              child: Text(
+                moment.fromNowPrecise(
+                  form: Abbreviation.full,
+                  includeWeeks: true,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
+          ),
+        ),
+        showEditIcon: false,
+      );
+
+      // ── Actions cell — full row of icon buttons or popup menu ─
+      final actionsCell = DataCell(
+        SizedBox(
+          width: actionsWidth,
+          child: Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(
+              child:
+                  useMenuActions
+                      ? _buildMenuActions(context, f, theme)
+                      : _buildIconActions(context, f, theme),
+            ),
+          ),
+        ),
+      );
+
+      rows.add(
+        DataRow(
+          selected: selectedRows.contains(f.path),
+          cells: [
+            nameCell,
+            if (showType) typeCell,
+            if (showSize) sizeCell,
+            if (showDate) dateCell,
+            actionsCell,
+          ],
+          onSelectChanged: (bool? e) {
+            setState(() {
+              if (e != null && e) {
+                selectedRows.add(f.path);
+              } else {
+                selectedRows.remove(f.path);
+              }
+            });
+            _notifySelectionChanged(context);
+          },
+        ),
+      );
     }
     return rows;
+  }
+
+  /// Three icon buttons: details, open, delete.
+  Widget _buildIconActions(BuildContext context, FileAsset f, ThemeData theme) {
+    if (f is! File) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            icon: Icon(
+              Icons.info_outline,
+              size: 20,
+              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+            ),
+            tooltip: 'Details',
+            onPressed: () => FileSelectedNotification(f).dispatch(context),
+          ),
+        ),
+        Flexible(
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            icon: Icon(
+              Icons.open_in_new,
+              size: 20,
+              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+            ),
+            tooltip: 'Open',
+            onPressed: () async {
+              if (f.path.startsWith('gdrive://')) {
+                final id = f.path.substring(9);
+                await launchUrl(
+                  Uri.parse('https://drive.google.com/file/d/$id/view'),
+                );
+              } else {
+                await OpenFilex.open(f.path);
+              }
+            },
+          ),
+        ),
+        Flexible(
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            icon: Icon(
+              Icons.delete,
+              size: 20,
+              color: theme.colorScheme.error.withValues(alpha: 0.8),
+            ),
+            tooltip: 'Delete',
+            onPressed: () => _showDeleteConfirmationDialog(context, f),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Collapsed ⋯ popup menu used at very narrow widths.
+  Widget _buildMenuActions(BuildContext context, FileAsset f, ThemeData theme) {
+    return PopupMenuButton<String>(
+      padding: EdgeInsets.zero,
+      icon: Icon(
+        Icons.more_vert,
+        size: 20,
+        color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+      ),
+      tooltip: 'Actions',
+      onSelected: (value) async {
+        switch (value) {
+          case 'details':
+            FileSelectedNotification(f).dispatch(context);
+          case 'open':
+            if (f is File) {
+              if (f.path.startsWith('gdrive://')) {
+                final id = f.path.substring(9);
+                await launchUrl(
+                  Uri.parse('https://drive.google.com/file/d/$id/view'),
+                );
+              } else {
+                await OpenFilex.open(f.path);
+              }
+            }
+          case 'delete':
+            if (f is File) _showDeleteConfirmationDialog(context, f);
+        }
+      },
+      itemBuilder:
+          (context) => [
+            PopupMenuItem(
+              value: 'details',
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 16),
+                  const SizedBox(width: 8),
+                  const Text('Details'),
+                ],
+              ),
+            ),
+            if (f is File)
+              PopupMenuItem(
+                value: 'open',
+                child: Row(
+                  children: [
+                    const Icon(Icons.open_in_new, size: 16),
+                    const SizedBox(width: 8),
+                    const Text('Open'),
+                  ],
+                ),
+              ),
+            if (f is File)
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.delete,
+                      size: 16,
+                      color: theme.colorScheme.error,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Delete',
+                      style: TextStyle(color: theme.colorScheme.error),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+    );
+  }
+
+  bool _isImageFile(File file) {
+    if (file.contentType == FilesConstants.mimeTypeImage) return true;
+    if (file.contentType.startsWith('image/')) return true;
+    final ext = p.extension(file.name).toLowerCase();
+    return [
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.webp',
+      '.bmp',
+      '.tif',
+      '.psd',
+    ].contains(ext);
   }
 
   void _notifySelectionChanged(BuildContext context) {
@@ -478,7 +649,9 @@ class _FileTable extends State<FileTable> {
       }
 
       // 2. Delete from database
-      await FileDesktopRepository(DatabaseManager.instance.database!).delete(file);
+      await FileDesktopRepository(
+        DatabaseManager.instance.database!,
+      ).delete(file);
 
       // 3. Notify parent to refresh
       if (context.mounted) {
@@ -551,9 +724,13 @@ class _FileTable extends State<FileTable> {
   IconData? getIconForMimeType(String contentType) {
     if (contentType == 'application/pdf') {
       return Icons.picture_as_pdf;
-    } else if (contentType == 'text/csv' || contentType.contains('csv') || contentType.contains('spreadsheet')) {
+    } else if (contentType == 'text/csv' ||
+        contentType.contains('csv') ||
+        contentType.contains('spreadsheet')) {
       return Icons.table_chart;
-    } else if (contentType.contains('zip') || contentType.contains('archive') || contentType.contains('compressed')) {
+    } else if (contentType.contains('zip') ||
+        contentType.contains('archive') ||
+        contentType.contains('compressed')) {
       return Icons.folder_zip;
     } else if (contentType.startsWith('image/')) {
       return Icons.image;
@@ -564,9 +741,13 @@ class _FileTable extends State<FileTable> {
   Color _getIconColor(String contentType) {
     if (contentType == 'application/pdf') {
       return Colors.red.shade400;
-    } else if (contentType == 'text/csv' || contentType.contains('csv') || contentType.contains('spreadsheet')) {
+    } else if (contentType == 'text/csv' ||
+        contentType.contains('csv') ||
+        contentType.contains('spreadsheet')) {
       return Colors.green.shade400;
-    } else if (contentType.contains('zip') || contentType.contains('archive') || contentType.contains('compressed')) {
+    } else if (contentType.contains('zip') ||
+        contentType.contains('archive') ||
+        contentType.contains('compressed')) {
       return Colors.amber.shade400;
     }
     return Colors.grey.shade400;
@@ -577,7 +758,9 @@ class _FileTable extends State<FileTable> {
       return 'PDF Document';
     } else if (contentType == 'text/csv') {
       return 'CSV Spreadsheet';
-    } else if (contentType == 'application/zip' || contentType == 'application/x-zip-compressed' || name.endsWith('.zip')) {
+    } else if (contentType == 'application/zip' ||
+        contentType == 'application/x-zip-compressed' ||
+        name.endsWith('.zip')) {
       return 'ZIP Archive';
     } else if (contentType.startsWith('image/')) {
       return contentType;

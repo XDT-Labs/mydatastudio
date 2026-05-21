@@ -97,6 +97,7 @@ class GetFileAndFoldersService
       );
 
       final List<FileAsset> newItems = [...folders, ...files];
+      print('GetFileAndFoldersService.invoke: query returned ${folders.length} folders and ${files.length} files (total: ${newItems.length}) for path "${command.path}" in db "${db.path}"');
 
       if (command.offset == 0) {
         _currentItems = newItems;

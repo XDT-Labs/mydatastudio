@@ -145,7 +145,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       child: Container(
         height: _previewHeight,
         width: double.infinity,
-        color: background ?? Colors.grey.shade100,
+        color: background ?? Colors.transparent,
         child: child,
       ),
     );
@@ -153,12 +153,11 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final isImage = widget.asset is File && _isImage(widget.asset as File);
     final tabCount = isImage ? 3 : 1;
 
     return Container(
-      decoration: BoxDecoration(color: theme.colorScheme.surface),
+      decoration: const BoxDecoration(color: Colors.transparent),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -170,9 +169,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
               top: 4,
               bottom: 4,
             ),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHigh,
-            ),
+            decoration: const BoxDecoration(color: Colors.transparent),
             child: Row(
               children: [
                 const Icon(Icons.info_outline, size: 16),
