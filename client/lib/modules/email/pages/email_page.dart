@@ -424,27 +424,30 @@ class _EmailPage extends State<EmailPage> {
           : const Center(child: CircularProgressIndicator());
     }
 
-    return NotificationListener<Notification>(
-      onNotification: (n) {
-        if (n is EmailSortChangedNotification) {
-          sortColumn = n.sortColumn;
-          sortAsc = n.sortAsc;
-          _refreshEmails();
-          return true;
-        }
-        if (n is EmailSelectedNotification) {
-          logger.i("Email selected: ${n.email.subject}");
-          setState(() => selectedEmail = n.email);
-          return true;
-        }
-        return false;
-      },
-      child: EmailTable(
-        emails: emails,
-        scrollController: _scrollController,
-        sortColumn: sortColumn,
-        sortAsc: sortAsc,
-        onLoadMore: _loadMoreEmails,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: NotificationListener<Notification>(
+        onNotification: (n) {
+          if (n is EmailSortChangedNotification) {
+            sortColumn = n.sortColumn;
+            sortAsc = n.sortAsc;
+            _refreshEmails();
+            return true;
+          }
+          if (n is EmailSelectedNotification) {
+            logger.i("Email selected: ${n.email.subject}");
+            setState(() => selectedEmail = n.email);
+            return true;
+          }
+          return false;
+        },
+        child: EmailTable(
+          emails: emails,
+          scrollController: _scrollController,
+          sortColumn: sortColumn,
+          sortAsc: sortAsc,
+          onLoadMore: _loadMoreEmails,
+        ),
       ),
     );
   }

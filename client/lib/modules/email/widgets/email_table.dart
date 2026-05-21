@@ -91,7 +91,6 @@ class _EmailTable extends State<EmailTable> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Container(
       color: Colors.transparent,
       constraints: const BoxConstraints.expand(),
@@ -117,9 +116,7 @@ class _EmailTable extends State<EmailTable> {
                 dataRowMaxHeight: 40,
                 dataRowMinHeight: 40,
                 headingRowHeight: 40,
-                headingRowColor: WidgetStateProperty.all(
-                  theme.colorScheme.surfaceContainer,
-                ),
+                headingRowColor: WidgetStateProperty.all(Colors.transparent),
                 rows: getRows(context, widget.emails, constraints.maxWidth),
               ),
             ),

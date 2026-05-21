@@ -385,14 +385,17 @@ class _RxFilesPage extends State<RxFilesPage> {
                 ),
                 // ─── Body Row: table + optional details panel ──
                 Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // File table fills all remaining horizontal space
-                      Expanded(child: _buildFileTableArea()),
-                      // Details panel animates in alongside the table
-                      _buildDetailsPanel(theme),
-                    ],
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // File table fills all remaining horizontal space
+                        Expanded(child: _buildFileTableArea()),
+                        // Details panel animates in alongside the table
+                        _buildDetailsPanel(theme),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -488,7 +491,7 @@ class _RxFilesPage extends State<RxFilesPage> {
       alignment: Alignment.topRight,
       child: isVisible
           ? Padding(
-              padding: const EdgeInsets.only(left: 16, right: 16, top: 0, bottom: 0),
+              padding: const EdgeInsets.only(left: 16, right: 0, top: 0, bottom: 0),
               child: SizedBox(
                 width: 300,
                 child: Container(

@@ -1,5 +1,5 @@
 PODS:
-  - desktop_window (0.0.1):
+  - desktop_window (0.4.3):
     - FlutterMacOS
   - file_picker (0.0.1):
     - FlutterMacOS
@@ -87,7 +87,7 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/window_to_front/macos
 
 SPEC CHECKSUMS:
-  desktop_window: de6acd6053564bdccd9f4b9473d25bf4f2ad9bdf
+  desktop_window: 52be864a782cbdae77ad04ca4547bd62073ced4a
   file_picker: 7584aae6fa07a041af2b36a2655122d42f578c1a
   flutter_angle: 290cf0e9610f10ee5e5a77e0a1e43885aa02ae3b
   flutter_secure_storage_macos: 7f45e30f838cf2659862a4e4e3ee1c347c2b3b54
