@@ -9,7 +9,6 @@ import 'package:mydatatools/modules/email/notifications/email_sort_changed_notif
 import 'package:mydatatools/modules/email/pages/new_email_page.dart';
 import 'package:mydatatools/database_manager.dart';
 import 'package:mydatatools/modules/email/services/email_repository.dart';
-
 import 'package:mydatatools/modules/email/services/get_email_folders_service.dart';
 import 'package:mydatatools/modules/email/widgets/email_details.dart';
 import 'package:mydatatools/modules/email/widgets/email_table.dart';
@@ -18,6 +17,7 @@ import 'package:mydatatools/scanners/scanner_manager.dart';
 import 'package:mydatatools/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_breadcrumb/flutter_breadcrumb.dart';
+import 'package:moment_dart/moment_dart.dart';
 import 'package:rxdart/rxdart.dart';
 
 class EmailPage extends StatefulWidget {
@@ -52,7 +52,6 @@ class _EmailPage extends State<EmailPage> {
   List<Email> emails = [];
   String sortColumn = 'date';
   bool sortAsc = false;
-  String emailLayout = 'vertical';
 
   final ScrollController _scrollController = ScrollController();
   static const int _pageSize = 100;
@@ -60,9 +59,6 @@ class _EmailPage extends State<EmailPage> {
   bool _isLoadingMore = false;
   bool _hasMore = true;
   Email? selectedEmail;
-  double _drawerWidth = 600;
-  bool isSidebarExpanded = false;
-  bool isSearching = false;
   final TextEditingController searchController = TextEditingController();
   bool _needsFolderAutoSelect = false;
 
@@ -78,7 +74,6 @@ class _EmailPage extends State<EmailPage> {
       });
       if (emailCollections.isNotEmpty &&
           EmailPage.selectedCollection.value == null) {
-        //select default collection
         _needsFolderAutoSelect = true;
         EmailPage.selectedCollection.add(emailCollections.first);
       }
@@ -88,9 +83,9 @@ class _EmailPage extends State<EmailPage> {
       if (value != null && collection != value) {
         setState(() {
           collection = value;
-          // Reset folder when collection changes
           EmailPage.selectedFolder.add(null);
           selectedFolderName = null;
+          selectedEmail = null;
         });
         _refreshEmails();
         _listenToScannerStatus(value);
@@ -135,7 +130,6 @@ class _EmailPage extends State<EmailPage> {
               selectedFolderName = folder.name;
             });
 
-            // Automatically sync the folder after we have its name
             if (collection != null) {
               logger.s(
                 "Refreshing $selectedFolderName folder for ${collection!.name}",
@@ -149,9 +143,6 @@ class _EmailPage extends State<EmailPage> {
       }
     });
 
-    //get all email collections — deferred to post-frame so the first frame
-    // renders immediately without triggering a synchronous BehaviorSubject
-    // replay cascade (listen() → setState → invoke → setState chain).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _collectionService?.invoke(GetCollectionsServiceCommand("email"));
     });
@@ -172,7 +163,6 @@ class _EmailPage extends State<EmailPage> {
 
     _loadMoreEmails();
 
-    // Also trigger folder fetch to get names
     GetEmailFoldersService.instance.invoke(
       EmailFolderServiceCommand(collection!.id),
     );
@@ -184,7 +174,6 @@ class _EmailPage extends State<EmailPage> {
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.position.pixels;
 
-    // Check if we are ~70% through the list
     if (currentScroll >= (maxScroll * 0.7) && !_isLoadingMore && _hasMore) {
       _loadMoreEmails();
     }
@@ -198,14 +187,11 @@ class _EmailPage extends State<EmailPage> {
       return;
     }
 
-    // Set to false initially until we get the actual scanner status
     if (mounted) setState(() => isScanning = false);
 
-    // Robustly wait for the scanner to be registered
     final mgr = ScannerManager.getInstance();
     mgr.getScannerAsync(c).then((scanner) {
       if (!mounted) return;
-      // Ensure we are still interested in this same collection
       if (EmailPage.selectedCollection.value?.id != c.id) return;
 
       _scannerSub = scanner.isScanning.listen((scanning) {
@@ -265,218 +251,270 @@ class _EmailPage extends State<EmailPage> {
     if (collections.isEmpty) {
       return const NewEmailPage();
     }
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        centerTitle: false,
-        title:
-            isSearching
-                ? TextField(
-                  controller: searchController,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    hintText: 'Search emails...',
-                    border: InputBorder.none,
-                  ),
-                  onChanged: (value) {
-                    _refreshEmails();
-                  },
-                )
-                : getBreadcrumb(collection, selectedFolderName),
-        bottom:
-            (isScanning || _isLoadingMore)
-                ? const PreferredSize(
-                  preferredSize: Size.fromHeight(2.0),
-                  child: LinearProgressIndicator(
-                    minHeight: 2,
-                    backgroundColor: Colors.transparent,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                  ),
-                )
-                : null,
-        actions: <Widget>[
-          if (isSearching)
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.black),
-              onPressed: () {
-                setState(() {
-                  isSearching = false;
-                  searchController.clear();
-                });
-                _refreshEmails();
-              },
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.search, color: Colors.black),
-              tooltip: 'Search Emails',
-              onPressed: () {
-                setState(() {
-                  isSearching = true;
-                });
-              },
-            ),
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.black),
-            tooltip: 'Refresh Current Folder',
-            onPressed: () {
-              if (collection != null &&
-                  EmailPage.selectedFolder.value != null) {
-                final folderId = EmailPage.selectedFolder.value!;
-                logger.s(
-                  "Refreshing $selectedFolderName folder for ${collection!.name}",
-                );
 
-                ScannerManager.getInstance()
-                    .getScanner(collection!)
-                    ?.start(collection!, folderId, true, true);
-              }
-            },
-          ),
-          const VerticalDivider(
-            color: Colors.grey,
-            thickness: 1,
-            indent: 10,
-            endIndent: 10,
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete, color: Colors.black),
-            tooltip: 'Delete Selected Messages',
-            onPressed:
-                emails.any((e) => e.isSelected == true)
-                    ? () => _showBulkDeleteConfirmation(context)
-                    : null,
-          ),
-        ],
-      ),
-      body: Row(
+    if (collection == null) {
+      return Container();
+    }
+
+    final theme = Theme.of(context);
+    final bool showDetail = selectedEmail != null;
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: NotificationListener<Notification>(
-                    onNotification: (n) {
-                      if (n is EmailSortChangedNotification) {
-                        sortColumn = n.sortColumn;
-                        sortAsc = n.sortAsc;
-                        _refreshEmails();
-                        return true;
-                      }
-                      if (n is EmailSelectedNotification) {
-                        logger.i("Email selected: ${n.email.subject}");
-                        setState(() {
-                          if (selectedEmail == null) {
-                            // First open: Expand by default at 700px
-                            _drawerWidth = 700.0;
-                            isSidebarExpanded = true;
-                          }
-                          // Otherwise keep existing width/state
-                          selectedEmail = n.email;
-                        });
-                        return true;
-                      }
-                      return false;
-                    },
-                    child:
-                        emails.isEmpty && (isScanning || _isLoadingMore)
-                            ? (isScanning
-                                ? _buildScanningPlaceholder()
-                                : const Center(
-                                  child: CircularProgressIndicator(),
-                                ))
-                            : EmailTable(
-                              emails: emails,
-                              scrollController: _scrollController,
-                              sortColumn: sortColumn,
-                              sortAsc: sortAsc,
-                              onLoadMore: _loadMoreEmails,
-                            ),
+          if (isScanning || _isLoadingMore)
+            LinearProgressIndicator(
+              minHeight: 2,
+              backgroundColor: Colors.transparent,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                theme.colorScheme.primary,
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Container(
+              height: 56,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: 0.3,
                   ),
+                  width: 1,
                 ),
-              ],
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: showDetail
+                  ? _buildDetailHeader(theme)
+                  : _buildListHeader(theme),
             ),
           ),
-          if (selectedEmail != null) ...[
-            // Drag handle
-            MouseRegion(
-              cursor: SystemMouseCursors.resizeColumn,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onHorizontalDragUpdate: (details) {
-                  setState(() {
-                    _drawerWidth = (_drawerWidth - details.delta.dx).clamp(
-                      250.0,
-                      900.0,
-                    );
-                    // Update expansion state based on 500px threshold
-                    isSidebarExpanded = _drawerWidth > 500.0;
-                  });
-                },
-                child: Container(
-                  width: 10,
-                  color: Colors.transparent,
-                  child: Center(
-                    child: Container(width: 1, color: Colors.grey.shade300),
-                  ),
-                ),
-              ),
-            ),
-            SizedBox(
-              width: _drawerWidth,
-              child: EmailDetails(
-                email: selectedEmail!,
-                width: _drawerWidth,
-                isExpanded: isSidebarExpanded,
-                onClose:
-                    () => setState(() {
-                      selectedEmail = null;
-                      isSidebarExpanded = false;
-                    }),
-                onExpand: () {
-                  setState(() {
-                    // Match File module's 300px / 700px toggle exactly
-                    if (_drawerWidth >= 700.0) {
-                      _drawerWidth = 300.0;
-                      isSidebarExpanded = false;
-                    } else {
-                      _drawerWidth = 700.0;
-                      isSidebarExpanded = true;
-                    }
-                  });
-                },
-              ),
-            ),
-          ],
+          Expanded(
+            child: showDetail
+                ? _buildEmailDetailArea()
+                : _buildEmailListArea(),
+          ),
         ],
       ),
     );
   }
 
-  BreadCrumb getBreadcrumb(Collection? collection, String? folderName) {
+  Widget _buildListHeader(ThemeData theme) {
+    final hasSelected = emails.any((e) => e.isSelected == true);
+    return Row(
+      children: [
+        Expanded(child: _getBreadcrumb(theme)),
+        IconButton(
+          icon: Icon(
+            Icons.refresh,
+            color: theme.colorScheme.onSurfaceVariant,
+            size: 20,
+          ),
+          tooltip: 'Refresh Current Folder',
+          onPressed: () {
+            if (collection != null &&
+                EmailPage.selectedFolder.value != null) {
+              final folderId = EmailPage.selectedFolder.value!;
+              logger.s(
+                "Refreshing $selectedFolderName folder for ${collection!.name}",
+              );
+              ScannerManager.getInstance()
+                  .getScanner(collection!)
+                  ?.start(collection!, folderId, true, true);
+            }
+          },
+        ),
+        const SizedBox(width: 8),
+        Container(
+          height: 20,
+          width: 1,
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          icon: const Icon(Icons.delete_outline, size: 20),
+          color: theme.colorScheme.error,
+          disabledColor: theme.colorScheme.error.withValues(alpha: 0.3),
+          tooltip: 'Delete Selected Messages',
+          onPressed: hasSelected
+              ? () => _showBulkDeleteConfirmation(context)
+              : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDetailHeader(ThemeData theme) {
+    final email = selectedEmail!;
+    final from = email.from.split('<')[0].trim();
+
+    return Row(
+      children: [
+        IconButton(
+          icon: Icon(
+            Icons.arrow_back,
+            color: theme.colorScheme.onSurfaceVariant,
+            size: 20,
+          ),
+          tooltip: 'Back',
+          onPressed: () => setState(() => selectedEmail = null),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                from.isNotEmpty ? from : email.from,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  color: theme.colorScheme.onSurface,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                email.subject ?? '(no subject)',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+        Text(
+          _formatEmailDate(email.date),
+          style: TextStyle(
+            fontSize: 12,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          height: 20,
+          width: 1,
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          icon: const Icon(Icons.delete_outline, size: 20),
+          color: theme.colorScheme.error,
+          tooltip: 'Delete Message',
+          onPressed: () {
+            setState(() => selectedEmail = null);
+            _deleteSelectedEmails([email]);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmailListArea() {
+    if (emails.isEmpty && (isScanning || _isLoadingMore)) {
+      return isScanning
+          ? _buildScanningPlaceholder()
+          : const Center(child: CircularProgressIndicator());
+    }
+
+    return NotificationListener<Notification>(
+      onNotification: (n) {
+        if (n is EmailSortChangedNotification) {
+          sortColumn = n.sortColumn;
+          sortAsc = n.sortAsc;
+          _refreshEmails();
+          return true;
+        }
+        if (n is EmailSelectedNotification) {
+          logger.i("Email selected: ${n.email.subject}");
+          setState(() => selectedEmail = n.email);
+          return true;
+        }
+        return false;
+      },
+      child: EmailTable(
+        emails: emails,
+        scrollController: _scrollController,
+        sortColumn: sortColumn,
+        sortAsc: sortAsc,
+        onLoadMore: _loadMoreEmails,
+      ),
+    );
+  }
+
+  Widget _buildEmailDetailArea() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Theme.of(
+              context,
+            ).colorScheme.outlineVariant.withValues(alpha: 0.2),
+            width: 1,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: EmailDetails(email: selectedEmail!),
+        ),
+      ),
+    );
+  }
+
+  BreadCrumb _getBreadcrumb(ThemeData theme) {
+    final isRootActive = selectedFolderName == null;
     return BreadCrumb(
       items: <BreadCrumbItem>[
         BreadCrumbItem(
-          content: const Icon(Icons.home, color: Colors.black),
-          onTap: () {
-            // maybe nav home
-          },
+          content: Icon(
+            Icons.home_outlined,
+            color: theme.colorScheme.onSurfaceVariant,
+            size: 20,
+          ),
+          onTap: () {},
         ),
         if (collection != null)
           BreadCrumbItem(
-            content: Text(collection.name),
-            onTap: () {
-              EmailPage.selectedFolder.add(null);
-            },
+            content: Text(
+              collection!.name,
+              style: TextStyle(
+                color: isRootActive
+                    ? theme.colorScheme.onSurface
+                    : theme.colorScheme.onSurfaceVariant,
+                fontWeight: isRootActive ? FontWeight.bold : FontWeight.normal,
+                fontSize: 14,
+              ),
+            ),
+            onTap: () => EmailPage.selectedFolder.add(null),
           ),
-        if (folderName != null)
-          BreadCrumbItem(content: Text(folderName), onTap: () {}),
+        if (selectedFolderName != null)
+          BreadCrumbItem(
+            content: Text(
+              selectedFolderName!,
+              style: TextStyle(
+                color: theme.colorScheme.onSurface,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            onTap: () {},
+          ),
       ],
-      divider: const Icon(Icons.chevron_right, color: Colors.black),
+      divider: Icon(
+        Icons.chevron_right,
+        color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+        size: 16,
+      ),
       overflow: const WrapOverflow(
         keepLastDivider: false,
         direction: Axis.horizontal,
@@ -484,33 +522,39 @@ class _EmailPage extends State<EmailPage> {
     );
   }
 
+  String _formatEmailDate(DateTime date) {
+    final moment = Moment(date.toLocal());
+    final isToday =
+        moment.format('yyyy-MM-dd') == Moment.now().format('yyyy-MM-dd');
+    return isToday ? moment.format('h:mm A') : moment.format('M/DD/YYYY');
+  }
+
   void _showBulkDeleteConfirmation(BuildContext context) {
     final selectedItems = emails.where((e) => e.isSelected == true).toList();
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Delete Emails'),
-            content: Text(
-              'Are you sure you want to delete ${selectedItems.length} selected messages?\nThese will be deleted locally and on the server.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _deleteSelectedEmails(selectedItems);
-                },
-                child: const Text(
-                  'Delete',
-                  style: TextStyle(color: Colors.red),
-                ),
-              ),
-            ],
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Emails'),
+        content: Text(
+          'Are you sure you want to delete ${selectedItems.length} selected messages?\nThese will be deleted locally and on the server.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
           ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteSelectedEmails(selectedItems);
+            },
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -518,7 +562,6 @@ class _EmailPage extends State<EmailPage> {
     try {
       final ids = items.map((e) => e.id).toList();
 
-      // 1. Remote Delete (if applicable)
       if (collection != null) {
         final scanner = ScannerManager.getInstance().getScanner(collection!);
         if (scanner != null) {
@@ -526,7 +569,6 @@ class _EmailPage extends State<EmailPage> {
 
           for (var item in items) {
             if (item.uid != null) {
-              // Priority: item's folder, then current view's folder, finally fallback to INBOX safely
               final fId =
                   item.folderId ?? EmailPage.selectedFolder.value ?? 'INBOX';
               groupedByFolder.putIfAbsent(fId, () => []).add(item.uid!);
@@ -539,10 +581,7 @@ class _EmailPage extends State<EmailPage> {
         }
       }
 
-      // 2. Local Delete
-      await EmailRepository(
-        DatabaseManager.instance.database!,
-      ).deleteEmails(ids);
+      await EmailRepository(DatabaseManager.instance.database!).deleteEmails(ids);
 
       _refreshEmails();
       if (mounted) {
@@ -552,16 +591,16 @@ class _EmailPage extends State<EmailPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '${items.length} messages deleted and moved to Trash on server',
+              '${items.length} message${items.length == 1 ? '' : 's'} deleted',
             ),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error deleting emails: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting emails: $e')),
+        );
       }
     }
   }
