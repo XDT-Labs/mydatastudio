@@ -9,26 +9,19 @@ class NewSocialPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    //final textTheme = Theme.of(context).textTheme;
-    //final colorScheme = Theme.of(context).colorScheme;
-    //bool isDesktop = !kIsWeb;
-    //(defaultTargetPlatform == TargetPlatform.macOS) || (defaultTargetPlatform == TargetPlatform.linux) || (defaultTargetPlatform == TargetPlatform.windows);
-
-    return Scaffold(
-      body: Center(
-        child: DefaultTabController(
-          length: 3,
-          child: Scaffold(
-            appBar: AppBar(
-              bottom: const TabBar(
-                tabs: [
-                  Tab(icon: Icon(Icons.facebook), text: 'Facebook'),
-                  Tab(icon: Icon(Icons.person), text: 'Instagram'),
-                  Tab(icon: Icon(Icons.person), text: 'Twitter'),
-                ],
-              ),
-            ),
-            body: TabBarView(
+    return DefaultTabController(
+      length: 3,
+      child: Column(
+        children: [
+          const TabBar(
+            tabs: [
+              Tab(icon: Icon(Icons.facebook), text: 'Facebook'),
+              Tab(icon: Icon(Icons.person), text: 'Instagram'),
+              Tab(icon: Icon(Icons.person), text: 'Twitter'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
               children: [
                 Padding(
                   padding: const EdgeInsets.all(24.0),
@@ -81,7 +74,7 @@ class NewSocialPage extends StatelessWidget {
               ],
             ),
           ),
-        ),
+        ],
       ),
     );
   }

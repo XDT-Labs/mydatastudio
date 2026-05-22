@@ -203,7 +203,10 @@ class AppRouter {
                 path: 'add',
                 pageBuilder:
                     (context, state) => const RoutePage(
-                      body: NavigationWrapper(body: NewSocialPage()),
+                      body: NavigationWrapper(
+                        body: NewSocialPage(),
+                        drawer: SocialDrawer(),
+                      ),
                     ),
               ),
               GoRoute(

@@ -50,8 +50,8 @@ class AccordionHeaderWidget extends StatelessWidget {
             ),
             Icon(
               isExpanded
-                  ? Icons.keyboard_arrow_up
-                  : Icons.keyboard_arrow_down,
+                  ? Icons.keyboard_arrow_down
+                  : Icons.keyboard_arrow_right,
               size: 18,
               color: theme.colorScheme.onSurfaceVariant,
             ),

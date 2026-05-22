@@ -4,8 +4,9 @@ import 'package:mydatatools/services/rx_service.dart';
 
 class GetCollectionsService
     extends RxService<GetCollectionsServiceCommand, List<Collection>> {
-  static final GetCollectionsService _singleton = GetCollectionsService();
-  static GetCollectionsService get instance => _singleton;
+  static GetCollectionsService _instance = GetCollectionsService();
+  static GetCollectionsService get instance => _instance;
+  static set instance(GetCollectionsService val) => _instance = val;
 
   GetCollectionsServiceCommand? currentCommand;
 
