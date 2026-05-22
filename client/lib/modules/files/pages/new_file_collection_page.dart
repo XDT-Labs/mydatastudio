@@ -43,9 +43,9 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
         children: [
           const TabBar(
             tabs: [
-              Tab(text: 'Local Files'),
-              Tab(text: 'Google Drive'),
-              Tab(text: 'Dropbox'),
+              Tab(icon: Icon(Icons.folder), text: 'Local Files'),
+              Tab(icon: Icon(Icons.cloud), text: 'Google Drive'),
+              Tab(icon: Icon(Icons.cloud), text: 'Dropbox'),
             ],
           ),
           Expanded(
