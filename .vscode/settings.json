@@ -6,6 +6,12 @@
             "driver": "SQLite",
             "name": "local db",
             "database": "/Volumes/MyDataStudio/mnimer/data/mydata.db"
+        },
+        {
+            "previewLimit": 50,
+            "driver": "SQLite",
+            "database": "/Users/mikenimer/Library/Application Support/com.xdtlabs.mydatastudio/data/mydata.db",
+            "name": "app support db"
         }
     ]
 }

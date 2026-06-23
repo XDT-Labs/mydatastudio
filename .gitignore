@@ -70,3 +70,5 @@ client/config/secrets.json
 .env
 analyzer_output.txt
 .realm_name
+*.txt
+*.db

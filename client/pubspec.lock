@@ -1265,10 +1265,18 @@ packages:
     dependency: "direct main"
     description:
       name: resqlite
-      sha256: "27cad72c0477073dc0398bda2c8a8a477ea79afbe88539f57acdf92cbe0a01df"
+      sha256: a193ec31867e827467d51243671fee1df7d31199f8fb42a15f3797ccc5a95174
       url: "https://pub.dev"
     source: hosted
-    version: "0.3.1"
+    version: "0.6.0"
+  resqlite_vector:
+    dependency: "direct main"
+    description:
+      name: resqlite_vector
+      sha256: "726b1209295ab2d283ea297c0983913021488d090932854d51a7e52a79169793"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.2"
   rsa_encrypt:
     dependency: "direct main"
     description:

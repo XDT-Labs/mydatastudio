@@ -8,6 +8,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:path/path.dart' as p;
 import 'package:resqlite/resqlite.dart';
+import 'package:resqlite_vector/resqlite_vector.dart';
 import 'package:mydatastudio/custom_path_provider.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:mydatastudio/main.dart';
@@ -320,7 +321,45 @@ class AppDatabase {
     if (!dbFile.parent.existsSync()) {
       dbFile.parent.createSync(recursive: true);
     }
-    final Database db = await Database.open(dbFile.path);
+
+    // vector_init() must be called on every connection, but requires the
+    // files_embeddings table to already exist. For brand-new databases the
+    // table doesn't exist yet, so we create the schema first on a plain
+    // connection, then reopen with the vector index registered.
+    // (sqlite-vector README: "For migrations that create the table, run the
+    //  migration first and reopen the database with this index configured.")
+    final vectorExtension = SqliteVectorExtension(
+      indexes: [
+        SqliteVectorIndex(
+          table: 'files_embeddings',
+          column: 'qwen3_8b_embedding',
+          dimension: 2048,
+        ),
+      ],
+    );
+
+    final isNewDb = !dbFile.existsSync();
+    Database db;
+
+    if (isNewDb) {
+      // Step 1: Open without vector index to let initSchema create all tables
+      // (including files_embeddings) before vector_init is called.
+      db = await Database.open(
+        dbFile.path,
+        extensions: [SqliteVectorExtension()],
+      );
+      final bootstrapDb = AppDatabase(db);
+      bootstrapDb.path = finalDbDir;
+      bootstrapDb.name = dbName;
+      await bootstrapDb.initSchema();
+      await db.close();
+
+      // Step 2: Reopen with vector indexes now that files_embeddings exists.
+      db = await Database.open(dbFile.path, extensions: [vectorExtension]);
+    } else {
+      // Existing database: files_embeddings already exists, open directly.
+      db = await Database.open(dbFile.path, extensions: [vectorExtension]);
+    }
 
     final appDb = AppDatabase(db);
     appDb.path = finalDbDir;
@@ -358,18 +397,6 @@ class AppDatabase {
       }
       logger.i("AppDatabase: Loading initial data...");
       await _loadInitialData(_db);
-      logger.i("AppDatabase: Initializing vector index...");
-      // await _initVectorIndex();
-    }
-  }
-
-  Future<void> _initVectorIndex() async {
-    try {
-      await _db.execute(
-        "SELECT vector_init('files_embeddings', 'qwen3_8b_embedding', 'type=FLOAT32,dimension=2048')",
-      );
-    } catch (e) {
-      logger.w('Could not initialize vector index (extension not loaded?): $e');
     }
   }
 
