@@ -1,7 +1,7 @@
 import 'dart:io' as io;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
-import 'package:mydatatools/modules/files/files_constants.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
+import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 
@@ -24,7 +24,10 @@ void main() {
     final path = p.join(tempDir, 'landscape.jpg');
     io.File(path).writeAsBytesSync(img.encodeJpg(image));
 
-    final thumbBase64 = await generator.pathImageToBase64(path, FilesConstants.mimeTypeImage);
+    final thumbBase64 = await generator.pathImageToBase64(
+      path,
+      FilesConstants.mimeTypeImage,
+    );
     expect(thumbBase64, isNotNull);
     expect(thumbBase64, isNotEmpty);
   });
@@ -35,7 +38,10 @@ void main() {
     final path = p.join(tempDir, 'portrait.jpg');
     io.File(path).writeAsBytesSync(img.encodeJpg(image));
 
-    final thumbBase64 = await generator.pathImageToBase64(path, FilesConstants.mimeTypeImage);
+    final thumbBase64 = await generator.pathImageToBase64(
+      path,
+      FilesConstants.mimeTypeImage,
+    );
     expect(thumbBase64, isNotNull);
     expect(thumbBase64, isNotEmpty);
   });
@@ -44,12 +50,18 @@ void main() {
     final path = p.join(tempDir, 'test.txt');
     io.File(path).writeAsStringSync('not an image');
 
-    final thumbBase64 = await generator.pathImageToBase64(path, FilesConstants.mimeTypePdf);
+    final thumbBase64 = await generator.pathImageToBase64(
+      path,
+      FilesConstants.mimeTypePdf,
+    );
     expect(thumbBase64, isNull);
   });
 
   test('returns null for missing files', () async {
-    final thumbBase64 = await generator.pathImageToBase64(p.join(tempDir, 'missing.jpg'), FilesConstants.mimeTypeImage);
+    final thumbBase64 = await generator.pathImageToBase64(
+      p.join(tempDir, 'missing.jpg'),
+      FilesConstants.mimeTypeImage,
+    );
     expect(thumbBase64, isNull);
   });
 }

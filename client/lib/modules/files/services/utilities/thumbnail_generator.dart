@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io' as io;
 import 'package:http/http.dart' as http;
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/modules/files/files_constants.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 

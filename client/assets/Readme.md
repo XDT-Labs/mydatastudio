@@ -22,12 +22,12 @@ zip -r ../../../client/app/aichat-macos.zip .
 cd ../../../client/app/
 
 # 4. Copy to your application support directory to test locally
-cp ./*.zip ~/Library/Application\ Support/mydata.tools/
+cp ./*.zip ~/Library/Application\ Support/com.xdtlabs.mydatastudio/
 ```
 
 ## All in one
 ```
-clear && cd aiserver && pdm install && pdm run pyinstaller -y main.spec && cd dist/aichat && zip -r ../../../client/app/aichat-macos.zip . && cd ../../../client/app/ && cp ./*.zip ~/Library/Application\ Support/mydata.tools/ && cd ../..
+clear && cd aiserver && pdm install && pdm run pyinstaller -y main.spec && cd dist/aichat && zip -r ../../../client/app/aichat-macos.zip . && cd ../../../client/app/ && cp ./*.zip ~/Library/Application\ Support/com.xdtlabs.mydatastudio/ && cd ../..
 ```
 
 

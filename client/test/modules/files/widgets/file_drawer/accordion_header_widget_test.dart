@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer/accordion_header_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
 
 void main() {
   group('AccordionHeaderWidget', () {

@@ -1,12 +1,13 @@
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:mocktail/mocktail.dart';
-import 'package:mydatatools/file_sources/file_source_file.dart';
-import 'package:mydatatools/file_sources/google_drive/google_drive_provider.dart';
-import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatastudio/file_sources/file_source_file.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_drive_provider.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:test/test.dart';
 import 'package:uuid/uuid.dart';
 
 class MockDriveApi extends Mock implements drive.DriveApi {}
+
 class MockFilesResource extends Mock implements drive.FilesResource {}
 
 /// A testable version of GoogleDriveProvider that allows injecting a mock API.
@@ -209,7 +210,7 @@ void main() {
       mockApi = MockDriveApi();
       mockFiles = MockFilesResource();
       testProvider = MockGoogleDriveProvider(mockApi);
-      
+
       when(() => mockApi.files).thenReturn(mockFiles);
 
       collection = Collection(
@@ -224,38 +225,43 @@ void main() {
     });
 
     test('listFolder calls files.list and maps results', () async {
-      final fileList = drive.FileList()
-        ..files = [
-          drive.File()
-            ..id = 'f1'
-            ..name = 'file1.txt'
-            ..mimeType = 'text/plain',
-          drive.File()
-            ..id = 'd1'
-            ..name = 'Folder1'
-            ..mimeType = 'application/vnd.google-apps.folder',
-        ];
+      final fileList =
+          drive.FileList()
+            ..files = [
+              drive.File()
+                ..id = 'f1'
+                ..name = 'file1.txt'
+                ..mimeType = 'text/plain',
+              drive.File()
+                ..id = 'd1'
+                ..name = 'Folder1'
+                ..mimeType = 'application/vnd.google-apps.folder',
+            ];
 
-      when(() => mockFiles.list(
-            q: any(named: 'q'),
-            $fields: any(named: '\$fields'),
-            pageToken: any(named: 'pageToken'),
-            pageSize: any(named: 'pageSize'),
-            orderBy: any(named: 'orderBy'),
-          )).thenAnswer((_) async => fileList);
+      when(
+        () => mockFiles.list(
+          q: any(named: 'q'),
+          $fields: any(named: '\$fields'),
+          pageToken: any(named: 'pageToken'),
+          pageSize: any(named: 'pageSize'),
+          orderBy: any(named: 'orderBy'),
+        ),
+      ).thenAnswer((_) async => fileList);
 
       final results = await testProvider.listFolder(collection);
 
       expect(results.length, equals(2));
       expect(results[0].name, equals('file1.txt'));
       expect(results[1].isFolder, isTrue);
-      
-      verify(() => mockFiles.list(
-            q: "'root' in parents and trashed = false",
-            $fields: any(named: '\$fields'),
-            pageSize: 200,
-            orderBy: 'folder, name',
-          )).called(1);
+
+      verify(
+        () => mockFiles.list(
+          q: "'root' in parents and trashed = false",
+          $fields: any(named: '\$fields'),
+          pageSize: 200,
+          orderBy: 'folder, name',
+        ),
+      ).called(1);
     });
 
     test('deleteFile calls files.update with trashed=true', () async {
@@ -266,20 +272,18 @@ void main() {
         isFolder: false,
       );
 
-      when(() => mockFiles.update(
-            any(),
-            any(),
-          )).thenAnswer((_) async => drive.File());
+      when(
+        () => mockFiles.update(any(), any()),
+      ).thenAnswer((_) async => drive.File());
 
       final success = await testProvider.deleteFile(collection, file);
 
       expect(success, isTrue);
-      
-      final capturedFile = verify(() => mockFiles.update(
-            captureAny(),
-            'f123',
-          )).captured.first as drive.File;
-      
+
+      final capturedFile =
+          verify(() => mockFiles.update(captureAny(), 'f123')).captured.first
+              as drive.File;
+
       expect(capturedFile.trashed, isTrue);
     });
 
@@ -291,8 +295,9 @@ void main() {
         isFolder: false,
       );
 
-      when(() => mockFiles.update(any(), any()))
-          .thenThrow(Exception('API Error'));
+      when(
+        () => mockFiles.update(any(), any()),
+      ).thenThrow(Exception('API Error'));
 
       final success = await testProvider.deleteFile(collection, file);
       expect(success, isFalse);

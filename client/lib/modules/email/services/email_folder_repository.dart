@@ -1,5 +1,5 @@
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
 
 class EmailFolderRepository {
   final AppDatabase database;

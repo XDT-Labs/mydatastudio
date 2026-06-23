@@ -1,6 +1,6 @@
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file_asset.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file_asset.dart';
 import 'package:path/path.dart' as p;
 
 /// Resolves the absolute filesystem path for a [FileAsset] given its [Collection].
@@ -27,8 +27,7 @@ class FilePathResolver {
   /// Useful when you have the path string but not the full [FileAsset] object.
   static String absoluteFromPath(String relativePath, Collection collection) {
     // Cloud or already-absolute paths pass through unchanged.
-    if (relativePath.startsWith('gdrive://') ||
-        relativePath.startsWith('/')) {
+    if (relativePath.startsWith('gdrive://') || relativePath.startsWith('/')) {
       return relativePath;
     }
 
@@ -39,7 +38,7 @@ class FilePathResolver {
 
     final root = collection.localCopyPath ?? collection.path;
     if (relativePath.isEmpty) return root;
-    
+
     if (root.isEmpty) return relativePath;
     return p.join(root, relativePath);
   }

@@ -1,5 +1,5 @@
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
 import 'package:uuid/uuid.dart';
 
 final _uuid = const Uuid();

@@ -1,21 +1,21 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/helpers/encryption_helper.dart';
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/models/tables/app_user.dart';
-import 'package:mydatatools/repositories/user_repository.dart';
-import 'package:mydatatools/services/get_user_service.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/helpers/encryption_helper.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/app_user.dart';
+import 'package:mydatastudio/repositories/user_repository.dart';
+import 'package:mydatastudio/services/get_user_service.dart';
 
-import 'package:mydatatools/widgets/setup/setup_step1.dart';
-import 'package:mydatatools/widgets/setup/setup_step2.dart';
-import 'package:mydatatools/widgets/setup/setup_step3.dart';
+import 'package:mydatastudio/widgets/setup/setup_step1.dart';
+import 'package:mydatastudio/widgets/setup/setup_step2.dart';
+import 'package:mydatastudio/widgets/setup/setup_step3.dart';
 import 'package:flutter/material.dart'
     as material; //create alias because Padding is in multiple widgets
 import 'package:flutter/material.dart';
-import 'package:mydatatools/app_logger.dart';
+import 'package:mydatastudio/app_logger.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';

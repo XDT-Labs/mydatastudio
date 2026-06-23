@@ -1,8 +1,8 @@
-import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:rxdart/rxdart.dart';
 
 /// [CollectionScanner] is the base interface for all data synchronization
-/// modules in MyDataTools (Files, Email, Social, etc.).
+/// modules in mydatastudio (Files, Email, Social, etc.).
 ///
 /// Synchronization Rules (MUST be followed by all implementations):
 /// 1. [Registration-Only Startup] Scanners MUST only register on startup.

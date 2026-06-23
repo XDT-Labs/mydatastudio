@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:mydatatools/database_manager.dart';
+import 'package:mydatastudio/database_manager.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
@@ -33,7 +33,9 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
 
     if (clientId.isEmpty || clientSecret.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Client ID and Client Secret are required')),
+        const SnackBar(
+          content: Text('Client ID and Client Secret are required'),
+        ),
       );
       return;
     }
@@ -86,15 +88,28 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
         Text(
           'To connect to Outlook, you must provide your own OAuth Client ID and Secret.',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.5),
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey.shade600,
+            height: 1.5,
+          ),
         ),
         const SizedBox(height: 8),
         InkWell(
-          onTap: () => launchUrl(Uri.parse('https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade')),
+          onTap:
+              () => launchUrl(
+                Uri.parse(
+                  'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
+                ),
+              ),
           child: const Text(
             'Get Credentials from Microsoft Azure Portal',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14, color: Colors.blue, decoration: TextDecoration.underline),
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.blue,
+              decoration: TextDecoration.underline,
+            ),
           ),
         ),
         const SizedBox(height: 24),
@@ -122,9 +137,20 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
             backgroundColor: const Color(0xFF0078D4),
             foregroundColor: Colors.white,
           ),
-          child: _isSaving 
-            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-            : const Text('Save & Continue', style: TextStyle(fontSize: 16)),
+          child:
+              _isSaving
+                  ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                  : const Text(
+                    'Save & Continue',
+                    style: TextStyle(fontSize: 16),
+                  ),
         ),
       ],
     );

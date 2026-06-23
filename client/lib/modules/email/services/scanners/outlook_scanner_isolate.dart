@@ -3,26 +3,26 @@ import 'dart:convert';
 import 'package:enough_mail/enough_mail.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:mydatatools/models/tables/file.dart' as db_file;
-import 'package:mydatatools/models/tables/folder.dart' as db_folder;
-import 'package:mydatatools/modules/email/services/email_folder_upsert_service.dart';
-import 'package:mydatatools/modules/email/services/email_repository.dart';
-import 'package:mydatatools/modules/email/services/email_upsert_service.dart';
-import 'package:mydatatools/modules/email/services/get_emails_service.dart';
-import 'package:mydatatools/modules/files/files_constants.dart';
-import 'package:mydatatools/modules/files/services/file_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
+import 'package:mydatastudio/models/tables/file.dart' as db_file;
+import 'package:mydatastudio/models/tables/folder.dart' as db_folder;
+import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/email_repository.dart';
+import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
+import 'package:mydatastudio/modules/files/files_constants.dart';
+import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
 import 'dart:io' as io;
 
-import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
 
 /// [OutlookScannerIsolate] is the client-side manager for the Outlook scanning
@@ -110,9 +110,9 @@ class OutlookScannerIsolate {
                 (message['uids'] as List).cast<int>(),
               )
               .then((_) {
-            isCleanupInProgress = false;
-            checkDone();
-          });
+                isCleanupInProgress = false;
+                checkDone();
+              });
         }
 
         if (message['status'] == 'done') {
@@ -197,7 +197,11 @@ class OutlookScannerIsolateWorker {
       logger.i("DEBUG: Outlook Isolate - Connecting for $type...");
       logger.i("DEBUG: Outlook Isolate - Target Email: $emailAddress");
       // Use imap-mail.outlook.com for better personal account support
-      await client.connectToServer('imap-mail.outlook.com', 993, isSecure: true);
+      await client.connectToServer(
+        'imap-mail.outlook.com',
+        993,
+        isSecure: true,
+      );
 
       // DIAGNOSTICS: Log token audience and scopes
       try {
@@ -214,8 +218,11 @@ class OutlookScannerIsolateWorker {
           logger.i("DEBUG: Token Diagnostics - Scopes: $scp");
           logger.i("DEBUG: Token Diagnostics - Tenant ID: $tid");
 
-          if (aud != "https://outlook.office.com" && aud != "https://graph.microsoft.com") {
-            logger.w("WARNING: Access token audience is '$aud', expected 'https://outlook.office.com'.");
+          if (aud != "https://outlook.office.com" &&
+              aud != "https://graph.microsoft.com") {
+            logger.w(
+              "WARNING: Access token audience is '$aud', expected 'https://outlook.office.com'.",
+            );
           }
         } else {
           logger.i("DEBUG: Token Diagnostics - Access token is opaque.");
@@ -224,12 +231,16 @@ class OutlookScannerIsolateWorker {
         logger.i("DEBUG: Token Diagnostics - Failed to decode token: $e");
       }
 
-      logger.i("Authenticating with Outlook IMAP as: $emailAddress (Host: imap-mail.outlook.com)");
+      logger.i(
+        "Authenticating with Outlook IMAP as: $emailAddress (Host: imap-mail.outlook.com)",
+      );
       try {
         await client.authenticateWithOAuth2(emailAddress, accessToken);
       } catch (e) {
         if (e.toString().contains('AUTHENTICATE failed')) {
-           logger.e("IMAP AUTHENTICATE failed. This usually means the token was rejected by Microsoft.");
+          logger.e(
+            "IMAP AUTHENTICATE failed. This usually means the token was rejected by Microsoft.",
+          );
         }
         rethrow;
       }
@@ -320,8 +331,18 @@ class OutlookScannerIsolateWorker {
           // We subtract 1 day to be safe around timezones/boundaries
           final sinceDate = lastScanDate.subtract(const Duration(days: 1));
           final monthNames = [
-            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+            'Jan',
+            'Feb',
+            'Mar',
+            'Apr',
+            'May',
+            'Jun',
+            'Jul',
+            'Aug',
+            'Sep',
+            'Oct',
+            'Nov',
+            'Dec',
           ];
           final dateStr =
               "${sinceDate.day}-${monthNames[sinceDate.month - 1]}-${sinceDate.year}";
@@ -386,7 +407,8 @@ class OutlookScannerIsolateWorker {
 
               // Refine incremental check with second-level precision
               if (!force && lastScanDate != null) {
-                final lastScanSecs = lastScanDate.millisecondsSinceEpoch ~/ 1000;
+                final lastScanSecs =
+                    lastScanDate.millisecondsSinceEpoch ~/ 1000;
                 final msgSecs = msgDate.millisecondsSinceEpoch ~/ 1000;
 
                 if (msgSecs <= lastScanSecs) {

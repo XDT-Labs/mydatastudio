@@ -1,19 +1,19 @@
 import 'dart:async';
 
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:mydatatools/modules/email/widgets/email_drawer/email_folder_tile_widget.dart';
-import 'package:mydatatools/modules/email/pages/email_page.dart';
-import 'package:mydatatools/modules/email/services/get_email_folders_service.dart';
-import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer/accordion_header_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer/collection_tile_widget.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
+import 'package:mydatastudio/modules/email/widgets/email_drawer/email_folder_tile_widget.dart';
+import 'package:mydatastudio/modules/email/pages/email_page.dart';
+import 'package:mydatastudio/modules/email/services/get_email_folders_service.dart';
+import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/collection_tile_widget.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -113,32 +113,44 @@ class _EmailDrawer extends State<EmailDrawer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final gmailAccounts = collections
-        .where((c) => c.scanner == AppConstants.scannerEmailGmail)
-        .toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    final yahooAccounts = collections
-        .where((c) => c.scanner == AppConstants.scannerEmailYahoo)
-        .toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    final outlookAccounts = collections
-        .where(
-          (c) =>
-              c.scanner == AppConstants.scannerEmailOutlook ||
-              c.scanner == AppConstants.scannerEmailOutlookPst,
-        )
-        .toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    final otherAccounts = collections
-        .where(
-          (c) =>
-              c.scanner != AppConstants.scannerEmailGmail &&
-              c.scanner != AppConstants.scannerEmailYahoo &&
-              c.scanner != AppConstants.scannerEmailOutlook &&
-              c.scanner != AppConstants.scannerEmailOutlookPst,
-        )
-        .toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final gmailAccounts =
+        collections
+            .where((c) => c.scanner == AppConstants.scannerEmailGmail)
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
+    final yahooAccounts =
+        collections
+            .where((c) => c.scanner == AppConstants.scannerEmailYahoo)
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
+    final outlookAccounts =
+        collections
+            .where(
+              (c) =>
+                  c.scanner == AppConstants.scannerEmailOutlook ||
+                  c.scanner == AppConstants.scannerEmailOutlookPst,
+            )
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
+    final otherAccounts =
+        collections
+            .where(
+              (c) =>
+                  c.scanner != AppConstants.scannerEmailGmail &&
+                  c.scanner != AppConstants.scannerEmailYahoo &&
+                  c.scanner != AppConstants.scannerEmailOutlook &&
+                  c.scanner != AppConstants.scannerEmailOutlookPst,
+            )
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
 
     return SizedBox.expand(
       child: Container(
@@ -168,28 +180,30 @@ class _EmailDrawer extends State<EmailDrawer> {
                           icon: Icons.email_outlined,
                           isExpanded:
                               _expandedSection == _EmailAccordionSection.gmail,
-                          onTap: () => setState(() {
-                            _expandedSection =
-                                _expandedSection ==
-                                        _EmailAccordionSection.gmail
-                                    ? null
-                                    : _EmailAccordionSection.gmail;
-                          }),
+                          onTap:
+                              () => setState(() {
+                                _expandedSection =
+                                    _expandedSection ==
+                                            _EmailAccordionSection.gmail
+                                        ? null
+                                        : _EmailAccordionSection.gmail;
+                              }),
                         ),
                         if (_expandedSection == _EmailAccordionSection.gmail)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: gmailAccounts
-                                  .map(
-                                    (c) => _buildAccountSection(
-                                      context,
-                                      theme,
-                                      c,
-                                    ),
-                                  )
-                                  .toList(),
+                              children:
+                                  gmailAccounts
+                                      .map(
+                                        (c) => _buildAccountSection(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
                             ),
                           ),
                       ],
@@ -199,28 +213,30 @@ class _EmailDrawer extends State<EmailDrawer> {
                           icon: Icons.mail_outlined,
                           isExpanded:
                               _expandedSection == _EmailAccordionSection.yahoo,
-                          onTap: () => setState(() {
-                            _expandedSection =
-                                _expandedSection ==
-                                        _EmailAccordionSection.yahoo
-                                    ? null
-                                    : _EmailAccordionSection.yahoo;
-                          }),
+                          onTap:
+                              () => setState(() {
+                                _expandedSection =
+                                    _expandedSection ==
+                                            _EmailAccordionSection.yahoo
+                                        ? null
+                                        : _EmailAccordionSection.yahoo;
+                              }),
                         ),
                         if (_expandedSection == _EmailAccordionSection.yahoo)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: yahooAccounts
-                                  .map(
-                                    (c) => _buildAccountSection(
-                                      context,
-                                      theme,
-                                      c,
-                                    ),
-                                  )
-                                  .toList(),
+                              children:
+                                  yahooAccounts
+                                      .map(
+                                        (c) => _buildAccountSection(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
                             ),
                           ),
                       ],
@@ -231,28 +247,30 @@ class _EmailDrawer extends State<EmailDrawer> {
                           isExpanded:
                               _expandedSection ==
                               _EmailAccordionSection.outlook,
-                          onTap: () => setState(() {
-                            _expandedSection =
-                                _expandedSection ==
-                                        _EmailAccordionSection.outlook
-                                    ? null
-                                    : _EmailAccordionSection.outlook;
-                          }),
+                          onTap:
+                              () => setState(() {
+                                _expandedSection =
+                                    _expandedSection ==
+                                            _EmailAccordionSection.outlook
+                                        ? null
+                                        : _EmailAccordionSection.outlook;
+                              }),
                         ),
                         if (_expandedSection == _EmailAccordionSection.outlook)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: outlookAccounts
-                                  .map(
-                                    (c) => _buildAccountSection(
-                                      context,
-                                      theme,
-                                      c,
-                                    ),
-                                  )
-                                  .toList(),
+                              children:
+                                  outlookAccounts
+                                      .map(
+                                        (c) => _buildAccountSection(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
                             ),
                           ),
                       ],
@@ -262,28 +280,30 @@ class _EmailDrawer extends State<EmailDrawer> {
                           icon: Icons.alternate_email,
                           isExpanded:
                               _expandedSection == _EmailAccordionSection.other,
-                          onTap: () => setState(() {
-                            _expandedSection =
-                                _expandedSection ==
-                                        _EmailAccordionSection.other
-                                    ? null
-                                    : _EmailAccordionSection.other;
-                          }),
+                          onTap:
+                              () => setState(() {
+                                _expandedSection =
+                                    _expandedSection ==
+                                            _EmailAccordionSection.other
+                                        ? null
+                                        : _EmailAccordionSection.other;
+                              }),
                         ),
                         if (_expandedSection == _EmailAccordionSection.other)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: otherAccounts
-                                  .map(
-                                    (c) => _buildAccountSection(
-                                      context,
-                                      theme,
-                                      c,
-                                    ),
-                                  )
-                                  .toList(),
+                              children:
+                                  otherAccounts
+                                      .map(
+                                        (c) => _buildAccountSection(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
                             ),
                           ),
                       ],
@@ -428,8 +448,7 @@ class _EmailDrawer extends State<EmailDrawer> {
                   _collectionsService.invoke(
                     GetCollectionsServiceCommand("email"),
                   );
-                  if (EmailPage.selectedCollection.value?.id ==
-                      collection.id) {
+                  if (EmailPage.selectedCollection.value?.id == collection.id) {
                     EmailPage.selectedCollection.add(null);
                   }
                 } finally {
@@ -470,9 +489,7 @@ class _EmailFolderListState extends State<_EmailFolderList> {
     _folderSub = GetEmailFoldersService.instance.sink.listen((value) {
       if (mounted) {
         final myFolders =
-            value
-                .where((f) => f.collectionId == widget.collection.id)
-                .toList();
+            value.where((f) => f.collectionId == widget.collection.id).toList();
         if (myFolders.isNotEmpty) {
           setState(() {
             folders = myFolders;
@@ -572,16 +589,17 @@ class _EmailFolderListState extends State<_EmailFolderList> {
               padding: const EdgeInsets.only(left: 8.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: otherFolders
-                    .map(
-                      (f) => EmailFolderTileWidget(
-                        folder: f,
-                        label: f.name,
-                        isSelected: widget.selectedFolderId == f.id,
-                        onTap: () => widget.onFolderTap(f.id),
-                      ),
-                    )
-                    .toList(),
+                children:
+                    otherFolders
+                        .map(
+                          (f) => EmailFolderTileWidget(
+                            folder: f,
+                            label: f.name,
+                            isSelected: widget.selectedFolderId == f.id,
+                            onTap: () => widget.onFolderTap(f.id),
+                          ),
+                        )
+                        .toList(),
               ),
             ),
         ],

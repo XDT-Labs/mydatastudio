@@ -3,34 +3,34 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/oauth/login_providers.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/oauth/login_providers.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:uuid/uuid.dart';
 
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:go_router/go_router.dart';
 import 'package:reactive_forms/reactive_forms.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:mydatatools/modules/email/pages/email_page.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/gmail_idle_view.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/gmail_loading_view.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/gmail_success_view.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/gmail_error_view.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/gmail_configure_view.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/outlook_configure_view.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_idle_view.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_loading_view.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_success_view.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_error_view.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
+import 'package:mydatastudio/modules/email/pages/email_page.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_idle_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_loading_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_success_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_error_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_configure_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/outlook_configure_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_idle_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_loading_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_success_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_error_view.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 
@@ -664,7 +664,9 @@ class _OutlookTabState extends State<_OutlookTab> {
     });
 
     try {
-      final collection = await LoginProviderExtension.handleOutlookMail(context);
+      final collection = await LoginProviderExtension.handleOutlookMail(
+        context,
+      );
 
       if (!mounted) return;
 
@@ -813,7 +815,8 @@ class _OutlookTabState extends State<_OutlookTab> {
           ),
           const SizedBox(height: 24),
           ElevatedButton(
-            onPressed: () => setState(() => _authState = _OutlookAuthState.idle),
+            onPressed:
+                () => setState(() => _authState = _OutlookAuthState.idle),
             child: const Text('Try Again'),
           ),
         ],

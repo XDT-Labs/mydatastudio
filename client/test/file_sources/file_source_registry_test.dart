@@ -1,23 +1,23 @@
 import 'dart:io' as io;
 
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/file_sources/file_source_file.dart';
-import 'package:mydatatools/file_sources/file_source_provider.dart';
-import 'package:mydatatools/file_sources/file_source_registry.dart';
-import 'package:mydatatools/file_sources/local/local_file_provider.dart';
-import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/file_sources/file_source_file.dart';
+import 'package:mydatastudio/file_sources/file_source_provider.dart';
+import 'package:mydatastudio/file_sources/file_source_registry.dart';
+import 'package:mydatastudio/file_sources/local/local_file_provider.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:test/test.dart';
 import 'package:uuid/uuid.dart';
 
 Collection _makeCollection(String scanner) => Collection(
-      id: const Uuid().v4(),
-      name: 'Test',
-      path: '/tmp/test',
-      type: 'file',
-      scanner: scanner,
-      scanStatus: 'pending',
-      needsReAuth: false,
-    );
+  id: const Uuid().v4(),
+  name: 'Test',
+  path: '/tmp/test',
+  type: 'file',
+  scanner: scanner,
+  scanStatus: 'pending',
+  needsReAuth: false,
+);
 
 void main() {
   group('FileSourceRegistry', () {
@@ -43,10 +43,7 @@ void main() {
     });
 
     test('isSupported returns false for unregistered scanners', () {
-      expect(
-        FileSourceRegistry.isSupported('file.unknown'),
-        isFalse,
-      );
+      expect(FileSourceRegistry.isSupported('file.unknown'), isFalse);
     });
 
     test('register allows overriding a provider at runtime', () {

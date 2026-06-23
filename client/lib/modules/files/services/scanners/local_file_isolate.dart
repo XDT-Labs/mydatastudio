@@ -1,23 +1,23 @@
 import 'dart:async';
 import 'dart:io' as io;
 import 'dart:isolate';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/modules/files/files_constants.dart';
-import 'package:mydatatools/modules/files/services/batch_file_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/cleanup_deleted_files_service.dart';
-import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/files/files_constants.dart';
+import 'package:mydatastudio/modules/files/services/batch_file_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
+import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:flutter/services.dart';
-import 'package:mydatatools/scanners/collection_scanner.dart';
-import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
+import 'package:mydatastudio/scanners/collection_scanner.dart';
+import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
 import 'package:path/path.dart' as p;
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 
 /// [LocalFileIsolate] is a collection scanner responsible for indexing files
 /// on the local filesystem. It uses a background Dart isolate to crawl
@@ -38,7 +38,8 @@ class LocalFileIsolate extends CollectionScanner {
   Isolate? isolate;
   AppLogger? logger;
 
-  LocalFileIsolate(this.loggerIsolatePort, {this.storagePath, this.dbName}) : super() {
+  LocalFileIsolate(this.loggerIsolatePort, {this.storagePath, this.dbName})
+    : super() {
     logger = AppLogger(loggerIsolatePort);
   }
 
@@ -223,11 +224,15 @@ class LocalFileIsolateWorker {
     // Fetch existing file metadata to avoid redundant processing
     final Map<String, File> metadataCache = {};
     try {
-      final List<File> files = await FileDesktopRepository(appDb).getScanMetadata(collectionId);
+      final List<File> files = await FileDesktopRepository(
+        appDb,
+      ).getScanMetadata(collectionId);
       for (final f in files) {
         metadataCache[f.id] = f;
       }
-      logger?.i('LocalScan: Loaded ${metadataCache.length} existing file records for caching');
+      logger?.i(
+        'LocalScan: Loaded ${metadataCache.length} existing file records for caching',
+      );
     } catch (e) {
       logger?.e('LocalScan: Failed to fetch metadata cache: $e');
     }
@@ -251,7 +256,9 @@ class LocalFileIsolateWorker {
     generatedThumbnails = results['generatedThumbnails'] ?? 0;
     totalFiles = results['total'] ?? 0;
 
-    logger?.i('LocalScan: Scan finished. Found $fileCount items. Stats: Total=$totalFiles, CacheHits=$cacheHits, NewThumbs=$generatedThumbnails');
+    logger?.i(
+      'LocalScan: Scan finished. Found $fileCount items. Stats: Total=$totalFiles, CacheHits=$cacheHits, NewThumbs=$generatedThumbnails',
+    );
 
     // Final cleanup — mark anything not seen this scan as deleted.
     final cleanupRelPath = p.relative(path, from: rootPath);
@@ -307,12 +314,7 @@ class LocalFileIsolateWorker {
       logger.i('Found ${dirList.length} items in ${dir.path}');
     } catch (e) {
       logger.e('Failed to list directory ${dir.path}: $e');
-      return {
-        'count': 0,
-        'cacheHits': 0,
-        'generatedThumbnails': 0,
-        'total': 0,
-      };
+      return {'count': 0, 'cacheHits': 0, 'generatedThumbnails': 0, 'total': 0};
     }
 
     for (var asset in dirList) {
@@ -463,7 +465,7 @@ class LocalFileIsolateWorker {
       'isCacheHit': false,
       'isGenerated': false,
     };
-    
+
     String absPath = file_.path;
     if (absPath.length > 1 && absPath.endsWith('/')) {
       absPath = absPath.substring(0, absPath.length - 1);
@@ -496,7 +498,7 @@ class LocalFileIsolateWorker {
       // SQLite stores DateTime as unix seconds, losing milliseconds.
       final bool mtimeMatches =
           (cached.dateLastModified.millisecondsSinceEpoch ~/ 1000) ==
-              (lmDate.millisecondsSinceEpoch ~/ 1000);
+          (lmDate.millisecondsSinceEpoch ~/ 1000);
 
       final bool hasThumbnail = cached.thumbnail != null;
       final bool isImage = getMimeType(name) == FilesConstants.mimeTypeImage;

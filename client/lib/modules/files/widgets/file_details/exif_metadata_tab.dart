@@ -1,6 +1,6 @@
 import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/info_row.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/info_row.dart';
 
 class ExifMetadataTab extends StatelessWidget {
   const ExifMetadataTab({
@@ -59,7 +59,10 @@ class ExifMetadataTab extends StatelessWidget {
     }
 
     return SingleChildScrollView(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: rows,
+      ),
     );
   }
 }

@@ -1,8 +1,8 @@
 import 'dart:io';
 
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/app_user.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/app_user.dart';
 
 class UserRepository {
   AppLogger logger = AppLogger(null);
@@ -41,7 +41,7 @@ class UserRepository {
         !File(privateFilePath).existsSync()) {
       throw Exception("Keys not found at $keyDir. Stopping application.");
     }
-    
+
     user.publicKey = File(publicFilePath).readAsStringSync();
     user.privateKey = File(privateFilePath).readAsStringSync();
     return user;

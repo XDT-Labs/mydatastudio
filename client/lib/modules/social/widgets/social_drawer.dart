@@ -1,8 +1,8 @@
 import 'dart:async';
 
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer/accordion_header_widget.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -54,7 +54,12 @@ class _SocialDrawerState extends State<SocialDrawer> {
 
   Widget _buildSectionHeader(String title, {double leftPadding = 16.0}) {
     return Padding(
-      padding: EdgeInsets.only(left: leftPadding, right: 16.0, top: 12, bottom: 12),
+      padding: EdgeInsets.only(
+        left: leftPadding,
+        right: 16.0,
+        top: 12,
+        bottom: 12,
+      ),
       child: Align(
         alignment: Alignment.topLeft,
         child: Text(
@@ -76,17 +81,24 @@ class _SocialDrawerState extends State<SocialDrawer> {
     required VoidCallback onTap,
     required ThemeData theme,
   }) {
-    final textColor = isSelected
-        ? (theme.brightness == Brightness.dark ? Colors.white : theme.colorScheme.primary)
-        : theme.colorScheme.onSurface.withValues(alpha: 0.6);
+    final textColor =
+        isSelected
+            ? (theme.brightness == Brightness.dark
+                ? Colors.white
+                : theme.colorScheme.primary)
+            : theme.colorScheme.onSurface.withValues(alpha: 0.6);
 
-    final bulletColor = isSelected
-        ? (theme.brightness == Brightness.dark ? Colors.white : theme.colorScheme.primary)
-        : theme.colorScheme.onSurface.withValues(alpha: 0.4);
+    final bulletColor =
+        isSelected
+            ? (theme.brightness == Brightness.dark
+                ? Colors.white
+                : theme.colorScheme.primary)
+            : theme.colorScheme.onSurface.withValues(alpha: 0.4);
 
-    final tileColor = isSelected
-        ? theme.colorScheme.primaryContainer.withValues(alpha: 0.15)
-        : Colors.transparent;
+    final tileColor =
+        isSelected
+            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.15)
+            : Colors.transparent;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2.0),
@@ -106,9 +118,12 @@ class _SocialDrawerState extends State<SocialDrawer> {
                 width: 3,
                 height: 24,
                 decoration: BoxDecoration(
-                  color: isSelected
-                      ? (theme.brightness == Brightness.dark ? Colors.white : theme.colorScheme.primary)
-                      : Colors.transparent,
+                  color:
+                      isSelected
+                          ? (theme.brightness == Brightness.dark
+                              ? Colors.white
+                              : theme.colorScheme.primary)
+                          : Colors.transparent,
                   borderRadius: BorderRadius.circular(1.5),
                 ),
               ),
@@ -130,7 +145,8 @@ class _SocialDrawerState extends State<SocialDrawer> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 13,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    fontWeight:
+                        isSelected ? FontWeight.bold : FontWeight.normal,
                     color: textColor,
                   ),
                 ),
@@ -159,18 +175,34 @@ class _SocialDrawerState extends State<SocialDrawer> {
       }
     }
 
-    final socialCollections = collections.where((c) => c.type == 'social').toList();
+    final socialCollections =
+        collections.where((c) => c.type == 'social').toList();
 
     // Grouping
-    final facebookCollections = socialCollections
-        .where((c) => c.scanner.toLowerCase().contains('facebook') || c.oauthService == 'facebook')
-        .toList();
-    final twitterCollections = socialCollections
-        .where((c) => c.scanner.toLowerCase().contains('twitter') || c.oauthService == 'twitter')
-        .toList();
-    final instagramCollections = socialCollections
-        .where((c) => c.scanner.toLowerCase().contains('instagram') || c.oauthService == 'instagram')
-        .toList();
+    final facebookCollections =
+        socialCollections
+            .where(
+              (c) =>
+                  c.scanner.toLowerCase().contains('facebook') ||
+                  c.oauthService == 'facebook',
+            )
+            .toList();
+    final twitterCollections =
+        socialCollections
+            .where(
+              (c) =>
+                  c.scanner.toLowerCase().contains('twitter') ||
+                  c.oauthService == 'twitter',
+            )
+            .toList();
+    final instagramCollections =
+        socialCollections
+            .where(
+              (c) =>
+                  c.scanner.toLowerCase().contains('instagram') ||
+                  c.oauthService == 'instagram',
+            )
+            .toList();
 
     return SizedBox.expand(
       child: Container(
@@ -208,45 +240,71 @@ class _SocialDrawerState extends State<SocialDrawer> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildSectionHeader("SOCIAL ACCOUNTS"),
-                      
+
                       // Facebook section
                       AccordionHeaderWidget(
                         title: "Facebook Accounts",
                         icon: Icons.people_outline,
                         isExpanded: _expandedSection == SocialSection.facebook,
-                        onTap: () => setState(() {
-                          _expandedSection = _expandedSection == SocialSection.facebook
-                              ? null
-                              : SocialSection.facebook;
-                        }),
+                        onTap:
+                            () => setState(() {
+                              _expandedSection =
+                                  _expandedSection == SocialSection.facebook
+                                      ? null
+                                      : SocialSection.facebook;
+                            }),
                       ),
                       if (_expandedSection == SocialSection.facebook)
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: facebookCollections.isNotEmpty
-                              ? facebookCollections.map((c) {
-                                  final isSelected = currentPath.contains(c.id);
-                                  return _buildSubItem(
-                                    name: c.name,
-                                    isSelected: isSelected,
-                                    onTap: () => GoRouter.of(context).go('/social/facebook/${c.id}'),
-                                    theme: theme,
-                                  );
-                                }).toList()
-                              : [
-                                  _buildSubItem(
-                                    name: "Meta Dev Team",
-                                    isSelected: currentPath.endsWith('/facebook/meta-dev-team') || currentPath.contains('/facebook/meta-dev-team'),
-                                    onTap: () => GoRouter.of(context).go('/social/facebook/meta-dev-team'),
-                                    theme: theme,
-                                  ),
-                                  _buildSubItem(
-                                    name: "Studio Primary",
-                                    isSelected: currentPath.endsWith('/facebook/studio-primary') || currentPath.contains('/facebook/studio-primary'),
-                                    onTap: () => GoRouter.of(context).go('/social/facebook/studio-primary'),
-                                    theme: theme,
-                                  ),
-                                ],
+                          children:
+                              facebookCollections.isNotEmpty
+                                  ? facebookCollections.map((c) {
+                                    final isSelected = currentPath.contains(
+                                      c.id,
+                                    );
+                                    return _buildSubItem(
+                                      name: c.name,
+                                      isSelected: isSelected,
+                                      onTap:
+                                          () => GoRouter.of(
+                                            context,
+                                          ).go('/social/facebook/${c.id}'),
+                                      theme: theme,
+                                    );
+                                  }).toList()
+                                  : [
+                                    _buildSubItem(
+                                      name: "Meta Dev Team",
+                                      isSelected:
+                                          currentPath.endsWith(
+                                            '/facebook/meta-dev-team',
+                                          ) ||
+                                          currentPath.contains(
+                                            '/facebook/meta-dev-team',
+                                          ),
+                                      onTap:
+                                          () => GoRouter.of(context).go(
+                                            '/social/facebook/meta-dev-team',
+                                          ),
+                                      theme: theme,
+                                    ),
+                                    _buildSubItem(
+                                      name: "Studio Primary",
+                                      isSelected:
+                                          currentPath.endsWith(
+                                            '/facebook/studio-primary',
+                                          ) ||
+                                          currentPath.contains(
+                                            '/facebook/studio-primary',
+                                          ),
+                                      onTap:
+                                          () => GoRouter.of(context).go(
+                                            '/social/facebook/studio-primary',
+                                          ),
+                                      theme: theme,
+                                    ),
+                                  ],
                         ),
 
                       // Twitter section
@@ -254,24 +312,30 @@ class _SocialDrawerState extends State<SocialDrawer> {
                         title: "Twitter Accounts",
                         icon: Icons.flutter_dash,
                         isExpanded: _expandedSection == SocialSection.twitter,
-                        onTap: () => setState(() {
-                          _expandedSection = _expandedSection == SocialSection.twitter
-                              ? null
-                              : SocialSection.twitter;
-                        }),
+                        onTap:
+                            () => setState(() {
+                              _expandedSection =
+                                  _expandedSection == SocialSection.twitter
+                                      ? null
+                                      : SocialSection.twitter;
+                            }),
                       ),
                       if (_expandedSection == SocialSection.twitter)
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: twitterCollections.map((c) {
-                            final isSelected = currentPath.contains(c.id);
-                            return _buildSubItem(
-                              name: c.name,
-                              isSelected: isSelected,
-                              onTap: () => GoRouter.of(context).go('/social/twitter/${c.id}'),
-                              theme: theme,
-                            );
-                          }).toList(),
+                          children:
+                              twitterCollections.map((c) {
+                                final isSelected = currentPath.contains(c.id);
+                                return _buildSubItem(
+                                  name: c.name,
+                                  isSelected: isSelected,
+                                  onTap:
+                                      () => GoRouter.of(
+                                        context,
+                                      ).go('/social/twitter/${c.id}'),
+                                  theme: theme,
+                                );
+                              }).toList(),
                         ),
 
                       // Instagram section
@@ -279,24 +343,30 @@ class _SocialDrawerState extends State<SocialDrawer> {
                         title: "Instagram Accounts",
                         icon: Icons.camera_alt_outlined,
                         isExpanded: _expandedSection == SocialSection.instagram,
-                        onTap: () => setState(() {
-                          _expandedSection = _expandedSection == SocialSection.instagram
-                              ? null
-                              : SocialSection.instagram;
-                        }),
+                        onTap:
+                            () => setState(() {
+                              _expandedSection =
+                                  _expandedSection == SocialSection.instagram
+                                      ? null
+                                      : SocialSection.instagram;
+                            }),
                       ),
                       if (_expandedSection == SocialSection.instagram)
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: instagramCollections.map((c) {
-                            final isSelected = currentPath.contains(c.id);
-                            return _buildSubItem(
-                              name: c.name,
-                              isSelected: isSelected,
-                              onTap: () => GoRouter.of(context).go('/social/instagram/${c.id}'),
-                              theme: theme,
-                            );
-                          }).toList(),
+                          children:
+                              instagramCollections.map((c) {
+                                final isSelected = currentPath.contains(c.id);
+                                return _buildSubItem(
+                                  name: c.name,
+                                  isSelected: isSelected,
+                                  onTap:
+                                      () => GoRouter.of(
+                                        context,
+                                      ).go('/social/instagram/${c.id}'),
+                                  theme: theme,
+                                );
+                              }).toList(),
                         ),
                     ],
                   ),

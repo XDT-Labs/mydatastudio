@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mydatatools/modules/files/pages/new_file_collection_page.dart';
+import 'package:mydatastudio/modules/files/pages/new_file_collection_page.dart';
 
 void main() {
   group('NewFileCollectionPage Widget Tests', () {
@@ -12,13 +12,17 @@ void main() {
       );
     }
 
-    testWidgets('renders TabBar with correct tab texts and icons', (tester) async {
+    testWidgets('renders TabBar with correct tab texts and icons', (
+      tester,
+    ) async {
       final router = GoRouter(
         initialLocation: '/files/add',
         routes: [
           GoRoute(
             path: '/files/add',
-            builder: (context, state) => const Scaffold(body: NewFileCollectionPage()),
+            builder:
+                (context, state) =>
+                    const Scaffold(body: NewFileCollectionPage()),
           ),
         ],
       );

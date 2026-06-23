@@ -1,20 +1,20 @@
 import 'dart:async';
 
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:mydatatools/modules/email/notifications/email_selected_notification.dart';
-import 'package:mydatatools/modules/email/notifications/email_sort_changed_notification.dart';
-import 'package:mydatatools/modules/email/pages/new_email_page.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/modules/email/services/email_repository.dart';
-import 'package:mydatatools/modules/email/services/get_email_folders_service.dart';
-import 'package:mydatatools/modules/email/widgets/email_details.dart';
-import 'package:mydatatools/modules/email/widgets/email_table.dart';
-import 'package:mydatatools/modules/email/widgets/scanning_placeholder_widget.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
+import 'package:mydatastudio/modules/email/notifications/email_selected_notification.dart';
+import 'package:mydatastudio/modules/email/notifications/email_sort_changed_notification.dart';
+import 'package:mydatastudio/modules/email/pages/new_email_page.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/modules/email/services/email_repository.dart';
+import 'package:mydatastudio/modules/email/services/get_email_folders_service.dart';
+import 'package:mydatastudio/modules/email/widgets/email_details.dart';
+import 'package:mydatastudio/modules/email/widgets/email_table.dart';
+import 'package:mydatastudio/modules/email/widgets/scanning_placeholder_widget.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_breadcrumb/flutter_breadcrumb.dart';
 import 'package:moment_dart/moment_dart.dart';
@@ -287,15 +287,14 @@ class _EmailPage extends State<EmailPage> {
                 ),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: showDetail
-                  ? _buildDetailHeader(theme)
-                  : _buildListHeader(theme),
+              child:
+                  showDetail
+                      ? _buildDetailHeader(theme)
+                      : _buildListHeader(theme),
             ),
           ),
           Expanded(
-            child: showDetail
-                ? _buildEmailDetailArea()
-                : _buildEmailListArea(),
+            child: showDetail ? _buildEmailDetailArea() : _buildEmailListArea(),
           ),
         ],
       ),
@@ -315,8 +314,7 @@ class _EmailPage extends State<EmailPage> {
           ),
           tooltip: 'Refresh Current Folder',
           onPressed: () {
-            if (collection != null &&
-                EmailPage.selectedFolder.value != null) {
+            if (collection != null && EmailPage.selectedFolder.value != null) {
               final folderId = EmailPage.selectedFolder.value!;
               logger.s(
                 "Refreshing $selectedFolderName folder for ${collection!.name}",
@@ -339,9 +337,8 @@ class _EmailPage extends State<EmailPage> {
           color: theme.colorScheme.error,
           disabledColor: theme.colorScheme.error.withValues(alpha: 0.3),
           tooltip: 'Delete Selected Messages',
-          onPressed: hasSelected
-              ? () => _showBulkDeleteConfirmation(context)
-              : null,
+          onPressed:
+              hasSelected ? () => _showBulkDeleteConfirmation(context) : null,
         ),
       ],
     );
@@ -491,9 +488,10 @@ class _EmailPage extends State<EmailPage> {
             content: Text(
               collection!.name,
               style: TextStyle(
-                color: isRootActive
-                    ? theme.colorScheme.onSurface
-                    : theme.colorScheme.onSurfaceVariant,
+                color:
+                    isRootActive
+                        ? theme.colorScheme.onSurface
+                        : theme.colorScheme.onSurfaceVariant,
                 fontWeight: isRootActive ? FontWeight.bold : FontWeight.normal,
                 fontSize: 14,
               ),
@@ -536,28 +534,29 @@ class _EmailPage extends State<EmailPage> {
     final selectedItems = emails.where((e) => e.isSelected == true).toList();
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Emails'),
-        content: Text(
-          'Are you sure you want to delete ${selectedItems.length} selected messages?\nThese will be deleted locally and on the server.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _deleteSelectedEmails(selectedItems);
-            },
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: Colors.red),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Delete Emails'),
+            content: Text(
+              'Are you sure you want to delete ${selectedItems.length} selected messages?\nThese will be deleted locally and on the server.',
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _deleteSelectedEmails(selectedItems);
+                },
+                child: const Text(
+                  'Delete',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
     );
   }
 
@@ -584,7 +583,9 @@ class _EmailPage extends State<EmailPage> {
         }
       }
 
-      await EmailRepository(DatabaseManager.instance.database!).deleteEmails(ids);
+      await EmailRepository(
+        DatabaseManager.instance.database!,
+      ).deleteEmails(ids);
 
       _refreshEmails();
       if (mounted) {
@@ -601,9 +602,9 @@ class _EmailPage extends State<EmailPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting emails: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error deleting emails: $e')));
       }
     }
   }

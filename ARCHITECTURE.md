@@ -1,7 +1,7 @@
 
 ## Overview
 
-**MyData/Tools** is a privacy-focused, local-first Digital Asset Manager (DAM) for managing your digital life — files, emails, photos, and social media archives — all stored on your device with no cloud dependency.
+**My Data Studio** is a privacy-focused, local-first Digital Asset Manager (DAM) for managing your digital life — files, emails, photos, and social media archives — all stored on your device with no cloud dependency.
 
 - **Local-first**: All data stored on your device
 - **Privacy-focused**: Zero server-side data storage

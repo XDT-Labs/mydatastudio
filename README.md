@@ -1,8 +1,8 @@
-# MyData/Tools 
+# My Data Studio
 
 ### Your personal data manager, organizer, and backup tool
 
-MyData/Tools started with one idea - we need a way to keep a local copy of our online digital life. This includes cloud drives, emails, social media posts, and more. 
+My Data Studio started with one idea - we need a way to keep a local copy of our online digital life. This includes cloud drives, emails, social media posts, and more. 
 
 ## Features
 
@@ -22,7 +22,7 @@ MyData/Tools started with one idea - we need a way to keep a local copy of our o
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/mikenimer/mydatatools-desktop.git
+   git clone https://github.com/XDT-Labs/mydatastudio.git
    ```
 
 2. Install dependencies:

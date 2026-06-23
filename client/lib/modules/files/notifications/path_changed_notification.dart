@@ -1,5 +1,5 @@
-import 'package:mydatatools/models/tables/file_asset.dart';
-import 'package:mydatatools/modules/files/notifications/file_notification.dart';
+import 'package:mydatastudio/models/tables/file_asset.dart';
+import 'package:mydatastudio/modules/files/notifications/file_notification.dart';
 
 class PathChangedNotification extends FiledNotification {
   final FileAsset asset;

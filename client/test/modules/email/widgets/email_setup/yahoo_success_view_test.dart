@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/yahoo_success_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_success_view.dart';
 
 void main() {
   group('YahooSuccessView', () {
     testWidgets('shows connected heading', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
-          home: Scaffold(
-            body: YahooSuccessView(connectedEmail: null),
-          ),
+          home: Scaffold(body: YahooSuccessView(connectedEmail: null)),
         ),
       );
 
@@ -31,9 +29,7 @@ void main() {
     testWidgets('hides email when null', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
-          home: Scaffold(
-            body: YahooSuccessView(connectedEmail: null),
-          ),
+          home: Scaffold(body: YahooSuccessView(connectedEmail: null)),
         ),
       );
 

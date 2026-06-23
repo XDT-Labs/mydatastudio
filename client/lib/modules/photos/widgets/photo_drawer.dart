@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 

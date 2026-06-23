@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/file_metadata_section.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/file_metadata_section.dart';
 
 import '../../../../helpers/file_fixture.dart';
 
@@ -14,9 +14,7 @@ void main() {
         size: 2048,
       );
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(body: FileMetadataSection(file: file)),
-        ),
+        MaterialApp(home: Scaffold(body: FileMetadataSection(file: file))),
       );
       await tester.pumpAndSettle();
       expect(find.text('photo.jpg'), findsOneWidget);
@@ -31,9 +29,7 @@ void main() {
         downloadUrl: 'https://example.com/file.pdf',
       );
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(body: FileMetadataSection(file: file)),
-        ),
+        MaterialApp(home: Scaffold(body: FileMetadataSection(file: file))),
       );
       await tester.pumpAndSettle();
       expect(find.text('https://example.com/file.pdf'), findsOneWidget);

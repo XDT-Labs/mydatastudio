@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 
 class CollectionTileWidget extends StatelessWidget {
   const CollectionTileWidget({
@@ -36,9 +36,10 @@ class CollectionTileWidget extends StatelessWidget {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
           side: BorderSide(
-            color: isSelected
-                ? theme.colorScheme.primary.withValues(alpha: 0.3)
-                : Colors.transparent,
+            color:
+                isSelected
+                    ? theme.colorScheme.primary.withValues(alpha: 0.3)
+                    : Colors.transparent,
             width: 1,
           ),
         ),
@@ -49,22 +50,24 @@ class CollectionTileWidget extends StatelessWidget {
           style: TextStyle(
             fontSize: 13,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected
-                ? theme.colorScheme.primary
-                : theme.colorScheme.onSurface,
+            color:
+                isSelected
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurface,
           ),
         ),
-        subtitle: subtitle != null
-            ? Text(
-                subtitle!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant.withOpacity(0.6),
-                  fontSize: 11,
-                ),
-              )
-            : null,
+        subtitle:
+            subtitle != null
+                ? Text(
+                  subtitle!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant.withOpacity(0.6),
+                    fontSize: 11,
+                  ),
+                )
+                : null,
         trailing: PopupMenuButton<String>(
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(),
@@ -77,10 +80,11 @@ class CollectionTileWidget extends StatelessWidget {
             if (value == 'sync') onSync();
             if (value == 'delete') onDelete();
           },
-          itemBuilder: (context) => const [
-            PopupMenuItem<String>(value: 'sync', child: Text('Sync')),
-            PopupMenuItem<String>(value: 'delete', child: Text('Delete')),
-          ],
+          itemBuilder:
+              (context) => const [
+                PopupMenuItem<String>(value: 'sync', child: Text('Sync')),
+                PopupMenuItem<String>(value: 'delete', child: Text('Delete')),
+              ],
         ),
         onTap: onTap,
       ),

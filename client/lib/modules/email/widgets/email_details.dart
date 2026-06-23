@@ -1,8 +1,8 @@
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/file.dart' as model;
-import 'package:mydatatools/modules/email/services/email_repository.dart';
-import 'package:mydatatools/modules/email/widgets/email_detail/email_attachments_section.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/file.dart' as model;
+import 'package:mydatastudio/modules/email/services/email_repository.dart';
+import 'package:mydatastudio/modules/email/widgets/email_detail/email_attachments_section.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -46,7 +46,8 @@ class _EmailDetails extends State<EmailDetails> {
     }
   }
 
-  static const _csp = '<meta http-equiv="Content-Security-Policy" '
+  static const _csp =
+      '<meta http-equiv="Content-Security-Policy" '
       "content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data: https: http:;\">";
 
   void _loadEmailContent() {
@@ -79,17 +80,38 @@ class _EmailDetails extends State<EmailDetails> {
 
   static String _sanitizeHtml(String html) {
     var s = html;
-    s = s.replaceAll(RegExp(r'<script[\s\S]*?</script>', caseSensitive: false), '');
-    s = s.replaceAll(RegExp(r"""\s+on\w+\s*=\s*["'][^"']*["']""", caseSensitive: false), '');
+    s = s.replaceAll(
+      RegExp(r'<script[\s\S]*?</script>', caseSensitive: false),
+      '',
+    );
+    s = s.replaceAll(
+      RegExp(r"""\s+on\w+\s*=\s*["'][^"']*["']""", caseSensitive: false),
+      '',
+    );
     s = s.replaceAll(RegExp(r'\s+on\w+\s*=\s*\S+', caseSensitive: false), '');
-    s = s.replaceAll(RegExp(r'<(iframe|object|embed|form|applet|base)[\s\S]*?(/?>|</\1>)', caseSensitive: false), '');
-    s = s.replaceAll(RegExp(r'javascript\s*:', caseSensitive: false), 'blocked:');
+    s = s.replaceAll(
+      RegExp(
+        r'<(iframe|object|embed|form|applet|base)[\s\S]*?(/?>|</\1>)',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    s = s.replaceAll(
+      RegExp(r'javascript\s*:', caseSensitive: false),
+      'blocked:',
+    );
     s = s.replaceAll(RegExp(r'<meta[^>]*>', caseSensitive: false), '');
 
     if (s.contains(RegExp(r'<head', caseSensitive: false))) {
-      s = s.replaceFirst(RegExp(r'<head([^>]*)>', caseSensitive: false), '<head\$1>$_csp');
+      s = s.replaceFirst(
+        RegExp(r'<head([^>]*)>', caseSensitive: false),
+        '<head\$1>$_csp',
+      );
     } else if (s.contains(RegExp(r'<html', caseSensitive: false))) {
-      s = s.replaceFirst(RegExp(r'<html([^>]*)>', caseSensitive: false), '<html\$1><head>$_csp</head>');
+      s = s.replaceFirst(
+        RegExp(r'<html([^>]*)>', caseSensitive: false),
+        '<html\$1><head>$_csp</head>',
+      );
     } else {
       s = '<html><head>$_csp</head><body>$s</body></html>';
     }

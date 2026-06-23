@@ -1,4 +1,4 @@
-import 'package:mydatatools/modules/files/notifications/file_notification.dart';
+import 'package:mydatastudio/modules/files/notifications/file_notification.dart';
 
 class SortChangedNotification extends FiledNotification {
   final String sortColumn;

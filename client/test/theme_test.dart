@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/family_dam_app.dart';
+import 'package:mydatastudio/family_dam_app.dart';
 
 void main() {
-  testWidgets('App starts in dark mode and uses darkColorScheme', (WidgetTester tester) async {
+  testWidgets('App starts in dark mode and uses darkColorScheme', (
+    WidgetTester tester,
+  ) async {
     tester.view.physicalSize = const Size(1600, 1200);
     tester.view.devicePixelRatio = 1.0;
 

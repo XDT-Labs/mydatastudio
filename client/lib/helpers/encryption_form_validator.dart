@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:mydatatools/helpers/encryption_helper.dart';
+import 'package:mydatastudio/helpers/encryption_helper.dart';
 import 'package:encrypt/encrypt.dart';
 import 'package:pointycastle/pointycastle.dart';
 import 'package:reactive_forms/reactive_forms.dart';

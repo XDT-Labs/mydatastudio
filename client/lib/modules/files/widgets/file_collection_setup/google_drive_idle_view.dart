@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_sign_in_button.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_sign_in_button.dart';
 
 class GoogleDriveIdleView extends StatelessWidget {
   const GoogleDriveIdleView({
@@ -31,7 +31,11 @@ class GoogleDriveIdleView extends StatelessWidget {
           'Sign in with your Google account to scan and browse your Drive '
           'files directly from this app.',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.5),
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey.shade600,
+            height: 1.5,
+          ),
         ),
         const SizedBox(height: 12),
         Container(

@@ -1,9 +1,10 @@
 import 'dart:io';
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/models/tables/app_user.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:reactive_forms/reactive_forms.dart';
+import 'package:mydatastudio/database_manager.dart';
 
 class SetupStep2 extends StatefulWidget {
   const SetupStep2({
@@ -37,7 +38,8 @@ class _SetupStep2State extends State<SetupStep2> {
 
     if (storageForm.valid && appUser != null) {
       String? dbDir = MainApp.appDataDirectory.value;
-      appUser.localStoragePath = (dbDir! is Directory) ? (dbDir as Directory).path : dbDir;
+      appUser.localStoragePath =
+          (dbDir! is Directory) ? (dbDir as Directory).path : dbDir;
 
       try {
         errorMessage = null;
@@ -65,12 +67,31 @@ class _SetupStep2State extends State<SetupStep2> {
           repoDir.createSync(recursive: true);
         }
 
+        // Test SQLite WAL support (fails on network/SMB shares)
+        setState(() {
+          errorMessage = 'Validating storage speed and locking...';
+        });
+        final supportsWal =
+            true; //await DatabaseManager.testPathSupportsWal(appUser.localStoragePath);
+        if (!supportsWal) {
+          setState(() {
+            errorMessage =
+                'SQLite database cannot be initialized on a network share (SMB/NAS). Please select a directory on a local drive.';
+          });
+          return;
+        }
+        setState(() {
+          errorMessage = null;
+        });
+
         //call callback and proceed to next step
         widget.onSubmit(appUser);
       } catch (e) {
         //Missing permissions required to use folder
         storageForm.findControl('storageLocation')?.value = '';
-        errorMessage = 'Missing permissions required to use folder';
+        setState(() {
+          errorMessage = 'Missing permissions required to use folder';
+        });
       }
     }
   }

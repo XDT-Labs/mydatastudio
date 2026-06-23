@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:mydatatools/modules/email/services/email_folder_repository.dart';
-import 'package:mydatatools/services/rx_service.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
+import 'package:mydatastudio/modules/email/services/email_folder_repository.dart';
+import 'package:mydatastudio/services/rx_service.dart';
 import 'package:resqlite/resqlite.dart' show ResqliteQueryException;
 
-class EmailFolderUpsertService extends RxService<EmailFolderUpsertServiceCommand, EmailFolder> {
+class EmailFolderUpsertService
+    extends RxService<EmailFolderUpsertServiceCommand, EmailFolder> {
   static final EmailFolderUpsertService _singleton = EmailFolderUpsertService();
   static EmailFolderUpsertService get instance => _singleton;
 

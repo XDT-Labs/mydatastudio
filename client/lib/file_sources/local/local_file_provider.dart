@@ -1,9 +1,9 @@
 import 'dart:io' as io;
 
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/file_sources/file_source_file.dart';
-import 'package:mydatatools/file_sources/file_source_provider.dart';
-import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/file_sources/file_source_file.dart';
+import 'package:mydatastudio/file_sources/file_source_provider.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 
@@ -49,18 +49,22 @@ class LocalFileProvider implements FileSourceProvider {
         // Skip hidden files/folders
         if (name.startsWith('.')) continue;
 
-        results.add(FileSourceFile(
-          id: entity.path,
-          name: name,
-          parentId: dirPath,
-          mimeType: entity is io.Directory
-              ? 'inode/directory'
-              : _mimeTypeFromName(name),
-          size: entity is io.File ? stat.size : null,
-          createdAt: stat.modified, // dart:io has no createdAt on all platforms
-          modifiedAt: stat.modified,
-          isFolder: entity is io.Directory,
-        ));
+        results.add(
+          FileSourceFile(
+            id: entity.path,
+            name: name,
+            parentId: dirPath,
+            mimeType:
+                entity is io.Directory
+                    ? 'inode/directory'
+                    : _mimeTypeFromName(name),
+            size: entity is io.File ? stat.size : null,
+            createdAt:
+                stat.modified, // dart:io has no createdAt on all platforms
+            modifiedAt: stat.modified,
+            isFolder: entity is io.Directory,
+          ),
+        );
       }
     } catch (e) {
       // Permission denied or path gone — return what we have

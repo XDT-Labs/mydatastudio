@@ -5,20 +5,20 @@ import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:math';
 
-import 'package:mydatatools/helpers/file_path_resolver.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/file_asset.dart';
-import 'package:mydatatools/modules/files/files_constants.dart';
-import 'package:mydatatools/modules/files/notifications/file_notification.dart';
-import 'package:mydatatools/modules/files/notifications/path_changed_notification.dart';
-import 'package:mydatatools/modules/files/notifications/sort_changed_notification.dart';
+import 'package:mydatastudio/helpers/file_path_resolver.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/file_asset.dart';
+import 'package:mydatastudio/modules/files/files_constants.dart';
+import 'package:mydatastudio/modules/files/notifications/file_notification.dart';
+import 'package:mydatastudio/modules/files/notifications/path_changed_notification.dart';
+import 'package:mydatastudio/modules/files/notifications/sort_changed_notification.dart';
 import 'package:flutter/material.dart';
 import 'package:moment_dart/moment_dart.dart';
 import 'package:path/path.dart' as p;
 
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 

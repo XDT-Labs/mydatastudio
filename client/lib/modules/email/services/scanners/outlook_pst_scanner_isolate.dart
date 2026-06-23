@@ -4,21 +4,21 @@ import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/modules/email/services/email_folder_upsert_service.dart';
-import 'package:mydatatools/modules/email/services/email_upsert_service.dart';
-import 'package:mydatatools/modules/email/services/get_emails_service.dart';
-import 'package:mydatatools/modules/files/files_constants.dart';
-import 'package:mydatatools/modules/files/services/file_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
+import 'package:mydatastudio/modules/files/files_constants.dart';
+import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:http/http.dart' as http;
@@ -172,8 +172,7 @@ class OutlookPstScannerIsolateWorker {
             name: data['name'],
             type: 'user',
             parentId:
-                p.dirname(data['path']) == "" ||
-                        p.dirname(data['path']) == "."
+                p.dirname(data['path']) == "" || p.dirname(data['path']) == "."
                     ? null
                     : folderPathToId[p.dirname(data['path'])],
           );
@@ -190,19 +189,14 @@ class OutlookPstScannerIsolateWorker {
             collectionId: collection.id,
             date: DateTime.tryParse(data['date'] ?? "") ?? DateTime.now(),
             from: data['sender'] ?? "Unknown",
-            to:
-                (data['to'] as List?)?.map((e) => e.toString()).toList() ??
-                [],
-            cc:
-                (data['cc'] as List?)?.map((e) => e.toString()).toList() ??
-                [],
+            to: (data['to'] as List?)?.map((e) => e.toString()).toList() ?? [],
+            cc: (data['cc'] as List?)?.map((e) => e.toString()).toList() ?? [],
             subject: data['subject'] ?? "(No Subject)",
             plainBody: data['body'] ?? "",
             htmlBody: data['html_body'] ?? "",
             folderId: folderId,
             isRead: true,
-            hasAttachments:
-                (data['attachments'] as List?)?.isNotEmpty ?? false,
+            hasAttachments: (data['attachments'] as List?)?.isNotEmpty ?? false,
             isDeleted: false,
           );
 
@@ -218,8 +212,12 @@ class OutlookPstScannerIsolateWorker {
 
             // Validate path stays within extraction root
             if (attPath.isNotEmpty &&
-                !p.canonicalize(attPath).startsWith(p.canonicalize(extractionRoot))) {
-              logger.w('PST Scanner: Skipping attachment with path outside extraction root');
+                !p
+                    .canonicalize(attPath)
+                    .startsWith(p.canonicalize(extractionRoot))) {
+              logger.w(
+                'PST Scanner: Skipping attachment with path outside extraction root',
+              );
               continue;
             }
 
@@ -240,8 +238,7 @@ class OutlookPstScannerIsolateWorker {
               id: fileId,
               name: att['name'],
               path: attPath,
-              parent:
-                  attPath.isNotEmpty ? p.dirname(attPath) : extractionRoot,
+              parent: attPath.isNotEmpty ? p.dirname(attPath) : extractionRoot,
               dateCreated: email.date,
               dateLastModified: email.date,
               collectionId: collection.id,

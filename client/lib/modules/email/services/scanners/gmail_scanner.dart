@@ -1,9 +1,9 @@
 import 'dart:isolate';
 
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/modules/email/services/scanners/gmail_scanner_isolate.dart';
-import 'package:mydatatools/scanners/collection_scanner.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/email/services/scanners/gmail_scanner_isolate.dart';
+import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:flutter/services.dart';
 
 /// [GmailScanner] is a collection scanner responsible for indexing emails
@@ -54,7 +54,7 @@ class GmailScanner extends CollectionScanner {
     bool recursive,
     bool force,
   ) async {
-    // We no longer skip scanning if lastScanDate is not null. 
+    // We no longer skip scanning if lastScanDate is not null.
     // The underlying isolate will handle incremental sync logic based on the date.
 
     // If scanning already, don't restart.
@@ -62,9 +62,9 @@ class GmailScanner extends CollectionScanner {
       logger.i("Registration-only mode: skipping scan for ${collection.name}");
       return 0;
     }
-    
+
     if (isScanning.value) return 0;
-    
+
     isScanning.add(true);
     logger.i("Gmail sync started for ${collection.name}");
 
@@ -80,8 +80,8 @@ class GmailScanner extends CollectionScanner {
       }
     });
 
-    // If the path looks like a local file path (e.g., from the Files module), 
-    // we don't want to pass it to Gmail as a label ID. 
+    // If the path looks like a local file path (e.g., from the Files module),
+    // we don't want to pass it to Gmail as a label ID.
     String? labelId;
     if (path != null && !path.startsWith('/') && !path.contains(appDir)) {
       labelId = path;
@@ -89,10 +89,7 @@ class GmailScanner extends CollectionScanner {
 
     //start isolate
     RootIsolateToken? token = RootIsolateToken.instance;
-    isolate = GmailScannerIsolate(
-      token: token,
-      appDir: appDir,
-    );
+    isolate = GmailScannerIsolate(token: token, appDir: appDir);
     await isolate!.start(
       collection,
       folderId: labelId,

@@ -5,12 +5,12 @@ import 'dart:isolate';
 import 'package:flutter/services.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/repositories/database_repository.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/repositories/database_repository.dart';
 
 class EmbeddingIsolate {
   Isolate? _isolate;

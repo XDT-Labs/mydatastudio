@@ -1,10 +1,10 @@
 import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/exif_metadata_tab.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/gps_metadata_tab.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/similar_files_tab.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/exif_metadata_tab.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/gps_metadata_tab.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/similar_files_tab.dart';
 
 class TabbedMetadataSection extends StatelessWidget {
   const TabbedMetadataSection({
@@ -52,10 +52,7 @@ class TabbedMetadataSection extends StatelessWidget {
                   tileProvider: tileProvider,
                 ),
               if (showExif)
-                ExifMetadataTab(
-                  exifData: exifData,
-                  isLoading: isLoadingExif,
-                ),
+                ExifMetadataTab(exifData: exifData, isLoading: isLoadingExif),
               const SimilarFilesTab(),
             ],
           ),

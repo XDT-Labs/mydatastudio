@@ -1,18 +1,18 @@
 import 'dart:async';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/modules/files/services/scanners/google_file_scanner.dart';
-import 'package:mydatatools/modules/files/services/scanners/local_file_isolate.dart';
-import 'package:mydatatools/modules/email/services/scanners/gmail_scanner.dart';
-import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
-import 'package:mydatatools/modules/email/services/scanners/outlook_scanner.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/files/services/scanners/google_file_scanner.dart';
+import 'package:mydatastudio/modules/files/services/scanners/local_file_isolate.dart';
+import 'package:mydatastudio/modules/email/services/scanners/gmail_scanner.dart';
+import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
+import 'package:mydatastudio/modules/email/services/scanners/outlook_scanner.dart';
 
-import 'package:mydatatools/modules/email/services/scanners/yahoo_scanner.dart';
-import 'package:mydatatools/scanners/collection_scanner.dart';
+import 'package:mydatastudio/modules/email/services/scanners/yahoo_scanner.dart';
+import 'package:mydatastudio/scanners/collection_scanner.dart';
 
 typedef ScannerFactory = Future<CollectionScanner> Function(Collection c);
 
@@ -222,7 +222,9 @@ class ScannerManager {
         case AppConstants.scannerEmailOutlookPst:
           // Handled as a one-time import via direct isolate call in UI.
           // We silently ignore it here to suppress the "type not recognized" warning on startup.
-          throw Exception("Outlook PST scanner is handled via direct isolate call and cannot be registered in ScannerManager.");
+          throw Exception(
+            "Outlook PST scanner is handled via direct isolate call and cannot be registered in ScannerManager.",
+          );
 
         default:
           logger.w("Scanner type '${c.scanner}' not recognized.");

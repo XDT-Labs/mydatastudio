@@ -1,6 +1,6 @@
-import 'package:mydatatools/models/tables/app.dart';
-import 'package:mydatatools/repositories/app_repository.dart';
-import 'package:mydatatools/services/rx_service.dart';
+import 'package:mydatastudio/models/tables/app.dart';
+import 'package:mydatastudio/repositories/app_repository.dart';
+import 'package:mydatastudio/services/rx_service.dart';
 
 class GetAppsService extends RxService<GetAppsServiceCommand, List<App>> {
   static final GetAppsService _singleton = GetAppsService();

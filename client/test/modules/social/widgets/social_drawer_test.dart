@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
-import 'package:mydatatools/modules/social/widgets/social_drawer.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
+import 'package:mydatastudio/modules/social/widgets/social_drawer.dart';
 import 'package:rxdart/rxdart.dart';
 
 class FakeGetCollectionsService extends GetCollectionsService {
@@ -50,7 +50,9 @@ void main() {
       );
     }
 
-    testWidgets('renders Social Accounts header and accordions', (tester) async {
+    testWidgets('renders Social Accounts header and accordions', (
+      tester,
+    ) async {
       final router = GoRouter(
         initialLocation: '/social',
         routes: [
@@ -73,26 +75,31 @@ void main() {
       expect(find.text('Instagram Accounts'), findsOneWidget);
     });
 
-    testWidgets('Facebook accordion is expanded by default and renders mockups when collections empty', (tester) async {
-      final router = GoRouter(
-        initialLocation: '/social',
-        routes: [
-          GoRoute(
-            path: '/social',
-            builder: (context, state) => const Scaffold(body: SocialDrawer()),
-          ),
-        ],
-      );
+    testWidgets(
+      'Facebook accordion is expanded by default and renders mockups when collections empty',
+      (tester) async {
+        final router = GoRouter(
+          initialLocation: '/social',
+          routes: [
+            GoRoute(
+              path: '/social',
+              builder: (context, state) => const Scaffold(body: SocialDrawer()),
+            ),
+          ],
+        );
 
-      await tester.pumpWidget(buildDrawer(router));
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(buildDrawer(router));
+        await tester.pumpAndSettle();
 
-      // Facebook should be expanded, showing mockup items
-      expect(find.text('Meta Dev Team'), findsOneWidget);
-      expect(find.text('Studio Primary'), findsOneWidget);
-    });
+        // Facebook should be expanded, showing mockup items
+        expect(find.text('Meta Dev Team'), findsOneWidget);
+        expect(find.text('Studio Primary'), findsOneWidget);
+      },
+    );
 
-    testWidgets('renders active highlight and selection style based on path', (tester) async {
+    testWidgets('renders active highlight and selection style based on path', (
+      tester,
+    ) async {
       final router = GoRouter(
         initialLocation: '/social/facebook/meta-dev-team',
         routes: [
@@ -102,7 +109,8 @@ void main() {
             routes: [
               GoRoute(
                 path: 'facebook/:id',
-                builder: (context, state) => const Scaffold(body: SocialDrawer()),
+                builder:
+                    (context, state) => const Scaffold(body: SocialDrawer()),
               ),
             ],
           ),
@@ -117,11 +125,15 @@ void main() {
       expect(textWidget.style?.fontWeight, equals(FontWeight.bold));
 
       // Studio Primary is not selected. Check its styling (normal font weight)
-      final unselectedTextWidget = tester.widget<Text>(find.text('Studio Primary'));
+      final unselectedTextWidget = tester.widget<Text>(
+        find.text('Studio Primary'),
+      );
       expect(unselectedTextWidget.style?.fontWeight, equals(FontWeight.normal));
     });
 
-    testWidgets('triggers GoRouter navigation when mock item is tapped', (tester) async {
+    testWidgets('triggers GoRouter navigation when mock item is tapped', (
+      tester,
+    ) async {
       final router = GoRouter(
         initialLocation: '/social',
         routes: [
@@ -131,7 +143,8 @@ void main() {
             routes: [
               GoRoute(
                 path: 'facebook/:id',
-                builder: (context, state) => const Scaffold(body: SocialDrawer()),
+                builder:
+                    (context, state) => const Scaffold(body: SocialDrawer()),
               ),
             ],
           ),
@@ -146,10 +159,15 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify path updated to /social/facebook/studio-primary
-      expect(router.routeInformationProvider.value.uri.path, equals('/social/facebook/studio-primary'));
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        equals('/social/facebook/studio-primary'),
+      );
     });
 
-    testWidgets('renders database social collections when present', (tester) async {
+    testWidgets('renders database social collections when present', (
+      tester,
+    ) async {
       final collections = <Collection>[
         Collection(
           id: 'fb-col-1',
@@ -181,11 +199,13 @@ void main() {
             routes: [
               GoRoute(
                 path: 'facebook/:id',
-                builder: (context, state) => const Scaffold(body: SocialDrawer()),
+                builder:
+                    (context, state) => const Scaffold(body: SocialDrawer()),
               ),
               GoRoute(
                 path: 'twitter/:id',
-                builder: (context, state) => const Scaffold(body: SocialDrawer()),
+                builder:
+                    (context, state) => const Scaffold(body: SocialDrawer()),
               ),
             ],
           ),
@@ -208,95 +228,111 @@ void main() {
       expect(find.text('Personal Twitter'), findsOneWidget);
     });
 
-    testWidgets('renders FloatingActionButton and navigates to /social/add on tap', (tester) async {
-      final router = GoRouter(
-        initialLocation: '/social',
-        routes: [
-          GoRoute(
-            path: '/social',
-            builder: (context, state) => const Scaffold(body: SocialDrawer()),
-            routes: [
-              GoRoute(
-                path: 'add',
-                builder: (context, state) => const Scaffold(body: Text('Add Social Source Page')),
-              ),
-            ],
+    testWidgets(
+      'renders FloatingActionButton and navigates to /social/add on tap',
+      (tester) async {
+        final router = GoRouter(
+          initialLocation: '/social',
+          routes: [
+            GoRoute(
+              path: '/social',
+              builder: (context, state) => const Scaffold(body: SocialDrawer()),
+              routes: [
+                GoRoute(
+                  path: 'add',
+                  builder:
+                      (context, state) =>
+                          const Scaffold(body: Text('Add Social Source Page')),
+                ),
+              ],
+            ),
+          ],
+        );
+
+        await tester.pumpWidget(buildDrawer(router));
+        await tester.pumpAndSettle();
+
+        // Verify FAB is rendered
+        final fabFinder = find.byType(FloatingActionButton);
+        expect(fabFinder, findsOneWidget);
+
+        // Verify styling of FAB
+        final fab = tester.widget<FloatingActionButton>(fabFinder);
+        expect(fab.tooltip, equals("Add Source"));
+        expect(fab.shape, const CircleBorder());
+        expect(find.byIcon(Icons.add), findsOneWidget);
+
+        // Tap FAB
+        await tester.tap(fabFinder);
+        await tester.pumpAndSettle();
+
+        // Verify routing happened
+        expect(
+          router.routeInformationProvider.value.uri.path,
+          equals('/social/add'),
+        );
+      },
+    );
+
+    testWidgets(
+      'preserves active accordion section when navigating to /social/add',
+      (tester) async {
+        final collections = <Collection>[
+          Collection(
+            id: 'tw-col-1',
+            name: 'Personal Twitter',
+            path: '',
+            type: 'social',
+            scanner: 'twitter',
+            scanStatus: 'idle',
+            needsReAuth: false,
           ),
-        ],
-      );
+        ];
+        fakeService.setCollections(collections);
 
-      await tester.pumpWidget(buildDrawer(router));
-      await tester.pumpAndSettle();
+        // Setup a router with actual paths that uses the drawer at both routes
+        final router = GoRouter(
+          initialLocation: '/social/twitter/tw-col-1',
+          routes: [
+            GoRoute(
+              path: '/social',
+              builder: (context, state) => const Scaffold(body: SocialDrawer()),
+              routes: [
+                GoRoute(
+                  path: 'twitter/:id',
+                  builder:
+                      (context, state) => const Scaffold(body: SocialDrawer()),
+                ),
+                GoRoute(
+                  path: 'add',
+                  builder:
+                      (context, state) => const Scaffold(body: SocialDrawer()),
+                ),
+              ],
+            ),
+          ],
+        );
 
-      // Verify FAB is rendered
-      final fabFinder = find.byType(FloatingActionButton);
-      expect(fabFinder, findsOneWidget);
+        await tester.pumpWidget(buildDrawer(router));
+        await tester.pumpAndSettle();
 
-      // Verify styling of FAB
-      final fab = tester.widget<FloatingActionButton>(fabFinder);
-      expect(fab.tooltip, equals("Add Source"));
-      expect(fab.shape, const CircleBorder());
-      expect(find.byIcon(Icons.add), findsOneWidget);
+        // On /social/twitter/tw-col-1, the Twitter section should be expanded
+        expect(find.text('Personal Twitter'), findsOneWidget);
 
-      // Tap FAB
-      await tester.tap(fabFinder);
-      await tester.pumpAndSettle();
+        // Tap FAB to navigate to /social/add
+        final fabFinder = find.byType(FloatingActionButton);
+        await tester.tap(fabFinder);
+        await tester.pumpAndSettle();
 
-      // Verify routing happened
-      expect(router.routeInformationProvider.value.uri.path, equals('/social/add'));
-    });
+        // Verify the path updated to /social/add
+        expect(
+          router.routeInformationProvider.value.uri.path,
+          equals('/social/add'),
+        );
 
-    testWidgets('preserves active accordion section when navigating to /social/add', (tester) async {
-      final collections = <Collection>[
-        Collection(
-          id: 'tw-col-1',
-          name: 'Personal Twitter',
-          path: '',
-          type: 'social',
-          scanner: 'twitter',
-          scanStatus: 'idle',
-          needsReAuth: false,
-        ),
-      ];
-      fakeService.setCollections(collections);
-
-      // Setup a router with actual paths that uses the drawer at both routes
-      final router = GoRouter(
-        initialLocation: '/social/twitter/tw-col-1',
-        routes: [
-          GoRoute(
-            path: '/social',
-            builder: (context, state) => const Scaffold(body: SocialDrawer()),
-            routes: [
-              GoRoute(
-                path: 'twitter/:id',
-                builder: (context, state) => const Scaffold(body: SocialDrawer()),
-              ),
-              GoRoute(
-                path: 'add',
-                builder: (context, state) => const Scaffold(body: SocialDrawer()),
-              ),
-            ],
-          ),
-        ],
-      );
-
-      await tester.pumpWidget(buildDrawer(router));
-      await tester.pumpAndSettle();
-
-      // On /social/twitter/tw-col-1, the Twitter section should be expanded
-      expect(find.text('Personal Twitter'), findsOneWidget);
-
-      // Tap FAB to navigate to /social/add
-      final fabFinder = find.byType(FloatingActionButton);
-      await tester.tap(fabFinder);
-      await tester.pumpAndSettle();
-
-      // Verify the path updated to /social/add
-      expect(router.routeInformationProvider.value.uri.path, equals('/social/add'));
-
-      // The Twitter section should STILL be expanded (and render the sub-item)
-      expect(find.text('Personal Twitter'), findsOneWidget);
-    });
+        // The Twitter section should STILL be expanded (and render the sub-item)
+        expect(find.text('Personal Twitter'), findsOneWidget);
+      },
+    );
   });
 }

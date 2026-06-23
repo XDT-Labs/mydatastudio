@@ -1,8 +1,8 @@
 import 'dart:io' as io;
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:path/path.dart' as p;
 
 class CollectionRepository {
@@ -19,18 +19,24 @@ class CollectionRepository {
   }
 
   Future<List<Collection>> collectionsByType(String type) async {
-    final rows = await db.select("SELECT * FROM collections WHERE type = ?", [type]);
+    final rows = await db.select("SELECT * FROM collections WHERE type = ?", [
+      type,
+    ]);
     return rows.map((r) => Collection.fromDbMap(r)).toList();
   }
 
   Future<Collection?> collectionById(String val) async {
-    final rows = await db.select("SELECT * FROM collections WHERE id = ?", [val]);
+    final rows = await db.select("SELECT * FROM collections WHERE id = ?", [
+      val,
+    ]);
     if (rows.isEmpty) return null;
     return Collection.fromDbMap(rows.first);
   }
 
   Future<Collection?> getCollectionByPath(String path) async {
-    final rows = await db.select("SELECT * FROM collections WHERE path = ?", [path]);
+    final rows = await db.select("SELECT * FROM collections WHERE path = ?", [
+      path,
+    ]);
     if (rows.isEmpty) return null;
     return Collection.fromDbMap(rows.first);
   }
@@ -108,12 +114,18 @@ class CollectionRepository {
 
     await db.transaction((tx) async {
       // 2. Find and delete all file embeddings associated with files in this collection
-      final fileRows = await tx.select("SELECT id FROM files WHERE collection_id = ?", [id]);
+      final fileRows = await tx.select(
+        "SELECT id FROM files WHERE collection_id = ?",
+        [id],
+      );
       final fileIds = fileRows.map((r) => r['id'] as String).toList();
-      
+
       if (fileIds.isNotEmpty) {
         final placeholders = List.filled(fileIds.length, '?').join(',');
-        await tx.execute("DELETE FROM files_embeddings WHERE file_id IN ($placeholders)", fileIds);
+        await tx.execute(
+          "DELETE FROM files_embeddings WHERE file_id IN ($placeholders)",
+          fileIds,
+        );
       }
 
       // 3. Delete all files linked to this collection
@@ -126,7 +138,9 @@ class CollectionRepository {
       await tx.execute("DELETE FROM emails WHERE collection_id = ?", [id]);
 
       // 6. Delete all email folders linked to this collection
-      await tx.execute("DELETE FROM email_folders WHERE collection_id = ?", [id]);
+      await tx.execute("DELETE FROM email_folders WHERE collection_id = ?", [
+        id,
+      ]);
 
       // 7. Finally delete the collection itself
       await tx.execute("DELETE FROM collections WHERE id = ?", [id]);
@@ -137,7 +151,12 @@ class CollectionRepository {
     if (appDir != null) {
       if (collection.type == 'email') {
         try {
-          final collectionDiskPath = p.join(appDir, 'files', 'email', collection.id);
+          final collectionDiskPath = p.join(
+            appDir,
+            'files',
+            'email',
+            collection.id,
+          );
           final dir = io.Directory(collectionDiskPath);
           if (await dir.exists()) {
             await dir.delete(recursive: true);
@@ -146,14 +165,22 @@ class CollectionRepository {
         } catch (e) {
           logger.e("Failed to delete email collection files from disk: $e");
         }
-      } else if (collection.type == 'file' && collection.scanner.contains('gdrive')) {
+      } else if (collection.type == 'file' &&
+          collection.scanner.contains('gdrive')) {
         try {
           // Google Drive files are saved under files/gdrive/{collection.name}
-          final collectionDiskPath = p.join(appDir, 'files', 'gdrive', collection.name);
+          final collectionDiskPath = p.join(
+            appDir,
+            'files',
+            'gdrive',
+            collection.name,
+          );
           final dir = io.Directory(collectionDiskPath);
           if (await dir.exists()) {
             await dir.delete(recursive: true);
-            logger.i("Deleted GDrive collection disk path: $collectionDiskPath");
+            logger.i(
+              "Deleted GDrive collection disk path: $collectionDiskPath",
+            );
           }
         } catch (e) {
           logger.e("Failed to delete GDrive collection files from disk: $e");

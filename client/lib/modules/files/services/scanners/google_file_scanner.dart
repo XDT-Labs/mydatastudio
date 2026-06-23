@@ -4,18 +4,18 @@ import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/modules/files/services/batch_file_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/cleanup_deleted_files_service.dart';
-import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
-import 'package:mydatatools/scanners/collection_scanner.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/files/services/batch_file_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
+import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
 
@@ -49,7 +49,8 @@ class CloudFileIsolate extends CollectionScanner {
   Isolate? _isolate;
   AppLogger? _logger;
 
-  CloudFileIsolate(this.loggerIsolatePort, {this.storagePath, this.dbName}) : super() {
+  CloudFileIsolate(this.loggerIsolatePort, {this.storagePath, this.dbName})
+    : super() {
     _logger = AppLogger(loggerIsolatePort);
   }
 
@@ -70,7 +71,9 @@ class CloudFileIsolate extends CollectionScanner {
     bool force,
   ) async {
     if (!force) {
-      _logger?.i("Registration-only mode: skipping scan for ${collection.name}");
+      _logger?.i(
+        "Registration-only mode: skipping scan for ${collection.name}",
+      );
       return 0;
     }
 
@@ -255,7 +258,8 @@ class CloudFileIsolateWorker {
     final collectionPath = args['collectionPath'] as String? ?? 'root';
     final rootFolderId = args['rootFolderId'] as String? ?? 'root';
     final lastScanDateStr = args['lastScanDate'] as String?;
-    final lastScanDate = lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
+    final lastScanDate =
+        lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
     final storagePath = args['storagePath'] as String?;
     final downloadLocalCopy = args['downloadLocalCopy'] as bool? ?? false;
     final isFullScan = args['isFullScan'] as bool? ?? false;
@@ -380,8 +384,9 @@ class CloudFileIsolateWorker {
       if (downloadLocalCopy && storagePath != null) {
         // Query DB for files with null localPath
         logger.i('CloudFileIsolate: querying DB for files needing download...');
-        final List<File> allFilesNeedingDownload =
-            await FileDesktopRepository(appDb).getFilesToDownload(collectionId);
+        final List<File> allFilesNeedingDownload = await FileDesktopRepository(
+          appDb,
+        ).getFilesToDownload(collectionId);
         _downloadQueue.clear();
 
         // Filter out Google native formats (Docs, Sheets, etc.) that we can't download as full media
@@ -400,7 +405,6 @@ class CloudFileIsolateWorker {
           collectionName,
           collectionPath,
         );
-
       }
     } catch (e, stack) {
       logger.e(
@@ -429,8 +433,8 @@ class CloudFileIsolateWorker {
     // but the mapping helpers handle filtering by checking parent IDs against known DB folder IDs.
     final String rfc3339Date = lastScanDate.toUtc().toIso8601String();
     String query = "modifiedTime > '$rfc3339Date' and trashed = false";
-    
-    // If we are restricted to a specific subfolder, we can try to scoped it, 
+
+    // If we are restricted to a specific subfolder, we can try to scoped it,
     // but cross-folder moves make global queries safer for catch-up.
     // For now, we trust the DB upsert logic to handle items correctly.
 
@@ -449,7 +453,10 @@ class CloudFileIsolateWorker {
         count++;
 
         final isFolder = f.mimeType == 'application/vnd.google-apps.folder';
-        final parentId = (f.parents != null && f.parents!.isNotEmpty) ? f.parents!.first : 'root';
+        final parentId =
+            (f.parents != null && f.parents!.isNotEmpty)
+                ? f.parents!.first
+                : 'root';
 
         if (isFolder) {
           final folder = _toFolder(
@@ -479,7 +486,10 @@ class CloudFileIsolateWorker {
 
             if (fileBatch.length >= 100) {
               await BatchFileUpsertService.instance.invoke(
-                BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+                BatchFileUpsertServiceCommand(
+                  List<File>.from(fileBatch),
+                  appDb,
+                ),
               );
               fileBatch.clear();
             }
@@ -583,13 +593,16 @@ class CloudFileIsolateWorker {
           if (file != null) {
             logger.i('Found Drive file: ${f.name} (${f.id})');
             fileBatch.add(file);
-            
+
             if (fileBatch.length >= 100) {
               logger.d(
                 'CloudFileIsolate: Sending batch of ${fileBatch.length} files to DB writer',
               );
               await BatchFileUpsertService.instance.invoke(
-                BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+                BatchFileUpsertServiceCommand(
+                  List<File>.from(fileBatch),
+                  appDb,
+                ),
               );
               fileBatch.clear();
             }
@@ -618,9 +631,14 @@ class CloudFileIsolateWorker {
   // Download Queue Processing
   // ---------------------------------------------------------------------------
 
-  Future<void> _processQueue(drive.DriveApi driveApi, String storagePath, String collectionName, String collectionPath) async {
+  Future<void> _processQueue(
+    drive.DriveApi driveApi,
+    String storagePath,
+    String collectionName,
+    String collectionPath,
+  ) async {
     List<Future<void>> activeTasks = [];
-    
+
     while (_downloadQueue.isNotEmpty || activeTasks.isNotEmpty) {
       // Pause if scanning is re-triggered
       if (_isScanning) {
@@ -628,9 +646,16 @@ class CloudFileIsolateWorker {
         continue;
       }
 
-      while (_downloadQueue.isNotEmpty && activeTasks.length < _maxConcurrentDownloads) {
+      while (_downloadQueue.isNotEmpty &&
+          activeTasks.length < _maxConcurrentDownloads) {
         final file = _downloadQueue.removeAt(0);
-        final task = _downloadFile(driveApi, file, storagePath, collectionName, collectionPath);
+        final task = _downloadFile(
+          driveApi,
+          file,
+          storagePath,
+          collectionName,
+          collectionPath,
+        );
         activeTasks.add(task);
         // Remove task from active list when done
         task.then((_) => activeTasks.remove(task));
@@ -643,39 +668,53 @@ class CloudFileIsolateWorker {
     }
   }
 
-  Future<void> _downloadFile(drive.DriveApi driveApi, File file, String storagePath, String collectionName, String collectionPath) async {
+  Future<void> _downloadFile(
+    drive.DriveApi driveApi,
+    File file,
+    String storagePath,
+    String collectionName,
+    String collectionPath,
+  ) async {
     try {
       final driveId = file.path.replaceFirst('gdrive://', '');
       final relativePath = _reconstructPath(file.parent, collectionPath);
-      final destDir = p.join(storagePath, 'files', 'gdrive', collectionName, relativePath);
+      final destDir = p.join(
+        storagePath,
+        'files',
+        'gdrive',
+        collectionName,
+        relativePath,
+      );
       final destPath = p.join(destDir, file.name);
 
       final destFile = io.File(destPath);
       if (await destFile.exists()) {
         logger.d('File already exists on disk: $destPath');
-        await appDb.execute(
-          'UPDATE files SET local_path = ? WHERE id = ?',
-          [destPath, file.id],
-        );
+        await appDb.execute('UPDATE files SET local_path = ? WHERE id = ?', [
+          destPath,
+          file.id,
+        ]);
         return;
       }
 
       await destFile.parent.create(recursive: true);
       logger.i('Downloading: ${file.name} to $destPath');
 
-      final drive.Media media = await driveApi.files.get(
-        driveId,
-        downloadOptions: drive.DownloadOptions.fullMedia,
-      ) as drive.Media;
+      final drive.Media media =
+          await driveApi.files.get(
+                driveId,
+                downloadOptions: drive.DownloadOptions.fullMedia,
+              )
+              as drive.Media;
 
       final sink = destFile.openWrite();
       try {
         await media.stream.pipe(sink);
         logger.i('Downloaded: ${file.name}');
-        await appDb.execute(
-          'UPDATE files SET local_path = ? WHERE id = ?',
-          [destPath, file.id],
-        );
+        await appDb.execute('UPDATE files SET local_path = ? WHERE id = ?', [
+          destPath,
+          file.id,
+        ]);
       } finally {
         await sink.flush();
         await sink.close();
@@ -688,14 +727,17 @@ class CloudFileIsolateWorker {
   String _reconstructPath(String parentId, String collectionPath) {
     List<String> segments = [];
     String? currentId = parentId;
-    
-    while (currentId != null && currentId.isNotEmpty && currentId != collectionPath && currentId != 'root') {
+
+    while (currentId != null &&
+        currentId.isNotEmpty &&
+        currentId != collectionPath &&
+        currentId != 'root') {
       String? name = _folderNames[currentId];
       if (name == null) break;
       segments.insert(0, name);
       currentId = _folderParents[currentId];
     }
-    
+
     return p.joinAll(segments);
   }
 

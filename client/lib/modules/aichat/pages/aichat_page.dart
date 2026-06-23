@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/modules/aichat/services/local_llm_content_generator.dart';
-import 'package:mydatatools/python_manager.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/modules/aichat/services/local_llm_content_generator.dart';
+import 'package:mydatastudio/python_manager.dart';
 
 import 'package:file_picker/file_picker.dart';
 
@@ -30,9 +30,13 @@ class _AichatPage extends State<AichatPage> {
   AppLogger logger = AppLogger(null);
   bool _isLLMServiceRunning = PythonManager.isLLMServiceRunning.value;
   String _selectedModel = 'Gemini 3 Flash';
-  final List<String> _models = ['Gemini 3 Flash', 'Local LLM', 'ChatGPT', 'Grok'];
+  final List<String> _models = [
+    'Gemini 3 Flash',
+    'Local LLM',
+    'ChatGPT',
+    'Grok',
+  ];
   final _textController = TextEditingController();
-
 
   late final A2uiMessageProcessor _a2uiMessageProcessor;
   late final GenUiConversation _genUiConversation;
@@ -41,7 +45,6 @@ class _AichatPage extends State<AichatPage> {
   @override
   void initState() {
     super.initState();
-
 
     // listen for changes
     PythonManager.isLLMServiceRunning.addListener(() {
@@ -143,8 +146,6 @@ class _AichatPage extends State<AichatPage> {
     });
   }
 
-
-
   void _sendMessage(String message) {
     if (message.trim().isEmpty) {
       return;
@@ -163,7 +164,8 @@ class _AichatPage extends State<AichatPage> {
     });
 
     if (_genUiConversation.contentGenerator is LocalLlmContentGenerator) {
-      (_genUiConversation.contentGenerator as LocalLlmContentGenerator).model = _selectedModel;
+      (_genUiConversation.contentGenerator as LocalLlmContentGenerator).model =
+          _selectedModel;
     }
     _genUiConversation.sendRequest(UserMessage.text(message));
     _textController.clear();
@@ -277,7 +279,10 @@ class _AichatPage extends State<AichatPage> {
                     style: const TextStyle(fontSize: 15, color: Colors.black87),
                     decoration: const InputDecoration(
                       hintText: "Ask anything, @ to mention, / for workflows",
-                      hintStyle: TextStyle(color: Color(0xFFAEB1B7), fontSize: 15),
+                      hintStyle: TextStyle(
+                        color: Color(0xFFAEB1B7),
+                        fontSize: 15,
+                      ),
                       contentPadding: EdgeInsets.symmetric(
                         horizontal: 12.0,
                         vertical: 12.0,
@@ -287,7 +292,11 @@ class _AichatPage extends State<AichatPage> {
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.only(left: 4, right: 8, bottom: 4),
+                    padding: const EdgeInsets.only(
+                      left: 4,
+                      right: 8,
+                      bottom: 4,
+                    ),
                     child: Row(
                       children: [
                         // + Icon
@@ -295,11 +304,14 @@ class _AichatPage extends State<AichatPage> {
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.add, color: Color(0xFF999999), size: 20),
+                          icon: const Icon(
+                            Icons.add,
+                            color: Color(0xFF999999),
+                            size: 20,
+                          ),
                           onPressed: () async {
-                            FilePickerResult? result = await FilePicker.platform.pickFiles(
-                              allowMultiple: true,
-                            );
+                            FilePickerResult? result = await FilePicker.platform
+                                .pickFiles(allowMultiple: true);
                             if (result != null) {
                               logger.d('Picked files: ${result.paths}');
                             }
@@ -317,7 +329,11 @@ class _AichatPage extends State<AichatPage> {
                               value: _selectedModel,
                               icon: const Padding(
                                 padding: EdgeInsets.only(left: 4.0),
-                                child: Icon(Icons.keyboard_arrow_up, size: 16, color: Color(0xFF8E8E93)),
+                                child: Icon(
+                                  Icons.keyboard_arrow_up,
+                                  size: 16,
+                                  color: Color(0xFF8E8E93),
+                                ),
                               ),
                               elevation: 2,
                               onChanged: (String? newValue) {
@@ -327,19 +343,22 @@ class _AichatPage extends State<AichatPage> {
                                   });
                                 }
                               },
-                              items: _models.map<DropdownMenuItem<String>>((String value) {
-                                return DropdownMenuItem<String>(
-                                  value: value,
-                                  child: Text(
-                                    value,
-                                    style: const TextStyle(
-                                      color: Color(0xFF8E8E93),
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w400,
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
+                              items:
+                                  _models.map<DropdownMenuItem<String>>((
+                                    String value,
+                                  ) {
+                                    return DropdownMenuItem<String>(
+                                      value: value,
+                                      child: Text(
+                                        value,
+                                        style: const TextStyle(
+                                          color: Color(0xFF8E8E93),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w400,
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
                             ),
                           ),
                         ),

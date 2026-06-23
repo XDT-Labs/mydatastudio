@@ -1,7 +1,7 @@
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/extensions/widget_extension.dart';
-import 'package:mydatatools/services/get_user_service.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/extensions/widget_extension.dart';
+import 'package:mydatastudio/services/get_user_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
@@ -164,7 +164,10 @@ class _LoginFormState extends State<LoginForm> {
   /// Args:
   ///   context (BuildContext): The `context` parameter in the `formSubmitHandler` function is an object
   /// passed in from the build method
-  Future<void> formSubmitHandler(BuildContext? context, Map<String, dynamic> values) async {
+  Future<void> formSubmitHandler(
+    BuildContext? context,
+    Map<String, dynamic> values,
+  ) async {
     if (context?.mounted ?? false) {
       setState(() {
         isSubmitting = true;

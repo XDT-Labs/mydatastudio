@@ -1,7 +1,7 @@
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/modules/photos/services/photos_repository.dart';
-import 'package:mydatatools/services/rx_service.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
+import 'package:mydatastudio/services/rx_service.dart';
 
 class PhotosByDateService
     extends RxService<PhotosByDateServiceCommand, Map<String, List<File>>> {

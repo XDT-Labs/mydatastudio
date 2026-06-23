@@ -15,7 +15,7 @@ jobs:
           - os: macos-latest
             artifact_name: aichat-macos.zip
             flutter_build_cmd: flutter build macos --release
-            flutter_artifact_path: client/build/macos/Build/Products/Release/mydatatools-desktop.app
+            flutter_artifact_path: client/build/macos/Build/Products/Release/mydatastudio-desktop.app
           # Uncomment the below sections to enable Windows and Linux builds
           # - os: windows-latest
           #   artifact_name: aichat-windows.zip
@@ -98,18 +98,18 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           cd $(dirname "${{ matrix.flutter_artifact_path }}")
-          zip -r mydatatools-${{ matrix.os }}.zip $(basename "${{ matrix.flutter_artifact_path }}")
+          zip -r mydatastudio-${{ matrix.os }}.zip $(basename "${{ matrix.flutter_artifact_path }}")
 
       - name: Zip Final Application (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          Compress-Archive -Path "${{ matrix.flutter_artifact_path }}\*" -DestinationPath "mydatatools-${{ matrix.os }}.zip"
+          Compress-Archive -Path "${{ matrix.flutter_artifact_path }}\*" -DestinationPath "mydatastudio-${{ matrix.os }}.zip"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mydatatools-${{ matrix.os }}
-          path: mydatatools-${{ matrix.os }}.zip
+          name: mydatastudio-${{ matrix.os }}
+          path: mydatastudio-${{ matrix.os }}.zip
 
   release:
     name: Create GitHub Release

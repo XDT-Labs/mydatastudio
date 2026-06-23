@@ -1,8 +1,8 @@
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/file_sources/file_source_provider.dart';
-import 'package:mydatatools/file_sources/google_drive/google_drive_provider.dart';
-import 'package:mydatatools/file_sources/local/local_file_provider.dart';
-import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/file_sources/file_source_provider.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_drive_provider.dart';
+import 'package:mydatastudio/file_sources/local/local_file_provider.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 
 /// Central factory that maps a [Collection.scanner] string to the correct
 /// [FileSourceProvider].

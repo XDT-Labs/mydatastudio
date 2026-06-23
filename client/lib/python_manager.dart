@@ -5,8 +5,8 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import 'package:flutter/foundation.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/main.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/main.dart';
 import 'package:path/path.dart' as p;
 
 class PythonManager {
@@ -171,7 +171,7 @@ class PythonManager {
         }
         // Update splash screen progress
         PythonManager.startupProgress.value = line;
-        
+
         final match = urlRegex.firstMatch(line);
         if (match != null) {
           final url = match.group(1);

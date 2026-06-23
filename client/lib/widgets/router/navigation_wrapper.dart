@@ -1,6 +1,6 @@
-import 'package:mydatatools/widgets/adaptive_app_bar.dart';
-import 'package:mydatatools/widgets/collapsing_drawer.dart';
-import 'package:mydatatools/widgets/router/status_message.dart';
+import 'package:mydatastudio/widgets/adaptive_app_bar.dart';
+import 'package:mydatastudio/widgets/collapsing_drawer.dart';
+import 'package:mydatastudio/widgets/router/status_message.dart';
 import 'package:flutter/material.dart';
 
 class NavigationWrapper extends StatefulWidget {
@@ -39,24 +39,28 @@ class _NavigationWrapperState extends State<NavigationWrapper> {
                     children: [
                       (_drawerOpen && widget.drawer != null)
                           ? Container(
-                              width: 250, 
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.surface,
-                              ),
-                              child: widget.drawer,
-                            )
+                            width: 250,
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surface,
+                            ),
+                            child: widget.drawer,
+                          )
                           : Container(),
                       Expanded(
                         child: Container(
-                          padding: const EdgeInsets.all(16), // effectively increasing spacing
+                          padding: const EdgeInsets.all(
+                            16,
+                          ), // effectively increasing spacing
                           decoration: BoxDecoration(
-                            color: theme.colorScheme.surface, 
+                            color: theme.colorScheme.surface,
                           ),
                           child: Container(
                             clipBehavior: Clip.antiAlias,
                             decoration: BoxDecoration(
                               color: theme.colorScheme.surfaceContainerLowest,
-                              borderRadius: BorderRadius.circular(8), // md roundedness
+                              borderRadius: BorderRadius.circular(
+                                8,
+                              ), // md roundedness
                               boxShadow: [
                                 BoxShadow(
                                   color: theme.colorScheme.shadow,
@@ -92,12 +96,15 @@ class _NavigationWrapperState extends State<NavigationWrapper> {
                 children: [
                   Expanded(
                     child: DefaultTextStyle(
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant.withOpacity(0.7),
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.0,
-                        fontSize: 9,
-                      ) ?? const TextStyle(),
+                      style:
+                          theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant
+                                .withOpacity(0.7),
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.0,
+                            fontSize: 9,
+                          ) ??
+                          const TextStyle(),
                       child: const StatusMessage(),
                     ),
                   ),

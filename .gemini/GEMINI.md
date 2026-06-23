@@ -28,7 +28,7 @@ CRITICAL! You MUST always seek the user's approval before commiting to git.  Nev
 - When generating Mermaid diagrams, ALWAYS wrap node labels in double quotes if they contain spaces, newlines (\n), or special characters (like (), [], {}, etc.) to prevent syntax errors.
 
 
-# Project Code Review: MyDataTools Desktop
+# Project Code Review: My Data Studio Desktop
 
 This document provides a technical overview and review of the project's architecture, patterns, and implementation details.
 

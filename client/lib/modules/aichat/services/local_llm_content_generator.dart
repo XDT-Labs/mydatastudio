@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:genui/genui.dart';
 import 'package:http/http.dart' as http;
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/main.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/main.dart';
 
 class LocalLlmContentGenerator implements ContentGenerator {
   final String systemInstruction;

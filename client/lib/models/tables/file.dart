@@ -1,4 +1,4 @@
-import 'package:mydatatools/models/tables/file_asset.dart';
+import 'package:mydatastudio/models/tables/file_asset.dart';
 
 class File implements FileAsset {
   @override
@@ -53,9 +53,18 @@ class File implements FileAsset {
       name: map['name'] as String,
       path: map['path'] as String,
       parent: map['parent'] as String,
-      dateCreated: DateTime.fromMillisecondsSinceEpoch(map['date_created'] as int),
-      dateLastModified: DateTime.fromMillisecondsSinceEpoch(map['date_last_modified'] as int),
-      lastScannedDate: map['last_scanned_date'] != null ? DateTime.fromMillisecondsSinceEpoch(map['last_scanned_date'] as int) : null,
+      dateCreated: DateTime.fromMillisecondsSinceEpoch(
+        map['date_created'] as int,
+      ),
+      dateLastModified: DateTime.fromMillisecondsSinceEpoch(
+        map['date_last_modified'] as int,
+      ),
+      lastScannedDate:
+          map['last_scanned_date'] != null
+              ? DateTime.fromMillisecondsSinceEpoch(
+                map['last_scanned_date'] as int,
+              )
+              : null,
       collectionId: map['collection_id'] as String,
       contentType: map['content_type'] as String,
       size: map['size'] as int,
@@ -63,8 +72,12 @@ class File implements FileAsset {
       thumbnail: map['thumbnail'] as String?,
       downloadUrl: map['download_url'] as String?,
       emailId: map['email_id'] as String?,
-      latitude: map['latitude'] != null ? (map['latitude'] as num).toDouble() : null,
-      longitude: map['longitude'] != null ? (map['longitude'] as num).toDouble() : null,
+      latitude:
+          map['latitude'] != null ? (map['latitude'] as num).toDouble() : null,
+      longitude:
+          map['longitude'] != null
+              ? (map['longitude'] as num).toDouble()
+              : null,
       localPath: map['local_path'] as String?,
     );
   }

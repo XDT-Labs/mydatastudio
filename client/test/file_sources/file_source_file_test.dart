@@ -1,4 +1,4 @@
-import 'package:mydatatools/file_sources/file_source_file.dart';
+import 'package:mydatastudio/file_sources/file_source_file.dart';
 import 'package:test/test.dart';
 
 void main() {

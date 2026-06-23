@@ -2,14 +2,14 @@
 
 import 'dart:async';
 
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/modules/files/services/utilities/exif_extractor.dart';
-import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/files/services/utilities/exif_extractor.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 
 class DatabaseChangeWatcher {
   AppDatabase database;

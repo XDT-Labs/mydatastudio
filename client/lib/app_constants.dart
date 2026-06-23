@@ -1,5 +1,5 @@
 class AppConstants {
-  static const String appName = "MyDataTools";
+  static const String appName = "MyDataStudio";
   static const String configFileName = "config.json";
   static const String dbName = "mydata.db"; //sqlite
 

@@ -3,15 +3,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uuid/uuid.dart';
 
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/app_user.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/repositories/user_repository.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
-import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
-import 'package:mydatatools/modules/files/services/repositories/folder_repository.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/app_user.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/repositories/user_repository.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/modules/files/services/repositories/folder_repository.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -23,7 +23,7 @@ void main() {
     setUp(() async {
       TestWidgetsFlutterBinding.ensureInitialized();
 
-      tempDir = await io.Directory.systemTemp.createTemp('mydatatools_test_');
+      tempDir = await io.Directory.systemTemp.createTemp('mydatastudio_test_');
 
       const MethodChannel channel = MethodChannel(
         'plugins.flutter.io/path_provider',
@@ -53,9 +53,11 @@ void main() {
 
     test('check database tables exist by query', () async {
       final db = databaseManager.database!;
-      final rows = await db.select("SELECT name FROM sqlite_master WHERE type='table'");
+      final rows = await db.select(
+        "SELECT name FROM sqlite_master WHERE type='table'",
+      );
       final tableNames = rows.map((r) => r['name'] as String).toList();
-      
+
       expect(tableNames.contains('app_users'), isTrue);
       expect(tableNames.contains('collections'), isTrue);
       expect(tableNames.contains('files'), isTrue);

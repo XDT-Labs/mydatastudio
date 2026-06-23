@@ -1,4 +1,4 @@
-import 'package:mydatatools/app_logger.dart';
+import 'package:mydatastudio/app_logger.dart';
 import 'package:flutter/material.dart';
 
 class StatusMessage extends StatelessWidget {
@@ -14,9 +14,7 @@ class StatusMessage extends StatelessWidget {
         return Text(
           text.toUpperCase(),
           key: UniqueKey(),
-          style: const TextStyle(
-            overflow: TextOverflow.ellipsis,
-          ),
+          style: const TextStyle(overflow: TextOverflow.ellipsis),
         );
       },
     );

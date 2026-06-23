@@ -1,4 +1,4 @@
-import 'package:mydatatools/models/tables/file_asset.dart';
+import 'package:mydatastudio/models/tables/file_asset.dart';
 
 class Folder implements FileAsset {
   @override
@@ -41,9 +41,18 @@ class Folder implements FileAsset {
       name: map['name'] as String,
       path: map['path'] as String,
       parent: map['parent'] as String,
-      dateCreated: DateTime.fromMillisecondsSinceEpoch(map['date_created'] as int),
-      dateLastModified: DateTime.fromMillisecondsSinceEpoch(map['date_last_modified'] as int),
-      lastScannedDate: map['last_scanned_date'] != null ? DateTime.fromMillisecondsSinceEpoch(map['last_scanned_date'] as int) : null,
+      dateCreated: DateTime.fromMillisecondsSinceEpoch(
+        map['date_created'] as int,
+      ),
+      dateLastModified: DateTime.fromMillisecondsSinceEpoch(
+        map['date_last_modified'] as int,
+      ),
+      lastScannedDate:
+          map['last_scanned_date'] != null
+              ? DateTime.fromMillisecondsSinceEpoch(
+                map['last_scanned_date'] as int,
+              )
+              : null,
       collectionId: map['collection_id'] as String,
       thumbnail: map['thumbnail'] as String?,
       downloadUrl: map['download_url'] as String?,

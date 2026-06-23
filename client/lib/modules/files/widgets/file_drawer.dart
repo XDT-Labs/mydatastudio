@@ -1,14 +1,14 @@
 import 'dart:async';
 
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/modules/files/pages/rx_files_page.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer/accordion_header_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer/collection_tile_widget.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
-import 'package:mydatatools/app_constants.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/files/pages/rx_files_page.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/collection_tile_widget.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/app_constants.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -115,8 +115,6 @@ class _FileDrawer extends State<FileDrawer> {
             .where((c) => c.scanner == AppConstants.scannerFileOneDrive)
             .toList();
 
-
-
     return SizedBox.expand(
       child: Container(
         color: Colors.transparent,
@@ -164,9 +162,16 @@ class _FileDrawer extends State<FileDrawer> {
                           padding: const EdgeInsets.only(left: 16.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: localFiles.map(
-                              (c) => _buildCollectionTile(context, theme, c),
-                            ).toList(),
+                            children:
+                                localFiles
+                                    .map(
+                                      (c) => _buildCollectionTile(
+                                        context,
+                                        theme,
+                                        c,
+                                      ),
+                                    )
+                                    .toList(),
                           ),
                         ),
                       _buildAccordionHeader(
@@ -181,19 +186,36 @@ class _FileDrawer extends State<FileDrawer> {
                           padding: const EdgeInsets.only(left: 24.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: gdriveFiles.map(
-                              (c) => _buildCollectionTile(context, theme, c),
-                            ).toList(),
+                            children:
+                                gdriveFiles
+                                    .map(
+                                      (c) => _buildCollectionTile(
+                                        context,
+                                        theme,
+                                        c,
+                                      ),
+                                    )
+                                    .toList(),
                           ),
                         ),
-                        _buildSectionHeader("DROPBOX (FUTURE)", leftPadding: 32.0),
+                        _buildSectionHeader(
+                          "DROPBOX (FUTURE)",
+                          leftPadding: 32.0,
+                        ),
                         Padding(
                           padding: const EdgeInsets.only(left: 24.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: dropboxFiles.map(
-                              (c) => _buildCollectionTile(context, theme, c),
-                            ).toList(),
+                            children:
+                                dropboxFiles
+                                    .map(
+                                      (c) => _buildCollectionTile(
+                                        context,
+                                        theme,
+                                        c,
+                                      ),
+                                    )
+                                    .toList(),
                           ),
                         ),
                         if (onedriveFiles.isNotEmpty) ...[
@@ -202,9 +224,16 @@ class _FileDrawer extends State<FileDrawer> {
                             padding: const EdgeInsets.only(left: 24.0),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: onedriveFiles.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ).toList(),
+                              children:
+                                  onedriveFiles
+                                      .map(
+                                        (c) => _buildCollectionTile(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
                             ),
                           ),
                         ],
@@ -222,7 +251,12 @@ class _FileDrawer extends State<FileDrawer> {
 
   Widget _buildSectionHeader(String title, {double leftPadding = 16.0}) {
     return Padding(
-      padding: EdgeInsets.only(left: leftPadding, right: 16.0, top: 12, bottom: 12),
+      padding: EdgeInsets.only(
+        left: leftPadding,
+        right: 16.0,
+        top: 12,
+        bottom: 12,
+      ),
       child: Align(
         alignment: Alignment.topLeft,
         child: Text(
@@ -248,17 +282,16 @@ class _FileDrawer extends State<FileDrawer> {
       title: title,
       icon: icon,
       isExpanded: _expandedSection == section,
-      onTap: () => setState(() {
-        if (_expandedSection == section) {
-          _expandedSection = null;
-        } else {
-          _expandedSection = section;
-        }
-      }),
+      onTap:
+          () => setState(() {
+            if (_expandedSection == section) {
+              _expandedSection = null;
+            } else {
+              _expandedSection = section;
+            }
+          }),
     );
   }
-
-
 
   Widget _buildCollectionTile(
     BuildContext context,
@@ -275,9 +308,10 @@ class _FileDrawer extends State<FileDrawer> {
         RxFilesPage.selectedPath.add(col.path);
         GoRouter.of(context).go('/files');
       },
-      onSync: () => ScannerManager.getInstance()
-          .getScanner(col)
-          ?.start(col, col.path, true, true),
+      onSync:
+          () => ScannerManager.getInstance()
+              .getScanner(col)
+              ?.start(col, col.path, true, true),
       onDelete: () => _showDeleteConfirmationDialog(context, col),
     );
   }
@@ -314,7 +348,9 @@ class _FileDrawer extends State<FileDrawer> {
                   Navigator.of(dialogContext).pop();
 
                   // Delete the collection and all related metadata (files, folders, etc.)
-                  await CollectionRepository(DatabaseManager.instance.database!).deleteCollection(collection.id);
+                  await CollectionRepository(
+                    DatabaseManager.instance.database!,
+                  ).deleteCollection(collection.id);
 
                   // Reload collections list
                   GetCollectionsService.instance.invoke(

@@ -1,5 +1,5 @@
-import 'package:mydatatools/app_router.dart';
-import 'package:mydatatools/color_schemes.g.dart';
+import 'package:mydatastudio/app_router.dart';
+import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -156,7 +156,7 @@ class FamilyDamApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp.router(
       restorationScopeId: 'mydata.tools',
-      title: "MyData / Tools",
+      title: "My Data Studio",
       debugShowCheckedModeBanner: false,
       routerConfig: AppRouter.instance,
       theme: _buildTheme(lightColorScheme, context),

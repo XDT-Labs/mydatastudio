@@ -194,13 +194,13 @@ jobs:
           node-version: latest
       - run: npm install -g appdmg
       - name: Create DMG
-        run: appdmg installers/dmg_creator/config.json build/macos/Build/Products/Release/MyDataTools.dmg
+        run: appdmg installers/dmg_creator/config.json build/macos/Build/Products/Release/MyDataStudio.dmg
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-release
-          path: client/build/macos/Build/Products/Release/MyDataTools.dmg
+          path: client/build/macos/Build/Products/Release/MyDataStudio.dmg
       
       # Important! Cleanup: remove the certificate and provisioning profile from the runner!
       - name: Clean up keychain and provisioning profile

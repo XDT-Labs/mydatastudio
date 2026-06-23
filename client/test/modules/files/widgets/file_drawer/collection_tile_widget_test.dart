@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer/collection_tile_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/collection_tile_widget.dart';
 import '../../../../helpers/file_fixture.dart';
 
 void main() {

@@ -1,13 +1,13 @@
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file_asset.dart';
-import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
-import 'package:mydatatools/modules/files/services/repositories/folder_repository.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/services/rx_service.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
-import 'package:mydatatools/helpers/file_path_resolver.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file_asset.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/modules/files/services/repositories/folder_repository.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/rx_service.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
+import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:path/path.dart' as p;
 
 /// Number of files fetched per page.
@@ -97,7 +97,9 @@ class GetFileAndFoldersService
       );
 
       final List<FileAsset> newItems = [...folders, ...files];
-      print('GetFileAndFoldersService.invoke: query returned ${folders.length} folders and ${files.length} files (total: ${newItems.length}) for path "${command.path}" in db "${db.path}"');
+      print(
+        'GetFileAndFoldersService.invoke: query returned ${folders.length} folders and ${files.length} files (total: ${newItems.length}) for path "${command.path}" in db "${db.path}"',
+      );
 
       if (command.offset == 0) {
         _currentItems = newItems;
@@ -112,15 +114,20 @@ class GetFileAndFoldersService
       if (!command.refreshOnly && command.offset == 0) {
         ScannerManager.getInstance()
             .getScannerAsync(command.collection)
-            .then((scanner) => scanner.start(
-                  command.collection, absolutePath, false, false));
+            .then(
+              (scanner) =>
+                  scanner.start(command.collection, absolutePath, false, false),
+            );
       }
 
       isLoading.add(false);
       return newItems;
     } catch (e, stack) {
-      logger.e('GetFileAndFoldersService.invoke failed: $e',
-          error: e, stackTrace: stack);
+      logger.e(
+        'GetFileAndFoldersService.invoke failed: $e',
+        error: e,
+        stackTrace: stack,
+      );
       isLoading.add(false);
       return _currentItems;
     }

@@ -1,7 +1,7 @@
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
-import 'package:mydatatools/services/rx_service.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/services/rx_service.dart';
 import 'package:flutter/material.dart';
 
 class DeleteFileService extends RxService<DeleteFileServiceCommand, bool> {

@@ -128,7 +128,7 @@ def download_model_if_needed(model_id: str, local_path: str, custom_archive_path
         tar_path = get_local_zip_path(model_id)  # This returns .tar.gz path
 
 
-        print(f"[LOADER] No local archive found. Starting download from MyData Tools cache server...")
+        print(f"[LOADER] No local archive found. Starting download from My Data Studio cache server...")
         # ex: https://gcs-file-downloader-10805446439.us-central1.run.app/download/google-gemma-3-4b-it
         
         # Check for custom model download URL

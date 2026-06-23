@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
 
 /// Regression tests for GetCollectionsService.
 ///
@@ -52,30 +52,35 @@ void main() {
       expect(cmd.type, isNull);
     });
 
-    test('invoke() does NOT emit isLoading to prevent cross-module UI leakage',
-        () async {
-      // Regression: isLoading.add(true) in invoke() caused ALL listeners
-      // across the app (FileDrawer, EmailDrawer, etc.) to show loading
-      // spinners when ANY module triggered a collection refresh.
-      //
-      // We verify that the isLoading stream is never set to true during
-      // invoke(). We can't call invoke() directly (needs real DB), so we
-      // verify the stream's initial state remains unchanged.
-      final service = GetCollectionsService.instance;
-      final emissions = <bool>[];
-      final sub = service.isLoading.listen(emissions.add);
+    test(
+      'invoke() does NOT emit isLoading to prevent cross-module UI leakage',
+      () async {
+        // Regression: isLoading.add(true) in invoke() caused ALL listeners
+        // across the app (FileDrawer, EmailDrawer, etc.) to show loading
+        // spinners when ANY module triggered a collection refresh.
+        //
+        // We verify that the isLoading stream is never set to true during
+        // invoke(). We can't call invoke() directly (needs real DB), so we
+        // verify the stream's initial state remains unchanged.
+        final service = GetCollectionsService.instance;
+        final emissions = <bool>[];
+        final sub = service.isLoading.listen(emissions.add);
 
-      // Wait a tick for BehaviorSubject's initial emission
-      await Future.delayed(const Duration(milliseconds: 50));
+        // Wait a tick for BehaviorSubject's initial emission
+        await Future.delayed(const Duration(milliseconds: 50));
 
-      // The only emission should be the initial seeded value (false)
-      expect(emissions, equals([false]),
+        // The only emission should be the initial seeded value (false)
+        expect(
+          emissions,
+          equals([false]),
           reason:
               'isLoading should only have the initial seeded value (false). '
               'invoke() must NOT emit isLoading=true to prevent cross-module '
-              'loading indicator leakage.');
-      await sub.cancel();
-    });
+              'loading indicator leakage.',
+        );
+        await sub.cancel();
+      },
+    );
   });
 }
 

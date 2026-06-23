@@ -1,29 +1,29 @@
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/app_user.dart';
-import 'package:mydatatools/modules/aichat/pages/aichat_page.dart';
-import 'package:mydatatools/modules/aichat/widgets/aichat_drawer.dart';
-import 'package:mydatatools/modules/email/pages/email_page.dart';
-import 'package:mydatatools/modules/email/pages/new_email_page.dart';
-import 'package:mydatatools/modules/email/widgets/email_drawer.dart';
-import 'package:mydatatools/modules/files/pages/new_file_collection_page.dart';
-import 'package:mydatatools/modules/files/pages/rx_files_page.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer.dart';
-import 'package:mydatatools/modules/photos/pages/photos_app.dart';
-import 'package:mydatatools/modules/photos/widgets/photo_drawer.dart';
-import 'package:mydatatools/modules/social/pages/facebook_page.dart';
-import 'package:mydatatools/modules/social/pages/instagram_page.dart';
-import 'package:mydatatools/modules/social/pages/new_social_page.dart';
-import 'package:mydatatools/modules/social/pages/twitter_page.dart';
-import 'package:mydatatools/modules/social/widgets/social_drawer.dart';
-import 'package:mydatatools/pages/home.dart';
-import 'package:mydatatools/pages/login.dart';
-import 'package:mydatatools/pages/settings.dart';
-import 'package:mydatatools/pages/settings_drawer.dart';
-import 'package:mydatatools/pages/setup.dart';
-import 'package:mydatatools/services/get_user_service.dart';
-import 'package:mydatatools/repositories/user_repository.dart';
-import 'package:mydatatools/widgets/router/navigation_wrapper.dart';
-import 'package:mydatatools/widgets/router/route_page.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/app_user.dart';
+import 'package:mydatastudio/modules/aichat/pages/aichat_page.dart';
+import 'package:mydatastudio/modules/aichat/widgets/aichat_drawer.dart';
+import 'package:mydatastudio/modules/email/pages/email_page.dart';
+import 'package:mydatastudio/modules/email/pages/new_email_page.dart';
+import 'package:mydatastudio/modules/email/widgets/email_drawer.dart';
+import 'package:mydatastudio/modules/files/pages/new_file_collection_page.dart';
+import 'package:mydatastudio/modules/files/pages/rx_files_page.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer.dart';
+import 'package:mydatastudio/modules/photos/pages/photos_app.dart';
+import 'package:mydatastudio/modules/photos/widgets/photo_drawer.dart';
+import 'package:mydatastudio/modules/social/pages/facebook_page.dart';
+import 'package:mydatastudio/modules/social/pages/instagram_page.dart';
+import 'package:mydatastudio/modules/social/pages/new_social_page.dart';
+import 'package:mydatastudio/modules/social/pages/twitter_page.dart';
+import 'package:mydatastudio/modules/social/widgets/social_drawer.dart';
+import 'package:mydatastudio/pages/home.dart';
+import 'package:mydatastudio/pages/login.dart';
+import 'package:mydatastudio/pages/settings.dart';
+import 'package:mydatastudio/pages/settings_drawer.dart';
+import 'package:mydatastudio/pages/setup.dart';
+import 'package:mydatastudio/services/get_user_service.dart';
+import 'package:mydatastudio/repositories/user_repository.dart';
+import 'package:mydatastudio/widgets/router/navigation_wrapper.dart';
+import 'package:mydatastudio/widgets/router/route_page.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -106,9 +106,7 @@ class AppRouter {
           GoRoute(
             path: '/',
             pageBuilder: (context, state) {
-              return const RoutePage(
-                body: NavigationWrapper(body: HomePage()),
-              );
+              return const RoutePage(body: NavigationWrapper(body: HomePage()));
             },
           ),
 

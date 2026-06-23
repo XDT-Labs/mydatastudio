@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/provider.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/provider.dart';
 import 'package:go_router/go_router.dart';
-
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -89,9 +88,9 @@ class _SettingsPageState extends State<SettingsPage> {
     );
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved $service configuration')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Saved $service configuration')));
     }
   }
 
@@ -110,24 +109,27 @@ class _SettingsPageState extends State<SettingsPage> {
           },
         ),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16.0),
-              children: [
-                Text(
-                  'OAuth Providers',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Configure your OAuth Client ID and Secret for various services. '
-                  'If left blank, the application will attempt to use default environment variables if available.',
-                ),
-                const SizedBox(height: 24),
-                ..._supportedProviders.map((service) => _buildProviderSection(service)),
-              ],
-            ),
+      body:
+          _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : ListView(
+                padding: const EdgeInsets.all(16.0),
+                children: [
+                  Text(
+                    'OAuth Providers',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Configure your OAuth Client ID and Secret for various services. '
+                    'If left blank, the application will attempt to use default environment variables if available.',
+                  ),
+                  const SizedBox(height: 24),
+                  ..._supportedProviders.map(
+                    (service) => _buildProviderSection(service),
+                  ),
+                ],
+              ),
     );
   }
 
@@ -141,7 +143,9 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             Text(
               service.toUpperCase(),
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
             TextField(

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:mydatatools/widgets/login_form.dart';
-import 'package:mydatatools/widgets/time_widget.dart';
+import 'package:mydatastudio/widgets/login_form.dart';
+import 'package:mydatastudio/widgets/time_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 

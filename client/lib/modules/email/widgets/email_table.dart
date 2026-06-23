@@ -1,6 +1,6 @@
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/modules/email/notifications/email_selected_notification.dart';
-import 'package:mydatatools/modules/email/notifications/email_sort_changed_notification.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/modules/email/notifications/email_selected_notification.dart';
+import 'package:mydatastudio/modules/email/notifications/email_sort_changed_notification.dart';
 import 'package:flutter/material.dart';
 import 'package:moment_dart/moment_dart.dart';
 import 'dart:math' as math;

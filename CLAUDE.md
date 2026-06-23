@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-MyData/Tools Desktop is a local-first personal data archive & management tool. Letting users view and search their local drives, cloud drives, email, photos, and social media entirely on-device. AI-powered search and chat uses local LLMs (no cloud API calls).
+My Data Studio Desktop is a local-first personal data archive & management tool. Letting users view and search their local drives, cloud drives, email, photos, and social media entirely on-device. AI-powered search and chat uses local LLMs (no cloud API calls).
 
 The app has two runtime components:
 1. **Flutter macOS desktop client** (`client/`) — the UI and data layer
@@ -169,7 +169,7 @@ Drift tables: `App`, `AppUser`, `Collection`, `File`, `Folder`, `Email`, `EmailF
 
 ### macOS Bundle IDs
 
-- `main` branch → `mydata.tools`
-- `develop` branch → `mydata.tools.dev`
+- `main` branch → `com.xdtlabs.mydatastudio`
+- `develop` branch → `com.xdtlabs.mydatastudio`
 
 Set via `make set-bundle-id` or controlled by `REALM_NAME` dart-define at build time.

@@ -1,15 +1,15 @@
 import 'dart:io';
 import 'dart:ui';
 
-import 'package:mydatatools/app_router.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/family_dam_app.dart';
-import 'package:mydatatools/pages/splash.dart';
-import 'package:mydatatools/python_manager.dart';
+import 'package:mydatastudio/app_router.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/family_dam_app.dart';
+import 'package:mydatastudio/pages/splash.dart';
+import 'package:mydatastudio/python_manager.dart';
 
-import 'package:mydatatools/repositories/watchers/database_change_watcher.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
-import 'package:mydatatools/widgets/auth_dialog_manager.dart';
+import 'package:mydatastudio/repositories/watchers/database_change_watcher.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
+import 'package:mydatastudio/widgets/auth_dialog_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:rxdart/rxdart.dart';
@@ -160,11 +160,11 @@ class MainAppState extends State<MainApp>
             _isSetupComplete = MainApp.databaseManager != null;
           });
         }
-      } on FileSystemException catch (e) {
+      } catch (e) {
         if (mounted) {
           setState(() {
             _dbAccessError = true;
-            _dbErrorPath = e.path;
+            _dbErrorPath = e.toString();
           });
         }
       }
@@ -199,7 +199,7 @@ class MainAppState extends State<MainApp>
     () async {
       await windowManager.setSize(const Size(900, 700));
       await windowManager.center();
-      await windowManager.setTitle('MyData Tools - Loading...');
+      await windowManager.setTitle('MyData Studio - Loading...');
     }();
     return const MaterialApp(
       home: SplashPage(),
@@ -209,7 +209,7 @@ class MainAppState extends State<MainApp>
 
   Widget _initDbErrorScreen() {
     () async {
-      await windowManager.setTitle('MyData Tools - Error');
+      await windowManager.setTitle('MyData Studio - Error');
       await windowManager.setSize(const Size(800, 600));
       await windowManager.center();
     }();
@@ -220,14 +220,20 @@ class MainAppState extends State<MainApp>
         body: Center(
           child: Card(
             elevation: 8,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Container(
               width: 500,
               padding: const EdgeInsets.all(32),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline, color: Colors.redAccent, size: 64),
+                  const Icon(
+                    Icons.error_outline,
+                    color: Colors.redAccent,
+                    size: 64,
+                  ),
                   const SizedBox(height: 24),
                   const Text(
                     'Storage Location Not Found',
@@ -235,7 +241,7 @@ class MainAppState extends State<MainApp>
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'The configured storage location could not be accessed. It may be on a disconnected network drive or the folder was moved.',
+                    'The configured storage location could not be accessed or initialized. If it is on a network/SMB share, SQLite WAL mode is not supported. Please select a local directory.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
                   ),
@@ -251,12 +257,18 @@ class MainAppState extends State<MainApp>
                       children: [
                         SelectableText(
                           "Configured Location:\n${DatabaseManager.instance.storagePath ?? 'Unknown'}",
-                          style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         const SizedBox(height: 12),
                         SelectableText(
                           "Error Details:\n$_dbErrorPath",
-                          style: const TextStyle(fontFamily: 'monospace', color: Colors.red),
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            color: Colors.red,
+                          ),
                         ),
                       ],
                     ),
@@ -281,9 +293,22 @@ class MainAppState extends State<MainApp>
                         icon: const Icon(Icons.folder_open),
                         label: const Text('Pick New Location'),
                         onPressed: () async {
-                          String? newPath = await FilePicker.platform.getDirectoryPath();
+                          String? newPath =
+                              await FilePicker.platform.getDirectoryPath();
                           if (newPath != null) {
-                            await DatabaseManager.instance.updateConfigPath(newPath);
+                            final supportsWal = await DatabaseManager.testPathSupportsWal(newPath);
+                            if (!supportsWal) {
+                              if (mounted) {
+                                setState(() {
+                                  _dbAccessError = true;
+                                  _dbErrorPath = 'The selected folder is on a network/SMB share and does not support SQLite WAL mode. Please select a local folder.';
+                                });
+                              }
+                              return;
+                            }
+                            await DatabaseManager.instance.updateConfigPath(
+                              newPath,
+                            );
                             if (mounted) {
                               setState(() {
                                 _dbAccessError = false;
@@ -310,7 +335,7 @@ class MainAppState extends State<MainApp>
     // Or perhaps navigate to a setup screen.
     // For now, just launch the main app and let the router go to setup.
     () async {
-      await windowManager.setTitle('MyData Tools');
+      await windowManager.setTitle('MyData Studio');
       await windowManager.setSize(const Size(1200, 800));
       await windowManager.center();
     }();
@@ -322,7 +347,7 @@ class MainAppState extends State<MainApp>
     // Or perhaps navigate to a setup screen.
     // For now, just launch the main app and let the router go to setup.
     () async {
-      await windowManager.setTitle('MyData Tools');
+      await windowManager.setTitle('MyData Studio');
       await windowManager.setSize(const Size(1200, 800));
       await windowManager.center();
     }();

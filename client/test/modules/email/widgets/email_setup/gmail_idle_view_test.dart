@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/gmail_idle_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_idle_view.dart';
 
 void main() {
   group('GmailIdleView', () {
@@ -8,9 +8,7 @@ void main() {
       bool called = false;
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(
-            body: GmailIdleView(onConnect: () => called = true),
-          ),
+          home: Scaffold(body: GmailIdleView(onConnect: () => called = true)),
         ),
       );
 
@@ -28,9 +26,7 @@ void main() {
       bool called = false;
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(
-            body: GmailSignInButton(onTap: () => called = true),
-          ),
+          home: Scaffold(body: GmailSignInButton(onTap: () => called = true)),
         ),
       );
 
@@ -44,11 +40,7 @@ void main() {
 
     testWidgets('shows Google sign-in text', (tester) async {
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: GmailSignInButton(onTap: () {}),
-          ),
-        ),
+        MaterialApp(home: Scaffold(body: GmailSignInButton(onTap: () {}))),
       );
 
       expect(find.textContaining('Google'), findsOneWidget);

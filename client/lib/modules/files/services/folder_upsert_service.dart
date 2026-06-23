@@ -1,8 +1,8 @@
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/modules/files/services/repositories/folder_repository.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/files/services/repositories/folder_repository.dart';
 
-import 'package:mydatatools/services/rx_service.dart';
+import 'package:mydatastudio/services/rx_service.dart';
 import 'package:flutter/material.dart';
 import 'package:resqlite/resqlite.dart' show ResqliteQueryException;
 

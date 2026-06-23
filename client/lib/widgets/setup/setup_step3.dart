@@ -1,9 +1,9 @@
 import 'dart:io';
 
-import 'package:mydatatools/helpers/encryption_form_validator.dart';
-import 'package:mydatatools/helpers/encryption_helper.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/models/tables/app_user.dart';
+import 'package:mydatastudio/helpers/encryption_form_validator.dart';
+import 'package:mydatastudio/helpers/encryption_helper.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:flutter/material.dart';
 import 'package:pointycastle/pointycastle.dart';
 import 'package:reactive_forms/reactive_forms.dart';
@@ -165,11 +165,11 @@ class _SetupStep3State extends State<SetupStep3> {
                     onPressed:
                         (encryptionForm.valid && !_isSubmitting)
                             ? () {
-                                setState(() {
-                                  _isSubmitting = true;
-                                });
-                                onStepContinueHandler(context, appUserClone);
-                              }
+                              setState(() {
+                                _isSubmitting = true;
+                              });
+                              onStepContinueHandler(context, appUserClone);
+                            }
                             : null,
                     style: ButtonStyle(
                       backgroundColor:
@@ -180,16 +180,17 @@ class _SetupStep3State extends State<SetupStep3> {
                         Colors.white,
                       ),
                     ),
-                    child: _isSubmitting
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text('Complete Setup'),
+                    child:
+                        _isSubmitting
+                            ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                            : const Text('Complete Setup'),
                   ),
                 ],
               );

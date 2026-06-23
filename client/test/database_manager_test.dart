@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/database_manager.dart';
+import 'package:mydatastudio/database_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
@@ -86,5 +86,16 @@ void main() {
       DatabaseManager.instance.dispose();
     });
 
+    test('testPathSupportsWal should return true for local temporary path', () async {
+      final testPath = p.join(tempDir!.path, 'wal_test_dir');
+      final supports = await DatabaseManager.testPathSupportsWal(testPath);
+      expect(supports, isTrue);
+
+      // Clean up test dir
+      final dir = io.Directory(testPath);
+      if (dir.existsSync()) {
+        dir.deleteSync(recursive: true);
+      }
+    });
   });
 }

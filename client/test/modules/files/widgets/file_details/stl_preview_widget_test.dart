@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/stl_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/stl_preview_widget.dart';
 
 import '../../../../helpers/file_fixture.dart';
 
@@ -19,8 +19,13 @@ class FakeStlRenderer implements StlRenderer {
 
 void main() {
   group('StlPreviewWidget', () {
-    testWidgets('shows fake renderer content via rendererFactory', (tester) async {
-      final file = makeTestFile(name: 'model.stl', contentType: 'application/octet-stream');
+    testWidgets('shows fake renderer content via rendererFactory', (
+      tester,
+    ) async {
+      final file = makeTestFile(
+        name: 'model.stl',
+        contentType: 'application/octet-stream',
+      );
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -38,8 +43,9 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsNothing);
     });
 
-    testWidgets('shows error text when fake renderer has shouldFail=true',
-        (tester) async {
+    testWidgets('shows error text when fake renderer has shouldFail=true', (
+      tester,
+    ) async {
       final file = makeTestFile(name: 'bad.stl');
       await tester.pumpWidget(
         MaterialApp(

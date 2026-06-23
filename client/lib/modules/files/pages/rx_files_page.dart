@@ -3,38 +3,38 @@ import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/image_preview_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/pdf_preview_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/stl_preview_widget.dart';
-import 'package:mydatatools/modules/files/widgets/video_file_preview.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/image_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/pdf_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/stl_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/video_file_preview.dart';
 
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/file_asset.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/modules/files/notifications/file_notification.dart';
-import 'package:mydatatools/modules/files/notifications/path_changed_notification.dart';
-import 'package:mydatatools/modules/files/notifications/sort_changed_notification.dart';
-import 'package:mydatatools/modules/files/pages/new_file_collection_page.dart';
-import 'package:mydatatools/modules/files/services/get_files_and_folders_service.dart';
-import 'package:mydatatools/modules/files/widgets/file_table.dart';
-import 'package:mydatatools/modules/files/widgets/file_details_drawer.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
-import 'package:mydatatools/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/file_asset.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/files/notifications/file_notification.dart';
+import 'package:mydatastudio/modules/files/notifications/path_changed_notification.dart';
+import 'package:mydatastudio/modules/files/notifications/sort_changed_notification.dart';
+import 'package:mydatastudio/modules/files/pages/new_file_collection_page.dart';
+import 'package:mydatastudio/modules/files/services/get_files_and_folders_service.dart';
+import 'package:mydatastudio/modules/files/widgets/file_table.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details_drawer.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/app_constants.dart';
 
-import 'package:mydatatools/helpers/file_path_resolver.dart';
+import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io' as io;
 import 'package:path/path.dart' as p;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:mydatatools/file_sources/google_drive/google_drive_auth_service.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_drive_auth_service.dart';
 import 'package:flutter_breadcrumb/flutter_breadcrumb.dart';
 import 'package:rxdart/rxdart.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
 
 class RxFilesPage extends StatefulWidget {
   const RxFilesPage({super.key});
@@ -101,9 +101,7 @@ class _RxFilesPage extends State<RxFilesPage> {
       if (value.isNotEmpty) {
         // Find first local file collection to select by default, or fallback to first collection
         final defaultCollection = value.firstWhere(
-          (c) =>
-              c.type == 'file' &&
-              c.scanner == AppConstants.scannerFileLocal,
+          (c) => c.type == 'file' && c.scanner == AppConstants.scannerFileLocal,
           orElse: () => value.first,
         );
         RxFilesPage.selectedCollection.add(defaultCollection);
@@ -254,7 +252,9 @@ class _RxFilesPage extends State<RxFilesPage> {
       _showLightbox = false;
     }
     final theme = Theme.of(context);
-    print('RxFilesPage.build: collections.length = ${collections.length}, collection = $collection');
+    print(
+      'RxFilesPage.build: collections.length = ${collections.length}, collection = $collection',
+    );
     if (collections.isEmpty) {
       return const NewFileCollectionPage();
     }
@@ -302,7 +302,9 @@ class _RxFilesPage extends State<RxFilesPage> {
                   LinearProgressIndicator(
                     minHeight: 2,
                     backgroundColor: Colors.transparent,
-                    valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      theme.colorScheme.primary,
+                    ),
                   ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -312,7 +314,9 @@ class _RxFilesPage extends State<RxFilesPage> {
                       color: theme.colorScheme.surfaceContainer,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.3,
+                        ),
                         width: 1,
                       ),
                     ),
@@ -320,22 +324,36 @@ class _RxFilesPage extends State<RxFilesPage> {
                     child: Row(
                       children: [
                         Expanded(
-                          child: getBreadcrumb(theme, collection!, path ?? collection!.path),
+                          child: getBreadcrumb(
+                            theme,
+                            collection!,
+                            path ?? collection!.path,
+                          ),
                         ),
                         IconButton(
-                          icon: Icon(Icons.add_box_outlined, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                          icon: Icon(
+                            Icons.add_box_outlined,
+                            color: theme.colorScheme.onSurfaceVariant,
+                            size: 20,
+                          ),
                           tooltip: 'Upload file',
                           onPressed: () {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('todo: add file to current folder'),
+                                content: Text(
+                                  'todo: add file to current folder',
+                                ),
                               ),
                             );
                           },
                         ),
                         const SizedBox(width: 8),
                         IconButton(
-                          icon: Icon(Icons.refresh, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                          icon: Icon(
+                            Icons.refresh,
+                            color: theme.colorScheme.onSurfaceVariant,
+                            size: 20,
+                          ),
                           tooltip: 'Refresh',
                           onPressed: () async {
                             if (collection != null) {
@@ -345,10 +363,20 @@ class _RxFilesPage extends State<RxFilesPage> {
                                 collection!,
                               );
                               final mgr = ScannerManager.getInstance();
-                              final scanner = await mgr.getScannerAsync(collection!);
-                              await scanner.start(collection!, absPath, false, true);
+                              final scanner = await mgr.getScannerAsync(
+                                collection!,
+                              );
+                              await scanner.start(
+                                collection!,
+                                absPath,
+                                false,
+                                true,
+                              );
                               _filesAndFoldersService!.invoke(
-                                GetFileAndFoldersServiceCommand(collection!, path ?? ''),
+                                GetFileAndFoldersServiceCommand(
+                                  collection!,
+                                  path ?? '',
+                                ),
                               );
                             }
                           },
@@ -357,27 +385,36 @@ class _RxFilesPage extends State<RxFilesPage> {
                         Container(
                           height: 20,
                           width: 1,
-                          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+                          color: theme.colorScheme.outlineVariant.withValues(
+                            alpha: 0.3,
+                          ),
                         ),
                         const SizedBox(width: 8),
                         IconButton(
                           icon: const Icon(Icons.download_outlined, size: 20),
                           color: theme.colorScheme.onSurfaceVariant,
-                          disabledColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                          disabledColor: theme.colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.3),
                           tooltip: 'Download File(s)',
-                          onPressed: selectedItems.isEmpty
-                              ? null
-                              : () => _downloadSelectedFiles(context),
+                          onPressed:
+                              selectedItems.isEmpty
+                                  ? null
+                                  : () => _downloadSelectedFiles(context),
                         ),
                         const SizedBox(width: 8),
                         IconButton(
                           icon: const Icon(Icons.delete_outline, size: 20),
                           color: theme.colorScheme.error,
-                          disabledColor: theme.colorScheme.error.withValues(alpha: 0.3),
+                          disabledColor: theme.colorScheme.error.withValues(
+                            alpha: 0.3,
+                          ),
                           tooltip: 'Delete File(s)',
-                          onPressed: selectedItems.isEmpty
-                              ? null
-                              : () => _showBulkDeleteConfirmationDialog(context),
+                          onPressed:
+                              selectedItems.isEmpty
+                                  ? null
+                                  : () => _showBulkDeleteConfirmationDialog(
+                                    context,
+                                  ),
                         ),
                       ],
                     ),
@@ -442,8 +479,11 @@ class _RxFilesPage extends State<RxFilesPage> {
           sortColumn = n.sortColumn;
           sortAsc = n.sortAsc;
           setState(() {
-            filesAndFolders =
-                _mergeAndSortRowData(filesAndFolders, sortColumn, sortAsc);
+            filesAndFolders = _mergeAndSortRowData(
+              filesAndFolders,
+              sortColumn,
+              sortAsc,
+            );
           });
           return true;
         }
@@ -489,46 +529,58 @@ class _RxFilesPage extends State<RxFilesPage> {
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeInOut,
       alignment: Alignment.topRight,
-      child: isVisible
-          ? Padding(
-              padding: const EdgeInsets.only(left: 16, right: 0, top: 0, bottom: 0),
-              child: SizedBox(
-                width: 300,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainer,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: theme.colorScheme.outlineVariant
-                          .withValues(alpha: 0.2),
-                      width: 1,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.18),
-                        blurRadius: 16,
-                        spreadRadius: 0,
-                        offset: const Offset(0, 4),
+      child:
+          isVisible
+              ? Padding(
+                padding: const EdgeInsets.only(
+                  left: 16,
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                ),
+                child: SizedBox(
+                  width: 300,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainer,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.2,
+                        ),
+                        width: 1,
                       ),
-                    ],
-                  ),
-                  child: FileDetailsDrawer(
-                    asset: asset!,
-                    collection: collection!,
-                    width: 300,
-                    onClose: () => setState(() {
-                      selectedAsset = null;
-                      _showLightbox = false;
-                    }),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.18),
+                          blurRadius: 16,
+                          spreadRadius: 0,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: FileDetailsDrawer(
+                      asset: asset!,
+                      collection: collection!,
+                      width: 300,
+                      onClose:
+                          () => setState(() {
+                            selectedAsset = null;
+                            _showLightbox = false;
+                          }),
+                    ),
                   ),
                 ),
-              ),
-            )
-          : const SizedBox.shrink(),
+              )
+              : const SizedBox.shrink(),
     );
   }
 
-  BreadCrumb getBreadcrumb(ThemeData theme, Collection collection, String path) {
+  BreadCrumb getBreadcrumb(
+    ThemeData theme,
+    Collection collection,
+    String path,
+  ) {
     final isCollectionActive = _breadcrumbTrail.isEmpty;
     return BreadCrumb(
       items: <BreadCrumbItem>[
@@ -553,8 +605,12 @@ class _RxFilesPage extends State<RxFilesPage> {
           content: Text(
             collection.name,
             style: TextStyle(
-              color: isCollectionActive ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant,
-              fontWeight: isCollectionActive ? FontWeight.bold : FontWeight.normal,
+              color:
+                  isCollectionActive
+                      ? theme.colorScheme.onSurface
+                      : theme.colorScheme.onSurfaceVariant,
+              fontWeight:
+                  isCollectionActive ? FontWeight.bold : FontWeight.normal,
               fontSize: 14,
             ),
           ),
@@ -578,7 +634,10 @@ class _RxFilesPage extends State<RxFilesPage> {
             content: Text(
               crumb.name,
               style: TextStyle(
-                color: isLast ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant,
+                color:
+                    isLast
+                        ? theme.colorScheme.onSurface
+                        : theme.colorScheme.onSurfaceVariant,
                 fontWeight: isLast ? FontWeight.bold : FontWeight.normal,
                 fontSize: 14,
               ),
@@ -697,7 +756,9 @@ class _RxFilesPage extends State<RxFilesPage> {
             await ioFile.delete();
           }
           // Delete from database
-          await FileDesktopRepository(DatabaseManager.instance.database!).delete(item);
+          await FileDesktopRepository(
+            DatabaseManager.instance.database!,
+          ).delete(item);
           deletedCount++;
         } catch (e) {
           logger.e("Error deleting ${item.path}: $e");
@@ -830,30 +891,54 @@ class _RxFilesPage extends State<RxFilesPage> {
   bool _isImage(File file) {
     if (file.contentType.startsWith('image/')) return true;
     final ext = p.extension(file.name).toLowerCase();
-    return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.psd']
-        .contains(ext);
+    return [
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.webp',
+      '.bmp',
+      '.tif',
+      '.psd',
+    ].contains(ext);
   }
 
   bool _isPdf(File file) {
-    if (file.contentType == 'application/pdf' || file.contentType == 'application/x-pdf') return true;
+    if (file.contentType == 'application/pdf' ||
+        file.contentType == 'application/x-pdf')
+      return true;
     return p.extension(file.name).toLowerCase() == '.pdf';
   }
 
   bool _isText(File file) {
     final ext = p.extension(file.name).toLowerCase();
     const textExts = [
-      '.txt', '.html', '.xml', '.xsl', '.xslt',
-      '.md', '.markdown', '.json', '.yaml', '.yml',
-      '.dart', '.py', '.js', '.css',
+      '.txt',
+      '.html',
+      '.xml',
+      '.xsl',
+      '.xslt',
+      '.md',
+      '.markdown',
+      '.json',
+      '.yaml',
+      '.yml',
+      '.dart',
+      '.py',
+      '.js',
+      '.css',
     ];
     return textExts.contains(ext) || file.contentType.startsWith('text/');
   }
 
-  String _resolvedPath(File file) => FilePathResolver.absolute(file, collection!);
+  String _resolvedPath(File file) =>
+      FilePathResolver.absolute(file, collection!);
 
   Future<List<int>?> _getGDriveFileBytes(File file) async {
     try {
-      final token = await GoogleDriveAuthService.getValidAccessToken(collection!);
+      final token = await GoogleDriveAuthService.getValidAccessToken(
+        collection!,
+      );
 
       Uri uri;
       if (file.path.startsWith('gdrive://')) {
@@ -909,14 +994,15 @@ class _RxFilesPage extends State<RxFilesPage> {
 
     final asset = _lastSelectedAsset!;
     final ext = p.extension(asset.name).toLowerCase();
-    
+
     Widget content;
     if (asset is File) {
       if (_isPdf(asset)) {
         content = PdfPreviewWidget(
-          filePath: asset.path.startsWith('gdrive://')
-              ? asset.path
-              : _resolvedPath(asset),
+          filePath:
+              asset.path.startsWith('gdrive://')
+                  ? asset.path
+                  : _resolvedPath(asset),
           previewHeight: double.infinity,
         );
       } else if (ext == '.stl') {
@@ -924,9 +1010,10 @@ class _RxFilesPage extends State<RxFilesPage> {
           file: asset,
           previewHeight: double.infinity,
           resolvedPath: _resolvedPath(asset),
-          onDownloadGDrive: asset.path.startsWith('gdrive://')
-              ? () => _getGDriveFileBytes(asset)
-              : null,
+          onDownloadGDrive:
+              asset.path.startsWith('gdrive://')
+                  ? () => _getGDriveFileBytes(asset)
+                  : null,
         );
       } else if (asset.contentType.startsWith('video/') ||
           ['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm'].contains(ext)) {
@@ -953,7 +1040,10 @@ class _RxFilesPage extends State<RxFilesPage> {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (snapshot.hasError || !snapshot.hasData) {
-                  return const Text('Error loading preview', style: TextStyle(color: Colors.white));
+                  return const Text(
+                    'Error loading preview',
+                    style: TextStyle(color: Colors.white),
+                  );
                 }
                 if (ext == '.md' || ext == '.markdown') {
                   return MarkdownBody(
@@ -962,13 +1052,20 @@ class _RxFilesPage extends State<RxFilesPage> {
                       p: const TextStyle(color: Colors.white70),
                       h1: const TextStyle(color: Colors.white),
                       h2: const TextStyle(color: Colors.white),
-                      code: const TextStyle(backgroundColor: Colors.black38, color: Colors.amberAccent),
+                      code: const TextStyle(
+                        backgroundColor: Colors.black38,
+                        color: Colors.amberAccent,
+                      ),
                     ),
                   );
                 }
                 return Text(
                   snapshot.data!,
-                  style: const TextStyle(fontFamily: 'Courier', fontSize: 13, color: Colors.white70),
+                  style: const TextStyle(
+                    fontFamily: 'Courier',
+                    fontSize: 13,
+                    color: Colors.white70,
+                  ),
                 );
               },
             ),
@@ -978,11 +1075,19 @@ class _RxFilesPage extends State<RxFilesPage> {
         content = Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.insert_drive_file_outlined, size: 80, color: Colors.white54),
+            const Icon(
+              Icons.insert_drive_file_outlined,
+              size: 80,
+              color: Colors.white54,
+            ),
             const SizedBox(height: 16),
             Text(
               asset.name,
-              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 8),
             const Text(
@@ -1000,7 +1105,11 @@ class _RxFilesPage extends State<RxFilesPage> {
           const SizedBox(height: 16),
           Text(
             asset.name,
-            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       );
@@ -1027,20 +1136,14 @@ class _RxFilesPage extends State<RxFilesPage> {
           child: Padding(
             padding: const EdgeInsets.all(48.0),
             child: Container(
-              constraints: const BoxConstraints(
-                maxWidth: 1200,
-                maxHeight: 900,
-              ),
+              constraints: const BoxConstraints(maxWidth: 1200, maxHeight: 900),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 color: Colors.transparent,
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
-                child: InteractiveViewer(
-                  maxScale: 4.0,
-                  child: content,
-                ),
+                child: InteractiveViewer(maxScale: 4.0, child: content),
               ),
             ),
           ),

@@ -37,7 +37,7 @@ npm install -g appdmg
 cd installers/dmg_creator
 ```
 ```bash
-appdmg installers/dmg_creator/config.json installers/mydata.tools.dmg
+appdmg installers/dmg_creator/config.json installers/com.xdtlabs.mydatastudio.dmg
 ```
 
 # Tests

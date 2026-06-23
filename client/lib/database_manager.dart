@@ -3,19 +3,18 @@ import 'dart:convert';
 import 'dart:io' as io;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/repositories/database_repository.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:path/path.dart' as p;
 import 'package:resqlite/resqlite.dart';
-import 'package:mydatatools/custom_path_provider.dart';
+import 'package:mydatastudio/custom_path_provider.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:mydatatools/modules/files/services/embedding_isolate.dart';
+import 'package:mydatastudio/modules/files/services/embedding_isolate.dart';
 import 'package:uuid/uuid.dart';
-
 
 class DatabaseManager {
   static final DatabaseManager _singleton = DatabaseManager._();
@@ -87,6 +86,43 @@ class DatabaseManager {
     file.writeAsStringSync(jsonEncode(config));
   }
 
+  /// Checks if the given path supports WAL mode (fails on network/SMB shares).
+  static Future<bool> testPathSupportsWal(String storagePath) async {
+    final testDbDir = io.Directory(p.join(storagePath, 'data'));
+    if (!testDbDir.existsSync()) {
+      try {
+        testDbDir.createSync(recursive: true);
+      } catch (_) {
+        return false;
+      }
+    }
+    final testDbFile = io.File(p.join(testDbDir.path, 'wal_test_probe.db'));
+    try {
+      // Attempt to open the database.
+      final db = await Database.open(testDbFile.path);
+      await db.close();
+      // Clean up test files.
+      try {
+        if (testDbFile.existsSync()) testDbFile.deleteSync();
+        final shmFile = io.File('${testDbFile.path}-shm');
+        if (shmFile.existsSync()) shmFile.deleteSync();
+        final walFile = io.File('${testDbFile.path}-wal');
+        if (walFile.existsSync()) walFile.deleteSync();
+      } catch (_) {}
+      return true;
+    } catch (e) {
+      // Clean up test files if created.
+      try {
+        if (testDbFile.existsSync()) testDbFile.deleteSync();
+        final shmFile = io.File('${testDbFile.path}-shm');
+        if (shmFile.existsSync()) shmFile.deleteSync();
+        final walFile = io.File('${testDbFile.path}-wal');
+        if (walFile.existsSync()) walFile.deleteSync();
+      } catch (_) {}
+      return false;
+    }
+  }
+
   Future<AppDatabase> initializeDatabase() async {
     if (isTesting) {
       storagePath = p.dirname(await _getConfigPath());
@@ -107,7 +143,9 @@ class DatabaseManager {
         path,
       );
     } else {
-      final original = (PathProviderPlatform.instance as CustomPathProviderPlatform).original;
+      final original =
+          (PathProviderPlatform.instance as CustomPathProviderPlatform)
+              .original;
       PathProviderPlatform.instance = CustomPathProviderPlatform(
         original,
         path,
@@ -119,7 +157,7 @@ class DatabaseManager {
 
     // start database repository
     _repository = DatabaseRepository(appDatabase!);
- 
+
     if (!isTesting) {
       // start scanners
       await _startScanners();
@@ -183,7 +221,9 @@ class DatabaseManager {
     isInitializedNotifier.value = false;
     _originalSupportPath = null;
     if (PathProviderPlatform.instance is CustomPathProviderPlatform) {
-      PathProviderPlatform.instance = (PathProviderPlatform.instance as CustomPathProviderPlatform).original;
+      PathProviderPlatform.instance =
+          (PathProviderPlatform.instance as CustomPathProviderPlatform)
+              .original;
     }
   }
 
@@ -229,16 +269,27 @@ class AppDatabase {
     return appDb;
   }
 
-  Future<List<Map<String, Object?>>> select(String sql, [List<Object?> params = const []]) => _db.select(sql, params);
-  Future<WriteResult> execute(String sql, [List<Object?> params = const []]) => _db.execute(sql, params);
-  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) => _db.executeBatch(sql, paramSets);
-  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) => _db.transaction(body);
-  Stream<List<Map<String, Object?>>> stream(String sql, [List<Object?> params = const []]) => _db.stream(sql, params);
+  Future<List<Map<String, Object?>>> select(
+    String sql, [
+    List<Object?> params = const [],
+  ]) => _db.select(sql, params);
+  Future<WriteResult> execute(String sql, [List<Object?> params = const []]) =>
+      _db.execute(sql, params);
+  Future<void> executeBatch(String sql, List<List<Object?>> paramSets) =>
+      _db.executeBatch(sql, paramSets);
+  Future<T> transaction<T>(Future<T> Function(Transaction tx) body) =>
+      _db.transaction(body);
+  Stream<List<Map<String, Object?>>> stream(
+    String sql, [
+    List<Object?> params = const [],
+  ]) => _db.stream(sql, params);
   Future<void> close() => _db.close();
 
   Future<void> initSchema() async {
     // Check if table 'apps' already exists to determine if initialization is required
-    final tables = await _db.select("SELECT name FROM sqlite_master WHERE type='table' AND name='apps'");
+    final tables = await _db.select(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='apps'",
+    );
     if (tables.isEmpty) {
       logger.i("AppDatabase: Initializing schema...");
       for (final sql in schemaDDL) {

@@ -1,11 +1,11 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
-import 'package:mydatatools/modules/email/services/email_folder_repository.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/modules/email/services/email_folder_repository.dart';
 
 void main() {
   late Directory tempDir;
@@ -31,15 +31,17 @@ void main() {
 
     // Need to insert a collection because of foreign key constraint in EmailFolders table
     final colRepo = CollectionRepository(databaseManager.database!);
-    await colRepo.addCollection(Collection(
-      id: 'col1',
-      name: 'Test Account',
-      path: 'test@gmail.com',
-      type: 'email',
-      scanner: 'gmail',
-      scanStatus: 'idle',
-      needsReAuth: false,
-    ));
+    await colRepo.addCollection(
+      Collection(
+        id: 'col1',
+        name: 'Test Account',
+        path: 'test@gmail.com',
+        type: 'email',
+        scanner: 'gmail',
+        scanStatus: 'idle',
+        needsReAuth: false,
+      ),
+    );
   });
 
   tearDown(() async {

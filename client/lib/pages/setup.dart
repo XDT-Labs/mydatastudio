@@ -1,4 +1,4 @@
-import 'package:mydatatools/widgets/setup/setup_stepper_form.dart';
+import 'package:mydatastudio/widgets/setup/setup_stepper_form.dart';
 import 'package:flutter/material.dart';
 
 class SetupPage extends StatelessWidget {
@@ -21,7 +21,7 @@ class SetupPage extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 48),
               child: Column(
                 children: [
-                  const Text('MyData Tools', style: TextStyle(fontSize: 48)),
+                  const Text('MyData Studio', style: TextStyle(fontSize: 48)),
                   Container(height: 16),
                   const Text(
                     'Keep a local copy of your digital life. \n\n\n',

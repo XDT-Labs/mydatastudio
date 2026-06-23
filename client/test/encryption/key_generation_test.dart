@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import "package:pointycastle/pointycastle.dart";
 import "package:pointycastle/export.dart";
 import 'package:encrypt/encrypt.dart';
-import "package:mydatatools/helpers/encryption_helper.dart";
+import "package:mydatastudio/helpers/encryption_helper.dart";
 
 /// Test the RSA key generation
 void main() {

@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
 
 class DatabaseRepository {
   AppDatabase db;
@@ -73,10 +73,9 @@ class DatabaseRepository {
   /// Should be called when the corresponding file is permanently deleted.
   Future<void> deleteFileEmbedding(String fileId) async {
     await db.transaction((tx) async {
-      await tx.execute(
-        'DELETE FROM files_embeddings WHERE file_id = ?',
-        [fileId],
-      );
+      await tx.execute('DELETE FROM files_embeddings WHERE file_id = ?', [
+        fileId,
+      ]);
     });
     logger.d('deleteFileEmbedding: fileId=$fileId');
   }

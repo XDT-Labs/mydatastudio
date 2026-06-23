@@ -1,5 +1,5 @@
 # ==============================================================================
-# Makefile for mydatatools-desktop
+# Makefile for mydatastudio-desktop
 #
 # Usage:
 #   make all            - Build everything (models, python, client)
@@ -10,7 +10,7 @@
 # ==============================================================================
 
 # --- Variables ---
-PROJECT_ID = mydata-tools
+PROJECT_ID = mydata-studio
 REGION = us-central1
 SERVICE_NAME = gcs-file-downloader
 IMAGE_REPO = cloud-run-source-deploy
@@ -86,13 +86,13 @@ set-bundle-id:
 	@echo "--- 🆔 Setting Bundle ID for macOS ---"
 	@BRANCH=$$(git branch --show-current); \
 	if [ "$$BRANCH" = "develop" ]; then \
-		echo "Detected branch: develop. Using Bundle ID: mydata.tools.dev"; \
-		sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = mydata.tools.dev/' client/macos/Runner/Configs/AppInfo.xcconfig; \
-		echo "REALM_NAME=mydata.tools.dev" > .realm_name; \
+		echo "Detected branch: develop. Using Bundle ID: com.xdtlabs.mydatastudio.dev"; \
+		sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = com.xdtlabs.mydatastudio.dev/' client/macos/Runner/Configs/AppInfo.xcconfig; \
+		
 	else \
-		echo "Detected branch: $$BRANCH. Using Bundle ID: mydata.tools"; \
-		sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = mydata.tools/' client/macos/Runner/Configs/AppInfo.xcconfig; \
-		echo "REALM_NAME=mydata.tools" > .realm_name; \
+		echo "Detected branch: $$BRANCH. Using Bundle ID: com.xdtlabs.mydatastudio"; \
+		sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = com.xdtlabs.mydatastudio/' client/macos/Runner/Configs/AppInfo.xcconfig; \
+		
 	fi
 
 # 3. Build Flutter Desktop Client
@@ -107,14 +107,14 @@ build-client: set-bundle-id
 	@echo "--- ✅ Flutter build complete ---"
 	@if [ "$$BRANCH" = "main" ]; then \
 		echo "--- 🚀 Copy release build to Applications folder ---"; \
-		cp -r $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyData.app /Applications/MyData.app; \
+		cp -r $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app /Applications/MyDataStudio.app; \
 	fi
 
 # Local Install (Testing)
 .PHONY: local-install-python
 local-install-python: build-python
 	@echo "--- 💾 Installing service for local testing ---"
-	@REALM=$$(cat .realm_name | cut -d= -f2 || echo "mydata.tools"); \
+	@REALM=$$(cat .realm_name | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \
 	mkdir -p ~/Library/Application\ Support/$$REALM/ && \
 	cp $(APP_ZIP_PATH) ~/Library/Application\ Support/$$REALM/ && \
 	rm -fr ~/Library/Application\ Support/$$REALM/aichat
@@ -132,6 +132,5 @@ clean:
 	@find . -type f -name "*.pyc" -delete
 	@find . -type d -name "__pycache__" -exec rm -rf {} +
 	@echo "--- 🧼 Restoring default Bundle ID ---"
-	@sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = mydata.tools.dev/PRODUCT_BUNDLE_IDENTIFIER = mydata.tools/' client/macos/Runner/Configs/AppInfo.xcconfig
-	@rm -f .realm_name
+	@sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = com.xdtlabs.mydatastudio.dev/PRODUCT_BUNDLE_IDENTIFIER = com.xdtlabs.mydatastudio/' client/macos/Runner/Configs/AppInfo.xcconfig
 	@echo "--- ✅ Clean complete ---"
