@@ -103,9 +103,7 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
         GetCollectionsService.instance.invoke(
           GetCollectionsServiceCommand(null),
         );
-        ScannerManager.getInstance()
-            .getScanner(fc)
-            ?.start(fc, fc.path, true, true);
+        ScannerManager.getInstance().startScanner(fc);
         RxFilesPage.selectedCollection.add(fc);
       });
 
@@ -184,9 +182,7 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
         return;
       }
 
-      ScannerManager.getInstance()
-          .getScanner(collection)
-          ?.start(collection, collection.path, true, true);
+      ScannerManager.getInstance().startScanner(collection);
 
       final nameMatch = RegExp(r'\((.+?)\)').firstMatch(collection.name);
       setState(() {

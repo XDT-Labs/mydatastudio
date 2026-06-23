@@ -140,6 +140,7 @@ class _RxFilesPage extends State<RxFilesPage> {
           // '' = relative root path (stored as empty string in DB)
           GetFileAndFoldersServiceCommand(value, ''),
         );
+        _triggerShallowScan(value, '');
       }
       setState(() {
         collection = value;
@@ -207,6 +208,21 @@ class _RxFilesPage extends State<RxFilesPage> {
           wasScanning = scanning;
         }
       });
+    });
+  }
+
+  void _triggerShallowScan(Collection col, String targetPath) {
+    if (col.type != 'file') {
+      return;
+    }
+    final absPath = FilePathResolver.absoluteFromPath(targetPath, col);
+    ScannerManager.getInstance().getScannerAsync(col).then((scanner) {
+      if (scanner.isScanning.value) {
+        return;
+      }
+      scanner.start(col, absPath, false, true);
+    }).catchError((e) {
+      logger.e("Error triggering shallow scan: $e");
     });
   }
 
@@ -455,7 +471,9 @@ class _RxFilesPage extends State<RxFilesPage> {
     }
     return NotificationListener<FiledNotification>(
       onNotification: (FiledNotification n) {
+        io.stderr.writeln("DEBUG: Received notification of type: ${n.runtimeType}");
         if (n is PathChangedNotification) {
+          io.stderr.writeln("DEBUG: n.asset.path = ${n.asset.path}, current path = $path");
           if (n.asset.path != path) {
             setState(() {
               path = n.asset.path;
@@ -472,6 +490,7 @@ class _RxFilesPage extends State<RxFilesPage> {
             _filesAndFoldersService!.invoke(
               GetFileAndFoldersServiceCommand(collection!, n.asset.path),
             );
+            _triggerShallowScan(collection!, n.asset.path);
             return true;
           }
         }
@@ -599,6 +618,7 @@ class _RxFilesPage extends State<RxFilesPage> {
             _filesAndFoldersService!.invoke(
               GetFileAndFoldersServiceCommand(collection, ''),
             );
+            _triggerShallowScan(collection, '');
           },
         ),
         BreadCrumbItem(
@@ -623,6 +643,7 @@ class _RxFilesPage extends State<RxFilesPage> {
             _filesAndFoldersService!.invoke(
               GetFileAndFoldersServiceCommand(collection, ''),
             );
+            _triggerShallowScan(collection, '');
           },
         ),
         // One item per folder the user has drilled into
@@ -652,6 +673,7 @@ class _RxFilesPage extends State<RxFilesPage> {
               _filesAndFoldersService!.invoke(
                 GetFileAndFoldersServiceCommand(collection, crumb.path),
               );
+              _triggerShallowScan(collection, crumb.path);
             },
           );
         }),

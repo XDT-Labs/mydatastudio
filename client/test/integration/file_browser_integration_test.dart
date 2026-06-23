@@ -21,6 +21,11 @@ import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
+import 'package:mydatastudio/scanners/collection_scanner.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/files/notifications/path_changed_notification.dart';
+import 'package:mydatastudio/modules/files/widgets/file_table.dart';
 import 'package:mocktail/mocktail.dart';
 
 class MockPathProviderPlatform extends Mock
@@ -415,4 +420,165 @@ void main() {
       expect(find.byTooltip('Close Preview (Esc)'), findsNothing);
     },
   );
+
+  testWidgets(
+    'Automatic folder scans on source addition, opening source, and folder navigation',
+    (WidgetTester tester) async {
+      final colId = 'scan-test-col';
+      final collectionPath = p.join(tempDir.path, 'scan_test_files');
+      io.Directory(collectionPath).createSync();
+
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      // 1. Setup a fake scanner
+      final fakeScanner = FakeCollectionScanner();
+      ScannerManager.getInstance().scannerFactory = (col) async => fakeScanner;
+
+      final collection = Collection(
+        id: colId,
+        name: 'Scan Test Collection',
+        path: collectionPath,
+        type: 'file',
+        scanner: AppConstants.scannerFileLocal,
+        scanStatus: 'idle',
+        needsReAuth: false,
+      );
+
+      // Insert the collection into the DB so that GetCollectionsService.invoke finds it
+      final colRepo = CollectionRepository(DatabaseManager.instance.database!);
+      await tester.runAsync(() async {
+        await colRepo.addCollection(collection);
+        await ScannerManager.getInstance().registerScanner(collection);
+      });
+
+      // We need to seed GetCollectionsService manually
+      GetCollectionsService.instance.sink.add([collection]);
+
+      await tester.runAsync(() async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Row(
+                children: [
+                  const SizedBox(width: 260, child: FileDrawer()),
+                  const Expanded(child: RxFilesPage()),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        // Verify that selecting the collection/opening source triggers a shallow scan
+        RxFilesPage.selectedCollection.add(collection);
+        
+        // Allow data to load and UI to settle dynamically
+        int pumpRetries = 0;
+        while (pumpRetries < 40) {
+          await tester.pump(const Duration(milliseconds: 100));
+          if (find.byType(FileTable).evaluate().isNotEmpty) {
+            break;
+          }
+          await Future.delayed(const Duration(milliseconds: 100));
+          pumpRetries++;
+        }
+
+        expect(fakeScanner.startCalls.length, greaterThanOrEqualTo(1));
+        final openSourceCall = fakeScanner.startCalls.first;
+        expect(openSourceCall['recursive'], isFalse);
+        expect(openSourceCall['force'], isTrue);
+        expect(openSourceCall['path'], equals(collectionPath));
+
+        fakeScanner.startCalls.clear();
+
+        // Verify that navigation (PathChangedNotification) triggers a shallow scan
+        final subFolder = Folder(
+          id: 'subfolder-id',
+          name: 'Sub Folder',
+          path: 'subdir',
+          parent: '',
+          dateCreated: DateTime.now(),
+          dateLastModified: DateTime.now(),
+          lastScannedDate: DateTime.now(),
+          collectionId: colId,
+        );
+
+        // Dispatch path changed notification
+        try {
+          final element = tester.element(find.byType(FileTable));
+          PathChangedNotification(subFolder, 'name', true).dispatch(element);
+        } catch (e, stack) {
+          print("Exception finding/dispatching: $e\n$stack");
+        }
+        await tester.pump(const Duration(milliseconds: 100));
+
+        expect(fakeScanner.startCalls.length, greaterThanOrEqualTo(1));
+        final navCall = fakeScanner.startCalls.first;
+        expect(navCall['recursive'], isFalse);
+        expect(navCall['force'], isTrue);
+        expect(navCall['path'], equals(p.join(collectionPath, 'subdir')));
+
+        // Verify clicking Sync in the sidebar triggers a full recursive scan
+        fakeScanner.startCalls.clear();
+
+        // Find and tap the trailing popup menu button on the ListTile
+        final moreVertIcon = find.byIcon(Icons.more_vert);
+        expect(moreVertIcon, findsOneWidget);
+        await tester.tap(moreVertIcon);
+        
+        // Pump frames to let the popup menu open animation finish completely
+        for (int i = 0; i < 10; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+
+        // Tap the "Sync" popup menu item
+        final syncMenuOption = find.text('Sync');
+        expect(syncMenuOption, findsOneWidget);
+        await tester.tap(syncMenuOption);
+        
+        // Pump frames to let the popup menu close animation finish completely and trigger onSync
+        for (int i = 0; i < 10; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+
+        // Wait for scan to trigger
+        int syncRetries = 0;
+        while (syncRetries < 40) {
+          await tester.pump(const Duration(milliseconds: 100));
+          if (fakeScanner.startCalls.isNotEmpty) {
+            break;
+          }
+          await Future.delayed(const Duration(milliseconds: 50));
+          syncRetries++;
+        }
+
+        expect(fakeScanner.startCalls.length, greaterThanOrEqualTo(1));
+        final syncCall = fakeScanner.startCalls.first;
+        expect(syncCall['recursive'], isTrue);
+        expect(syncCall['force'], isTrue);
+        expect(syncCall['path'], isNull); // Full sync has path == null
+      });
+    },
+  );
+}
+
+class FakeCollectionScanner extends CollectionScanner {
+  final List<Map<String, dynamic>> startCalls = [];
+
+  @override
+  Future<int> start(
+    Collection collection,
+    String? path,
+    bool recursive,
+    bool force,
+  ) async {
+    startCalls.add({
+      'collection': collection,
+      'path': path,
+      'recursive': recursive,
+      'force': force,
+    });
+    return 0;
+  }
 }

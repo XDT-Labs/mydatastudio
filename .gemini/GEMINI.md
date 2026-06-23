@@ -19,6 +19,8 @@ These are non-negotiable rules for all interactions and code changes. Failure to
 ## Git Commit
 CRITICAL! You MUST always seek the user's approval before commiting to git.  Never commit without the user's approval.
 
+* After completing an Implementation Plan, write a markup git commit message for the work done. 
+
 ## Mermaid Diagrams
 - When generating Mermaid diagrams, ALWAYS wrap node labels in double quotes if they contain spaces, newlines (\n), or special characters (like (), [], {}, etc.) to prevent syntax errors.
 
@@ -28,7 +30,7 @@ CRITICAL! You MUST always seek the user's approval before commiting to git.  Nev
 This document provides a technical overview and review of the project's architecture, patterns, and implementation details.
 
 ## 1. High-Level Architecture
-The project is a Flutter desktop application designed for high-performance data management and AI integration. It adheres to a modularized **MVVM (Model-View-ViewModel)** pattern, leveraging **Isolates** for multi-threaded execution to keep the UI responsive during resource-intensive tasks.
+The project is a Flutter desktop application designed for high-performance data management and AI integration. Leveraging **Isolates** for multi-threaded execution to keep the UI responsive during resource-intensive tasks.
 
 ### Core Components:
 - **Modules**: Located in `lib/modules`, these encapsulate feature-specific logic.
@@ -78,7 +80,7 @@ To ensure thread safety and prevent SQLite locks during massive scans:
 - **Makefile**: Used to manage complex build tasks, likely including native C++ bindings for LLM support (e.g., `llama.cpp`).
 - **Python Integration**: The `PythonManager` orchestrates background Python services for AI tasks, ensuring they are bundled and managed correctly within the macOS application sandbox.
 
-
+---
 
 # Important Rules 
 

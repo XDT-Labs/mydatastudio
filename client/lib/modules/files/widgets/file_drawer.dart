@@ -308,10 +308,10 @@ class _FileDrawer extends State<FileDrawer> {
         RxFilesPage.selectedPath.add(col.path);
         GoRouter.of(context).go('/files');
       },
-      onSync:
-          () => ScannerManager.getInstance()
-              .getScanner(col)
-              ?.start(col, col.path, true, true),
+      onSync: () async {
+        final scanner = await ScannerManager.getInstance().getScannerAsync(col);
+        await scanner.start(col, null, true, true);
+      },
       onDelete: () => _showDeleteConfirmationDialog(context, col),
     );
   }
