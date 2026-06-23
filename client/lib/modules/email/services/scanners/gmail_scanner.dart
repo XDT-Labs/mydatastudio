@@ -1,4 +1,5 @@
 import 'dart:isolate';
+import 'package:path/path.dart' as p;
 
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
@@ -89,7 +90,11 @@ class GmailScanner extends CollectionScanner {
 
     //start isolate
     RootIsolateToken? token = RootIsolateToken.instance;
-    isolate = GmailScannerIsolate(token: token, appDir: appDir);
+    isolate = GmailScannerIsolate(
+      token: token,
+      appDir: appDir,
+      dbDir: p.dirname(p.dirname(dbPath)),
+    );
     await isolate!.start(
       collection,
       folderId: labelId,

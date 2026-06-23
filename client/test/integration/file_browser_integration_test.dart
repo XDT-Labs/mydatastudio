@@ -83,6 +83,7 @@ void main() {
   });
 
   tearDown(() async {
+    ScannerManager.getInstance().stopScanners();
     final dbMgr = DatabaseManager.instance;
     dbMgr.dispose();
 
@@ -398,11 +399,11 @@ void main() {
         ),
       );
       RxFilesPage.selectedCollection.add(collection);
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
 
       // Select image.png again
       await tester.tap(find.text('image.png'));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
 
       // Focus the text field
       focusNode.requestFocus();
@@ -410,7 +411,7 @@ void main() {
 
       // Press space bar -> Lightbox should NOT open because input is focused!
       await tester.sendKeyEvent(LogicalKeyboardKey.space);
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
       expect(find.byTooltip('Close Preview (Esc)'), findsNothing);
     },
   );

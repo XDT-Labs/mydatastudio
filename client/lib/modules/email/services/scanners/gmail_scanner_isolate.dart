@@ -36,10 +36,11 @@ import 'package:uuid/uuid.dart';
 class GmailScannerIsolate {
   final RootIsolateToken? token;
   final String appDir;
+  final String dbDir;
   Isolate? _isolate;
   final AppLogger logger = AppLogger(null);
 
-  GmailScannerIsolate({this.token, required this.appDir});
+  GmailScannerIsolate({this.token, required this.appDir, required this.dbDir});
 
   /// Spawns the Gmail background worker isolate.
   ///
@@ -71,6 +72,7 @@ class GmailScannerIsolate {
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'force': force,
       'appDir': appDir,
+      'dbDir': dbDir,
     };
 
     _isolate = await spawnIsolate(GmailScannerIsolateWorker.worker, args);
@@ -131,6 +133,7 @@ class GmailScannerIsolateWorker {
         lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
     final bool force = args['force'] ?? false;
     final String appDir = args['appDir'];
+    final String dbDir = args['dbDir'] ?? appDir;
 
     if (token != null) {
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
@@ -167,7 +170,7 @@ class GmailScannerIsolateWorker {
       Isolate.exit(clientPort, {'error': 'auth_failed'});
     }
 
-    final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName);
+    final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
 
     final authHttpClient = AuthenticatedHttpClient.bearer(accessToken);
     final GmailApi gmailApi = GmailApi(authHttpClient);

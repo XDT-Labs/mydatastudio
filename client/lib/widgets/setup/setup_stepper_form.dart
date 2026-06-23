@@ -19,6 +19,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
+import 'package:path_provider/path_provider.dart';
 
 class SetupStepperForm extends StatefulWidget {
   const SetupStepperForm({super.key});
@@ -80,7 +81,7 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
       }
 
       //Write storage location to local lookup file.
-      var config = createConfigFile(appUser);
+      var config = await createConfigFile(appUser);
       var jsonConfig = jsonEncode(config);
 
       File(
@@ -133,9 +134,19 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
     }
   }
 
-  Map<String, dynamic> createConfigFile(AppUser? appUser) => <String, dynamic>{
-    'path': appUser!.localStoragePath,
-  };
+  Future<Map<String, dynamic>> createConfigFile(AppUser? appUser) async {
+    final storagePath = appUser!.localStoragePath;
+    final supportsWal = await DatabaseManager.testPathSupportsWal(storagePath);
+    String databasePath = storagePath;
+    if (!supportsWal) {
+      final realSupportPath = await DatabaseManager.getRealApplicationSupportPath();
+      databasePath = realSupportPath;
+    }
+    return <String, dynamic>{
+      'storage': storagePath,
+      'database': databasePath,
+    };
+  }
 
   List<Step> getSteps(BuildContext context) {
     return <Step>[

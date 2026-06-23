@@ -296,16 +296,6 @@ class MainAppState extends State<MainApp>
                           String? newPath =
                               await FilePicker.platform.getDirectoryPath();
                           if (newPath != null) {
-                            final supportsWal = await DatabaseManager.testPathSupportsWal(newPath);
-                            if (!supportsWal) {
-                              if (mounted) {
-                                setState(() {
-                                  _dbAccessError = true;
-                                  _dbErrorPath = 'The selected folder is on a network/SMB share and does not support SQLite WAL mode. Please select a local folder.';
-                                });
-                              }
-                              return;
-                            }
                             await DatabaseManager.instance.updateConfigPath(
                               newPath,
                             );

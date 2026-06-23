@@ -333,6 +333,7 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
       final pstIsolate = OutlookPstScannerIsolate(
         token: RootIsolateToken.instance,
         appDir: appDataDir,
+        dbDir: DatabaseManager.instance.databaseDirectoryPath!,
         serverUrl: serverUrl,
       );
       await pstIsolate.start(collection);

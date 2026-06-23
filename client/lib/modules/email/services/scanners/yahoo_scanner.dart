@@ -1,4 +1,5 @@
 import 'dart:isolate';
+import 'package:path/path.dart' as p;
 
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
@@ -75,7 +76,11 @@ class YahooScanner extends CollectionScanner {
 
     //start isolate
     RootIsolateToken? token = RootIsolateToken.instance;
-    isolate = YahooScannerIsolate(token: token, appDir: appDir);
+    isolate = YahooScannerIsolate(
+      token: token,
+      appDir: appDir,
+      dbDir: p.dirname(p.dirname(dbPath)),
+    );
     await isolate!.start(
       collection,
       folderId: path,
@@ -97,8 +102,8 @@ class YahooScanner extends CollectionScanner {
     // Lazy-init isolate if needed
     isolate ??= YahooScannerIsolate(
       token: RootIsolateToken.instance,
-
       appDir: appDir,
+      dbDir: p.dirname(p.dirname(dbPath)),
     );
 
     await isolate!.moveToTrash(collection, folderId: folderId, uids: uids);

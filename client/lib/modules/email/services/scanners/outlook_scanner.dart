@@ -1,4 +1,5 @@
 import 'dart:isolate';
+import 'package:path/path.dart' as p;
 
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
@@ -75,7 +76,11 @@ class OutlookScanner extends CollectionScanner {
 
     //start isolate
     RootIsolateToken? token = RootIsolateToken.instance;
-    isolate = OutlookScannerIsolate(token: token, appDir: appDir);
+    isolate = OutlookScannerIsolate(
+      token: token,
+      appDir: appDir,
+      dbDir: p.dirname(p.dirname(dbPath)),
+    );
     await isolate!.start(
       collection,
       folderId: path,
@@ -97,8 +102,8 @@ class OutlookScanner extends CollectionScanner {
     // Lazy-init isolate if needed
     isolate ??= OutlookScannerIsolate(
       token: RootIsolateToken.instance,
-
       appDir: appDir,
+      dbDir: p.dirname(p.dirname(dbPath)),
     );
 
     await isolate!.moveToTrash(collection, folderId: folderId, uids: uids);

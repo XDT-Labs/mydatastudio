@@ -41,7 +41,9 @@ class YahooScannerIsolate {
   Isolate? _isolate;
   final AppLogger logger = AppLogger(null);
 
-  YahooScannerIsolate({this.token, required this.appDir});
+  YahooScannerIsolate({this.token, required this.appDir, required this.dbDir});
+
+  final String dbDir;
 
   /// Spawns the Yahoo background worker isolate.
   ///
@@ -72,6 +74,7 @@ class YahooScannerIsolate {
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'force': force,
       'appDir': appDir,
+      'dbDir': dbDir,
     };
 
     _isolate = await spawnIsolate(YahooScannerIsolateWorker.worker, args);
@@ -142,6 +145,7 @@ class YahooScannerIsolate {
       'uids': uids,
       'type': 'move_to_trash',
       'appDir': appDir,
+      'dbDir': dbDir,
     };
 
     // We use a fresh isolate for the move operation to avoid blocking or being blocked by long-running scans
@@ -178,6 +182,7 @@ class YahooScannerIsolateWorker {
         lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
     final bool force = args['force'] ?? false;
     final String appDir = args['appDir'] as String;
+    final String dbDir = args['dbDir'] as String? ?? appDir;
     final List<int>? uidsToMove =
         args['uids'] != null ? (args['uids'] as List).cast<int>() : null;
 
@@ -244,7 +249,7 @@ class YahooScannerIsolateWorker {
         return;
       }
 
-      final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName);
+      final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
 
       final scanStartTime = DateTime.now();
       int totalFound = 0;

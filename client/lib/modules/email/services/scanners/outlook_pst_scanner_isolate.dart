@@ -41,9 +41,12 @@ class OutlookPstScannerIsolate {
   Isolate? _isolate;
   final AppLogger logger = AppLogger(null);
 
+  final String dbDir;
+
   OutlookPstScannerIsolate({
     this.token,
     required this.appDir,
+    required this.dbDir,
     required this.serverUrl,
   });
 
@@ -67,6 +70,7 @@ class OutlookPstScannerIsolate {
       'port': receivePort.sendPort,
       'collection': collection,
       'appDir': appDir,
+      'dbDir': dbDir,
       'serverUrl': serverUrl,
     };
 
@@ -101,6 +105,7 @@ class OutlookPstScannerIsolateWorker {
     final SendPort clientPort = workerArgs['port'];
     final Collection collection = workerArgs['collection'];
     final String appDir = workerArgs['appDir'];
+    final String dbDir = workerArgs['dbDir'] ?? appDir;
     final String? serverUrl = workerArgs['serverUrl'];
 
     if (token != null) {
@@ -142,7 +147,7 @@ class OutlookPstScannerIsolateWorker {
       Isolate.exit(clientPort, {'error': 'api_failed'});
     }
 
-    final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName);
+    final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
 
     // Keep track of internal IDs
     final Map<String, String> folderPathToId = {};

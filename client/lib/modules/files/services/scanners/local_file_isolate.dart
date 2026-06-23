@@ -179,23 +179,21 @@ class LocalFileIsolateWorker {
     unicode: true,
   );
 
-  //constructor
   LocalFileIsolateWorker(
     this.token,
     this.receiverPort,
     this.storagePath,
     this.dbName,
     this.loggerPort,
-  ) {
-    // Ensure the background binary messenger is initialized so plugins/platform channels work
-    if (token != null) {
-      BackgroundIsolateBinaryMessenger.ensureInitialized(token!);
-    }
-  }
+  );
 
   // start scanning
   void _scan(Map<String, dynamic> args) async {
     logger = AppLogger(loggerPort);
+
+    if (token != null) {
+      BackgroundIsolateBinaryMessenger.ensureInitialized(token!);
+    }
 
     final appDb = await AppDatabase.create(null, storagePath, dbName);
 

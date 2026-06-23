@@ -101,6 +101,8 @@ class ScannerManager {
       pstScanners[collectionId]?.stop();
       pstScanners.remove(collectionId);
     }
+    _registrationFutures.remove(collectionId);
+    _pendingScanners.remove(collectionId);
   }
 
   void stopScanners() {
@@ -111,6 +113,8 @@ class ScannerManager {
       for (var key in pstScanners.keys.toList()) {
         stopScanner(key);
       }
+      _registrationFutures.clear();
+      _pendingScanners.clear();
     } catch (error) {
       logger.e("Error stopping scanners: $error");
     }
@@ -140,6 +144,7 @@ class ScannerManager {
   }
 
   Future<CollectionScanner> registerScanner(Collection c) async {
+    print("DEBUG registerScanner: scanners keys = ${scanners.keys.toList()}, futures keys = ${_registrationFutures.keys.toList()}");
     if (scanners.containsKey(c.id)) return scanners[c.id]!;
 
     // If registration is already in progress, return the existing future
@@ -166,7 +171,7 @@ class ScannerManager {
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
           scanner = LocalFileIsolate(
             null,
-            storagePath: DatabaseManager.instance.storagePath!,
+            storagePath: DatabaseManager.instance.databaseDirectoryPath!,
             dbName: AppConstants.dbName,
           );
           break;
@@ -175,7 +180,7 @@ class ScannerManager {
           logger.i("Registering GDrive scanner for ${c.name} (ID: ${c.id})");
           scanner = CloudFileIsolate(
             null,
-            storagePath: DatabaseManager.instance.storagePath!,
+            storagePath: DatabaseManager.instance.databaseDirectoryPath!,
             dbName: AppConstants.dbName,
           );
           break;
@@ -184,7 +189,7 @@ class ScannerManager {
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
           scanner = GmailScanner(
             dbPath: p.join(
-              DatabaseManager.instance.storagePath!,
+              DatabaseManager.instance.databaseDirectoryPath!,
               'data',
               AppConstants.dbName,
             ),
@@ -197,7 +202,7 @@ class ScannerManager {
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
           scanner = YahooScanner(
             dbPath: p.join(
-              DatabaseManager.instance.storagePath!,
+              DatabaseManager.instance.databaseDirectoryPath!,
               'data',
               AppConstants.dbName,
             ),
@@ -210,7 +215,7 @@ class ScannerManager {
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
           scanner = OutlookScanner(
             dbPath: p.join(
-              DatabaseManager.instance.storagePath!,
+              DatabaseManager.instance.databaseDirectoryPath!,
               'data',
               AppConstants.dbName,
             ),

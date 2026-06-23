@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/modules/email/widgets/email_drawer/email_folder_tile_widget.dart';
@@ -389,6 +390,7 @@ class _EmailDrawer extends State<EmailDrawer> {
         final pstIsolate = OutlookPstScannerIsolate(
           token: RootIsolateToken.instance,
           appDir: appDataDir,
+          dbDir: DatabaseManager.instance.databaseDirectoryPath!,
           serverUrl: serverUrl,
         );
         ScannerManager.getInstance().pstScanners[col.id] = pstIsolate;

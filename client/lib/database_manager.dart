@@ -31,6 +31,7 @@ class DatabaseManager {
   /// Flag to indicate if the app is running in a test environment
   static bool isTesting = io.Platform.environment.containsKey('FLUTTER_TEST');
   String? storagePath;
+  String? databaseDirectoryPath;
   AppDatabase? appDatabase;
   EmbeddingIsolate? _embeddingIsolate;
   DatabaseRepository? _repository;
@@ -50,20 +51,31 @@ class DatabaseManager {
 
   static String? _originalSupportPath;
 
-  Future<String> _getConfigPath() async {
-    io.Directory supportPath;
+  /// Gets the real local application support directory path, ignoring any custom overrides.
+  static Future<String> getRealApplicationSupportPath() async {
     if (_originalSupportPath != null) {
-      supportPath = io.Directory(_originalSupportPath!);
-    } else {
-      supportPath = await getApplicationSupportDirectory();
-      _originalSupportPath = supportPath.path;
+      return _originalSupportPath!;
     }
+    final platform = PathProviderPlatform.instance;
+    if (platform is CustomPathProviderPlatform) {
+      final originalPath = await platform.original.getApplicationSupportPath();
+      if (originalPath != null) {
+        _originalSupportPath = originalPath;
+        return originalPath;
+      }
+    }
+    final supportDir = await getApplicationSupportDirectory();
+    _originalSupportPath = supportDir.path;
+    return supportDir.path;
+  }
 
-    MainApp.supportDirectory.add(supportPath);
+  Future<String> _getConfigPath() async {
+    final supportPath = await getRealApplicationSupportPath();
+    MainApp.supportDirectory.add(io.Directory(supportPath));
 
     // Look for config file with user selected path for DB and Files
     io.File file = io.File(
-      p.join(supportPath.path, AppConstants.configFileName),
+      p.join(supportPath, AppConstants.configFileName),
     );
     return file.absolute.path;
   }
@@ -75,14 +87,26 @@ class DatabaseManager {
     return file.existsSync();
   }
 
-  /// Updates the database configuration path
-  Future<void> updateConfigPath(String newPath) async {
+  /// Updates the database and storage configuration paths
+  Future<void> updateConfigPath(String storagePath) async {
     io.File file = io.File(await _getConfigPath());
     var config = <String, dynamic>{};
     if (file.existsSync()) {
-      config = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+      try {
+        config = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+      } catch (_) {}
     }
-    config['path'] = newPath;
+
+    final supportsWal = await testPathSupportsWal(storagePath);
+    String databasePath = storagePath;
+    if (!supportsWal) {
+      final realSupportPath = await getRealApplicationSupportPath();
+      databasePath = realSupportPath;
+    }
+
+    config.remove('path');
+    config['storage'] = storagePath;
+    config['database'] = databasePath;
     file.writeAsStringSync(jsonEncode(config));
   }
 
@@ -96,11 +120,18 @@ class DatabaseManager {
         return false;
       }
     }
-    final testDbFile = io.File(p.join(testDbDir.path, 'wal_test_probe.db'));
+    final uniqueId = DateTime.now().microsecondsSinceEpoch;
+    final testDbFile = io.File(
+      p.join(testDbDir.path, 'wal_test_probe_$uniqueId.db'),
+    );
     try {
       // Attempt to open the database.
       final db = await Database.open(testDbFile.path);
+      // Explicitly try to enable WAL mode.
+      final result = await db.select('PRAGMA journal_mode=WAL;');
+      final mode = result.isNotEmpty ? result.first.values.first as String : '';
       await db.close();
+
       // Clean up test files.
       try {
         if (testDbFile.existsSync()) testDbFile.deleteSync();
@@ -109,9 +140,15 @@ class DatabaseManager {
         final walFile = io.File('${testDbFile.path}-wal');
         if (walFile.existsSync()) walFile.deleteSync();
       } catch (_) {}
+
+      if (mode.toLowerCase() != 'wal') {
+        print("DEBUG testPathSupportsWal: Path does not support WAL mode (returned: $mode)");
+        return false;
+      }
       return true;
     } catch (e) {
       // Clean up test files if created.
+      print("DEBUG testPathSupportsWal failed: $e");
       try {
         if (testDbFile.existsSync()) testDbFile.deleteSync();
         final shmFile = io.File('${testDbFile.path}-shm');
@@ -126,10 +163,12 @@ class DatabaseManager {
   Future<AppDatabase> initializeDatabase() async {
     if (isTesting) {
       storagePath = p.dirname(await _getConfigPath());
+      databaseDirectoryPath = storagePath;
     } else {
       io.File file = io.File(await _getConfigPath());
       var config = jsonDecode(file.readAsStringSync());
-      storagePath = config['path'];
+      storagePath = config['storage'] ?? config['path'];
+      databaseDirectoryPath = config['database'] ?? storagePath;
     }
     String path = storagePath!;
 
@@ -153,7 +192,7 @@ class DatabaseManager {
     }
 
     // start database
-    appDatabase = await _openDatabase(path);
+    appDatabase = await _openDatabase(databaseDirectoryPath!);
 
     // start database repository
     _repository = DatabaseRepository(appDatabase!);
@@ -163,33 +202,45 @@ class DatabaseManager {
       await _startScanners();
 
       // start embedding isolate
-      await _startEmbeddingIsolate(path);
+      await _startEmbeddingIsolate(appDatabase!.path!);
     }
 
     isInitializedNotifier.value = true;
     return appDatabase!;
   }
 
-  Future<AppDatabase> _openDatabase(String storagePath) async {
+  Future<AppDatabase> _openDatabase(String dbDir) async {
     try {
       if (this.database != null) {
         return this.database!;
       }
 
-      //make sure root dir exists
-      io.Directory(storagePath).createSync(recursive: true);
-      //make sure data, files, and keys sub dirs have been created
-      io.Directory(p.join(storagePath, 'data')).createSync(recursive: true);
-      io.Directory(p.join(storagePath, 'keys')).createSync(recursive: true);
-      io.Directory(p.join(storagePath, 'files')).createSync(recursive: true);
+      //make sure database root dir exists
+      io.Directory(dbDir).createSync(recursive: true);
+      io.Directory(p.join(dbDir, 'data')).createSync(recursive: true);
+
+      // also make sure keys and files directories exist in configured storagePath
+      if (storagePath != null) {
+        io.Directory(storagePath!).createSync(recursive: true);
+        io.Directory(p.join(storagePath!, 'keys')).createSync(recursive: true);
+        io.Directory(p.join(storagePath!, 'files')).createSync(recursive: true);
+      }
 
       //on app startup, start db.
       AppDatabase database = await AppDatabase.create(
         null,
-        storagePath,
+        dbDir,
         AppConstants.dbName,
       );
-      logger.i("DB Started | schema version=${database.schemaVersion}");
+      if (database.path != storagePath) {
+        logger.i(
+          "SQLite WAL mode is unsupported on storagePath. Database is stored locally at: ${database.path}",
+        );
+      } else {
+        logger.i(
+          "DB Started | schema version=${database.schemaVersion} | path=${database.path}",
+        );
+      }
 
       return database;
     } catch (err) {
@@ -255,14 +306,24 @@ class AppDatabase {
     if (storagePath == null || dbName == null) {
       throw Exception("Path or Name not provided for database opening");
     }
-    final dbFile = io.File(p.join(storagePath, 'data', dbName));
+
+    String finalDbDir = storagePath;
+    // Check if the storagePath supports WAL. If not, redirect database to local Application Support Directory.
+    final supportsWal = await DatabaseManager.testPathSupportsWal(storagePath);
+    if (!supportsWal) {
+      final realSupportPath = await DatabaseManager.getRealApplicationSupportPath();
+      finalDbDir = realSupportPath;
+    }
+
+    final dbFile = io.File(p.join(finalDbDir, 'data', dbName));
+    print("DEBUG AppDatabase.create: opening db at ${dbFile.path}");
     if (!dbFile.parent.existsSync()) {
       dbFile.parent.createSync(recursive: true);
     }
     final Database db = await Database.open(dbFile.path);
 
     final appDb = AppDatabase(db);
-    appDb.path = storagePath;
+    appDb.path = finalDbDir;
     appDb.name = dbName;
 
     await appDb.initSchema();
@@ -298,7 +359,7 @@ class AppDatabase {
       logger.i("AppDatabase: Loading initial data...");
       await _loadInitialData(_db);
       logger.i("AppDatabase: Initializing vector index...");
-      await _initVectorIndex();
+      // await _initVectorIndex();
     }
   }
 

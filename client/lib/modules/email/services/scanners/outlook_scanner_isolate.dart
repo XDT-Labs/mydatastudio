@@ -42,7 +42,9 @@ class OutlookScannerIsolate {
   Isolate? _isolate;
   final AppLogger logger = AppLogger(null);
 
-  OutlookScannerIsolate({this.token, required this.appDir});
+  OutlookScannerIsolate({this.token, required this.appDir, required this.dbDir});
+
+  final String dbDir;
 
   /// Spawns the Outlook background worker isolate.
   ///
@@ -74,6 +76,7 @@ class OutlookScannerIsolate {
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'force': force,
       'appDir': appDir,
+      'dbDir': dbDir,
     };
 
     _isolate = await spawnIsolate(OutlookScannerIsolateWorker.worker, args);
@@ -144,6 +147,7 @@ class OutlookScannerIsolate {
       'uids': uids,
       'type': 'move_to_trash',
       'appDir': appDir,
+      'dbDir': dbDir,
     };
 
     // We use a fresh isolate for the move operation to avoid blocking or being blocked by long-running scans
@@ -180,6 +184,7 @@ class OutlookScannerIsolateWorker {
         lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
     final bool force = args['force'] ?? false;
     final String appDir = args['appDir'] as String;
+    final String dbDir = args['dbDir'] as String? ?? appDir;
 
     final List<int>? uidsToMove =
         args['uids'] != null ? (args['uids'] as List).cast<int>() : null;
@@ -294,7 +299,7 @@ class OutlookScannerIsolateWorker {
         return;
       }
 
-      final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName);
+      final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
 
       final scanStartTime = DateTime.now();
       int totalFound = 0;
