@@ -81,6 +81,7 @@ class LocalFileIsolate extends CollectionScanner {
       'collectionId': collection.id,
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'llmServiceUrl': MainApp.llmServiceUrl.valueOrNull,
+      'port': p.sendPort,
     };
 
     //// Invoked the _scan() method in an isolate thread

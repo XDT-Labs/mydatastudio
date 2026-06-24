@@ -48,7 +48,7 @@ class TestCloudFileIsolate extends CloudFileIsolate {
 }
 
 class TestGmailScannerIsolate extends GmailScannerIsolate {
-  TestGmailScannerIsolate({required String appDir}) : super(appDir: appDir);
+  TestGmailScannerIsolate({required String appDir}) : super(appDir: appDir, dbDir: appDir);
 
   Map<String, dynamic>? lastSpawnArgs;
 
@@ -65,7 +65,7 @@ class TestGmailScannerIsolate extends GmailScannerIsolate {
 }
 
 class TestOutlookScannerIsolate extends OutlookScannerIsolate {
-  TestOutlookScannerIsolate({required String appDir}) : super(appDir: appDir);
+  TestOutlookScannerIsolate({required String appDir}) : super(appDir: appDir, dbDir: appDir);
 
   Map<String, dynamic>? lastSpawnArgs;
 
@@ -82,7 +82,7 @@ class TestOutlookScannerIsolate extends OutlookScannerIsolate {
 }
 
 class TestYahooScannerIsolate extends YahooScannerIsolate {
-  TestYahooScannerIsolate({required String appDir}) : super(appDir: appDir);
+  TestYahooScannerIsolate({required String appDir}) : super(appDir: appDir, dbDir: appDir);
 
   Map<String, dynamic>? lastSpawnArgs;
 

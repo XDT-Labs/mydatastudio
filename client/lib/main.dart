@@ -72,6 +72,8 @@ class MainAppState extends State<MainApp>
   bool _isSetupComplete = false;
   bool _dbAccessError = false;
   String? _dbErrorPath;
+  bool _pythonStartError = false;
+  String? _pythonErrorMsg;
   PythonManager? pythonManager;
   late final AppLifecycleListener _lifecycleListener;
 
@@ -137,29 +139,7 @@ class MainAppState extends State<MainApp>
         // 1. Initialize local Database
         var dbFuture = DatabaseManager.instance.initializeDatabase();
         await dbFuture;
-
-        // 2. Initialize Python Manager
-        final pythonFuture =
-            (() async {
-              final pythonMgr = await PythonManager.forAppSupport();
-              await pythonMgr.startAiChatService();
-              return pythonMgr;
-            })();
-
-        // Wait for both to finish (db is already done)
-        await Future.wait([pythonFuture, dbFuture]);
-
-        // set database repository
         MainApp.databaseManager = DatabaseManager.instance;
-        //set python manager
-        pythonManager = await pythonFuture;
-
-        // 4. Signal ready
-        if (mounted) {
-          setState(() {
-            _isSetupComplete = MainApp.databaseManager != null;
-          });
-        }
       } catch (e) {
         if (mounted) {
           setState(() {
@@ -167,6 +147,29 @@ class MainAppState extends State<MainApp>
             _dbErrorPath = e.toString();
           });
         }
+        return;
+      }
+
+      try {
+        // 2. Initialize Python Manager
+        final pythonMgr = await PythonManager.forAppSupport();
+        await pythonMgr.startAiChatService();
+        pythonManager = pythonMgr;
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _pythonStartError = true;
+            _pythonErrorMsg = e.toString();
+          });
+        }
+        return;
+      }
+
+      // 3. Signal ready
+      if (mounted) {
+        setState(() {
+          _isSetupComplete = MainApp.databaseManager != null;
+        });
       }
     }
   }
@@ -344,10 +347,97 @@ class MainAppState extends State<MainApp>
     return const FamilyDamApp();
   }
 
+  Widget _initPythonErrorScreen() {
+    () async {
+      await windowManager.setTitle('MyData Studio - AI Service Error');
+      await windowManager.setSize(const Size(800, 600));
+      await windowManager.center();
+    }();
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Colors.grey.shade900,
+        body: Center(
+          child: Card(
+            elevation: 8,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Container(
+              width: 500,
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    color: Colors.redAccent,
+                    size: 64,
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'AI Chat Service Failed to Start',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'The embedded AI Chat service could not be prepared or started. This may happen if the bundled zip file is missing or corrupted.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SelectableText(
+                          "Error Details:\n$_pythonErrorMsg",
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            color: Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry Startup'),
+                        onPressed: () {
+                          setState(() {
+                            _pythonStartError = false;
+                            _pythonErrorMsg = null;
+                          });
+                          _initStartup();
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_dbAccessError) {
       return _initDbErrorScreen();
+    }
+    if (_pythonStartError) {
+      return _initPythonErrorScreen();
     }
     if (_needsSetup) {
       return _initSetupScreen();

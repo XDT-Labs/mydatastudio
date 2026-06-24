@@ -88,11 +88,9 @@ set-bundle-id:
 	if [ "$$BRANCH" = "develop" ]; then \
 		echo "Detected branch: develop. Using Bundle ID: com.xdtlabs.mydatastudio.dev"; \
 		sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = com.xdtlabs.mydatastudio.dev/' client/macos/Runner/Configs/AppInfo.xcconfig; \
-		
 	else \
 		echo "Detected branch: $$BRANCH. Using Bundle ID: com.xdtlabs.mydatastudio"; \
 		sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = com.xdtlabs.mydatastudio/' client/macos/Runner/Configs/AppInfo.xcconfig; \
-		
 	fi
 
 # 3. Build Flutter Desktop Client
@@ -114,7 +112,13 @@ build-client: set-bundle-id
 .PHONY: local-install-python
 local-install-python: build-python
 	@echo "--- 💾 Installing service for local testing ---"
-	@REALM=$$(cat .realm_name | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \
+	@BRANCH=$$(git branch --show-current); \
+	if [ "$$BRANCH" = "develop" ]; then \
+		REALM="com.xdtlabs.mydatastudio.dev"; \
+	else \
+		REALM="com.xdtlabs.mydatastudio"; \
+	fi; \
+	echo "Installing to realm: $$REALM"; \
 	mkdir -p ~/Library/Application\ Support/$$REALM/ && \
 	cp $(APP_ZIP_PATH) ~/Library/Application\ Support/$$REALM/ && \
 	rm -fr ~/Library/Application\ Support/$$REALM/aichat

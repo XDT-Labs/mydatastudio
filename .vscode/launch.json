@@ -1,29 +1,22 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
             "name": "client (dev)",
-            "name": "client (dev)",
             "cwd": "client",
             "request": "launch",
             "type": "dart",
             "preLaunchTask": "Use Dev Pubspec",
-            "preLaunchTask": "Use Dev Pubspec",
-            "args": [
-                "--dart-define=PYTHON_SERVER_URL=http://127.0.0.1:8000""--dart-define=PYTHON_SERVER_URL=http://127.0.0.1:8000"
-            ]
         },
         {
-            "name": "client (prod)",
+            "name": "client (dev w/remote server)",
             "cwd": "client",
             "request": "launch",
             "type": "dart",
-            "preLaunchTask": "Use Prod Pubspec",
-            "flutterMode": "release",
-            "args": []
+            "preLaunchTask": "Use Dev Pubspec",
+            "args": [
+                "--dart-define=PYTHON_SERVER_URL=http://127.0.0.1:8000"
+            ]
         },
         {
             "name": "client (prod)",
@@ -66,21 +59,12 @@
         }
     ],
     "compounds": [
-        "args": []
-    }
-],
-"compounds": [
-    {
-        "name": "client + server (dev)",
-        "configurations": [
-            "aichat server (python)",
-            "client (dev)"
-        ]
+        {
             "name": "client + server (dev)",
-        "configurations": [
-            "aichat server (python)",
-            "client (dev)"
-        ]
-    }
-]
+            "configurations": [
+                "aichat server (python)",
+                "client (dev)"
+            ]
+        }
+    ]
 }
