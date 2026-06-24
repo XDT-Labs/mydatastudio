@@ -177,7 +177,8 @@ def generate_embedding(
     model: Any, 
     processor: Any, 
     text: Optional[str] = None, 
-    image_base64: Optional[str] = None
+    image_base64: Optional[str] = None,
+    filename: Optional[str] = None
 ) -> List[float]:
     """
     Universal embedding generator that handles both LlamaCpp and Transformers.
@@ -191,14 +192,15 @@ def generate_embedding(
     
     # Transformers path
     print(f"[EMBEDDING] Route: Transformers (Multimodal)")
-    return generate_transformers_multimodal_embedding(model, processor, text, image_base64)
+    return generate_transformers_multimodal_embedding(model, processor, text, image_base64, filename)
 
 
 def _generate_siglip_embedding(
     model: Any, 
     processor: Any, 
     text: Optional[str] = None, 
-    image_base64: Optional[str] = None
+    image_base64: Optional[str] = None,
+    filename: Optional[str] = None
 ) -> List[float]:
     import base64
     import io
@@ -208,7 +210,7 @@ def _generate_siglip_embedding(
     
     images = []
     if image_base64:
-        images.append(decode_base64_image(image_base64))
+        images.append(decode_base64_image(image_base64, filename))
             
     texts = [text] if text else None
     
@@ -256,7 +258,8 @@ def generate_transformers_multimodal_embedding(
     model: Any, 
     processor: Any, 
     text: Optional[str] = None, 
-    image_base64: Optional[str] = None
+    image_base64: Optional[str] = None,
+    filename: Optional[str] = None
 ) -> List[float]:
     """
     Generate embeddings using Qwen-VL or SigLIP Transformers model.
@@ -264,7 +267,7 @@ def generate_transformers_multimodal_embedding(
     model_type = getattr(getattr(model, 'config', object()), 'model_type', '')
     model_name = getattr(getattr(model, 'config', object()), '_name_or_path', '')
     if 'siglip' in model_type.lower() or 'siglip' in model_name.lower():
-        return _generate_siglip_embedding(model, processor, text, image_base64)
+        return _generate_siglip_embedding(model, processor, text, image_base64, filename)
         
     device = next(model.parameters()).device
     
@@ -330,9 +333,10 @@ def generate_text_embedding(text: str, model: Any, processor: Any) -> List[float
         raise ValueError("Provided model does not support LlamaCpp embedding generation correctly")
 
 
-def decode_base64_image(image_base64: str) -> Image.Image:
+def decode_base64_image(image_base64: str, filename: Optional[str] = None) -> Image.Image:
     """
     Decode a base64 encoded image string (optionally with data URI prefix) into a PIL Image.
+    If the filename indicates it is a RAW image format (e.g., .nef), decodes using rawpy.
     """
     import base64
     import io
@@ -342,8 +346,28 @@ def decode_base64_image(image_base64: str) -> Image.Image:
         image_base64 = image_base64.split(",")[1]
     try:
         image_bytes = base64.b64decode(image_base64)
+        
+        # Check if it is a RAW image file based on extension
+        if filename:
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in ['.nef', '.cr2', '.arw', '.dng', '.orf', '.sr2']:
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                    tmp.write(image_bytes)
+                    tmp_name = tmp.name
+                try:
+                    import rawpy
+                    with rawpy.imread(tmp_name) as raw:
+                        rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True, bright=1.0)
+                        return Image.fromarray(rgb)
+                finally:
+                    try:
+                        os.unlink(tmp_name)
+                    except:
+                        pass
+
         return Image.open(io.BytesIO(image_bytes)).convert("RGB")
     except Exception as e:
         print(f"[EMBEDDING] Failed to parse image_base64: {e}")
-        raise ValueError("Invalid image_base64 format provided.")
+        raise ValueError(f"Invalid image_base64 format provided: {e}")
 

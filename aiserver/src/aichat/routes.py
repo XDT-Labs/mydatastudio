@@ -379,7 +379,8 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
                 model=embedding_model,
                 processor=embedding_processor,
                 text=request.text,
-                image_base64=request.image_base64
+                image_base64=request.image_base64,
+                filename=request.filename
             )
             if request.text and request.image_base64:
                 input_type = "multimodal"

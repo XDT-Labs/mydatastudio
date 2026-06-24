@@ -198,7 +198,7 @@ class EmbeddingIsolate {
     }
 
     final bytes = await ioFile.readAsBytes();
-    return await _generateEmbedding(bytes, serviceUrl, logger);
+    return await _generateEmbedding(bytes, file.name, serviceUrl, logger);
   }
 
   static Future<List<double>?> _processGDriveFile(
@@ -255,7 +255,7 @@ class EmbeddingIsolate {
               )
               as drive.Media;
       final bytes = await http.ByteStream(media.stream).toBytes();
-      return await _generateEmbedding(bytes, serviceUrl, logger);
+      return await _generateEmbedding(bytes, file.name, serviceUrl, logger);
     } catch (e) {
       logger.e("Error downloading GDrive file: $e");
       return null;
@@ -264,6 +264,7 @@ class EmbeddingIsolate {
 
   static Future<List<double>?> _generateEmbedding(
     List<int> bytes,
+    String filename,
     String serviceUrl,
     AppLogger logger,
   ) async {
@@ -275,7 +276,7 @@ class EmbeddingIsolate {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'model_name': 'google/siglip2-so400m-patch16-naflex',
-          'filename': '',
+          'filename': filename,
           'image_base64': base64Image,
         }),
       );
