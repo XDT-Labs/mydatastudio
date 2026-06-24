@@ -74,13 +74,13 @@ jobs:
         run: |
           pdm run pyinstaller -y main.spec
           mkdir -p ../../../app
-          cd dist/aichat && zip -r ../../../../../app/aichat-macos.zip .
+          cd dist/aichat && zip -r ../../../../../app/aiserver-macos.zip .
 
       - name: Upload Python Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aichat-macos-zip
-          path: client/app/aichat-macos.zip
+          name: aiserver-macos-zip
+          path: client/app/aiserver-macos.zip
 
   build-and-release-macos:
     needs: [download-assets, build-aichat-macos]
@@ -101,7 +101,7 @@ jobs:
       - name: Download Python Artifact
         uses: actions/download-artifact@v4
         with:
-          name: aichat-macos-zip
+          name: aiserver-macos-zip
           path: client/app
 
       #- uses: nickwph/apple-provisioning-profile-action@v1
@@ -256,7 +256,7 @@ jobs:
   #       run: |
   #         cd assets/python/aichat
   #         python -m PyInstaller main.spec --clean --noconfirm
-  #         zip -j ../../../app/aichat-linux.zip dist/aichat
+  #         zip -j ../../../app/aiserver-linux.zip dist/aichat
 
   #     - name: build linux
   #       run: flutter build linux --no-tree-shake-icons --release

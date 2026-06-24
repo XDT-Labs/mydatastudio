@@ -18,7 +18,7 @@ IMAGE_REPO = cloud-run-source-deploy
 # Python/AI Chat Config
 PYTHON_DIR = aiserver
 APP_DIR = client/app
-APP_ZIP_NAME = aichat-macos.zip
+APP_ZIP_NAME = aiserver-macos.zip
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = bartowski/google_gemma-3-4b-it-GGUF
 HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf

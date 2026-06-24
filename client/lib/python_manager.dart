@@ -257,13 +257,13 @@ class PythonManager {
         return;
       }
 
-      String zipName = 'aichat.zip';
+      String zipName = 'aiserver.zip';
       if (Platform.isMacOS) {
-        zipName = 'aichat-macos.zip';
+        zipName = 'aiserver-macos.zip';
       } else if (Platform.isWindows) {
-        zipName = 'aichat-windows.zip';
+        zipName = 'aiserver-windows.zip';
       } else if (Platform.isLinux) {
-        zipName = 'aichat-linux.zip';
+        zipName = 'aiserver-linux.zip';
       }
 
       // Candidate locations for the zip file in common run contexts
@@ -271,16 +271,16 @@ class PythonManager {
           <String>[
             // when manually placed/copied for local testing via makefile
             p.join(supportPath, zipName),
-            p.join(supportPath, 'aichat.zip'),
+            p.join(supportPath, 'aiserver.zip'),
             // when running from the project root
             p.join(Directory.current.path, 'client', 'app', zipName),
-            p.join(Directory.current.path, 'client', 'app', 'aichat.zip'),
+            p.join(Directory.current.path, 'client', 'app', 'aiserver.zip'),
             // fallback when running from client folder directly
             p.join(Directory.current.path, 'app', zipName),
-            p.join(Directory.current.path, 'app', 'aichat.zip'),
+            p.join(Directory.current.path, 'app', 'aiserver.zip'),
             // when running from a built executable next to an `app` folder
             p.join(p.dirname(Platform.resolvedExecutable), 'app', zipName),
-            p.join(p.dirname(Platform.resolvedExecutable), 'app', 'aichat.zip'),
+            p.join(p.dirname(Platform.resolvedExecutable), 'app', 'aiserver.zip'),
             // inside a macOS .app bundle flutter_assets folder
             p.join(
               p.dirname(Platform.resolvedExecutable),
@@ -296,7 +296,7 @@ class PythonManager {
               'Resources',
               'flutter_assets',
               'app',
-              'aichat.zip',
+              'aiserver.zip',
             ),
             // inside a macOS .app bundle Resources folder (legacy/fallback)
             p.join(
@@ -311,7 +311,7 @@ class PythonManager {
               '..',
               'Resources',
               'app',
-              'aichat.zip',
+              'aiserver.zip',
             ),
           ].map((s) => p.normalize(s)).toList();
 
@@ -327,7 +327,7 @@ class PythonManager {
 
       if (zipPath == null) {
         final msg =
-            'aichat zip not found. Searched candidates: ${candidates.join(', ')}';
+            'aiserver zip not found. Searched candidates: ${candidates.join(', ')}';
         _stderrController.add(msg);
         logger.e('[python] $msg');
         throw Exception(msg);
@@ -447,7 +447,7 @@ class PythonManager {
         tempDir.renameSync(destDir.path);
       }
     } catch (e) {
-      final msg = 'Exception while unzipping aichat bundle: $e';
+      final msg = 'Exception while unzipping aiserver bundle: $e';
       _stderrController.add(msg);
       logger.e('[python] $msg');
       rethrow;

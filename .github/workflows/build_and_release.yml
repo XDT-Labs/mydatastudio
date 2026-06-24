@@ -13,16 +13,16 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            artifact_name: aichat-macos.zip
+            artifact_name: aiserver-macos.zip
             flutter_build_cmd: flutter build macos --release
             flutter_artifact_path: client/build/macos/Build/Products/Release/mydatastudio-desktop.app
           # Uncomment the below sections to enable Windows and Linux builds
           # - os: windows-latest
-          #   artifact_name: aichat-windows.zip
+          #   artifact_name: aiserver-windows.zip
           #   flutter_build_cmd: flutter build windows --release
           #   flutter_artifact_path: client/build/windows/x64/runner/Release
           # - os: ubuntu-latest
-          #   artifact_name: aichat-linux.zip
+          #   artifact_name: aiserver-linux.zip
           #   flutter_build_cmd: flutter build linux --release
           #   flutter_artifact_path: client/build/linux/x64/release/bundle
 
