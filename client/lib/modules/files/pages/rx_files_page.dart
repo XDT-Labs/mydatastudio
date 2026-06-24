@@ -216,14 +216,17 @@ class _RxFilesPage extends State<RxFilesPage> {
       return;
     }
     final absPath = FilePathResolver.absoluteFromPath(targetPath, col);
-    ScannerManager.getInstance().getScannerAsync(col).then((scanner) {
-      if (scanner.isScanning.value) {
-        return;
-      }
-      scanner.start(col, absPath, false, true);
-    }).catchError((e) {
-      logger.e("Error triggering shallow scan: $e");
-    });
+    ScannerManager.getInstance()
+        .getScannerAsync(col)
+        .then((scanner) {
+          if (scanner.isScanning.value) {
+            return;
+          }
+          scanner.start(col, absPath, false, true);
+        })
+        .catchError((e) {
+          logger.e("Error triggering shallow scan: $e");
+        });
   }
 
   /// Loads the next page of files for the current collection and path.
@@ -471,9 +474,13 @@ class _RxFilesPage extends State<RxFilesPage> {
     }
     return NotificationListener<FiledNotification>(
       onNotification: (FiledNotification n) {
-        io.stderr.writeln("DEBUG: Received notification of type: ${n.runtimeType}");
+        io.stderr.writeln(
+          "DEBUG: Received notification of type: ${n.runtimeType}",
+        );
         if (n is PathChangedNotification) {
-          io.stderr.writeln("DEBUG: n.asset.path = ${n.asset.path}, current path = $path");
+          io.stderr.writeln(
+            "DEBUG: n.asset.path = ${n.asset.path}, current path = $path",
+          );
           if (n.asset.path != path) {
             setState(() {
               path = n.asset.path;
@@ -885,7 +892,7 @@ class _RxFilesPage extends State<RxFilesPage> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'This may take a minute for large accounts.',
+            'This may take a minute for large folders.',
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
         ],

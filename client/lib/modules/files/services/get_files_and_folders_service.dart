@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'package:rxdart/rxdart.dart' show Rx;
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
@@ -19,9 +23,19 @@ class GetFileAndFoldersService
   static GetFileAndFoldersService get instance => _singleton;
   AppLogger logger = AppLogger(null);
 
+  /// Tracks the subscription to the database stream.
+  StreamSubscription<List<FileAsset>>? _currentSubscription;
+
   /// Tracks the accumulated pages so load-more can append without reading
   /// the sink (which is typed as `Subject<R>` and has no valueOrNull).
   List<FileAsset> _currentItems = [];
+
+  @override
+  void reset() {
+    _currentSubscription?.cancel();
+    _currentSubscription = null;
+    super.reset();
+  }
 
   @override
   Future<List<FileAsset>> invoke(
@@ -107,6 +121,33 @@ class GetFileAndFoldersService
         _currentItems = [..._currentItems, ...newItems];
       }
       sink.add(_currentItems);
+
+      // Cancel previous stream subscription
+      await _currentSubscription?.cancel();
+
+      // Start reactive stream query for both folders and files
+      final folderStream = db.stream(
+        "SELECT * FROM folders WHERE collection_id = ? AND parent = ? ORDER BY name",
+        [command.collection.id, relativePath],
+      ).map((rows) => rows.map((r) => Folder.fromDbMap(r)).toList());
+
+      final fileStream = db.stream(
+        "SELECT * FROM files WHERE collection_id = ? AND parent = ? AND is_deleted = 0 ORDER BY name LIMIT ?",
+        [
+          command.collection.id,
+          relativePath,
+          command.offset + command.pageSize,
+        ],
+      ).map((rows) => rows.map((r) => File.fromDbMap(r)).toList());
+
+      _currentSubscription = Rx.combineLatest2<List<Folder>, List<File>, List<FileAsset>>(
+        folderStream,
+        fileStream,
+        (fldrs, fls) => [...fldrs, ...fls],
+      ).listen((updatedItems) {
+        _currentItems = updatedItems;
+        sink.add(updatedItems);
+      });
 
       // ── 2. THEN trigger scanner in background ────────────────────
       // Fire-and-forget: the scanner writes to the DB directly.

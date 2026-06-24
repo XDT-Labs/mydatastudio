@@ -188,6 +188,62 @@ class LocalFileIsolateWorker {
     this.loggerPort,
   );
 
+  final List<Future<void> Function()> _thumbnailQueue = [];
+  int _activeThumbnailJobs = 0;
+  static const int _maxConcurrentThumbnails = 4;
+  Completer<void>? _thumbnailCompleter;
+
+  void _enqueueThumbnailJob(
+    AppDatabase appDb,
+    String fileId,
+    String absPath,
+    String mimeType,
+    String? llmServiceUrl,
+  ) {
+    _thumbnailQueue.add(() async {
+      try {
+        final thumbnail = await ThumbnailGenerator().pathImageToBase64(
+          absPath,
+          mimeType,
+          llmServiceUrl: llmServiceUrl,
+        );
+        if (thumbnail != null) {
+          await appDb.execute(
+            "UPDATE files SET thumbnail = ? WHERE id = ?",
+            [thumbnail, fileId],
+          );
+          logger?.d('LocalScanner: Saved thumbnail for $absPath');
+        }
+      } catch (e) {
+        logger?.e('LocalScanner: Error generating thumbnail for $absPath: $e');
+      }
+    });
+    _processThumbnailQueue();
+  }
+
+  void _processThumbnailQueue() {
+    if (_thumbnailQueue.isEmpty && _activeThumbnailJobs == 0) {
+      if (_thumbnailCompleter != null && !_thumbnailCompleter!.isCompleted) {
+        _thumbnailCompleter!.complete();
+      }
+      return;
+    }
+
+    while (_activeThumbnailJobs < _maxConcurrentThumbnails &&
+        _thumbnailQueue.isNotEmpty) {
+      _activeThumbnailJobs++;
+      final job = _thumbnailQueue.removeAt(0);
+      Future(() async {
+        try {
+          await job();
+        } finally {
+          _activeThumbnailJobs--;
+          _processThumbnailQueue();
+        }
+      });
+    }
+  }
+
   // start scanning
   void _scan(Map<String, dynamic> args) async {
     logger = AppLogger(loggerPort);
@@ -280,6 +336,13 @@ class LocalFileIsolateWorker {
       await colRepo.updateCollection(col);
     }
 
+    // Wait for any remaining thumbnails to finish generating
+    if (_activeThumbnailJobs > 0 || _thumbnailQueue.isNotEmpty) {
+      logger?.i('LocalScan: Waiting for ${_thumbnailQueue.length + _activeThumbnailJobs} remaining thumbnails to generate...');
+      _thumbnailCompleter = Completer<void>();
+      await _thumbnailCompleter!.future;
+    }
+
     // return file count
     print('Worker: Exiting isolate with count $fileCount');
     Isolate.exit(receiverPort, fileCount);
@@ -331,9 +394,19 @@ class LocalFileIsolateWorker {
 
         final file = validation['file'] as File?;
         if (validation['isCacheHit'] == true) cacheHits++;
-        if (validation['isGenerated'] == true) generatedThumbnails++;
 
         if (file != null) {
+          if (validation['isCacheHit'] == false &&
+              file.contentType == FilesConstants.mimeTypeImage) {
+            _enqueueThumbnailJob(
+              appDb,
+              file.id,
+              asset.path,
+              file.contentType,
+              llmServiceUrl,
+            );
+            generatedThumbnails++;
+          }
           fileBatch.add(file);
           if (fileBatch.length >= 100) {
             logger.i('Found ${fileBatch.length} files, saving batch');
@@ -528,26 +601,7 @@ class LocalFileIsolateWorker {
       }
     }
 
-    // Generate thumbnail if it's an image
-    String? thumbnail;
     final mimeType = getMimeType(name);
-    if (mimeType == FilesConstants.mimeTypeImage) {
-      try {
-        // Thumbnail generation can be slow, but this is a background isolate.
-        // We use the absolute path for generation.
-        logger?.i('LocalScanner: Generating thumbnail for $absPath');
-        thumbnail = await ThumbnailGenerator().pathImageToBase64(
-          absPath,
-          mimeType,
-          llmServiceUrl: llmServiceUrl,
-        );
-        if (thumbnail != null) {
-          result['isGenerated'] = true;
-        }
-      } catch (e) {
-        logger?.e('LocalScanner: Error generating thumbnail for $absPath: $e');
-      }
-    }
 
     result['file'] = File(
       id: fileId,
@@ -561,7 +615,7 @@ class LocalFileIsolateWorker {
       isDeleted: false,
       size: file_.lengthSync(),
       contentType: mimeType,
-      thumbnail: thumbnail,
+      thumbnail: null,
     );
 
     return result;
@@ -591,6 +645,20 @@ class LocalFileIsolateWorker {
         return FilesConstants.mimeTypeUnKnown;
     }
   }
+
+  void enqueueThumbnailJobForTesting(
+    AppDatabase appDb,
+    String fileId,
+    String absPath,
+    String mimeType,
+    String? llmServiceUrl,
+  ) {
+    _enqueueThumbnailJob(appDb, fileId, absPath, mimeType, llmServiceUrl);
+  }
+
+  Completer<void>? get thumbnailCompleterForTesting => _thumbnailCompleter;
+  int get activeThumbnailJobsForTesting => _activeThumbnailJobs;
+  int get queueLengthForTesting => _thumbnailQueue.length;
 }
 
 /** TODO map extra types and move to helper class

@@ -29,7 +29,7 @@ from .state import (
     get_locks
 )
 
-async def generate_thumbnail(request: ThumbnailRequest) -> Dict[str, Any]:
+def generate_thumbnail(request: ThumbnailRequest) -> Dict[str, Any]:
     """
     Generate a thumbnail for an image file, including RAW formats like NEF.
     
