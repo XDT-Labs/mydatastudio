@@ -18,6 +18,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.llms import LlamaCpp
 
 from .config import MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE
+from .utils import find_local_model, download_gguf_model
 
 
 def load_gemini_model() -> ChatGoogleGenerativeAI:
@@ -97,11 +98,10 @@ def load_embedding_model(model_id: str, filename: str, local_dir: str) -> Any:
     print(f"[EMBEDDING] Attempting to load embedding model: {model_id}")
     
     # Check if it's the Qwen-VL or SigLIP Transformers model
-    if "Qwen3-VL-Embedding" in model_id or "siglip" in model_id.lower():
+    if "VL" in model_id or "siglip" in model_id.lower():
         return load_transformers_embedding_model(model_id, local_dir)
     
     # Default to LlamaCpp for GGUF models
-    from .utils import find_local_model, download_gguf_model
     model_path = find_local_model(filename, local_dir)
     if not model_path:
         print(f"[EMBEDDING] Model not found locally, downloading: {model_id}/{filename}")
@@ -129,12 +129,37 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
     device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[EMBEDDING] Using device: {device}")
     
+    import sys
     # The Makefile downloads the full repo into models/<org>/<model_name>/
     # so local_dir is already the parent, just use it directly.
     model_path = local_dir
     if not os.path.isdir(model_path):
-        # Fallback to model_id for HF Hub auto-download
-        model_path = model_id
+        # Build list of potential alternative paths for SigLip2
+        paths_to_check = []
+        if "siglip" in model_id.lower():
+            if getattr(sys, 'frozen', False):
+                # 1. PyInstaller onefile: sys._MEIPASS/models/siglip2
+                if hasattr(sys, '_MEIPASS'):
+                    paths_to_check.append(os.path.join(sys._MEIPASS, 'models', 'siglip2'))
+                # 2. PyInstaller onedir/COLLECT: <exe_dir>/_internal/models/siglip2
+                exe_dir = os.path.dirname(sys.executable)
+                paths_to_check.append(os.path.join(exe_dir, '_internal', 'models', 'siglip2'))
+                # 3. Inside execution directory
+                paths_to_check.append(os.path.join(exe_dir, 'models', 'siglip2'))
+            # 4. Local development path relative to workspace root
+            paths_to_check.append("./models/siglip2")
+            
+        found_alt = False
+        for alt_path in paths_to_check:
+            if os.path.isdir(alt_path):
+                model_path = alt_path
+                print(f"[EMBEDDING] Redirecting SigLip2 to local directory: {model_path}")
+                found_alt = True
+                break
+                
+        if not found_alt:
+            # Fallback to model_id for HF Hub auto-download
+            model_path = model_id
 
     print(f"[EMBEDDING] Loading from {model_path}...")
     model = AutoModel.from_pretrained(
@@ -183,14 +208,7 @@ def _generate_siglip_embedding(
     
     images = []
     if image_base64:
-        if image_base64.startswith("data:image"):
-            image_base64 = image_base64.split(",")[1]
-        try:
-            image_bytes = base64.b64decode(image_base64)
-            images.append(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
-        except Exception as e:
-            print(f"[EMBEDDING] Failed to parse image_base64: {e}")
-            raise ValueError("Invalid image_base64 format provided.")
+        images.append(decode_base64_image(image_base64))
             
     texts = [text] if text else None
     
@@ -310,4 +328,22 @@ def generate_text_embedding(text: str, model: Any, processor: Any) -> List[float
         return result
     else:
         raise ValueError("Provided model does not support LlamaCpp embedding generation correctly")
+
+
+def decode_base64_image(image_base64: str) -> Image.Image:
+    """
+    Decode a base64 encoded image string (optionally with data URI prefix) into a PIL Image.
+    """
+    import base64
+    import io
+    from PIL import Image
+
+    if image_base64.startswith("data:image"):
+        image_base64 = image_base64.split(",")[1]
+    try:
+        image_bytes = base64.b64decode(image_base64)
+        return Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    except Exception as e:
+        print(f"[EMBEDDING] Failed to parse image_base64: {e}")
+        raise ValueError("Invalid image_base64 format provided.")
 

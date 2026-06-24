@@ -69,7 +69,7 @@ class TestRoutes:
         with patch('aichat.routes.get_llm_instance') as mock_get_llm:
             mock_get_llm.return_value = None
             
-            request = ChatRequest(prompt="Hello")
+            request = ChatRequest(prompt="Hello", session_id="123")
             
             with pytest.raises(HTTPException) as exc_info:
                 await generate_chat_response(request)
@@ -88,7 +88,7 @@ class TestRoutes:
             mock_get_llm.return_value = mock_llm
             mock_get_chat_id.return_value = "test-model"
             
-            request = ChatRequest(prompt="Hello", system_instruction="Be helpful")
+            request = ChatRequest(prompt="Hello", system_instruction="Be helpful", session_id="123")
             result = await generate_chat_response(request)
             
             assert result["ai_response"] == "I am an AI response"
@@ -122,7 +122,7 @@ class TestRoutes:
         """Test text embedding generation."""
         with patch('aichat.routes.get_locks') as mock_locks, \
              patch('aichat.routes.get_embedding_model') as mock_get_embed, \
-             patch('aichat.routes.generate_text_embedding') as mock_gen_embed, \
+             patch('aichat.routes.gen_emb_fn') as mock_gen_embed, \
              patch('aichat.routes.get_embedding_model_id') as mock_get_embed_id:
             
             embedding_lock = AsyncMock()
@@ -144,15 +144,17 @@ class TestRoutes:
     async def test_generate_embedding_image_not_supported(self):
         """Test image embedding generation throws correct exception."""
         with patch('aichat.routes.get_locks') as mock_locks, \
-             patch('aichat.routes.get_embedding_model') as mock_get_embed:
+             patch('aichat.routes.get_embedding_model') as mock_get_embed, \
+             patch('aichat.routes.gen_emb_fn') as mock_gen_embed:
             
             embedding_lock = AsyncMock()
             mock_locks.return_value = (AsyncMock(), embedding_lock)
             mock_get_embed.return_value = (Mock(), Mock())
+            mock_gen_embed.side_effect = ValueError("LlamaCpp does not support image embeddings in this implementation.")
             
             request = EmbeddingRequest(image_base64="bad_base_64")
             with pytest.raises(HTTPException) as exc_info:
                 await generate_embedding(request)
                 
             assert exc_info.value.status_code == 400
-            assert "Image embedding is not natively supported" in str(exc_info.value.detail)
+            assert "LlamaCpp does not support image embeddings" in str(exc_info.value.detail)

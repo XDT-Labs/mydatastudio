@@ -43,12 +43,12 @@ class TestStartSession:
             assert result["model"] == "google/gemma-2-9b-it"
     
     @pytest.mark.asyncio
-    async def test_start_session_download_failure(self):
-        """Test start_session when model download fails."""
+    async def test_start_session_not_found(self):
+        """Test start_session when model is not found locally."""
         with patch('aichat.routes.get_locks') as mock_get_locks, \
              patch('aichat.routes.get_current_model_id') as mock_get_model_id, \
              patch('aichat.routes.get_local_path') as mock_get_local_path, \
-             patch('aichat.routes.download_gguf_model_if_needed') as mock_download:
+             patch('aichat.routes.find_local_model') as mock_find:
             
             # Setup mocks
             model_lock = AsyncMock()
@@ -56,7 +56,7 @@ class TestStartSession:
             mock_get_locks.return_value = (model_lock, embedding_lock)
             mock_get_model_id.return_value = None  # No model loaded
             mock_get_local_path.return_value = "/local/path"
-            mock_download.return_value = False  # Download fails
+            mock_find.return_value = None  # Not found
             
             # Create request
             request = StartSessionRequest(model_name="test/model")
@@ -65,8 +65,8 @@ class TestStartSession:
             with pytest.raises(HTTPException) as exc_info:
                 await start_session(request)
             
-            assert exc_info.value.status_code == 500
-            assert "Failed to download model files" in exc_info.value.detail or "Failed to load model" in exc_info.value.detail
+            assert exc_info.value.status_code == 404
+            assert "not found locally" in exc_info.value.detail
     
     @pytest.mark.asyncio
     async def test_start_session_model_loading_failure(self):
@@ -74,7 +74,7 @@ class TestStartSession:
         with patch('aichat.routes.get_locks') as mock_get_locks, \
              patch('aichat.routes.get_current_model_id') as mock_get_model_id, \
              patch('aichat.routes.get_local_path') as mock_get_local_path, \
-             patch('aichat.routes.download_gguf_model_if_needed') as mock_download, \
+             patch('aichat.routes.find_local_model') as mock_find, \
              patch('aichat.routes.load_local_model') as mock_load_model, \
              patch('aichat.routes.set_llm_instance') as mock_set_llm, \
              patch('aichat.routes.set_current_model_id') as mock_set_model_id, \
@@ -86,7 +86,7 @@ class TestStartSession:
             mock_get_locks.return_value = (model_lock, embedding_lock)
             mock_get_model_id.return_value = None
             mock_get_local_path.return_value = "/local/path"
-            mock_download.return_value = True
+            mock_find.return_value = "/local/path/model.gguf"
             mock_load_model.side_effect = Exception("Out of memory")
             
             # Create request
@@ -97,7 +97,7 @@ class TestStartSession:
                 await start_session(request)
             
             assert exc_info.value.status_code == 500
-            assert "Failed to load model test/model into memory" in exc_info.value.detail
+            assert "Failed to load model into memory" in exc_info.value.detail
             
             # Verify cleanup was called
             mock_set_llm.assert_called_with(None)
@@ -109,7 +109,7 @@ class TestStartSession:
         with patch('aichat.routes.get_locks') as mock_get_locks, \
              patch('aichat.routes.get_current_model_id') as mock_get_model_id, \
              patch('aichat.routes.get_local_path') as mock_get_local_path, \
-             patch('aichat.routes.download_gguf_model_if_needed') as mock_download, \
+             patch('aichat.routes.find_local_model') as mock_find, \
              patch('aichat.routes.load_local_model') as mock_load_model, \
              patch('aichat.routes.set_llm_instance') as mock_set_llm, \
              patch('aichat.routes.set_current_model_id') as mock_set_model_id, \
@@ -121,7 +121,7 @@ class TestStartSession:
             mock_get_locks.return_value = (model_lock, embedding_lock)
             mock_get_model_id.return_value = None
             mock_get_local_path.return_value = "/local/path"
-            mock_download.return_value = True
+            mock_find.return_value = "/local/path/model.gguf"
             mock_llm_instance = Mock()
             mock_load_model.return_value = mock_llm_instance
             

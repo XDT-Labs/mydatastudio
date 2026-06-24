@@ -171,8 +171,7 @@ class EmbeddingIsolate {
             logger.e("Error processing file ${file.path}: $e");
           }
         }
-
-        break; // temporary while debugging
+        
       } catch (e, stack) {
         logger.e(
           "Error in EmbeddingIsolate loop: $e",

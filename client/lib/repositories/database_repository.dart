@@ -4,6 +4,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/helpers/file_path_resolver.dart';
 
 class DatabaseRepository {
   AppDatabase db;
@@ -32,6 +33,10 @@ class DatabaseRepository {
     String fileId,
     List<double> embedding,
   ) async {
+    // Route to correct column based on embedding length (1152 for SigLip2, 2048 for Qwen3-8B)
+    final isSigLip = embedding.length == 1152;
+    final column = isSigLip ? 'siglip2_embedding' : 'qwen3_8b_embedding';
+
     // Build JSON array string that sqlite_vector's vector_as_f32() accepts.
     final jsonArray = '[${embedding.join(',')}]';
 
@@ -40,10 +45,10 @@ class DatabaseRepository {
         // Use vector_as_f32() to pack the JSON float array into a BLOB.
         await tx.execute(
           '''
-          INSERT INTO files_embeddings (file_id, qwen3_8b_embedding)
+          INSERT INTO files_embeddings (file_id, $column)
           VALUES (?, vector_as_f32(?))
           ON CONFLICT(file_id) DO UPDATE SET
-            qwen3_8b_embedding = excluded.qwen3_8b_embedding
+            $column = excluded.$column
           ''',
           [fileId, jsonArray],
         );
@@ -55,10 +60,10 @@ class DatabaseRepository {
         final blob = Float32List.fromList(embedding).buffer.asUint8List();
         await tx.execute(
           '''
-          INSERT INTO files_embeddings (file_id, qwen3_8b_embedding)
+          INSERT INTO files_embeddings (file_id, $column)
           VALUES (?, ?)
           ON CONFLICT(file_id) DO UPDATE SET
-            qwen3_8b_embedding = excluded.qwen3_8b_embedding
+            $column = excluded.$column
           ''',
           [fileId, blob],
         );
@@ -124,18 +129,33 @@ class DatabaseRepository {
   Future<List<File>> getFilesWithMissingEmbeddings({int limit = 10}) async {
     final rows = await db.select(
       '''
-      SELECT f.*
+      SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner
       FROM files f
       LEFT OUTER JOIN files_embeddings fe ON fe.file_id = f.id
       INNER JOIN collections c ON c.id = f.collection_id
-      WHERE fe.file_id IS NULL
-        AND f.content_type LIKE 'image/%'
+      WHERE (fe.file_id IS NULL OR fe.siglip2_embedding IS NULL)
+        AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
         AND f.is_deleted = 0
       LIMIT ?
       ''',
       [limit],
     );
-    return rows.map((row) => File.fromDbMap(row)).toList();
+    var results = rows.map((row) {
+      final file = File.fromDbMap(row);
+      final fakeCollection = Collection(
+        id: file.collectionId,
+        name: '',
+        path: (row['col_path'] as String?) ?? '',
+        type: '',
+        scanner: (row['scanner'] as String?) ?? '',
+        scanStatus: '',
+        needsReAuth: false,
+        localCopyPath: row['local_copy_path'] as String?,
+      );
+      file.path = FilePathResolver.absolute(file, fakeCollection);
+      return file;
+    }).toList();
+    return results;
   }
 
   Future<Collection?> getCollection(String id) async {

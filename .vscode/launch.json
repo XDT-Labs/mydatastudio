@@ -63,7 +63,7 @@
             "name": "client + server (dev)",
             "configurations": [
                 "aichat server (python)",
-                "client (dev)"
+                "client (dev w/remote server)"
             ]
         }
     ]

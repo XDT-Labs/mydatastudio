@@ -40,18 +40,15 @@ class TestModelManager:
             temperature=0.7
         )
         
-    @patch('aichat.model_manager.download_gguf_model_if_needed')
     @patch('aichat.model_manager.LlamaCpp')
-    def test_load_local_model_success(self, mock_llamacpp, mock_download):
+    def test_load_local_model_success(self, mock_llamacpp):
         """Test successful local LlamaCpp model loading."""
-        mock_download.return_value = "/fake/path/model.gguf"
         mock_instance = Mock()
         mock_llamacpp.return_value = mock_instance
         
-        result = load_local_model("bartowski/gemma", "model.gguf", "/tmp")
+        result = load_local_model("bartowski/gemma", "/fake/path/model.gguf")
         
         assert result == mock_instance
-        mock_download.assert_called_once_with("bartowski/gemma", "model.gguf", "/tmp")
         
         # Verify LlamaCpp initialization parameters
         init_kwargs = mock_llamacpp.call_args[1]
@@ -60,10 +57,12 @@ class TestModelManager:
         assert init_kwargs["max_tokens"] == 512
         assert init_kwargs["n_gpu_layers"] == -1
 
-    @patch('aichat.model_manager.download_gguf_model_if_needed')
+    @patch('aichat.model_manager.find_local_model')
+    @patch('aichat.model_manager.download_gguf_model')
     @patch('aichat.model_manager.LlamaCpp')
-    def test_load_embedding_model_success(self, mock_llamacpp, mock_download):
+    def test_load_embedding_model_success(self, mock_llamacpp, mock_download, mock_find_local):
         """Test successful local embedding model loading."""
+        mock_find_local.return_value = None  # Force download fallback
         mock_download.return_value = "/fake/path/embed.gguf"
         mock_instance = Mock()
         mock_llamacpp.return_value = mock_instance

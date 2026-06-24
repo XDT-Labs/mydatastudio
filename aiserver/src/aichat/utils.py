@@ -27,6 +27,8 @@ def get_local_path(model_id: str) -> str:
         >>> get_local_path("google/gemma-2-9b-it")
         './models/google-gemma-2-9b-it-local/'
     """
+    if model_id is None:
+        model_id = "unknown"
     # Use a sanitized version of the model ID for the directory name
     safe_model_name = model_id.replace('/', '-').replace('..', '')
     return f"./models/{safe_model_name}-local/"
@@ -49,6 +51,8 @@ def get_local_zip_path(model_id: str) -> str:
         >>> get_local_zip_path("google/gemma-2-9b-it")
         './models/google-gemma-2-9b-it-local.tar.gz'
     """
+    if model_id is None:
+        model_id = "unknown"
     # Use a sanitized version of the model ID for the directory name
     safe_model_name = model_id.replace('/', '-')
     return f"./models/{safe_model_name}-local.tar.gz"

@@ -343,6 +343,11 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
             status_code=400,
             detail="Either 'text' or 'image_base64' must be provided."
         )
+    if request.text and request.image_base64:
+        raise HTTPException(
+            status_code=400,
+            detail="Only one of 'text' or 'image_base64' can be provided, not both."
+        )
     
 
     # Load embedding model if not already loaded

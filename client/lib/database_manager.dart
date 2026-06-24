@@ -335,31 +335,28 @@ class AppDatabase {
           column: 'qwen3_8b_embedding',
           dimension: 2048,
         ),
+        SqliteVectorIndex(
+          table: 'files_embeddings',
+          column: 'siglip2_embedding',
+          dimension: 1152,
+        ),
       ],
     );
 
-    final isNewDb = !dbFile.existsSync();
-    Database db;
+    // Step 1: Open without vector index to let initSchema create/migrate all tables
+    // (including files_embeddings) before vector_init is called.
+    Database db = await Database.open(
+      dbFile.path,
+      extensions: [SqliteVectorExtension()],
+    );
+    final bootstrapDb = AppDatabase(db);
+    bootstrapDb.path = finalDbDir;
+    bootstrapDb.name = dbName;
+    await bootstrapDb.initSchema();
+    await db.close();
 
-    if (isNewDb) {
-      // Step 1: Open without vector index to let initSchema create all tables
-      // (including files_embeddings) before vector_init is called.
-      db = await Database.open(
-        dbFile.path,
-        extensions: [SqliteVectorExtension()],
-      );
-      final bootstrapDb = AppDatabase(db);
-      bootstrapDb.path = finalDbDir;
-      bootstrapDb.name = dbName;
-      await bootstrapDb.initSchema();
-      await db.close();
-
-      // Step 2: Reopen with vector indexes now that files_embeddings exists.
-      db = await Database.open(dbFile.path, extensions: [vectorExtension]);
-    } else {
-      // Existing database: files_embeddings already exists, open directly.
-      db = await Database.open(dbFile.path, extensions: [vectorExtension]);
-    }
+    // Step 2: Reopen with vector indexes now that files_embeddings is migrated.
+    db = await Database.open(dbFile.path, extensions: [vectorExtension]);
 
     final appDb = AppDatabase(db);
     appDb.path = finalDbDir;
@@ -397,6 +394,36 @@ class AppDatabase {
       }
       logger.i("AppDatabase: Loading initial data...");
       await _loadInitialData(_db);
+    } else {
+      // Schema migration: Check if siglip2_embedding exists or if qwen3_8b_embedding is NOT NULL
+      try {
+        final columns = await _db.select("PRAGMA table_info(files_embeddings);");
+        final hasSiglip2 = columns.any((c) => c['name'] == 'siglip2_embedding');
+        bool isQwenNotNull = false;
+        for (final c in columns) {
+          if (c['name'] == 'qwen3_8b_embedding') {
+            if (c['notnull'] == 1) {
+              isQwenNotNull = true;
+            }
+            break;
+          }
+        }
+
+        if (!hasSiglip2 || isQwenNotNull) {
+          logger.i("AppDatabase: Re-creating files_embeddings table for new schema...");
+          await _db.execute("DROP TABLE IF EXISTS files_embeddings;");
+          await _db.execute('''
+            CREATE TABLE files_embeddings (
+              file_id TEXT PRIMARY KEY,
+              qwen3_8b_embedding BLOB,
+              siglip2_embedding BLOB,
+              FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+            );
+          ''');
+        }
+      } catch (e) {
+        logger.e("AppDatabase: Migration of files_embeddings table failed: $e");
+      }
     }
   }
 
@@ -619,7 +646,8 @@ class AppDatabase {
     '''
     CREATE TABLE IF NOT EXISTS files_embeddings (
       file_id TEXT PRIMARY KEY,
-      qwen3_8b_embedding BLOB NOT NULL,
+      qwen3_8b_embedding BLOB,
+      siglip2_embedding BLOB,
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
     ''',

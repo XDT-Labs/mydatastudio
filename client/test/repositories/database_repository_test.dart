@@ -13,6 +13,8 @@ import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/modules/files/services/repositories/folder_repository.dart';
 
+import 'package:mydatastudio/repositories/database_repository.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -62,6 +64,7 @@ void main() {
       expect(tableNames.contains('collections'), isTrue);
       expect(tableNames.contains('files'), isTrue);
       expect(tableNames.contains('folders'), isTrue);
+      expect(tableNames.contains('files_embeddings'), isTrue);
     });
 
     test('UserRepository CRUD Integration', () async {
@@ -170,6 +173,86 @@ void main() {
       final folders = await repo.getByParentPath('col-123', '/');
       expect(folders.length, equals(1));
       expect(folders.first.name, equals('Photos'));
+    });
+
+    test('DatabaseRepository Embeddings Routing & Queries', () async {
+      final db = databaseManager.database!;
+      final dbRepo = DatabaseRepository(db);
+      final fileRepo = FileDesktopRepository(db);
+      final colRepo = CollectionRepository(db);
+
+      // Setup a collection
+      final colId = const Uuid().v4();
+      final col = Collection(
+        id: colId,
+        name: 'Photos Collection',
+        path: '/photos',
+        type: 'file',
+        scanner: 'local',
+        needsReAuth: false,
+        scanStatus: 'idle',
+      );
+      await colRepo.addCollection(col);
+
+      // Create dummy image file
+      final fileId = const Uuid().v4();
+      final file = File(
+        id: fileId,
+        name: 'test_img.png',
+        path: 'test_img.png',
+        parent: '/photos',
+        dateCreated: DateTime.now(),
+        dateLastModified: DateTime.now(),
+        collectionId: colId,
+        contentType: 'application/image',
+        size: 2048,
+        isDeleted: false,
+      );
+      await fileRepo.create(file);
+
+      // Initially, the file has missing embeddings (none exists)
+      var missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 10);
+      expect(missing.any((f) => f.id == fileId), isTrue);
+      expect(missing.firstWhere((f) => f.id == fileId).path, equals('/photos/test_img.png'));
+
+      // Upsert a 2048-dimension embedding (Qwen3)
+      final qwenEmbedding = List<double>.filled(2048, 0.5);
+      await dbRepo.upsertFileEmbedding(fileId, qwenEmbedding);
+
+      // Check database to ensure qwen3_8b_embedding is populated but siglip2_embedding is null
+      var rows = await db.select(
+        'SELECT qwen3_8b_embedding, siglip2_embedding FROM files_embeddings WHERE file_id = ?',
+        [fileId],
+      );
+      expect(rows, isNotEmpty);
+      expect(rows.first['qwen3_8b_embedding'], isNotNull);
+      expect(rows.first['siglip2_embedding'], isNull);
+
+      // Since siglip2_embedding is still missing/null, getFilesWithMissingEmbeddings should still return it
+      missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 10);
+      expect(missing.any((f) => f.id == fileId), isTrue);
+
+      // Upsert a 1152-dimension embedding (SigLip2)
+      final siglipEmbedding = List<double>.filled(1152, 0.8);
+      await dbRepo.upsertFileEmbedding(fileId, siglipEmbedding);
+
+      // Check database to ensure both are populated now
+      rows = await db.select(
+        'SELECT qwen3_8b_embedding, siglip2_embedding FROM files_embeddings WHERE file_id = ?',
+        [fileId],
+      );
+      expect(rows, isNotEmpty);
+      expect(rows.first['qwen3_8b_embedding'], isNotNull);
+      expect(rows.first['siglip2_embedding'], isNotNull);
+
+      // Now both are present, so getFilesWithMissingEmbeddings should NOT return it
+      missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 10);
+      expect(missing.any((f) => f.id == fileId), isFalse);
+
+      // Clean up/delete embedding
+      await dbRepo.deleteFileEmbedding(fileId);
+      rows = await db.select('SELECT * FROM files_embeddings WHERE file_id = ?', [fileId]);
+      expect(rows, isEmpty);
     });
   });
 }
