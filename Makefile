@@ -18,7 +18,7 @@ IMAGE_REPO = cloud-run-source-deploy
 # Python/AI Chat Config
 PYTHON_DIR = aiserver
 APP_DIR = client/app
-APP_ZIP_NAME = aiserver-macos.zip
+APP_ZIP_NAME = aichat-macos.zip
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = bartowski/google_gemma-3-4b-it-GGUF
 HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
@@ -81,29 +81,18 @@ build-python:
 		zip -r ../../../client/app/$(APP_ZIP_NAME) .
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
 
-.PHONY: set-bundle-id
-set-bundle-id:
-	@echo "--- 🆔 Setting Bundle ID for macOS ---"
-	@BRANCH=$$(git branch --show-current); \
-	if [ "$$BRANCH" = "develop" ]; then \
-		echo "Detected branch: develop. Using Bundle ID: com.xdtlabs.mydatastudio.dev"; \
-		sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = com.xdtlabs.mydatastudio.dev/' client/macos/Runner/Configs/AppInfo.xcconfig; \
-	else \
-		echo "Detected branch: $$BRANCH. Using Bundle ID: com.xdtlabs.mydatastudio"; \
-		sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = com.xdtlabs.mydatastudio/' client/macos/Runner/Configs/AppInfo.xcconfig; \
-	fi
-
 # 3. Build Flutter Desktop Client
 .PHONY: build-client
-build-client: set-bundle-id
+build-client:
 	@echo "--- 🚀 Building Flutter Desktop client (macOS) ---"
-	@REALM=$$(cat .realm_name | cut -d= -f2); \
+	@REALM=$$(cat .realm_name 2>/dev/null | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \
 	cd $(FLUTTER_DIR) && \
 		cp pubspec.prod.yaml pubspec.yaml && \
 		flutter pub get && \
 		flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
 	@echo "--- ✅ Flutter build complete ---"
-	@if [ "$$BRANCH" = "main" ]; then \
+	@BRANCH=$$(git branch --show-current); \
+	if [ "$$BRANCH" = "main" ]; then \
 		echo "--- 🚀 Copy release build to Applications folder ---"; \
 		cp -r $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app /Applications/MyDataStudio.app; \
 	fi
@@ -112,16 +101,12 @@ build-client: set-bundle-id
 .PHONY: local-install-python
 local-install-python: build-python
 	@echo "--- 💾 Installing service for local testing ---"
-	@BRANCH=$$(git branch --show-current); \
-	if [ "$$BRANCH" = "develop" ]; then \
-		REALM="com.xdtlabs.mydatastudio.dev"; \
-	else \
-		REALM="com.xdtlabs.mydatastudio"; \
-	fi; \
-	echo "Installing to realm: $$REALM"; \
-	mkdir -p ~/Library/Application\ Support/$$REALM/ && \
-	cp $(APP_ZIP_PATH) ~/Library/Application\ Support/$$REALM/ && \
-	rm -fr ~/Library/Application\ Support/$$REALM/aichat
+	@for REALM in com.xdtlabs.mydatastudio.dev com.xdtlabs.mydatastudio; do \
+		echo "Installing to realm: $$REALM"; \
+		mkdir -p ~/Library/Application\ Support/$$REALM/ && \
+		cp $(APP_ZIP_PATH) ~/Library/Application\ Support/$$REALM/ && \
+		rm -fr ~/Library/Application\ Support/$$REALM/aichat; \
+	done
 	@echo "--- ✅ Copy complete ---"
 
 
@@ -135,6 +120,5 @@ clean:
 	cd $(FLUTTER_DIR) && flutter clean
 	@find . -type f -name "*.pyc" -delete
 	@find . -type d -name "__pycache__" -exec rm -rf {} +
-	@echo "--- 🧼 Restoring default Bundle ID ---"
-	@sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = com.xdtlabs.mydatastudio.dev/PRODUCT_BUNDLE_IDENTIFIER = com.xdtlabs.mydatastudio/' client/macos/Runner/Configs/AppInfo.xcconfig
 	@echo "--- ✅ Clean complete ---"
+
