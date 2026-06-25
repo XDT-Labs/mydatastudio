@@ -56,7 +56,7 @@ jobs:
       - name: Ensure models directory exists
         run: |
           mkdir -p aiserver/models
-          [ -z "$(ls -A aiserver/models 2>/dev/null)" ] && touch aiserver/models/.gitkeep || true
+          [ -z "$(ls -A aiserver/models 2>/dev/null)" ] && touch aiserver/models/placeholder.txt || true
 
       # ------------------------------------------
       # 3. Build Python (aiserver) Service via Makefile
