@@ -113,8 +113,11 @@ jobs:
         if: steps.signing.outputs.enabled == 'true'
         working-directory: client
         run: |
-          UUID=$(openssl smime -inform DER -verify -noverify -in "$RUNNER_TEMP/build_pp.mobileprovision" 2>/dev/null | \
-            /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin)
+          if [ ! -s "$RUNNER_TEMP/build_pp.mobileprovision" ]; then
+            echo "Error: provisioning profile is missing or empty"
+            exit 1
+          fi
+          UUID=$(python3 -c "import plistlib,os; d=open(os.environ['RUNNER_TEMP']+'/build_pp.mobileprovision','rb').read(); s=d.find(b'<?xml'); e=d.rfind(b'</plist>')+8; print(plistlib.loads(d[s:e])['UUID'])")
           echo "Provisioning Profile UUID: $UUID"
           IDENTITY=$(security find-identity -v -p codesigning "$RUNNER_TEMP/app-signing.keychain-db" | head -1 | grep '"' | sed 's/.*"\(.*\)".*/\1/')
           echo "Code Signing Identity: $IDENTITY"
