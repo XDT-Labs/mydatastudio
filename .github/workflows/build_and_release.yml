@@ -1,6 +1,8 @@
 name: Build and Release
 
 on:
+  push:
+    branches: ["main", "develop", "feature/actions"]
   workflow_dispatch:
     inputs:
       version:
@@ -45,6 +47,7 @@ jobs:
       # 2. Download AI Models via Makefile
       # ------------------------------------------
       - name: Download Models
+        if: false  # TODO: re-enable before shipping — disabled to speed up debug builds
         run: make models
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -105,8 +108,11 @@ jobs:
         if: steps.signing.outputs.enabled == 'true'
         working-directory: client
         run: |
-          UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/build_pp.mobileprovision))
-          IDENTITY=$(security find-identity -v -p codesigning $RUNNER_TEMP/app-signing.keychain-db | head -1 | grep '"' | sed 's/.*"\(.*\)".*/\1/')
+          UUID=$(openssl smime -inform DER -verify -noverify -in "$RUNNER_TEMP/build_pp.mobileprovision" 2>/dev/null | \
+            /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin)
+          echo "Provisioning Profile UUID: $UUID"
+          IDENTITY=$(security find-identity -v -p codesigning "$RUNNER_TEMP/app-signing.keychain-db" | head -1 | grep '"' | sed 's/.*"\(.*\)".*/\1/')
+          echo "Code Signing Identity: $IDENTITY"
           if [ -z "$IDENTITY" ]; then
             echo "Error: No Code Signing Identity found."
             exit 1
@@ -151,9 +157,11 @@ jobs:
       # ------------------------------------------
       - name: Resolve Version Tag
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "tag=v${{ inputs.version }}" >> $GITHUB_OUTPUT
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "tag=v${INPUT_VERSION}" >> $GITHUB_OUTPUT
           else
             VERSION=$(grep '^version:' client/pubspec.yaml | sed 's/version: //' | cut -d'+' -f1 | tr -d '[:space:]')
             echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
@@ -190,9 +198,11 @@ jobs:
 
       - name: Resolve Version Tag
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "tag=v${{ inputs.version }}" >> $GITHUB_OUTPUT
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "tag=v${INPUT_VERSION}" >> $GITHUB_OUTPUT
           else
             VERSION=$(grep '^version:' client/pubspec.yaml | sed 's/version: //' | cut -d'+' -f1 | tr -d '[:space:]')
             echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
