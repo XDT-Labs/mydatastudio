@@ -53,6 +53,11 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
 
+      - name: Ensure models directory exists
+        run: |
+          mkdir -p aiserver/models
+          [ -z "$(ls -A aiserver/models 2>/dev/null)" ] && touch aiserver/models/.gitkeep || true
+
       # ------------------------------------------
       # 3. Build Python (aiserver) Service via Makefile
       # ------------------------------------------
