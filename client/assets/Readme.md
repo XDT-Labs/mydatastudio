@@ -11,7 +11,7 @@ pdm install
 
 # 2. Download the default GGUF model manually
 # This is required so the model is bundled in the final zip via main.spec
-hf download bartowski/google_gemma-3-4b-it-GGUF google_gemma-3-4b-it-Q4_K_M.gguf --local-dir models
+hf download ggml-org/gemma-4-E4B-it-GGUF gemma-4-E4B-it-Q4_K_M.gguf --local-dir models
 
 # 3. Compile the executable
 pdm run pyinstaller -y main.spec

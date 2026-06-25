@@ -18,10 +18,10 @@ IMAGE_REPO = cloud-run-source-deploy
 # Python/AI Chat Config
 PYTHON_DIR = aiserver
 APP_DIR = client/app
-APP_ZIP_NAME = aichat-macos.zip
+APP_ZIP_NAME = aiserver-macos.zip
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
-HF_MODEL = bartowski/google_gemma-3-4b-it-GGUF
-HF_FILE = google_gemma-3-4b-it-Q4_K_M.gguf
+HF_MODEL = ggml-org/gemma-4-E4B-it-GGUF
+HF_FILE = gemma-4-E4B-it-Q4_K_M.gguf
 HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
 HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
 
@@ -92,7 +92,7 @@ build-client:
 		flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
 	@echo "--- ✅ Flutter build complete ---"
 	@BRANCH=$$(git branch --show-current); \
-	if [ "$$BRANCH" = "main" ]; then \
+	if [ "$$BRANCH" = "main" ] && [ -z "$$CI" ]; then \
 		echo "--- 🚀 Copy release build to Applications folder ---"; \
 		cp -r $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app /Applications/MyDataStudio.app; \
 	fi
