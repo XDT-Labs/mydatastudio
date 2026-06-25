@@ -71,24 +71,29 @@ jobs:
           CMAKE_ARGS: "-DGGML_METAL=on -DGGML_NATIVE=off"
 
       # ------------------------------------------
-      # 4. Apple Code Signing (skipped if secrets not configured)
+      # 4. Apple Code Signing
       # ------------------------------------------
-      - name: Check signing configuration
-        id: signing
+      - name: Validate signing secrets
         env:
           CERT: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          PROFILE: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          P12_PASS: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASS: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          if [ -n "$CERT" ]; then
-            echo "enabled=true" >> $GITHUB_OUTPUT
-          else
-            echo "enabled=false" >> $GITHUB_OUTPUT
-            echo "Signing secrets not configured — building unsigned app"
+          MISSING=""
+          [ -z "$CERT" ]         && MISSING="$MISSING\n  - BUILD_CERTIFICATE_BASE64"
+          [ -z "$PROFILE" ]      && MISSING="$MISSING\n  - BUILD_PROVISION_PROFILE_BASE64"
+          [ -z "$P12_PASS" ]     && MISSING="$MISSING\n  - P12_PASSWORD"
+          [ -z "$KEYCHAIN_PASS" ] && MISSING="$MISSING\n  - KEYCHAIN_PASSWORD"
+          if [ -n "$MISSING" ]; then
+            printf "Error: missing required signing secrets:%b\n" "$MISSING"
+            exit 1
           fi
 
       - name: Install Apple Certificate and Provisioning Profile
-        if: steps.signing.outputs.enabled == 'true'
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
           BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
@@ -110,13 +115,8 @@ jobs:
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
 
       - name: Update Code Signing Settings
-        if: steps.signing.outputs.enabled == 'true'
         working-directory: client
         run: |
-          if [ ! -s "$RUNNER_TEMP/build_pp.mobileprovision" ]; then
-            echo "Error: provisioning profile is missing or empty"
-            exit 1
-          fi
           UUID=$(python3 -c "import plistlib,os; d=open(os.environ['RUNNER_TEMP']+'/build_pp.mobileprovision','rb').read(); s=d.find(b'<?xml'); e=d.rfind(b'</plist>')+8; print(plistlib.loads(d[s:e])['UUID'])")
           echo "Provisioning Profile UUID: $UUID"
           IDENTITY=$(security find-identity -v -p codesigning "$RUNNER_TEMP/app-signing.keychain-db" | head -1 | grep '"' | sed 's/.*"\(.*\)".*/\1/')
@@ -126,9 +126,9 @@ jobs:
             exit 1
           fi
           sed -i '' "s/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g" macos/Runner.xcodeproj/project.pbxproj
-          sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = \"\";/PROVISIONING_PROFILE_SPECIFIER = \"$UUID\";/g" macos/Runner.xcodeproj/project.pbxproj
-          sed -i '' "s/CODE_SIGN_IDENTITY = \"-\";/CODE_SIGN_IDENTITY = \"$IDENTITY\";/g" macos/Runner.xcodeproj/project.pbxproj
-          sed -i '' "s/\"CODE_SIGN_IDENTITY\[sdk=macosx\*\]\" = \"Apple Development\";/\"CODE_SIGN_IDENTITY[sdk=macosx*]\" = \"$IDENTITY\";/g" macos/Runner.xcodeproj/project.pbxproj
+          sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = \"[^\"]*\";/PROVISIONING_PROFILE_SPECIFIER = \"$UUID\";/g" macos/Runner.xcodeproj/project.pbxproj
+          sed -i '' "s/CODE_SIGN_IDENTITY = \"[^\"]*\";/CODE_SIGN_IDENTITY = \"$IDENTITY\";/g" macos/Runner.xcodeproj/project.pbxproj
+          sed -i '' "s/\"CODE_SIGN_IDENTITY\[sdk=macosx\*\]\" = \"[^\"]*\";/\"CODE_SIGN_IDENTITY[sdk=macosx*]\" = \"$IDENTITY\";/g" macos/Runner.xcodeproj/project.pbxproj
 
       # ------------------------------------------
       # 5. Build Flutter Client via Makefile
