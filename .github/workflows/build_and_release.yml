@@ -71,7 +71,29 @@ jobs:
           CMAKE_ARGS: "-DGGML_METAL=on -DGGML_NATIVE=off"
 
       # ------------------------------------------
-      # 4. Apple Code Signing
+      # 4. Set up Flutter and prepare the Xcode project first
+      #    (flutter pub get runs SPM integration which rewrites project.pbxproj;
+      #     signing must be applied AFTER this, not before)
+      # ------------------------------------------
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          architecture: x64
+
+      - name: Configure Flutter
+        run: |
+          flutter config --enable-macos-desktop
+          flutter config --no-enable-swift-package-manager
+
+      - name: Flutter pub get
+        working-directory: client
+        run: |
+          cp pubspec.prod.yaml pubspec.yaml
+          flutter pub get
+
+      # ------------------------------------------
+      # 5. Apple Code Signing (applied after pub get so SPM can't overwrite it)
       # ------------------------------------------
       - name: Validate signing secrets
         env:
@@ -131,22 +153,13 @@ jobs:
           sed -i '' "s/\"CODE_SIGN_IDENTITY\[sdk=macosx\*\]\" = \"[^\"]*\";/\"CODE_SIGN_IDENTITY[sdk=macosx*]\" = \"$IDENTITY\";/g" macos/Runner.xcodeproj/project.pbxproj
 
       # ------------------------------------------
-      # 5. Build Flutter Client via Makefile
+      # 6. Build Flutter Client via Makefile
       # ------------------------------------------
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          architecture: x64
-
-      - name: Enable macOS desktop
-        run: flutter config --enable-macos-desktop
-
       - name: Build Flutter Client
         run: make build-client
 
       # ------------------------------------------
-      # 6. Create DMG installer
+      # 7. Create DMG installer
       # ------------------------------------------
       - name: Set up Node.js
         uses: actions/setup-node@v4
