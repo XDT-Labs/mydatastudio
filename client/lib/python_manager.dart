@@ -257,13 +257,13 @@ class PythonManager {
         return;
       }
 
-      String zipName = 'aichat.zip';
+      String zipName = 'aiserver.zip';
       if (Platform.isMacOS) {
-        zipName = 'aichat-macos.zip';
+        zipName = 'aiserver-macos.zip';
       } else if (Platform.isWindows) {
-        zipName = 'aichat-windows.zip';
+        zipName = 'aiserver-windows.zip';
       } else if (Platform.isLinux) {
-        zipName = 'aichat-linux.zip';
+        zipName = 'aiserver-linux.zip';
       }
 
       // Candidate locations for the zip file in common run contexts
@@ -271,16 +271,12 @@ class PythonManager {
           <String>[
             // when manually placed/copied for local testing via makefile
             p.join(supportPath, zipName),
-            p.join(supportPath, 'aichat.zip'),
             // when running from the project root
             p.join(Directory.current.path, 'client', 'app', zipName),
-            p.join(Directory.current.path, 'client', 'app', 'aichat.zip'),
             // fallback when running from client folder directly
             p.join(Directory.current.path, 'app', zipName),
-            p.join(Directory.current.path, 'app', 'aichat.zip'),
             // when running from a built executable next to an `app` folder
             p.join(p.dirname(Platform.resolvedExecutable), 'app', zipName),
-            p.join(p.dirname(Platform.resolvedExecutable), 'app', 'aichat.zip'),
             // inside a macOS .app bundle flutter_assets folder
             p.join(
               p.dirname(Platform.resolvedExecutable),
@@ -290,28 +286,13 @@ class PythonManager {
               'app',
               zipName,
             ),
-            p.join(
-              p.dirname(Platform.resolvedExecutable),
-              '..',
-              'Resources',
-              'flutter_assets',
-              'app',
-              'aichat.zip',
-            ),
-            // inside a macOS .app bundle Resources folder (legacy/fallback)
+            // inside a macOS .app bundle Resources folder
             p.join(
               p.dirname(Platform.resolvedExecutable),
               '..',
               'Resources',
               'app',
               zipName,
-            ),
-            p.join(
-              p.dirname(Platform.resolvedExecutable),
-              '..',
-              'Resources',
-              'app',
-              'aichat.zip',
             ),
           ].map((s) => p.normalize(s)).toList();
 
@@ -432,7 +413,7 @@ class PythonManager {
           }).toList();
 
       if (contents.length == 1 && contents.first is Directory) {
-        // It's a nested folder structure (e.g. aichat-macos/), move it to destDir
+        // It's a nested folder structure (e.g. aiserver-macos/), move it to destDir
         PythonManager.startupProgress.value = 'Finalizing setup...';
         final nestedDir = contents.first as Directory;
         _stdoutController.add(
