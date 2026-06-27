@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: ["main", "develop", "feature/actions"]
+    branches: ["main", "feature/actions"]
   workflow_dispatch:
     inputs:
       version:
