@@ -19,7 +19,6 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
-import 'package:path_provider/path_provider.dart';
 
 class SetupStepperForm extends StatefulWidget {
   const SetupStepperForm({super.key});
@@ -139,13 +138,11 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
     final supportsWal = await DatabaseManager.testPathSupportsWal(storagePath);
     String databasePath = storagePath;
     if (!supportsWal) {
-      final realSupportPath = await DatabaseManager.getRealApplicationSupportPath();
+      final realSupportPath =
+          await DatabaseManager.getRealApplicationSupportPath();
       databasePath = realSupportPath;
     }
-    return <String, dynamic>{
-      'storage': storagePath,
-      'database': databasePath,
-    };
+    return <String, dynamic>{'storage': storagePath, 'database': databasePath};
   }
 
   List<Step> getSteps(BuildContext context) {

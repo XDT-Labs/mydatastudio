@@ -20,8 +20,8 @@ PYTHON_DIR = aiserver
 APP_DIR = client/app
 APP_ZIP_NAME = aiserver-macos.zip
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
-HF_MODEL = ggml-org/gemma-4-E4B-it-GGUF
-HF_FILE = gemma-4-E4B-it-Q4_K_M.gguf
+HF_MODEL = ggml-org/gemma-4-12B-it-GGUF
+HF_FILE = gemma-4-12B-it-Q4_K_M.gguf
 HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
 HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
 

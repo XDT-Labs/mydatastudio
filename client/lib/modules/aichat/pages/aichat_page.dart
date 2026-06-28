@@ -29,13 +29,14 @@ class GenUiSurfaceItem extends ChatItem {
 class _AichatPage extends State<AichatPage> {
   AppLogger logger = AppLogger(null);
   bool _isLLMServiceRunning = PythonManager.isLLMServiceRunning.value;
-  String _selectedModel = 'Gemini 3 Flash';
-  final List<String> _models = [
-    'Gemini 3 Flash',
-    'Local LLM',
-    'ChatGPT',
-    'Grok',
-  ];
+  String _selectedModel = 'Local LLM';
+  final List<String> _models = ['Local LLM', 'Gemini'];
+
+  // Maps UI display names to the server model alias (see aiserver/config.py registry)
+  static const Map<String, String> _modelAliases = {
+    'Local LLM': 'gemma4:12b',
+    'Gemini': 'gemini',
+  };
   final _textController = TextEditingController();
 
   late final A2uiMessageProcessor _a2uiMessageProcessor;
@@ -103,7 +104,7 @@ class _AichatPage extends State<AichatPage> {
       },
       onSurfaceDeleted: _onSurfaceDeleted,
       onError: (error) {
-        logger.e('GenUiConversation error: $error');
+        logger.e('GenUiConversation error: ${error.error}');
       },
     );
     // logger.d('GenUiConversation created');
@@ -164,8 +165,9 @@ class _AichatPage extends State<AichatPage> {
     });
 
     if (_genUiConversation.contentGenerator is LocalLlmContentGenerator) {
+      final alias = _modelAliases[_selectedModel] ?? _selectedModel;
       (_genUiConversation.contentGenerator as LocalLlmContentGenerator).model =
-          _selectedModel;
+          alias;
     }
     _genUiConversation.sendRequest(UserMessage.text(message));
     _textController.clear();

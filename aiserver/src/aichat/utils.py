@@ -159,7 +159,15 @@ def find_local_model(filename: str, local_path: str) -> Optional[str]:
             print(f"[LOADER] Found model in _internal/models: {found}")
             return found
 
-    # 3. Explicit local_path (user-downloaded models)
+    # 3. Flat models/ root (manually placed or pre-downloaded files)
+    models_root = os.path.normpath(os.path.join(os.getcwd(), 'models'))
+    print(f"[LOADER] Checking models root: {models_root}")
+    found = _fuzzy_find(models_root, filename)
+    if found:
+        print(f"[LOADER] Found model in models root: {found}")
+        return found
+
+    # 4. Explicit local_path (models downloaded via /util/download-model)
     print(f"[LOADER] Checking local path: {local_path}")
     found = _fuzzy_find(local_path, filename)
     if found:

@@ -2,7 +2,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:http/http.dart' as http;
 
 import 'package:flutter/foundation.dart';
 import 'package:mydatastudio/app_logger.dart';
@@ -171,25 +170,6 @@ class PythonManager {
       );
 
       await _pipeOutput(_pythonProc!);
-
-      //Start default session
-      MainApp.llmServiceUrl.listen((llmServiceUrl) async {
-        if (llmServiceUrl != null) {
-          final session = await http.post(
-            Uri.parse("$llmServiceUrl/start-session"),
-            headers: <String, String>{
-              'Content-Type': 'application/json; charset=UTF-8',
-            },
-            body: jsonEncode(<String, dynamic>{
-              "model_name": "bartowski/gemma-3-4b-it-GGUF",
-              "filename": "gemma-3-4b-it-Q4_K_M.gguf",
-            }),
-          );
-          logger.d(
-            'Started default session: ${session.statusCode} ${session.body}',
-          );
-        }
-      });
     } catch (e) {
       final msg = 'Failed to start AI Chat service: $e';
       _stderrController.add(msg);

@@ -133,7 +133,7 @@ class OutlookPstScannerIsolateWorker {
     logger.i("PST Scanner: Calling AI Chat API for PST import");
 
     final client = http.Client();
-    final request = http.Request('POST', Uri.parse("$serverUrl/import/pst"));
+    final request = http.Request('POST', Uri.parse("$serverUrl/util/import/pst"));
     request.headers['Content-Type'] = 'application/json';
     request.body = jsonEncode({
       'file_path': collection.path,

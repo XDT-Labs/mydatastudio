@@ -1,23 +1,33 @@
 """
-Configuration settings for the Gemma Local Chat API.
-
-This module contains all configuration constants and settings used throughout
-the application. Centralizing configuration makes it easier to maintain and
-modify application behavior.
+Configuration settings for the local LLM server.
 """
 
-# Default model configuration
-DEFAULT_LOCAL_MODEL = "bartowski/gemma-3-4b-it-GGUF"  # Default model repository to load at startup
-DEFAULT_GGUF_FILE = "gemma-3-4b-it-Q4_K_M.gguf"       # Default GGUF file to utilize
+# ── Model registry ────────────────────────────────────────────────────────────
+# Maps simple client-facing aliases (e.g. "gemma3:4b") to the HuggingFace
+# repo ID and GGUF filename used for local storage and loading.
+# Soon this will be pulled from the database; for now it is hardcoded here.
 
-# Model loading configuration
-MAX_NEW_TOKENS = 512        # Maximum tokens to generate in response
-TEMPERATURE = 0.7           # Sampling temperature for text generation
-DO_SAMPLE = True           # Whether to use sampling vs greedy decoding
+MODEL_REGISTRY: dict = {
+    "gemma4:12b": {
+        "model_name": "ggml-org/gemma-4-12B-it-GGUF",
+        "model_file": "gemma-4-12B-it-Q4_K_M.gguf",
+    },
+}
 
-# File paths
-MODELS_BASE_DIR = "./models"  # Base directory for storing model files
+DEFAULT_MODEL_ALIAS = "gemma4:12b"
 
-# FastAPI configuration
-API_TITLE = "Gemma 2 Local Chat Endpoint with GGUF Dynamic Loading"
-API_DESCRIPTION = "API to dynamically download, load, and chat with local GGUF format Hugging Face models."
+# ── Fallback values (used when a model is not in the registry) ────────────────
+DEFAULT_LOCAL_MODEL = "ggml-org/gemma-4-12B-it-GGUF"
+DEFAULT_GGUF_FILE = "gemma-4-12B-it-Q4_K_M.gguf"
+
+# ── Model loading ─────────────────────────────────────────────────────────────
+MAX_NEW_TOKENS = 512
+TEMPERATURE = 0.7
+DO_SAMPLE = True
+
+# ── File paths ────────────────────────────────────────────────────────────────
+MODELS_BASE_DIR = "./models"
+
+# ── FastAPI ───────────────────────────────────────────────────────────────────
+API_TITLE = "MyDataStudio Local LLM Server"
+API_DESCRIPTION = "OpenAI-compatible local LLM server using llama.cpp GGUF models."

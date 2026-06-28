@@ -272,7 +272,7 @@ class EmbeddingIsolate {
 
     try {
       final response = await http.post(
-        Uri.parse("$serviceUrl/embedding"),
+        Uri.parse("$serviceUrl/util/embedding"),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'model_name': 'google/siglip2-so400m-patch16-naflex',

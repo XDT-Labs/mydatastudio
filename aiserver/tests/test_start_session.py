@@ -1,147 +1,123 @@
 """
-Unit tests for the start_session endpoint.
+Unit tests for model auto-loading in generate_chat_completion.
 
-This module contains comprehensive unit tests for the start_session API route handler,
-testing model loading scenarios, session management, and error conditions.
-Tests use pytest with async support and mocking for dependencies.
+The /start-session endpoint has been removed. Model loading now happens
+automatically inside /v1/chat/completions when the requested model differs
+from the currently loaded one.
 """
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from fastapi import HTTPException
 
-# Import the functions we want to test
-from aichat.routes import start_session
-from aichat.models import StartSessionRequest
+from aichat.routes import generate_chat_completion
+from aichat.models import ChatCompletionRequest, ChatMessage
 
 
-class TestStartSession:
-    """Test suite for the start_session endpoint."""
-    
+class TestChatCompletionModelLoading:
+
     @pytest.mark.asyncio
-    async def test_start_session_model_already_loaded(self):
-        """Test start_session when requested model is already loaded."""
-        with patch('aichat.routes.get_locks') as mock_get_locks, \
-             patch('aichat.routes.get_current_model_id') as mock_get_model_id, \
-             patch('aichat.routes.get_local_path') as mock_get_local_path:
-            
-            # Setup mocks
-            model_lock = AsyncMock()
-            embedding_lock = AsyncMock()
-            mock_get_locks.return_value = (model_lock, embedding_lock)
-            mock_get_model_id.return_value = "google/gemma-2-9b-it"
-            mock_get_local_path.return_value = "/local/path"
-            
-            # Create request
-            request = StartSessionRequest(model_name="google/gemma-2-9b-it")
-            
-            # Call function
-            result = await start_session(request)
-            
-            # Assertions
-            assert result["status"] == "success"
-            assert "already active" in result["message"]
-            assert result["model"] == "google/gemma-2-9b-it"
-    
+    async def test_model_already_loaded_skips_reload(self):
+        """Does not reload when the requested model is already active."""
+        mock_llm = Mock()
+        mock_llm.client = Mock()
+        mock_llm.client.create_chat_completion = Mock(return_value={
+            "id": "chatcmpl-1", "object": "chat.completion", "created": 0,
+            "model": "test-model",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
+            "usage": {}
+        })
+
+        with patch('aichat.routes.get_llm_instance', return_value=mock_llm), \
+             patch('aichat.routes.get_current_model_id', return_value="test-model"), \
+             patch('aichat.routes.load_local_model') as mock_load:
+
+            request = ChatCompletionRequest(
+                model="test-model",
+                messages=[ChatMessage(role="user", content="Hello")]
+            )
+            await generate_chat_completion(request)
+
+            mock_load.assert_not_called()
+
     @pytest.mark.asyncio
-    async def test_start_session_not_found(self):
-        """Test start_session when model is not found locally."""
-        with patch('aichat.routes.get_locks') as mock_get_locks, \
-             patch('aichat.routes.get_current_model_id') as mock_get_model_id, \
-             patch('aichat.routes.get_local_path') as mock_get_local_path, \
-             patch('aichat.routes.find_local_model') as mock_find:
-            
-            # Setup mocks
+    async def test_model_not_found_locally_returns_404(self):
+        """Returns 404 when the requested model file is not on disk."""
+        with patch('aichat.routes.get_llm_instance', return_value=None), \
+             patch('aichat.routes.get_current_model_id', return_value=None), \
+             patch('aichat.routes.get_locks') as mock_locks, \
+             patch('aichat.routes.find_local_model', return_value=None), \
+             patch('aichat.routes.get_local_path', return_value="/models/"):
+
             model_lock = AsyncMock()
-            embedding_lock = AsyncMock()
-            mock_get_locks.return_value = (model_lock, embedding_lock)
-            mock_get_model_id.return_value = None  # No model loaded
-            mock_get_local_path.return_value = "/local/path"
-            mock_find.return_value = None  # Not found
-            
-            # Create request
-            request = StartSessionRequest(model_name="test/model")
-            
-            # Call function and expect exception
+            mock_locks.return_value = (model_lock, AsyncMock())
+
+            request = ChatCompletionRequest(
+                model="some/model",
+                model_file="some-model.gguf",
+                messages=[ChatMessage(role="user", content="Hello")]
+            )
+
             with pytest.raises(HTTPException) as exc_info:
-                await start_session(request)
-            
+                await generate_chat_completion(request)
+
             assert exc_info.value.status_code == 404
-            assert "not found locally" in exc_info.value.detail
-    
+            assert "not found locally" in str(exc_info.value.detail)
+
     @pytest.mark.asyncio
-    async def test_start_session_model_loading_failure(self):
-        """Test start_session when model loading into memory fails."""
-        with patch('aichat.routes.get_locks') as mock_get_locks, \
-             patch('aichat.routes.get_current_model_id') as mock_get_model_id, \
-             patch('aichat.routes.get_local_path') as mock_get_local_path, \
-             patch('aichat.routes.find_local_model') as mock_find, \
-             patch('aichat.routes.load_local_model') as mock_load_model, \
-             patch('aichat.routes.set_llm_instance') as mock_set_llm, \
-             patch('aichat.routes.set_current_model_id') as mock_set_model_id, \
-             patch('builtins.print'):
-            
-            # Setup mocks
+    async def test_model_load_failure_returns_500(self):
+        """Returns 500 when the model file exists but fails to load into memory."""
+        with patch('aichat.routes.get_llm_instance', return_value=None), \
+             patch('aichat.routes.get_current_model_id', return_value=None), \
+             patch('aichat.routes.get_locks') as mock_locks, \
+             patch('aichat.routes.find_local_model', return_value="/path/to/model.gguf"), \
+             patch('aichat.routes.load_local_model', side_effect=RuntimeError("OOM")), \
+             patch('aichat.routes.set_llm_instance'), \
+             patch('aichat.routes.set_current_model_id'), \
+             patch('aichat.routes.get_local_path', return_value="/models/"):
+
             model_lock = AsyncMock()
-            embedding_lock = AsyncMock()
-            mock_get_locks.return_value = (model_lock, embedding_lock)
-            mock_get_model_id.return_value = None
-            mock_get_local_path.return_value = "/local/path"
-            mock_find.return_value = "/local/path/model.gguf"
-            mock_load_model.side_effect = Exception("Out of memory")
-            
-            # Create request
-            request = StartSessionRequest(model_name="test/model")
-            
-            # Call function and expect exception
+            mock_locks.return_value = (model_lock, AsyncMock())
+
+            request = ChatCompletionRequest(
+                model="some/model",
+                model_file="some-model.gguf",
+                messages=[ChatMessage(role="user", content="Hello")]
+            )
+
             with pytest.raises(HTTPException) as exc_info:
-                await start_session(request)
-            
+                await generate_chat_completion(request)
+
             assert exc_info.value.status_code == 500
-            assert "Failed to load model into memory" in exc_info.value.detail
-            
-            # Verify cleanup was called
-            mock_set_llm.assert_called_with(None)
-            mock_set_model_id.assert_called_with(None)
-    
+
     @pytest.mark.asyncio
-    async def test_start_session_success(self):
-        """Test successful model loading and session start."""
-        with patch('aichat.routes.get_locks') as mock_get_locks, \
-             patch('aichat.routes.get_current_model_id') as mock_get_model_id, \
-             patch('aichat.routes.get_local_path') as mock_get_local_path, \
-             patch('aichat.routes.find_local_model') as mock_find, \
-             patch('aichat.routes.load_local_model') as mock_load_model, \
-             patch('aichat.routes.set_llm_instance') as mock_set_llm, \
-             patch('aichat.routes.set_current_model_id') as mock_set_model_id, \
-             patch('builtins.print'):
-            
-            # Setup mocks
+    async def test_model_switch_loads_new_model(self):
+        """Loads a new model when the request specifies a different one."""
+        new_mock_llm = Mock()
+        new_mock_llm.client = Mock()
+        new_mock_llm.client.create_chat_completion = Mock(return_value={
+            "id": "chatcmpl-2", "object": "chat.completion", "created": 0,
+            "model": "new-model",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
+            "usage": {}
+        })
+
+        with patch('aichat.routes.get_llm_instance', return_value=new_mock_llm), \
+             patch('aichat.routes.get_current_model_id', return_value="old-model"), \
+             patch('aichat.routes.get_locks') as mock_locks, \
+             patch('aichat.routes.find_local_model', return_value="/path/to/new.gguf"), \
+             patch('aichat.routes.load_local_model', return_value=new_mock_llm) as mock_load, \
+             patch('aichat.routes.set_llm_instance'), \
+             patch('aichat.routes.set_current_model_id'), \
+             patch('aichat.routes.get_local_path', return_value="/models/"):
+
             model_lock = AsyncMock()
-            embedding_lock = AsyncMock()
-            mock_get_locks.return_value = (model_lock, embedding_lock)
-            mock_get_model_id.return_value = None
-            mock_get_local_path.return_value = "/local/path"
-            mock_find.return_value = "/local/path/model.gguf"
-            mock_llm_instance = Mock()
-            mock_load_model.return_value = mock_llm_instance
-            
-            # Create request
-            request = StartSessionRequest(model_name="test/model")
-            
-            # Call function
-            result = await start_session(request)
-            
-            # Assertions
-            assert result["status"] == "success"
-            assert "successfully loaded" in result["message"]
-            assert result["local_path"] == "/local/path"
-            
-            # Verify model was set
-            mock_set_llm.assert_called_with(mock_llm_instance)
-            mock_set_model_id.assert_called()
+            mock_locks.return_value = (model_lock, AsyncMock())
 
+            request = ChatCompletionRequest(
+                model="new-model",
+                model_file="new-model.gguf",
+                messages=[ChatMessage(role="user", content="Hello")]
+            )
+            await generate_chat_completion(request)
 
-if __name__ == "__main__":
-    # Run tests if file is executed directly
-    import pytest
-    pytest.main([__file__, "-v"])
+            mock_load.assert_called_once()

@@ -83,9 +83,9 @@ def load_local_model(model_name: str, model_path: str) -> LlamaCpp:
         model_path=model_path,
         temperature=TEMPERATURE,
         max_tokens=MAX_NEW_TOKENS,
-        n_ctx=4096,
-        n_gpu_layers=-1, # Offload all layers to GPU (Metal on Mac)
-        verbose=False,   # Disabled to clean up flutter logs
+        n_ctx=8192,
+        n_gpu_layers=-1,  # Offload all layers to GPU (Metal on Mac)
+        verbose=False,
     )
     
     return llm

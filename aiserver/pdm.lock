@@ -1198,7 +1198,7 @@ files = [
 
 [[package]]
 name = "llama-cpp-python"
-version = "0.3.16"
+version = "0.3.31"
 requires_python = ">=3.8"
 summary = "Python bindings for the llama.cpp library"
 groups = ["default"]
@@ -1210,7 +1210,7 @@ dependencies = [
     "typing-extensions>=4.5.0",
 ]
 files = [
-    {file = "llama_cpp_python-0.3.16.tar.gz", hash = "sha256:34ed0f9bd9431af045bb63d9324ae620ad0536653740e9bb163a2e1fcb973be6"},
+    {file = "llama_cpp_python-0.3.31.tar.gz", hash = "sha256:c3fd23b2c7197770321020a89f23c6515a366511dce4fcda1e81cfb749267a94"},
 ]
 
 [[package]]

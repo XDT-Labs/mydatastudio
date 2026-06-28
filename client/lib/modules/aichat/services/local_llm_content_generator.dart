@@ -16,11 +16,12 @@ class LocalLlmContentGenerator implements ContentGenerator {
   final _textResponseController = StreamController<String>.broadcast();
   final _errorController = StreamController<ContentGeneratorError>.broadcast();
   final _isProcessing = ValueNotifier<bool>(false);
-  String? model; // Selected model ID
-  // We still keep local history for UI purposes if needed, but don't send it to server
-  final List<ChatMessage> _localHistory = [];
-  // Generate a unique session ID for this instance
-  final String _sessionId = DateTime.now().millisecondsSinceEpoch.toString();
+
+  String? model;
+
+  // Client-side conversation history in OpenAI format. Each request sends
+  // the full history so the server remains stateless.
+  final List<Map<String, String>> _messages = [];
 
   @override
   Stream<A2uiMessage> get a2uiMessageStream => _a2uiMessageController.stream;
@@ -50,87 +51,43 @@ class LocalLlmContentGenerator implements ContentGenerator {
   }) async {
     _isProcessing.value = true;
     try {
-      String? llmServiceUrl = MainApp.llmServiceUrl.valueOrNull;
+      final String? llmServiceUrl = MainApp.llmServiceUrl.valueOrNull;
       if (llmServiceUrl == null || llmServiceUrl.isEmpty) {
         throw Exception('LLM Service is not running.');
       }
 
-      // We now rely on server-side history. Only send the new user message.
-      String prompt = '';
-
-      // Add current message
       if (message is UserMessage) {
-        prompt = message.text;
-        _localHistory.add(message);
+        _messages.add({'role': 'user', 'content': message.text});
       }
 
+      // Build the full message list: system prompt (if any) + conversation history
+      final List<Map<String, String>> requestMessages = [
+        if (systemInstruction.isNotEmpty)
+          {'role': 'system', 'content': systemInstruction},
+        ..._messages,
+      ];
+
       final response = await http.post(
-        Uri.parse("$llmServiceUrl/chat"),
-        headers: <String, String>{
-          'Content-Type': 'application/json; charset=UTF-8',
-        },
-        body: jsonEncode(<String, dynamic>{
-          "prompt": prompt,
-          "system_instruction": systemInstruction,
-          "use_genui": true,
-          "session_id": _sessionId, // Send session ID
-          "model": model, // Send model ID
+        Uri.parse('$llmServiceUrl/v1/chat/completions'),
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode({
+          'model': model ?? '',
+          'messages': requestMessages,
         }),
       );
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
-        final aiResponse = responseData['ai_response'];
+        final String content =
+            responseData['choices'][0]['message']['content'] as String;
 
-        logger.d('Received aiResponse type: ${aiResponse.runtimeType}');
-        // logger.d('Received aiResponse: $aiResponse');
-
-        // Add response to local history
-        _localHistory.add(InternalMessage(aiResponse.toString()));
-
-        if (aiResponse.trim().startsWith('[') &&
-            aiResponse.trim().endsWith(']')) {
-          // GenUI message array
-          try {
-            final List<dynamic> messagesJson = jsonDecode(aiResponse);
-            logger.d('Parsed ${messagesJson.length} GenUI messages');
-
-            // Emit each message to the stream
-            for (final messageJson in messagesJson) {
-              final message = A2uiMessage.fromJson(messageJson);
-              logger.d('Emitting message: ${message.runtimeType}');
-              _a2uiMessageController.add(message);
-            }
-          } catch (e) {
-            logger.e('Failed to parse GenUI message array: $e');
-            _textResponseController.add(aiResponse);
-          }
-        } else if (aiResponse.trim().startsWith('{') &&
-            aiResponse.trim().endsWith('}')) {
-          // Single GenUI message (legacy format)
-          try {
-            final jsonResponse = jsonDecode(aiResponse);
-            logger.d('Parsed JSON successfully: $jsonResponse');
-            final message = A2uiMessage.fromJson(jsonResponse);
-            logger.d('Created A2uiMessage, emitting to stream...');
-            _a2uiMessageController.add(message);
-            logger.d('A2uiMessage emitted to stream');
-          } catch (e) {
-            logger.e('Failed to parse as GenUI JSON: $e');
-            _textResponseController.add(aiResponse);
-          }
-        } else {
-          // Plain text response
-          logger.d('Emitting plain text response');
-          _textResponseController.add(aiResponse);
-        }
+        _messages.add({'role': 'assistant', 'content': content});
+        _textResponseController.add(content);
       } else {
-        _errorController.add(
-          ContentGeneratorError(
-            'Failed to get response: ${response.statusCode}',
-            StackTrace.current,
-          ),
-        );
+        _errorController.add(ContentGeneratorError(
+          'Failed to get response: ${response.statusCode} — ${response.body}',
+          StackTrace.current,
+        ));
       }
     } catch (e, stackTrace) {
       _errorController.add(ContentGeneratorError(e.toString(), stackTrace));
@@ -138,4 +95,7 @@ class LocalLlmContentGenerator implements ContentGenerator {
       _isProcessing.value = false;
     }
   }
+
+  /// Clear local conversation history (e.g. when the user starts a new chat).
+  void clearHistory() => _messages.clear();
 }

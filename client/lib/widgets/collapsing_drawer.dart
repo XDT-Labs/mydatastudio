@@ -84,6 +84,7 @@ class _CollapsingDrawerState extends State<CollapsingDrawer> {
         ),
       ...appApps.map((app) {
         return NavigationRailDestination(
+          // ignore: non_const_argument_for_const_parameter
           icon: Icon(IconData(app.icon ?? 0xe08f, fontFamily: 'MaterialIcons')),
           label: Text(app.name),
         );
@@ -96,6 +97,7 @@ class _CollapsingDrawerState extends State<CollapsingDrawer> {
         ),
       ...collectionApps.map((app) {
         return NavigationRailDestination(
+          // ignore: non_const_argument_for_const_parameter
           icon: Icon(IconData(app.icon ?? 0xe08f, fontFamily: 'MaterialIcons')),
           label: Text(app.name),
         );

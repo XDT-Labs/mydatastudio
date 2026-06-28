@@ -34,7 +34,7 @@ class ThumbnailGenerator {
     if (isRaw && llmServiceUrl != null) {
       try {
         final response = await http.post(
-          Uri.parse("$llmServiceUrl/thumbnail"),
+          Uri.parse("$llmServiceUrl/util/thumbnail"),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
             'file_path': filePath,
