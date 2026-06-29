@@ -594,6 +594,57 @@ class _RxFilesPage extends State<RxFilesPage> {
                             selectedAsset = null;
                             _showLightbox = false;
                           }),
+                      onNavigateToFile: (file) async {
+                        // Resolve the target collection — may differ from the
+                        // current one since findSimilarImages searches all
+                        // collections.
+                        var targetCollection = collection!;
+                        if (file.collectionId != collection!.id) {
+                          final found = await DatabaseManager.instance.repository
+                              ?.getCollection(file.collectionId);
+                          if (!mounted) return;
+                          if (found == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Could not find collection for this file'),
+                              ),
+                            );
+                            return;
+                          }
+                          targetCollection = found;
+                        }
+                        setState(() {
+                          collection = targetCollection;
+                          path = file.parent;
+                          selectedAsset = file;
+                          _lastSelectedAsset = file;
+                          _showLightbox = false;
+                          _breadcrumbTrail = _trailFromFolderPath(file.parent);
+                        });
+                        _fileOffset = 0;
+                        _hasMoreFiles = true;
+                        _filesAndFoldersService!.invoke(
+                          GetFileAndFoldersServiceCommand(
+                            targetCollection,
+                            file.parent,
+                          ),
+                        );
+                      },
+                      onDeleteFile: (file) {
+                        if (selectedAsset?.id == file.id) {
+                          setState(() {
+                            selectedAsset = null;
+                            _showLightbox = false;
+                          });
+                        }
+                        _filesAndFoldersService!.invoke(
+                          GetFileAndFoldersServiceCommand(
+                            collection!,
+                            path ?? '',
+                            refreshOnly: true,
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -695,6 +746,21 @@ class _RxFilesPage extends State<RxFilesPage> {
         direction: Axis.horizontal,
       ),
     );
+  }
+
+  /// Builds a breadcrumb trail from a relative folder path.
+  /// e.g. 'Photos/2024/vacation' → [Photos, Photos/2024, Photos/2024/vacation]
+  List<_BreadcrumbEntry> _trailFromFolderPath(String folderPath) {
+    if (folderPath.isEmpty) return [];
+    final parts = folderPath.split('/').where((s) => s.isNotEmpty).toList();
+    final trail = <_BreadcrumbEntry>[];
+    for (int i = 0; i < parts.length; i++) {
+      trail.add(_BreadcrumbEntry(
+        name: parts[i],
+        path: parts.sublist(0, i + 1).join('/'),
+      ));
+    }
+    return trail;
   }
 
   List<FileAsset> _mergeAndSortRowData(

@@ -16,6 +16,8 @@ class TabbedMetadataSection extends StatelessWidget {
     required this.isLoadingExif,
     required this.showExif,
     this.tileProvider,
+    this.onNavigateToFile,
+    this.onDeleteFile,
   });
 
   final File file;
@@ -25,6 +27,8 @@ class TabbedMetadataSection extends StatelessWidget {
   final bool showExif;
   // Passed through to GpsMetadataTab for test injection.
   final TileProvider? tileProvider;
+  final void Function(File)? onNavigateToFile;
+  final void Function(File)? onDeleteFile;
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +60,12 @@ class TabbedMetadataSection extends StatelessWidget {
                 ),
               if (showExif)
                 ExifMetadataTab(exifData: exifData, isLoading: isLoadingExif),
-              SimilarFilesTab(file: file, collection: collection),
+              SimilarFilesTab(
+                file: file,
+                collection: collection,
+                onNavigateToFile: onNavigateToFile,
+                onDeleteFile: onDeleteFile,
+              ),
             ],
           ),
         ),

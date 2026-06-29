@@ -32,6 +32,8 @@ class FileDetailsDrawer extends StatefulWidget {
     required this.width,
     required this.onClose,
     this.onExpand,
+    this.onNavigateToFile,
+    this.onDeleteFile,
   });
 
   final FileAsset asset;
@@ -39,6 +41,8 @@ class FileDetailsDrawer extends StatefulWidget {
   final double width;
   final VoidCallback onClose;
   final VoidCallback? onExpand;
+  final void Function(File)? onNavigateToFile;
+  final void Function(File)? onDeleteFile;
 
   @override
   State<FileDetailsDrawer> createState() => _FileDetailsDrawerState();
@@ -229,6 +233,8 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                         exifData: _exifData,
                         isLoadingExif: _loadingExif,
                         showExif: isImage,
+                        onNavigateToFile: widget.onNavigateToFile,
+                        onDeleteFile: widget.onDeleteFile,
                       ),
                     ] else ...[
                       FolderMetadataSection(

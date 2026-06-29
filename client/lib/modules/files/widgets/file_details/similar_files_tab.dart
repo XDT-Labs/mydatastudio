@@ -1,19 +1,26 @@
 import 'dart:convert';
+import 'dart:io' as io;
 
 import 'package:flutter/material.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 
 class SimilarFilesTab extends StatefulWidget {
   const SimilarFilesTab({
     super.key,
     required this.file,
     required this.collection,
+    this.onNavigateToFile,
+    this.onDeleteFile,
   });
 
   final File file;
   final Collection collection;
+  final void Function(File)? onNavigateToFile;
+  final void Function(File)? onDeleteFile;
 
   @override
   State<SimilarFilesTab> createState() => _SimilarFilesTabState();
@@ -75,13 +82,131 @@ class _SimilarFilesTabState extends State<SimilarFilesTab> {
   List<({File file, double similarity})> get _filtered =>
       _allResults.where((r) => r.similarity >= _threshold).toList();
 
+  // ── Lightbox ──────────────────────────────────────────────────────────────
+
+  void _showLightbox(BuildContext context, File file) {
+    showDialog(
+      context: context,
+      builder:
+          (ctx) => Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.all(24),
+            child: Stack(
+              alignment: Alignment.topRight,
+              children: [
+                Container(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(ctx).size.height * 0.8,
+                    maxWidth: MediaQuery.of(ctx).size.width * 0.8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  clipBehavior: Clip.hardEdge,
+                  child: _lightboxContent(file),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.black54,
+                    ),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+    );
+  }
+
+  Widget _lightboxContent(File file) {
+    if (file.thumbnail != null) {
+      try {
+        if (file.thumbnail!.startsWith('http')) {
+          return Image.network(file.thumbnail!, fit: BoxFit.contain);
+        }
+        return Image.memory(base64Decode(file.thumbnail!), fit: BoxFit.contain);
+      } catch (_) {}
+    }
+    if (file.path.startsWith('/')) {
+      final ioFile = io.File(file.path);
+      if (ioFile.existsSync()) {
+        return Image.file(ioFile, fit: BoxFit.contain);
+      }
+    }
+    return const Center(
+      child: Icon(Icons.photo, color: Colors.white54, size: 80),
+    );
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+
+  Future<void> _handleDelete(BuildContext context, File file) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Delete Image'),
+            content: Text(
+              'Delete "${file.name}" from your computer and database?\n\nThis cannot be undone.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final resolvedPath =
+          file.collectionId == widget.collection.id
+              ? FilePathResolver.absolute(file, widget.collection)
+              : file.path;
+      final ioFile = io.File(resolvedPath);
+      if (await ioFile.exists()) await ioFile.delete();
+
+      await FileDesktopRepository(
+        DatabaseManager.instance.database!,
+      ).delete(file);
+
+      if (!mounted) return;
+      setState(() => _allResults.removeWhere((r) => r.file.id == file.id));
+      widget.onDeleteFile?.call(file);
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Deleted "${file.name}"')));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting "${file.name}": $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Column(
-      children: [
-        _buildSliderRow(),
-        Expanded(child: _buildContent()),
-      ],
+      children: [_buildSliderRow(), Expanded(child: _buildContent(context))],
     );
   }
 
@@ -106,7 +231,7 @@ class _SimilarFilesTabState extends State<SimilarFilesTab> {
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildContent(BuildContext context) {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -122,7 +247,7 @@ class _SimilarFilesTabState extends State<SimilarFilesTab> {
             ),
             SizedBox(height: 8),
             Text(
-              'No visual embedding for this image',
+              'Visual embeddings for this image are still being generated',
               style: TextStyle(color: Colors.grey, fontSize: 12),
             ),
           ],
@@ -146,22 +271,37 @@ class _SimilarFilesTabState extends State<SimilarFilesTab> {
         crossAxisCount: 3,
         crossAxisSpacing: 4,
         mainAxisSpacing: 4,
-        childAspectRatio: 0.85,
+        childAspectRatio: 0.7,
       ),
       itemCount: results.length,
-      itemBuilder: (context, index) {
+      itemBuilder: (_, index) {
         final item = results[index];
-        return _SimilarImageCell(file: item.file, similarity: item.similarity);
+        return _SimilarImageCell(
+          file: item.file,
+          similarity: item.similarity,
+          onTap: () => _showLightbox(context, item.file),
+          onNavigate: () => widget.onNavigateToFile?.call(item.file),
+          onDelete: () => _handleDelete(context, item.file),
+        );
       },
     );
   }
 }
 
 class _SimilarImageCell extends StatelessWidget {
-  const _SimilarImageCell({required this.file, required this.similarity});
+  const _SimilarImageCell({
+    required this.file,
+    required this.similarity,
+    required this.onTap,
+    required this.onNavigate,
+    required this.onDelete,
+  });
 
   final File file;
   final double similarity;
+  final VoidCallback onTap;
+  final VoidCallback onNavigate;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -169,35 +309,38 @@ class _SimilarImageCell extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _buildImage(),
-                Positioned(
-                  bottom: 2,
-                  right: 2,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                    child: Text(
-                      '${similarity.round()}%',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold,
+          child: GestureDetector(
+            onTap: onTap,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _buildImage(),
+                  Positioned(
+                    bottom: 2,
+                    right: 2,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: Text(
+                        '${similarity.round()}%',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -207,6 +350,29 @@ class _SimilarImageCell extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 9),
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            Tooltip(
+              message: 'Go to folder',
+              child: GestureDetector(
+                onTap: onNavigate,
+                child: const Icon(Icons.folder_open_outlined, size: 14),
+              ),
+            ),
+            Tooltip(
+              message: 'Delete',
+              child: GestureDetector(
+                onTap: onDelete,
+                child: const Icon(
+                  Icons.delete_outline,
+                  size: 14,
+                  color: Colors.redAccent,
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
