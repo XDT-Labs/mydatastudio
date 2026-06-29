@@ -295,7 +295,7 @@ class AppDatabase {
 
   AppDatabase(this._db);
 
-  int get schemaVersion => 16;
+  int get schemaVersion => 17;
 
   Database get rawDb => _db;
 
@@ -423,6 +423,37 @@ class AppDatabase {
         }
       } catch (e) {
         logger.e("AppDatabase: Migration of files_embeddings table failed: $e");
+      }
+
+      // v17: add aichat tables if missing
+      try {
+        final aichatTables = await _db.select(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='aichat_conversations'",
+        );
+        if (aichatTables.isEmpty) {
+          logger.i("AppDatabase: Creating aichat_conversations and aichat_conversation_history tables...");
+          await _db.execute('''
+            CREATE TABLE IF NOT EXISTS aichat_conversations (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              model TEXT,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+          ''');
+          await _db.execute('''
+            CREATE TABLE IF NOT EXISTS aichat_conversation_history (
+              id TEXT PRIMARY KEY,
+              conversation_id TEXT NOT NULL,
+              role TEXT NOT NULL,
+              content TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              FOREIGN KEY (conversation_id) REFERENCES aichat_conversations(id) ON DELETE CASCADE
+            );
+          ''');
+        }
+      } catch (e) {
+        logger.e("AppDatabase: Migration of aichat tables failed: $e");
       }
     }
   }
@@ -659,6 +690,27 @@ class AppDatabase {
       client_secret TEXT NOT NULL,
       api_key TEXT NOT NULL,
       permissions TEXT
+    );
+    ''',
+    // aichat_conversations
+    '''
+    CREATE TABLE IF NOT EXISTS aichat_conversations (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      model TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    ''',
+    // aichat_conversation_history
+    '''
+    CREATE TABLE IF NOT EXISTS aichat_conversation_history (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (conversation_id) REFERENCES aichat_conversations(id) ON DELETE CASCADE
     );
     ''',
   ];

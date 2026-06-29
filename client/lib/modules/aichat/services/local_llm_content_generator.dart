@@ -158,4 +158,10 @@ class LocalLlmContentGenerator implements ContentGenerator {
     _messages.clear();
     pendingAttachments = [];
   }
+
+  /// Restores message history (OpenAI format) when loading a saved conversation.
+  void loadHistory(List<Map<String, dynamic>> messages) {
+    _messages.clear();
+    _messages.addAll(messages);
+  }
 }

@@ -4,8 +4,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:genui/genui.dart';
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/aichat/services/local_llm_content_generator.dart';
 import 'package:mydatastudio/python_manager.dart';
+import 'package:mydatastudio/repositories/aichat_repository.dart';
 import 'package:file_picker/file_picker.dart';
 
 // Dark theme colors
@@ -20,6 +22,12 @@ const _sendDisabledBg = Color(0xFF3A3A3C);
 
 class AichatPage extends StatefulWidget {
   const AichatPage({super.key});
+
+  /// Drawer writes here to load a conversation (null = new conversation).
+  static final ValueNotifier<String?> selectConversationId = ValueNotifier(null);
+
+  /// True while an LLM response is streaming — navigation is disabled during this time.
+  static final ValueNotifier<bool> isStreaming = ValueNotifier(false);
 
   @override
   State<AichatPage> createState() => _AichatPage();
@@ -50,6 +58,7 @@ class _AichatPage extends State<AichatPage> {
   };
 
   final _textController = TextEditingController();
+  final _titleController = TextEditingController();
   final _scrollController = ScrollController();
   final _focusNode = FocusNode();
 
@@ -63,6 +72,15 @@ class _AichatPage extends State<AichatPage> {
 
   // Files staged for the next message (cleared after send).
   final List<PlatformFile> _pendingFiles = [];
+
+  // Current conversation being viewed/edited.
+  String? _conversationId;
+
+  AichatRepository? get _repo {
+    final db = DatabaseManager.instance.database;
+    if (db == null) return null;
+    return AichatRepository(db);
+  }
 
   bool get _canSend =>
       _textController.text.trim().isNotEmpty || _pendingFiles.isNotEmpty;
@@ -81,6 +99,8 @@ class _AichatPage extends State<AichatPage> {
       }
     });
 
+    AichatPage.selectConversationId.addListener(_onConversationSelected);
+
     _a2uiMessageProcessor = A2uiMessageProcessor(
       catalogs: [CoreCatalogItems.asCatalog()],
     );
@@ -91,6 +111,7 @@ class _AichatPage extends State<AichatPage> {
 
     _contentGenerator.streamingChunkStream.listen((chunk) {
       if (mounted) {
+        AichatPage.isStreaming.value = true;
         setState(() {
           _streamingText = (_streamingText ?? '') + chunk;
         });
@@ -104,6 +125,8 @@ class _AichatPage extends State<AichatPage> {
           _chatItems.add(TextMessageItem(role: 'assistant', text: text));
           _streamingText = null;
         });
+        AichatPage.isStreaming.value = false;
+        _persistAssistantMessage(text);
         _scrollToBottom();
       }
     });
@@ -120,6 +143,7 @@ class _AichatPage extends State<AichatPage> {
       onSurfaceDeleted: _onSurfaceDeleted,
       onError: (error) {
         logger.e('GenUiConversation error: ${error.error}');
+        AichatPage.isStreaming.value = false;
         if (mounted) setState(() => _streamingText = null);
       },
     );
@@ -127,11 +151,117 @@ class _AichatPage extends State<AichatPage> {
 
   @override
   void dispose() {
+    AichatPage.selectConversationId.removeListener(_onConversationSelected);
     _textController.dispose();
+    _titleController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
     _genUiConversation.dispose();
     super.dispose();
+  }
+
+  void _onConversationSelected() {
+    final id = AichatPage.selectConversationId.value;
+    if (id == null) {
+      _startNewConversation();
+    } else if (id != '__new__') {
+      _loadConversation(id);
+    }
+  }
+
+  void _startNewConversation() {
+    if (!mounted) return;
+    setState(() {
+      _conversationId = null;
+      _chatItems.clear();
+      _streamingText = null;
+      _titleController.text = '';
+    });
+    _contentGenerator.clearHistory();
+  }
+
+  Future<void> _loadConversation(String id) async {
+    final repo = _repo;
+    if (repo == null) return;
+
+    final messages = await repo.getMessages(id);
+    if (!mounted) return;
+
+    // Rebuild display list and LLM history from persisted messages
+    final chatItems = <TextMessageItem>[];
+    final llmHistory = <Map<String, dynamic>>[];
+    String conversationName = '';
+
+    for (final m in messages) {
+      chatItems.add(TextMessageItem(role: m.role, text: m.content));
+      llmHistory.add({'role': m.role, 'content': m.content});
+    }
+
+    // Fetch the conversation name
+    final rows = await DatabaseManager.instance.database?.select(
+      'SELECT name, model FROM aichat_conversations WHERE id = ? LIMIT 1',
+      [id],
+    );
+    if (rows != null && rows.isNotEmpty) {
+      conversationName = rows.first['name'] as String? ?? '';
+      final savedModel = rows.first['model'] as String?;
+      if (savedModel != null) {
+        final displayModel = _modelAliases.entries
+            .where((e) => e.value == savedModel)
+            .map((e) => e.key)
+            .firstOrNull;
+        if (displayModel != null && mounted) {
+          setState(() => _selectedModel = displayModel);
+        }
+      }
+    }
+
+    _contentGenerator.loadHistory(llmHistory);
+
+    setState(() {
+      _conversationId = id;
+      _chatItems
+        ..clear()
+        ..addAll(chatItems);
+      _streamingText = null;
+      _titleController.text = conversationName;
+    });
+
+    _scrollToBottom();
+  }
+
+  /// Creates a conversation record on first message if not yet created.
+  Future<void> _ensureConversation(String firstMessage) async {
+    if (_conversationId != null) return;
+    final repo = _repo;
+    if (repo == null) return;
+
+    final name = _defaultName(firstMessage);
+    final alias = _modelAliases[_selectedModel] ?? _selectedModel;
+    final conv = await repo.createConversation(name: name, model: alias);
+
+    if (mounted) {
+      setState(() {
+        _conversationId = conv.id;
+        _titleController.text = conv.name;
+      });
+    }
+  }
+
+  Future<void> _persistAssistantMessage(String text) async {
+    final id = _conversationId;
+    final repo = _repo;
+    if (id == null || repo == null) return;
+    await repo.addMessage(conversationId: id, role: 'assistant', content: text);
+    // Keep model in sync
+    final alias = _modelAliases[_selectedModel] ?? _selectedModel;
+    await repo.updateConversation(id, model: alias);
+  }
+
+  String _defaultName(String message) {
+    final words = message.trim().split(RegExp(r'\s+'));
+    final snippet = words.take(6).join(' ');
+    return snippet.length > 50 ? snippet.substring(0, 50) : snippet;
   }
 
   void _scrollToBottom() {
@@ -180,6 +310,9 @@ class _AichatPage extends State<AichatPage> {
       return;
     }
 
+    // Create conversation on first message
+    await _ensureConversation(message);
+
     if (_pendingFiles.isNotEmpty) {
       logger.d('[ATTACH] Reading ${_pendingFiles.length} file(s): ${_pendingFiles.map((f) => f.name).toList()}');
       final List<Uint8List> bytes = await Future.wait(
@@ -195,6 +328,13 @@ class _AichatPage extends State<AichatPage> {
       _chatItems.add(TextMessageItem(role: 'user', text: message));
       _pendingFiles.clear();
     });
+
+    // Persist user message
+    final id = _conversationId;
+    final repo = _repo;
+    if (id != null && repo != null) {
+      await repo.addMessage(conversationId: id, role: 'user', content: message);
+    }
 
     final alias = _modelAliases[_selectedModel] ?? _selectedModel;
     _contentGenerator.model = alias;
@@ -279,6 +419,41 @@ class _AichatPage extends State<AichatPage> {
     );
   }
 
+  Widget _buildTitleBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+      decoration: const BoxDecoration(
+        color: _bgColor,
+        border: Border(bottom: BorderSide(color: _inputBorderColor, width: 0.5)),
+      ),
+      child: TextField(
+        controller: _titleController,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.w500,
+        ),
+        decoration: const InputDecoration(
+          hintText: 'New conversation',
+          hintStyle: TextStyle(color: _hintColor, fontSize: 16, fontWeight: FontWeight.w400),
+          border: InputBorder.none,
+          isDense: true,
+          contentPadding: EdgeInsets.zero,
+        ),
+        onSubmitted: (value) => _saveTitleChange(value),
+        onEditingComplete: () => _saveTitleChange(_titleController.text),
+      ),
+    );
+  }
+
+  Future<void> _saveTitleChange(String value) async {
+    final id = _conversationId;
+    final repo = _repo;
+    final trimmed = value.trim();
+    if (id == null || repo == null || trimmed.isEmpty) return;
+    await repo.updateConversation(id, name: trimmed);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_isLLMServiceRunning) {
@@ -295,43 +470,11 @@ class _AichatPage extends State<AichatPage> {
 
     final itemCount = _chatItems.length + (_streamingText != null ? 1 : 0);
 
-    return Theme(
-      data: Theme.of(context).copyWith(
-        scaffoldBackgroundColor: _bgColor,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: _bgColor,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          surfaceTintColor: Colors.transparent,
-        ),
-      ),
-      child: Scaffold(
+    return Scaffold(
         backgroundColor: _bgColor,
-        appBar: AppBar(
-          backgroundColor: _bgColor,
-          centerTitle: false,
-          title: const Text(
-            "AI Chat",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-          ),
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(1.0),
-            child: Container(height: 1.0, color: _inputBorderColor),
-          ),
-          actions: <Widget>[
-            IconButton(
-              icon: const Icon(Icons.add, color: Colors.white),
-              tooltip: 'New Session',
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('todo: new session')),
-                );
-              },
-            ),
-          ],
-        ),
         body: Column(
           children: [
+            _buildTitleBar(),
             Expanded(
               child: ListView.builder(
                 controller: _scrollController,
@@ -541,7 +684,6 @@ class _AichatPage extends State<AichatPage> {
             ),
           ],
         ),
-      ),
-    );
+      );
   }
 }
