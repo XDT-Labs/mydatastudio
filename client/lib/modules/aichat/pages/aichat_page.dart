@@ -1,9 +1,11 @@
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:genui/genui.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/modules/aichat/services/local_llm_content_generator.dart';
 import 'package:mydatastudio/python_manager.dart';
-
 import 'package:file_picker/file_picker.dart';
 
 class AichatPage extends StatefulWidget {
@@ -32,22 +34,29 @@ class _AichatPage extends State<AichatPage> {
   String _selectedModel = 'Local LLM';
   final List<String> _models = ['Local LLM', 'Gemini'];
 
-  // Maps UI display names to the server model alias (see aiserver/config.py registry)
   static const Map<String, String> _modelAliases = {
     'Local LLM': 'gemma4:12b',
     'Gemini': 'gemini',
   };
-  final _textController = TextEditingController();
 
+  final _textController = TextEditingController();
+  final _scrollController = ScrollController();
+
+  late final LocalLlmContentGenerator _contentGenerator;
   late final A2uiMessageProcessor _a2uiMessageProcessor;
   late final GenUiConversation _genUiConversation;
   final List<ChatItem> _chatItems = [];
+
+  // Accumulates streaming tokens; null when idle.
+  String? _streamingText;
+
+  // Files staged for the next message (cleared after send).
+  final List<PlatformFile> _pendingFiles = [];
 
   @override
   void initState() {
     super.initState();
 
-    // listen for changes
     PythonManager.isLLMServiceRunning.addListener(() {
       if (mounted) {
         setState(() {
@@ -60,85 +69,84 @@ class _AichatPage extends State<AichatPage> {
       catalogs: [CoreCatalogItems.asCatalog()],
     );
 
-    final contentGenerator = LocalLlmContentGenerator(
+    _contentGenerator = LocalLlmContentGenerator(
       systemInstruction: 'You are a helpful assistant.',
     );
 
-    // Debug: Listen to a2uiMessageStream to see if messages are flowing
-    // This must be done BEFORE creating GenUiConversation
-    contentGenerator.a2uiMessageStream.listen(
-      (message) {
-        //logger.d('DEBUG: a2uiMessageStream received message: $message');
-      },
-      onError: (error) {
-        //logger.e('DEBUG: a2uiMessageStream error: $error');
-      },
-      onDone: () {
-        //logger.d('DEBUG: a2uiMessageStream done');
-      },
-    );
-
-    // Listen to text responses from the generator for non-UI messages
-    contentGenerator.textResponseStream.listen((text) {
-      logger.d('DEBUG: textResponseStream received: $text');
+    // Stream individual tokens → accumulate into the in-progress bubble.
+    _contentGenerator.streamingChunkStream.listen((chunk) {
       if (mounted) {
         setState(() {
-          _chatItems.add(TextMessageItem(role: 'assistant', text: text));
+          _streamingText = (_streamingText ?? '') + chunk;
         });
+        _scrollToBottom();
       }
     });
 
-    // Debug: Listen to surfaceUpdates directly
-    _a2uiMessageProcessor.surfaceUpdates.listen((event) {
-      //logger.d('DEBUG: A2uiMessageProcessor emitted event: $event');
+    // Full response arrives → finalize into _chatItems, clear streaming state.
+    _contentGenerator.textResponseStream.listen((text) {
+      if (mounted) {
+        setState(() {
+          _chatItems.add(TextMessageItem(role: 'assistant', text: text));
+          _streamingText = null;
+        });
+        _scrollToBottom();
+      }
     });
 
-    // logger.d('Creating GenUiConversation...');
+    _a2uiMessageProcessor.surfaceUpdates.listen((_) {});
+
     _genUiConversation = GenUiConversation(
       a2uiMessageProcessor: _a2uiMessageProcessor,
-      contentGenerator: contentGenerator,
+      contentGenerator: _contentGenerator,
       onSurfaceAdded: _onSurfaceAdded,
       onSurfaceUpdated: (event) {
-        //logger.d('SurfaceUpdated event: ${event.surfaceId}');
         _addSurfaceId(event.surfaceId);
       },
       onSurfaceDeleted: _onSurfaceDeleted,
       onError: (error) {
         logger.e('GenUiConversation error: ${error.error}');
+        if (mounted) setState(() => _streamingText = null);
       },
     );
-    // logger.d('GenUiConversation created');
   }
 
   @override
   void dispose() {
     _textController.dispose();
+    _scrollController.dispose();
     _genUiConversation.dispose();
     super.dispose();
   }
 
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
   void _addSurfaceId(String surfaceId) {
-    // Check if surface is already in the list
     final exists = _chatItems.any(
       (item) => item is GenUiSurfaceItem && item.surfaceId == surfaceId,
     );
-
     if (!exists) {
       setState(() {
         _chatItems.add(GenUiSurfaceItem(surfaceId: surfaceId));
       });
-      logger.d('Surface added to list: $surfaceId');
-      logger.d('Total items: ${_chatItems.length}');
     }
   }
 
   void _onSurfaceAdded(SurfaceAdded event) {
-    logger.d('SurfaceAdded event: ${event.surfaceId}');
     _addSurfaceId(event.surfaceId);
   }
 
   void _onSurfaceDeleted(SurfaceRemoved update) {
-    logger.d('Surface deleted: ${update.surfaceId}');
     setState(() {
       _chatItems.removeWhere(
         (item) =>
@@ -147,10 +155,8 @@ class _AichatPage extends State<AichatPage> {
     });
   }
 
-  void _sendMessage(String message) {
-    if (message.trim().isEmpty) {
-      return;
-    }
+  Future<void> _sendMessage(String message) async {
+    if (message.trim().isEmpty && _pendingFiles.isEmpty) return;
 
     if (!_isLLMServiceRunning) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -159,18 +165,83 @@ class _AichatPage extends State<AichatPage> {
       return;
     }
 
-    // Add user message to chat items
+    // Read attachment bytes before clearing the list.
+    if (_pendingFiles.isNotEmpty) {
+      logger.d('[ATTACH] Reading ${_pendingFiles.length} file(s): ${_pendingFiles.map((f) => f.name).toList()}');
+      final List<Uint8List> bytes = await Future.wait(
+        _pendingFiles
+            .where((f) => f.path != null)
+            .map((f) => File(f.path!).readAsBytes()),
+      );
+      logger.d('[ATTACH] Read ${bytes.length} file(s)');
+      _contentGenerator.pendingAttachments = bytes;
+    }
+
     setState(() {
       _chatItems.add(TextMessageItem(role: 'user', text: message));
+      _pendingFiles.clear();
     });
 
-    if (_genUiConversation.contentGenerator is LocalLlmContentGenerator) {
-      final alias = _modelAliases[_selectedModel] ?? _selectedModel;
-      (_genUiConversation.contentGenerator as LocalLlmContentGenerator).model =
-          alias;
-    }
+    final alias = _modelAliases[_selectedModel] ?? _selectedModel;
+    _contentGenerator.model = alias;
+
     _genUiConversation.sendRequest(UserMessage.text(message));
     _textController.clear();
+    _scrollToBottom();
+  }
+
+  Widget _buildUserBubble(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.75,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+          decoration: BoxDecoration(
+            color: Colors.blueAccent.withValues(alpha: 0.9),
+            borderRadius: BorderRadius.circular(12.0),
+          ),
+          child: Text(text, style: const TextStyle(color: Colors.white)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAssistantBubble(String text, {bool streaming = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.75,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade200,
+            borderRadius: BorderRadius.circular(12.0),
+          ),
+          child: MarkdownBody(
+            data: streaming ? '$text▋' : text,
+            styleSheet: MarkdownStyleSheet(
+              p: const TextStyle(color: Colors.black87, fontSize: 15),
+              code: TextStyle(
+                backgroundColor: Colors.grey.shade300,
+                fontFamily: 'monospace',
+                fontSize: 13,
+              ),
+              codeblockDecoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(6),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -180,6 +251,8 @@ class _AichatPage extends State<AichatPage> {
         child: Text("LLM Service is not running or is still starting up."),
       );
     }
+
+    final itemCount = _chatItems.length + (_streamingText != null ? 1 : 0);
 
     return Scaffold(
       appBar: AppBar(
@@ -205,49 +278,32 @@ class _AichatPage extends State<AichatPage> {
         children: [
           Expanded(
             child: ListView.builder(
+              controller: _scrollController,
               padding: const EdgeInsets.only(
                 bottom: 20,
                 left: 16,
                 right: 16,
                 top: 16,
               ),
-              itemCount: _chatItems.length,
+              itemCount: itemCount,
               itemBuilder: (context, index) {
+                // In-progress streaming bubble at the end of the list
+                if (index == _chatItems.length && _streamingText != null) {
+                  return _buildAssistantBubble(
+                    _streamingText!,
+                    streaming: true,
+                  );
+                }
+
                 final item = _chatItems[index];
 
                 if (item is TextMessageItem) {
-                  final isUser = item.role == 'user';
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6.0),
-                    child: Align(
-                      alignment:
-                          isUser ? Alignment.centerRight : Alignment.centerLeft,
-                      child: Container(
-                        constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width * 0.75,
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12.0,
-                          vertical: 8.0,
-                        ),
-                        decoration: BoxDecoration(
-                          color:
-                              isUser
-                                  ? Colors.blueAccent.withValues(alpha: 0.9)
-                                  : Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(12.0),
-                        ),
-                        child: Text(
-                          item.text,
-                          style: TextStyle(
-                            color: isUser ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                } else if (item is GenUiSurfaceItem) {
-                  // logger.d('Rendering GenUiSurface for surface: ${item.surfaceId}',);
+                  return item.role == 'user'
+                      ? _buildUserBubble(item.text)
+                      : _buildAssistantBubble(item.text);
+                }
+
+                if (item is GenUiSurfaceItem) {
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8.0),
                     child: GenUiSurface(
@@ -256,6 +312,7 @@ class _AichatPage extends State<AichatPage> {
                     ),
                   );
                 }
+
                 return const SizedBox.shrink();
               },
             ),
@@ -274,7 +331,7 @@ class _AichatPage extends State<AichatPage> {
                 children: [
                   TextField(
                     controller: _textController,
-                    onSubmitted: _sendMessage,
+                    onSubmitted: (text) => _sendMessage(text),
                     keyboardType: TextInputType.multiline,
                     minLines: 1,
                     maxLines: 10,
@@ -293,6 +350,22 @@ class _AichatPage extends State<AichatPage> {
                       isDense: true,
                     ),
                   ),
+                  if (_pendingFiles.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8, top: 4),
+                      child: Wrap(
+                        spacing: 6,
+                        children: _pendingFiles.map((f) {
+                          return Chip(
+                            label: Text(f.name, style: const TextStyle(fontSize: 12)),
+                            deleteIcon: const Icon(Icons.close, size: 14),
+                            onDeleted: () => setState(() => _pendingFiles.remove(f)),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                          );
+                        }).toList(),
+                      ),
+                    ),
                   Padding(
                     padding: const EdgeInsets.only(
                       left: 4,
@@ -301,7 +374,6 @@ class _AichatPage extends State<AichatPage> {
                     ),
                     child: Row(
                       children: [
-                        // + Icon
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
@@ -315,12 +387,11 @@ class _AichatPage extends State<AichatPage> {
                             FilePickerResult? result = await FilePicker.platform
                                 .pickFiles(allowMultiple: true);
                             if (result != null) {
-                              logger.d('Picked files: ${result.paths}');
+                              setState(() => _pendingFiles.addAll(result.files));
                             }
                           },
                         ),
                         const SizedBox(width: 12),
-                        // Model Dropdown
                         Theme(
                           data: Theme.of(context).copyWith(
                             hoverColor: Colors.transparent,
@@ -345,29 +416,25 @@ class _AichatPage extends State<AichatPage> {
                                   });
                                 }
                               },
-                              items:
-                                  _models.map<DropdownMenuItem<String>>((
-                                    String value,
-                                  ) {
-                                    return DropdownMenuItem<String>(
-                                      value: value,
-                                      child: Text(
-                                        value,
-                                        style: const TextStyle(
-                                          color: Color(0xFF8E8E93),
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w400,
-                                        ),
+                              items: _models.map<DropdownMenuItem<String>>(
+                                (String value) {
+                                  return DropdownMenuItem<String>(
+                                    value: value,
+                                    child: Text(
+                                      value,
+                                      style: const TextStyle(
+                                        color: Color(0xFF8E8E93),
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w400,
                                       ),
-                                    );
-                                  }).toList(),
+                                    ),
+                                  );
+                                },
+                              ).toList(),
                             ),
                           ),
                         ),
                         const Spacer(),
-                        // Voice Icon
-
-                        // Send Icon (Arrow in circle)
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
@@ -375,11 +442,15 @@ class _AichatPage extends State<AichatPage> {
                           icon: Container(
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: const Color(0xFFD1D1D6),
+                              color: _streamingText != null
+                                  ? const Color(0xFF007AFF)
+                                  : const Color(0xFFD1D1D6),
                             ),
                             padding: const EdgeInsets.all(4),
-                            child: const Icon(
-                              Icons.arrow_forward_rounded,
+                            child: Icon(
+                              _streamingText != null
+                                  ? Icons.stop_rounded
+                                  : Icons.arrow_forward_rounded,
                               color: Colors.white,
                               size: 18,
                             ),

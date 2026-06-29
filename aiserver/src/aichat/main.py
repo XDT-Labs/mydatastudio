@@ -56,15 +56,23 @@ def main() -> None:
     default_entry = MODEL_REGISTRY.get(DEFAULT_MODEL_ALIAS, {})
     startup_model_name = default_entry.get("model_name", DEFAULT_LOCAL_MODEL)
     startup_model_file = default_entry.get("model_file", DEFAULT_GGUF_FILE)
+    startup_mmproj_file = default_entry.get("model_file_mmproj")
 
     local_path = get_local_path(startup_model_name)
     model_path = find_local_model(startup_model_file, local_path)
     if model_path:
         try:
+            mmproj_path = find_local_model(startup_mmproj_file, local_path) if startup_mmproj_file else None
+            if startup_mmproj_file and not mmproj_path:
+                print(f"[STARTUP] mmproj '{startup_mmproj_file}' not found — loading text-only.")
             print(f"[STARTUP] Loading '{DEFAULT_MODEL_ALIAS}' ({startup_model_name})...")
             from .model_manager import load_local_model
             from .state import set_llm_instance, set_current_model_id
-            llm = load_local_model(model_name=startup_model_name, model_path=model_path)
+            llm = load_local_model(
+                model_name=startup_model_name,
+                model_path=model_path,
+                clip_model_path=mmproj_path,
+            )
             set_llm_instance(llm)
             set_current_model_id(DEFAULT_MODEL_ALIAS)  # store alias, not HF repo ID
             print(f"[STARTUP] Model '{DEFAULT_MODEL_ALIAS}' loaded successfully.")

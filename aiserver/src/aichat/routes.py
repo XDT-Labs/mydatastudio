@@ -56,7 +56,7 @@ async def health_check() -> Dict[str, Any]:
     }
 
 
-async def generate_chat_completion(request: ChatCompletionRequest) -> Dict[str, Any]:
+async def generate_chat_completion(request: ChatCompletionRequest):
     """
     OpenAI-compatible chat completion. Auto-loads the requested model if it
     differs from the currently loaded one.
@@ -80,6 +80,11 @@ async def generate_chat_completion(request: ChatCompletionRequest) -> Dict[str, 
                             detail=f"Model '{target_alias}' ({filename}) not found locally. "
                                    f"Use /util/download-model to download it first."
                         )
+                    # Look up optional vision projector (mmproj); graceful degradation if absent
+                    mmproj_filename = MODEL_REGISTRY.get(target_alias, {}).get("model_file_mmproj")
+                    mmproj_path = find_local_model(mmproj_filename, local_path) if mmproj_filename else None
+                    if mmproj_filename and not mmproj_path:
+                        print(f"[LOADER] mmproj '{mmproj_filename}' not found — running text-only mode")
 
                 old_llm = get_llm_instance()
                 if old_llm is not None:
@@ -93,7 +98,11 @@ async def generate_chat_completion(request: ChatCompletionRequest) -> Dict[str, 
                     if model_name == "gemini":
                         new_llm = load_gemini_model()
                     else:
-                        new_llm = load_local_model(model_name=model_name, model_path=model_path)
+                        new_llm = load_local_model(
+                            model_name=model_name,
+                            model_path=model_path,
+                            clip_model_path=mmproj_path,
+                        )
                     set_llm_instance(new_llm)
                     set_current_model_id(target_alias)  # store the alias, not the HF repo ID
                     print(f"[LOADER] Model '{target_alias}' loaded.")
@@ -113,14 +122,28 @@ async def generate_chat_completion(request: ChatCompletionRequest) -> Dict[str, 
     try:
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
-        # LlamaCpp: use llama_cpp's native create_chat_completion (handles chat templates automatically)
-        if hasattr(llm_instance, 'client') and hasattr(llm_instance.client, 'create_chat_completion'):
+        # llama_cpp.Llama (local GGUF, text or vision)
+        if hasattr(llm_instance, 'create_chat_completion'):
             kwargs: Dict[str, Any] = {"messages": messages}
             if request.temperature is not None:
                 kwargs["temperature"] = request.temperature
             if request.max_tokens is not None:
                 kwargs["max_tokens"] = request.max_tokens
-            result = llm_instance.client.create_chat_completion(**kwargs)
+
+            if request.stream:
+                current_model = get_current_model_id()
+
+                def _sse_stream() -> Generator[str, None, None]:
+                    for chunk in llm_instance.create_chat_completion(
+                        stream=True, **kwargs
+                    ):
+                        chunk["model"] = current_model
+                        yield f"data: {json.dumps(chunk)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+                return StreamingResponse(_sse_stream(), media_type="text/event-stream")
+
+            result = llm_instance.create_chat_completion(**kwargs)
             result["model"] = get_current_model_id() or result.get("model", "unknown")
             return result
 
@@ -134,6 +157,28 @@ async def generate_chat_completion(request: ChatCompletionRequest) -> Dict[str, 
                 lc_messages.append(HumanMessage(content=m.content))
             elif m.role == "assistant":
                 lc_messages.append(AIMessage(content=m.content))
+
+        if request.stream:
+            current_model = get_current_model_id()
+            completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+            created_at = int(time.time())
+
+            def _gemini_sse_stream() -> Generator[str, None, None]:
+                for chunk in llm_instance.stream(lc_messages):
+                    delta = chunk.content if hasattr(chunk, 'content') else str(chunk)
+                    if delta:
+                        payload = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_at,
+                            "model": current_model,
+                            "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(payload)}\n\n"
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(_gemini_sse_stream(), media_type="text/event-stream")
+
         response = llm_instance.invoke(lc_messages)
         content = response.content if hasattr(response, 'content') else str(response)
         return {

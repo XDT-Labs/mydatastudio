@@ -22,6 +22,7 @@ APP_ZIP_NAME = aiserver-macos.zip
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = ggml-org/gemma-4-12B-it-GGUF
 HF_FILE = gemma-4-12B-it-Q4_K_M.gguf
+HF_MMPROJ_FILE = mmproj-gemma-4-12B-it-Q8_0.gguf
 HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
 HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
 
@@ -57,6 +58,12 @@ models:
 		hf download $(HF_MODEL) $(HF_FILE) --local-dir $(PYTHON_DIR)/models; \
 	else \
 		echo "$(HF_FILE) already exists, skipping download."; \
+	fi
+	@if [ ! -f $(PYTHON_DIR)/models/$(HF_MMPROJ_FILE) ]; then \
+		echo "Downloading $(HF_MMPROJ_FILE) (vision projector)..."; \
+		hf download $(HF_MODEL) $(HF_MMPROJ_FILE) --local-dir $(PYTHON_DIR)/models; \
+	else \
+		echo "$(HF_MMPROJ_FILE) already exists, skipping download."; \
 	fi
 	@if [ ! -d $(HF_SIGLIP_DIR) ]; then \
 		echo "Downloading SigLip 2 embedding model (Transformers)..."; \

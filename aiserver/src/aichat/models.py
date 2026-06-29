@@ -1,7 +1,7 @@
 """
 Pydantic models for request/response validation.
 """
-from typing import Optional, List
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field, ConfigDict
 from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, DEFAULT_MODEL_ALIAS
 
@@ -10,7 +10,8 @@ from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, DEFAULT_MODEL_ALIAS
 
 class ChatMessage(BaseModel):
     role: str = Field(..., description="Message role: 'system', 'user', or 'assistant'")
-    content: str = Field(..., description="Message content")
+    # OpenAI multimodal format: string for text-only, list of content parts for vision
+    content: Union[str, List[Dict[str, Any]]] = Field(..., description="Message content")
 
 
 class ChatCompletionRequest(BaseModel):
@@ -21,6 +22,7 @@ class ChatCompletionRequest(BaseModel):
     messages: List[ChatMessage] = Field(..., description="Conversation history in OpenAI format")
     temperature: Optional[float] = Field(None, description="Sampling temperature")
     max_tokens: Optional[int] = Field(None, description="Maximum tokens to generate")
+    stream: bool = Field(False, description="Stream response as SSE (text/event-stream)")
 
     model_config = ConfigDict(
         json_schema_extra={

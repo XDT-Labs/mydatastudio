@@ -11,6 +11,7 @@ MODEL_REGISTRY: dict = {
     "gemma4:12b": {
         "model_name": "ggml-org/gemma-4-12B-it-GGUF",
         "model_file": "gemma-4-12B-it-Q4_K_M.gguf",
+        "model_file_mmproj": "mmproj-gemma-4-12B-it-Q8_0.gguf",
     },
 }
 

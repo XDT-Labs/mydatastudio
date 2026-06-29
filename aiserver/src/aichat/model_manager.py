@@ -57,38 +57,32 @@ def load_gemini_model() -> ChatGoogleGenerativeAI:
     return llm
 
 
-def load_local_model(model_name: str, model_path: str) -> LlamaCpp:
+def load_local_model(model_name: str, model_path: str, clip_model_path: Optional[str] = None):
     """
-    Load a language model from disk into a LangChain LlamaCpp object.
-    
+    Load a GGUF model directly via llama_cpp.Llama.
+
     Args:
         model_name (str): HF repo ID or display name (used for logging only)
         model_path (str): Full absolute path to the .gguf file
-        
-    Returns:
-        LlamaCpp: Wrapped pipeline ready for text generation
-        
-    Raises:
-        Exception: If model loading fails.
-
-    Example:
-        >>> llm = load_local_model("bartowski/gemma", "/path/to/gemma-3-4b.gguf")
-        >>> response = llm.invoke("Hi!")
+        clip_model_path (str | None): Path to mmproj .gguf for vision; None = text-only
     """
-    print(f"[LOADER] Attempting to load GGUF model: {model_name} from {model_path}")
-    
-    # Initialize LlamaCpp directly from the resolved path
-    print(f"[LOADER] Initializing LlamaCpp from {model_path}...")
-    llm = LlamaCpp(
+    import llama_cpp
+
+    print(f"[LOADER] Loading GGUF model: {model_name} from {model_path}")
+
+    chat_handler = None
+    if clip_model_path:
+        from llama_cpp.llama_chat_format import Gemma4ChatHandler
+        print(f"[LOADER] Vision mode — Gemma4ChatHandler with mmproj: {clip_model_path}")
+        chat_handler = Gemma4ChatHandler(clip_model_path=clip_model_path, verbose=False)
+
+    return llama_cpp.Llama(
         model_path=model_path,
-        temperature=TEMPERATURE,
-        max_tokens=MAX_NEW_TOKENS,
         n_ctx=8192,
-        n_gpu_layers=-1,  # Offload all layers to GPU (Metal on Mac)
+        n_gpu_layers=-1,
         verbose=False,
+        chat_handler=chat_handler,
     )
-    
-    return llm
 
 
 def load_embedding_model(model_id: str, filename: str, local_dir: str) -> Any:
