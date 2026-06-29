@@ -123,6 +123,55 @@ class DatabaseRepository {
         .toList();
   }
 
+  /// Fetches the SigLip2 visual embedding for [fileId].
+  /// Returns null if no embedding exists for this file.
+  Future<List<double>?> getFileSiglip2Embedding(String fileId) async {
+    final rows = await db.select(
+      'SELECT siglip2_embedding FROM files_embeddings WHERE file_id = ? LIMIT 1',
+      [fileId],
+    );
+    if (rows.isEmpty || rows.first['siglip2_embedding'] == null) return null;
+    final blob = rows.first['siglip2_embedding'] as Uint8List;
+    return Float32List.view(blob.buffer).toList();
+  }
+
+  /// Returns files visually similar to [queryEmbedding] using the SigLip2 index.
+  /// [excludeFileId] removes the source file from results.
+  /// Similarity is (1 − L2distance/2)×100 assuming L2-normalised unit vectors.
+  Future<List<({File file, double similarity})>> findSimilarImages(
+    List<double> queryEmbedding, {
+    String? excludeFileId,
+    int limit = 100,
+  }) async {
+    final jsonArray = '[${queryEmbedding.join(',')}]';
+    final excludeClause = excludeFileId != null ? 'AND e.file_id != ?' : '';
+    final params = [jsonArray, limit, if (excludeFileId != null) excludeFileId];
+
+    final rows = await db.select(
+      '''
+      SELECT f.*, v.distance
+      FROM files_embeddings AS e
+      JOIN files AS f ON f.id = e.file_id
+      JOIN vector_full_scan(
+        'files_embeddings',
+        'siglip2_embedding',
+        vector_as_f32(?),
+        ?
+      ) AS v ON e.rowid = v.rowid
+      WHERE f.is_deleted = 0
+        $excludeClause
+      ORDER BY v.distance ASC
+      ''',
+      params,
+    );
+
+    return rows.map((row) {
+      final distance = (row['distance'] as num).toDouble();
+      final similarity = ((1.0 - distance / 2.0) * 100).clamp(0.0, 100.0);
+      return (file: File.fromDbMap(row), similarity: similarity);
+    }).toList();
+  }
+
   /// Returns a list of files that do not have a corresponding entry in the
   /// `files_embeddings` table, limited to [limit] results.
   /// Filters for image content types.

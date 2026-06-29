@@ -225,6 +225,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                       const SizedBox(height: 16),
                       TabbedMetadataSection(
                         file: widget.asset as File,
+                        collection: widget.collection,
                         exifData: _exifData,
                         isLoadingExif: _loadingExif,
                         showExif: isImage,

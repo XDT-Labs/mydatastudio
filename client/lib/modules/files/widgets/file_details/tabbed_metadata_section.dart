@@ -1,6 +1,7 @@
 import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/exif_metadata_tab.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/gps_metadata_tab.dart';
@@ -10,6 +11,7 @@ class TabbedMetadataSection extends StatelessWidget {
   const TabbedMetadataSection({
     super.key,
     required this.file,
+    required this.collection,
     required this.exifData,
     required this.isLoadingExif,
     required this.showExif,
@@ -17,6 +19,7 @@ class TabbedMetadataSection extends StatelessWidget {
   });
 
   final File file;
+  final Collection collection;
   final Map<String, IfdTag>? exifData;
   final bool isLoadingExif;
   final bool showExif;
@@ -53,7 +56,7 @@ class TabbedMetadataSection extends StatelessWidget {
                 ),
               if (showExif)
                 ExifMetadataTab(exifData: exifData, isLoading: isLoadingExif),
-              const SimilarFilesTab(),
+              SimilarFilesTab(file: file, collection: collection),
             ],
           ),
         ),
