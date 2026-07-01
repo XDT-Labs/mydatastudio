@@ -31,6 +31,7 @@ from .state import (
     get_embedding_model, set_embedding_model,
     get_embedding_model_id, set_embedding_model_id,
     get_locks,
+    is_stop_requested, request_stop, reset_stop,
 )
 
 
@@ -54,6 +55,18 @@ async def health_check() -> Dict[str, Any]:
         "embedding_model_loaded": embedding_model is not None,
         "is_loading": model_lock.locked() or embedding_lock.locked(),
     }
+
+
+def _strip_image_content(messages: list) -> list:
+    """Extract only text from multimodal messages for text-only models."""
+    result = []
+    for msg in messages:
+        content = msg.get('content')
+        if isinstance(content, list):
+            text_parts = [p['text'] for p in content if p.get('type') == 'text' and p.get('text')]
+            msg = {**msg, 'content': ' '.join(text_parts)}
+        result.append(msg)
+    return result
 
 
 async def generate_chat_completion(request: ChatCompletionRequest):
@@ -97,6 +110,18 @@ async def generate_chat_completion(request: ChatCompletionRequest):
                             mmproj_path = mmproj_candidate
                         else:
                             print(f"[LOADER] mmproj not found at {mmproj_candidate} — text-only mode")
+                    # No client-provided mmproj: fall back to the registry.
+                    # Downloaded models land in the same directory as their mmproj,
+                    # so check there first, then let find_local_model scan wider.
+                    if mmproj_path is None:
+                        mmproj_filename = registry_entry.get("model_file_mmproj")
+                        if mmproj_filename:
+                            model_dir = os.path.dirname(model_path)
+                            mmproj_path = find_local_model(mmproj_filename, model_dir)
+                            if mmproj_path:
+                                print(f"[LOADER] Found mmproj via registry fallback: {mmproj_path}")
+                            else:
+                                print(f"[LOADER] Registry mmproj '{mmproj_filename}' not found — text-only mode")
                     # Chat handler comes from the registry if this alias is known
                     chat_handler_name = registry_entry.get("chat_handler")
                 else:
@@ -156,6 +181,11 @@ async def generate_chat_completion(request: ChatCompletionRequest):
     try:
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
+        # If the model has no vision handler, strip image_url parts so raw base64
+        # doesn't get tokenized as text (which would consume hundreds of thousands of tokens).
+        if hasattr(llm_instance, 'create_chat_completion') and not getattr(llm_instance, 'chat_handler', None):
+            messages = _strip_image_content(messages)
+
         # llama_cpp.Llama (local GGUF, text or vision)
         if hasattr(llm_instance, 'create_chat_completion'):
             kwargs: Dict[str, Any] = {"messages": messages}
@@ -168,9 +198,12 @@ async def generate_chat_completion(request: ChatCompletionRequest):
                 current_model = get_current_model_id()
 
                 def _sse_stream() -> Generator[str, None, None]:
+                    reset_stop()
                     for chunk in llm_instance.create_chat_completion(
                         stream=True, **kwargs
                     ):
+                        if is_stop_requested():
+                            break
                         chunk["model"] = current_model
                         yield f"data: {json.dumps(chunk)}\n\n"
                     yield "data: [DONE]\n\n"
@@ -198,7 +231,10 @@ async def generate_chat_completion(request: ChatCompletionRequest):
             created_at = int(time.time())
 
             def _gemini_sse_stream() -> Generator[str, None, None]:
+                reset_stop()
                 for chunk in llm_instance.stream(lc_messages):
+                    if is_stop_requested():
+                        break
                     delta = chunk.content if hasattr(chunk, 'content') else str(chunk)
                     if delta:
                         payload = {
@@ -235,6 +271,12 @@ async def generate_chat_completion(request: ChatCompletionRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to generate response.")
+
+
+async def stop_generation() -> Dict[str, Any]:
+    """Signal the active streaming generation to stop after the current token."""
+    request_stop()
+    return {"status": "stopping"}
 
 
 async def generate_embedding_v1(request: EmbeddingV1Request) -> Dict[str, Any]:

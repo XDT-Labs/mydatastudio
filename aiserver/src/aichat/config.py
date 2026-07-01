@@ -26,6 +26,12 @@ MODEL_REGISTRY: dict = {
         "model_file_mmproj": "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf",
         "chat_handler": "Qwen2VLChatHandler",
     },
+    "phi4": {
+        "model_name": "Swicked86/phi4-mm-gguf",
+        "model_file": "phi4-mm-Q4_K_M.gguf",
+        "model_file_mmproj": "mmproj-phi4-mm-f16.gguf",
+        "chat_handler": "Phi3VisionChatHandler",
+    },
 }
 
 DEFAULT_MODEL_ALIAS = "gemma4:12b"

@@ -89,7 +89,7 @@ def load_local_model(
 
     return llama_cpp.Llama(
         model_path=model_path,
-        n_ctx=8192,
+        n_ctx=32768,
         n_gpu_layers=-1,
         verbose=False,
         chat_handler=chat_handler,

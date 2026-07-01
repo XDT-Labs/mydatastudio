@@ -6,6 +6,7 @@ access to model instances, IDs, and synchronization locks. It ensures that
 model loading operations are coordinated across concurrent requests.
 """
 import asyncio
+import threading
 from typing import Optional, Any, Tuple
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -143,6 +144,21 @@ def set_embedding_model_id(model_id: Optional[str]) -> None:
     """
     global embedding_model_id
     embedding_model_id = model_id
+
+
+_stop_event = threading.Event()
+
+
+def is_stop_requested() -> bool:
+    return _stop_event.is_set()
+
+
+def request_stop() -> None:
+    _stop_event.set()
+
+
+def reset_stop() -> None:
+    _stop_event.clear()
 
 
 def get_locks() -> Tuple[asyncio.Lock, asyncio.Lock]:

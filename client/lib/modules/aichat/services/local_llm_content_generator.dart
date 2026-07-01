@@ -38,6 +38,10 @@ class LocalLlmContentGenerator implements ContentGenerator {
   // Client-side conversation history in OpenAI format (content may be string or list).
   final List<Map<String, dynamic>> _messages = [];
 
+  // Active streaming state — used by cancelStream().
+  http.Client? _activeClient;
+  bool _cancelled = false;
+
   @override
   Stream<A2uiMessage> get a2uiMessageStream => _a2uiMessageController.stream;
 
@@ -52,6 +56,22 @@ class LocalLlmContentGenerator implements ContentGenerator {
 
   /// Emits individual token chunks as they stream from the server.
   Stream<String> get streamingChunkStream => _streamingChunkController.stream;
+
+  /// Cancel the active stream: closes the HTTP connection and signals the
+  /// server to stop. Whatever was already received is committed.
+  Future<void> cancelStream() async {
+    if (!_isProcessing.value) return;
+    _cancelled = true;
+    _activeClient?.close();
+    try {
+      final url = MainApp.llmServiceUrl.valueOrNull;
+      if (url != null) {
+        await http
+            .post(Uri.parse('$url/v1/chat/stop'))
+            .timeout(const Duration(seconds: 2));
+      }
+    } catch (_) {}
+  }
 
   @override
   void dispose() {
@@ -69,6 +89,7 @@ class LocalLlmContentGenerator implements ContentGenerator {
     Iterable<ChatMessage>? history,
   }) async {
     _isProcessing.value = true;
+    _cancelled = false;
     try {
       final String? llmServiceUrl = MainApp.llmServiceUrl.valueOrNull;
       if (llmServiceUrl == null || llmServiceUrl.isEmpty) {
@@ -119,6 +140,7 @@ class LocalLlmContentGenerator implements ContentGenerator {
 
       lastResponseModel = null;
       final client = http.Client();
+      _activeClient = client;
       try {
         final streamedResponse = await client.send(request);
 
@@ -132,27 +154,35 @@ class LocalLlmContentGenerator implements ContentGenerator {
         }
 
         final buffer = StringBuffer();
-        await for (final line in streamedResponse.stream
-            .transform(utf8.decoder)
-            .transform(const LineSplitter())) {
-          if (!line.startsWith('data: ')) continue;
-          final data = line.substring(6).trim();
-          if (data == '[DONE]') break;
-          try {
-            final parsed = jsonDecode(data) as Map<String, dynamic>;
-            lastResponseModel ??= parsed['model'] as String?;
-            final choices = parsed['choices'] as List?;
-            if (choices != null && choices.isNotEmpty) {
-              final delta =
-                  (choices[0] as Map<String, dynamic>)['delta']
-                      as Map<String, dynamic>?;
-              final content = delta?['content'] as String?;
-              if (content != null && content.isNotEmpty) {
-                buffer.write(content);
-                _streamingChunkController.add(content);
+
+        // Wrap the stream loop so that any interruption (cancel or server
+        // disconnect) falls through to the commit step below.
+        try {
+          await for (final line in streamedResponse.stream
+              .transform(utf8.decoder)
+              .transform(const LineSplitter())) {
+            if (!line.startsWith('data: ')) continue;
+            final data = line.substring(6).trim();
+            if (data == '[DONE]') break;
+            try {
+              final parsed = jsonDecode(data) as Map<String, dynamic>;
+              lastResponseModel ??= parsed['model'] as String?;
+              final choices = parsed['choices'] as List?;
+              if (choices != null && choices.isNotEmpty) {
+                final delta =
+                    (choices[0] as Map<String, dynamic>)['delta']
+                        as Map<String, dynamic>?;
+                final content = delta?['content'] as String?;
+                if (content != null && content.isNotEmpty) {
+                  buffer.write(content);
+                  _streamingChunkController.add(content);
+                }
               }
-            }
-          } catch (_) {}
+            } catch (_) {}
+          }
+        } catch (_) {
+          // Stream was interrupted (user cancel or server disconnect).
+          // Fall through to commit whatever is in the buffer.
         }
 
         final fullContent = buffer.toString();
@@ -161,11 +191,15 @@ class LocalLlmContentGenerator implements ContentGenerator {
           _textResponseController.add(fullContent);
         }
       } finally {
+        _activeClient = null;
         client.close();
       }
     } catch (e, stackTrace) {
-      _errorController.add(ContentGeneratorError(e.toString(), stackTrace));
+      if (!_cancelled) {
+        _errorController.add(ContentGeneratorError(e.toString(), stackTrace));
+      }
     } finally {
+      _cancelled = false;
       _isProcessing.value = false;
     }
   }

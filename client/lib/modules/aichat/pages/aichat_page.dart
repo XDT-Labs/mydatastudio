@@ -44,7 +44,8 @@ class TextMessageItem extends ChatItem {
   final String role;
   final String text;
   final String? model;
-  TextMessageItem({required this.role, required this.text, this.model});
+  final List<Uint8List> images;
+  TextMessageItem({required this.role, required this.text, this.model, this.images = const []});
 }
 
 class GenUiSurfaceItem extends ChatItem {
@@ -378,21 +379,22 @@ class _AichatPage extends State<AichatPage> {
     // Create conversation on first message
     await _ensureConversation(message);
 
+    List<Uint8List> attachmentBytes = [];
     if (_pendingFiles.isNotEmpty) {
       logger.d(
         '[ATTACH] Reading ${_pendingFiles.length} file(s): ${_pendingFiles.map((f) => f.name).toList()}',
       );
-      final List<Uint8List> bytes = await Future.wait(
+      attachmentBytes = await Future.wait(
         _pendingFiles
             .where((f) => f.path != null)
             .map((f) => File(f.path!).readAsBytes()),
       );
-      logger.d('[ATTACH] Read ${bytes.length} file(s)');
-      _contentGenerator.pendingAttachments = bytes;
+      logger.d('[ATTACH] Read ${attachmentBytes.length} file(s)');
+      _contentGenerator.pendingAttachments = attachmentBytes;
     }
 
     setState(() {
-      _chatItems.add(TextMessageItem(role: 'user', text: message));
+      _chatItems.add(TextMessageItem(role: 'user', text: message, images: attachmentBytes));
       _pendingFiles.clear();
     });
 
@@ -428,7 +430,7 @@ class _AichatPage extends State<AichatPage> {
     return KeyEventResult.ignored;
   }
 
-  Widget _buildUserBubble(String text) {
+  Widget _buildUserBubble(String text, {List<Uint8List> images = const []}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Align(
@@ -442,9 +444,38 @@ class _AichatPage extends State<AichatPage> {
             color: _userBubbleColor,
             borderRadius: BorderRadius.circular(18.0),
           ),
-          child: Text(
-            text,
-            style: const TextStyle(color: Colors.white, fontSize: 15),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (images.isNotEmpty)
+                Padding(
+                  padding: EdgeInsets.only(bottom: text.isNotEmpty ? 8.0 : 0),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    alignment: WrapAlignment.end,
+                    children: images
+                        .map(
+                          (bytes) => ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.memory(
+                              bytes,
+                              width: 120,
+                              height: 120,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              if (text.isNotEmpty)
+                Text(
+                  text,
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                ),
+            ],
           ),
         ),
       ),
@@ -590,7 +621,8 @@ class _AichatPage extends State<AichatPage> {
         children: [
           _buildTitleBar(),
           Expanded(
-            child: ListView.builder(
+            child: SelectionArea(
+             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.only(
                 bottom: 20,
@@ -611,7 +643,7 @@ class _AichatPage extends State<AichatPage> {
 
                 if (item is TextMessageItem) {
                   return item.role == 'user'
-                      ? _buildUserBubble(item.text)
+                      ? _buildUserBubble(item.text, images: item.images)
                       : _buildAssistantBubble(item.text, model: item.model);
                 }
 
@@ -628,6 +660,7 @@ class _AichatPage extends State<AichatPage> {
                 return const SizedBox.shrink();
               },
             ),
+           ),
           ),
           Container(
             color: _bgColor,
@@ -749,31 +782,42 @@ class _AichatPage extends State<AichatPage> {
                           ),
                         ),
                         const Spacer(),
-                        GestureDetector(
-                          onTap:
-                              _canSend && _streamingText == null
-                                  ? () => _sendMessage(_textController.text)
-                                  : null,
-                          child: Container(
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color:
-                                  _canSend && _streamingText == null
-                                      ? _sendEnabledBg
-                                      : _sendDisabledBg,
+                        if (_streamingText != null)
+                          GestureDetector(
+                            onTap: () => _contentGenerator.cancelStream(),
+                            child: Container(
+                              width: 30,
+                              height: 30,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _sendEnabledBg,
+                              ),
+                              child: const Icon(
+                                Icons.stop_rounded,
+                                color: Colors.black,
+                                size: 18,
+                              ),
                             ),
-                            child: Icon(
-                              Icons.arrow_upward_rounded,
-                              color:
-                                  _canSend && _streamingText == null
-                                      ? Colors.black
-                                      : _mutedColor,
-                              size: 18,
+                          )
+                        else
+                          GestureDetector(
+                            onTap: _canSend
+                                ? () => _sendMessage(_textController.text)
+                                : null,
+                            child: Container(
+                              width: 30,
+                              height: 30,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _canSend ? _sendEnabledBg : _sendDisabledBg,
+                              ),
+                              child: Icon(
+                                Icons.arrow_upward_rounded,
+                                color: _canSend ? Colors.black : _mutedColor,
+                                size: 18,
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),

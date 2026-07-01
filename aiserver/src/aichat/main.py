@@ -39,6 +39,7 @@ app.get("/")(routes.health_check)
 
 # OpenAI-compatible
 app.post("/v1/chat/completions", summary="OpenAI-compatible chat completion")(routes.generate_chat_completion)
+app.post("/v1/chat/stop", summary="Stop the active streaming generation")(routes.stop_generation)
 app.post("/v1/embeddings", summary="OpenAI-compatible text embeddings")(routes.generate_embedding_v1)
 
 # Util
