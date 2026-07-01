@@ -16,6 +16,7 @@ from .models import (
     ChatCompletionRequest, EmbeddingV1Request,
     EmbeddingRequest, DownloadModelRequest, DeleteModelRequest, ThumbnailRequest, PstImportRequest,
 )
+from .skills import apply_skill, list_skills
 from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, MODEL_REGISTRY, DEFAULT_MODEL_ALIAS
 from .pst_parser import PstParser
 from .model_manager import (
@@ -180,6 +181,7 @@ async def generate_chat_completion(request: ChatCompletionRequest):
 
     try:
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
+        messages = apply_skill(messages)
 
         # If the model has no vision handler, strip image_url parts so raw base64
         # doesn't get tokenized as text (which would consume hundreds of thousands of tokens).
@@ -277,6 +279,11 @@ async def stop_generation() -> Dict[str, Any]:
     """Signal the active streaming generation to stop after the current token."""
     request_stop()
     return {"status": "stopping"}
+
+
+async def get_skills() -> Dict[str, Any]:
+    """Return the built-in skill registry for client autocomplete."""
+    return {"skills": list_skills()}
 
 
 async def generate_embedding_v1(request: EmbeddingV1Request) -> Dict[str, Any]:

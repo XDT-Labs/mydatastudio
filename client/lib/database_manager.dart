@@ -501,6 +501,63 @@ class AppDatabase {
       } catch (e) {
         logger.e("AppDatabase: Migration of aichat_models table failed: $e");
       }
+
+      // v19: add aichat_skills table if missing
+      try {
+        final skillsTables = await _db.select(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='aichat_skills'",
+        );
+        if (skillsTables.isEmpty) {
+          logger.i("AppDatabase: Creating aichat_skills table...");
+          await _db.execute(_aichatSkillsDDL);
+          await _seedAichatSkills(_db);
+        }
+      } catch (e) {
+        logger.e("AppDatabase: Migration of aichat_skills table failed: $e");
+      }
+    }
+  }
+
+  static Future<void> _seedAichatSkills(Database db) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final skills = [
+      {
+        'trigger': '/summarize',
+        'name': 'Summarize',
+        'description': 'Condense content into a concise bullet-point summary.',
+        'system_prompt': 'You are a summarization assistant. Summarize the following content concisely using bullet points. Be brief and capture only the key points.',
+      },
+      {
+        'trigger': '/analyze',
+        'name': 'Analyze',
+        'description': 'Deep analysis of themes, patterns, and key insights.',
+        'system_prompt': 'You are an analytical assistant. Analyze the following content in depth. Identify themes, patterns, key insights, and notable details. Structure your response clearly.',
+      },
+      {
+        'trigger': '/translate',
+        'name': 'Translate',
+        'description': 'Translate text to English.',
+        'system_prompt': 'You are a translation assistant. Translate the user\'s message to English. Output only the translation with no additional commentary.',
+      },
+      {
+        'trigger': '/explain',
+        'name': 'Explain',
+        'description': 'Explain a concept or text in simple terms.',
+        'system_prompt': 'You are a teacher. Explain the following in simple, clear terms that anyone can understand. Use examples where helpful.',
+      },
+      {
+        'trigger': '/rewrite',
+        'name': 'Rewrite',
+        'description': 'Rewrite text to be clearer and more professional.',
+        'system_prompt': 'You are a professional editor. Rewrite the following text to be clearer, more concise, and more professional while preserving the original meaning. Output only the rewritten text.',
+      },
+    ];
+    for (final s in skills) {
+      await db.execute(
+        'INSERT OR IGNORE INTO aichat_skills (id, trigger, name, description, system_prompt, enabled, created_at, updated_at) '
+        'VALUES (?, ?, ?, ?, ?, 1, ?, ?)',
+        [const Uuid().v4(), s['trigger'], s['name'], s['description'], s['system_prompt'], now, now],
+      );
     }
   }
 
@@ -789,6 +846,8 @@ class AppDatabase {
     ''',
     // aichat_models
     _aichatModelsDDL,
+    // aichat_skills
+    _aichatSkillsDDL,
   ];
 
   static const String _aichatModelsDDL = '''
@@ -803,6 +862,19 @@ class AppDatabase {
       api_key TEXT,
       base_url TEXT,
       enabled INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  ''';
+
+  static const String _aichatSkillsDDL = '''
+    CREATE TABLE IF NOT EXISTS aichat_skills (
+      id TEXT PRIMARY KEY,
+      trigger TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT,
+      system_prompt TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );

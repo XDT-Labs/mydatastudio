@@ -45,7 +45,7 @@ class _SettingsDrawerState extends State<SettingsDrawer> {
               ),
               onTap: () => setState(() => _aiChatExpanded = !_aiChatExpanded),
             ),
-            if (_aiChatExpanded)
+            if (_aiChatExpanded) ...[
               ListTile(
                 contentPadding: const EdgeInsets.only(left: 40, right: 16),
                 leading: const Icon(Icons.memory, size: 20),
@@ -53,6 +53,14 @@ class _SettingsDrawerState extends State<SettingsDrawer> {
                 selected: currentRoute == '/settings/aichat-models',
                 onTap: () => GoRouter.of(context).go('/settings/aichat-models'),
               ),
+              ListTile(
+                contentPadding: const EdgeInsets.only(left: 40, right: 16),
+                leading: const Icon(Icons.terminal, size: 20),
+                title: const Text('Skills'),
+                selected: currentRoute == '/settings/aichat-skills',
+                onTap: () => GoRouter.of(context).go('/settings/aichat-skills'),
+              ),
+            ],
           ],
         ),
       ),

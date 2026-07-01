@@ -35,6 +35,10 @@ class LocalLlmContentGenerator implements ContentGenerator {
   /// Reflects what was actually loaded, not what the client requested.
   String? lastResponseModel;
 
+  /// When set, overrides [systemInstruction] for the next request only.
+  /// Cleared automatically after each send.
+  String? skillSystemPrompt;
+
   // Client-side conversation history in OpenAI format (content may be string or list).
   final List<Map<String, dynamic>> _messages = [];
 
@@ -119,9 +123,11 @@ class LocalLlmContentGenerator implements ContentGenerator {
         }
       }
 
+      final activeSystemPrompt = skillSystemPrompt ?? systemInstruction;
+      skillSystemPrompt = null; // consume — applies to this request only
       final List<Map<String, dynamic>> requestMessages = [
-        if (systemInstruction.isNotEmpty)
-          {'role': 'system', 'content': systemInstruction},
+        if (activeSystemPrompt.isNotEmpty)
+          {'role': 'system', 'content': activeSystemPrompt},
         ..._messages,
       ];
 

@@ -3,6 +3,7 @@ Main FastAPI application — OpenAI-compatible local LLM server.
 
 Endpoints:
   GET  /                          Health check
+  GET  /skills                    List built-in skills for client autocomplete
   POST /v1/chat/completions       OpenAI-compatible chat (auto-loads model)
   POST /v1/embeddings             OpenAI-compatible text embeddings
   POST /util/download-model       Download a GGUF model from Hugging Face
@@ -36,6 +37,9 @@ app.add_middleware(
 
 # Health
 app.get("/")(routes.health_check)
+
+# Skills registry
+app.get("/skills", summary="List built-in skills")(routes.get_skills)
 
 # OpenAI-compatible
 app.post("/v1/chat/completions", summary="OpenAI-compatible chat completion")(routes.generate_chat_completion)

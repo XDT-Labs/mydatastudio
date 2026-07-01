@@ -10,6 +10,7 @@ import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/models/tables/aichat_model.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 import 'package:mydatastudio/repositories/aichat_repository.dart';
+import 'package:mydatastudio/repositories/aichat_skills_repository.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:async';
 
@@ -376,6 +377,21 @@ class _AichatPage extends State<AichatPage> {
       return;
     }
 
+    // Resolve /command skill: inject system prompt and strip the trigger word.
+    String llmMessage = message;
+    if (message.trimLeft().startsWith('/')) {
+      final db = DatabaseManager.instance.database;
+      if (db != null) {
+        final parts = message.trim().split(RegExp(r'\s+'));
+        final trigger = parts.first;
+        final skill = await AichatSkillsRepository(db).getByTrigger(trigger);
+        if (skill != null) {
+          _contentGenerator.skillSystemPrompt = skill.systemPrompt;
+          llmMessage = parts.length > 1 ? parts.sublist(1).join(' ') : '';
+        }
+      }
+    }
+
     // Create conversation on first message
     await _ensureConversation(message);
 
@@ -414,7 +430,7 @@ class _AichatPage extends State<AichatPage> {
     _contentGenerator.modelPath = selectedDbModel?.file;
     _contentGenerator.mmprojPath = selectedDbModel?.mmproj;
 
-    _genUiConversation.sendRequest(UserMessage.text(message));
+    _genUiConversation.sendRequest(UserMessage.text(llmMessage.isEmpty ? message : llmMessage));
     _textController.clear();
     _focusNode.requestFocus();
     _scrollToBottom();
