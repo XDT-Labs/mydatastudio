@@ -14,7 +14,7 @@ from PIL import Image
 
 from .models import (
     ChatCompletionRequest, EmbeddingV1Request,
-    EmbeddingRequest, DownloadModelRequest, ThumbnailRequest, PstImportRequest,
+    EmbeddingRequest, DownloadModelRequest, DeleteModelRequest, ThumbnailRequest, PstImportRequest,
 )
 from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, MODEL_REGISTRY, DEFAULT_MODEL_ALIAS
 from .pst_parser import PstParser
@@ -24,7 +24,7 @@ from .model_manager import (
     generate_embedding as gen_emb_fn,
     load_gemini_model,
 )
-from .utils import get_local_path, find_local_model, download_gguf_model
+from .utils import get_local_path, find_local_model, download_gguf_model, stream_download_gguf, _resolve_models_base
 from .state import (
     get_llm_instance, set_llm_instance,
     get_current_model_id, set_current_model_id,
@@ -69,22 +69,55 @@ async def generate_chat_completion(request: ChatCompletionRequest):
         async with model_lock:
             # Re-check inside the lock to avoid double-loading
             if get_llm_instance() is None or target_alias != get_current_model_id():
-                model_name, filename = _resolve_model(target_alias)
+                mmproj_path = None
+                chat_handler_name = None
+                registry_entry = MODEL_REGISTRY.get(target_alias, {})
 
-                if model_name != "gemini":
-                    local_path = get_local_path(model_name)
-                    model_path = find_local_model(filename, local_path)
-                    if model_path is None:
+                # When the client sends an explicit file path, use it directly
+                # instead of going through the registry lookup + file discovery.
+                if request.model_path:
+                    model_name = target_alias
+                    models_dir = os.path.realpath(_resolve_models_base())
+                    model_path = os.path.realpath(request.model_path)
+                    _assert_within_models_dir(model_path, models_dir, "model_path")
+                    if not model_path.endswith('.gguf'):
+                        raise HTTPException(status_code=400, detail="model_path must point to a .gguf file")
+                    if not os.path.exists(model_path):
                         raise HTTPException(
                             status_code=404,
-                            detail=f"Model '{target_alias}' ({filename}) not found locally. "
-                                   f"Use /util/download-model to download it first."
+                            detail=f"Model file not found at path: {model_path}"
                         )
-                    # Look up optional vision projector (mmproj); graceful degradation if absent
-                    mmproj_filename = MODEL_REGISTRY.get(target_alias, {}).get("model_file_mmproj")
-                    mmproj_path = find_local_model(mmproj_filename, local_path) if mmproj_filename else None
-                    if mmproj_filename and not mmproj_path:
-                        print(f"[LOADER] mmproj '{mmproj_filename}' not found — running text-only mode")
+                    # Validate and use client-provided mmproj if present
+                    if request.mmproj_path:
+                        mmproj_candidate = os.path.realpath(request.mmproj_path)
+                        _assert_within_models_dir(mmproj_candidate, models_dir, "mmproj_path")
+                        if not mmproj_candidate.endswith('.gguf'):
+                            raise HTTPException(status_code=400, detail="mmproj_path must point to a .gguf file")
+                        if os.path.exists(mmproj_candidate):
+                            mmproj_path = mmproj_candidate
+                        else:
+                            print(f"[LOADER] mmproj not found at {mmproj_candidate} — text-only mode")
+                    # Chat handler comes from the registry if this alias is known
+                    chat_handler_name = registry_entry.get("chat_handler")
+                else:
+                    model_name, filename = _resolve_model(target_alias)
+
+                    if model_name != "gemini":
+                        local_path = get_local_path(model_name)
+                        model_path = find_local_model(filename, local_path)
+                        if model_path is None:
+                            raise HTTPException(
+                                status_code=404,
+                                detail=f"Model '{target_alias}' ({filename}) not found locally. "
+                                       f"Use /util/download-model to download it first."
+                            )
+                        # Look up optional vision projector and handler from registry
+                        mmproj_filename = registry_entry.get("model_file_mmproj")
+                        chat_handler_name = registry_entry.get("chat_handler")
+                        if mmproj_filename:
+                            mmproj_path = find_local_model(mmproj_filename, local_path)
+                        if mmproj_filename and not mmproj_path:
+                            print(f"[LOADER] mmproj '{mmproj_filename}' not found — running text-only mode")
 
                 old_llm = get_llm_instance()
                 if old_llm is not None:
@@ -102,6 +135,7 @@ async def generate_chat_completion(request: ChatCompletionRequest):
                             model_name=model_name,
                             model_path=model_path,
                             clip_model_path=mmproj_path,
+                            chat_handler_name=chat_handler_name,
                         )
                     set_llm_instance(new_llm)
                     set_current_model_id(target_alias)  # store the alias, not the HF repo ID
@@ -295,8 +329,9 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail="Failed to generate embedding.")
 
 
-async def download_model(request: DownloadModelRequest) -> Dict[str, Any]:
-    """Download a GGUF model from Hugging Face Hub."""
+async def download_model(request: DownloadModelRequest):
+    """Download a GGUF model from HuggingFace, streaming SSE progress events."""
+    import json
     model_id = request.model_name
     filename = request.filename
     local_path = get_local_path(model_id)
@@ -305,14 +340,57 @@ async def download_model(request: DownloadModelRequest) -> Dict[str, Any]:
 
     existing = find_local_model(filename, local_path)
     if existing:
-        return {"status": "success", "message": f"Model '{filename}' already exists locally.", "model_path": existing}
+        def _already_exists():
+            yield f'data: {json.dumps({"status": "complete", "progress": 1.0, "model_path": existing, "message": "Already downloaded"})}\n\n'
+        return StreamingResponse(_already_exists(), media_type="text/event-stream")
 
+    return StreamingResponse(
+        stream_download_gguf(model_id, filename, local_path, hf_token=request.hf_token),
+        media_type="text/event-stream",
+    )
+
+
+def _assert_within_models_dir(path: str, models_dir: str, label: str = "Path") -> None:
+    """Raise 400 if `path` is not strictly inside `models_dir`."""
     try:
-        downloaded_path = download_gguf_model(model_id, filename, local_path)
-        return {"status": "success", "message": f"Model '{filename}' downloaded successfully.", "model_path": downloaded_path}
-    except Exception as e:
-        print(f"[ERROR] Download failed for {model_id}/{filename}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to download model. Check server logs for details.")
+        if os.path.commonpath([path, models_dir]) != models_dir:
+            raise HTTPException(status_code=400, detail=f"{label} is outside the models directory")
+    except ValueError:
+        # commonpath raises ValueError when paths are on different drives (Windows)
+        raise HTTPException(status_code=400, detail=f"{label} is outside the models directory")
+
+
+async def delete_model(request: DeleteModelRequest) -> Dict[str, Any]:
+    """Delete a downloaded GGUF model file and clean up its directory."""
+    import shutil
+
+    models_dir = os.path.realpath(
+        os.environ.get('AICHAT_MODELS_DIR') or os.path.join(os.getcwd(), 'models')
+    )
+    model_path = os.path.realpath(request.model_path)
+
+    _assert_within_models_dir(model_path, models_dir, "File")
+
+    if not model_path.endswith('.gguf'):
+        raise HTTPException(status_code=400, detail="Only .gguf files may be deleted")
+
+    if not os.path.exists(model_path):
+        return {"status": "success", "message": "File already deleted"}
+
+    os.remove(model_path)
+    print(f"[DELETE] Removed model file: {model_path}")
+
+    # Remove the parent directory if nothing meaningful remains
+    parent = os.path.realpath(os.path.dirname(model_path))
+    _assert_within_models_dir(parent, models_dir, "Directory")
+
+    HF_NOISE = {'.gitattributes', '.cache', '.locks', 'blobs', 'refs', 'snapshots'}
+    remaining = {f for f in os.listdir(parent) if f not in HF_NOISE}
+    if not remaining:
+        shutil.rmtree(parent, ignore_errors=True)
+        print(f"[DELETE] Removed empty model directory: {parent}")
+
+    return {"status": "success", "message": f"Deleted {os.path.basename(model_path)}"}
 
 
 def generate_thumbnail(request: ThumbnailRequest) -> Dict[str, Any]:

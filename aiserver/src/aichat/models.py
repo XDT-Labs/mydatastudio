@@ -17,7 +17,15 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str = Field(
         default=DEFAULT_MODEL_ALIAS,
-        description="Model alias (e.g. 'gemma3:4b') or raw HF repo ID"
+        description="Model alias from the registry (e.g. 'gemma4:12b')"
+    )
+    model_path: Optional[str] = Field(
+        None,
+        description="Absolute path to a .gguf file. When provided, bypasses registry lookup and loads this file directly."
+    )
+    mmproj_path: Optional[str] = Field(
+        None,
+        description="Absolute path to the mmproj .gguf file for multimodal vision support."
     )
     messages: List[ChatMessage] = Field(..., description="Conversation history in OpenAI format")
     temperature: Optional[float] = Field(None, description="Sampling temperature")
@@ -79,6 +87,15 @@ class DownloadModelRequest(BaseModel):
         default=DEFAULT_GGUF_FILE,
         description="GGUF filename to download"
     )
+    hf_token: Optional[str] = Field(
+        default=None,
+        description="HuggingFace API token for downloading gated models"
+    )
+
+
+class DeleteModelRequest(BaseModel):
+    """Request to delete a downloaded GGUF model file from disk."""
+    model_path: str = Field(..., description="Absolute path to the GGUF file to delete")
 
 
 class ThumbnailRequest(BaseModel):

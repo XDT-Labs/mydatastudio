@@ -295,7 +295,7 @@ class AppDatabase {
 
   AppDatabase(this._db);
 
-  int get schemaVersion => 17;
+  int get schemaVersion => 18;
 
   Database get rawDb => _db;
 
@@ -394,6 +394,7 @@ class AppDatabase {
       }
       logger.i("AppDatabase: Loading initial data...");
       await _loadInitialData(_db);
+      await _seedAichatModels(_db);
     } else {
       // Schema migration: Check if siglip2_embedding exists or if qwen3_8b_embedding is NOT NULL
       try {
@@ -455,6 +456,79 @@ class AppDatabase {
       } catch (e) {
         logger.e("AppDatabase: Migration of aichat tables failed: $e");
       }
+
+      // v18: add aichat_models table if missing
+      try {
+        final modelsTables = await _db.select(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='aichat_models'",
+        );
+        if (modelsTables.isEmpty) {
+          logger.i("AppDatabase: Creating aichat_models table...");
+          await _db.execute(_aichatModelsDDL);
+          await _seedAichatModels(_db);
+        } else {
+          // Backfill: ensure the default Gemma 4 12B row exists (added after initial v18 seed)
+          final gemmaRows = await _db.select(
+            "SELECT id FROM aichat_models WHERE name = 'gemma4:12b' OR alias = 'gemma4:12b' LIMIT 1",
+          );
+          if (gemmaRows.isEmpty) {
+            logger.i("AppDatabase: Backfilling default Gemma 4 12B model...");
+            final now = DateTime.now().millisecondsSinceEpoch;
+            await _db.execute(
+              'INSERT OR IGNORE INTO aichat_models (id, alias, "group", name, file, mmproj, type, api_key, base_url, enabled, created_at, updated_at) '
+              'VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, 1, ?, ?)',
+              [const Uuid().v4(), 'Gemma 4 12B', 'local', 'gemma4:12b', 'gguf', now, now],
+            );
+          }
+          // Migrate: alias was incorrectly set to the display name; swap alias ↔ name for all rows
+          final oldFormat = await _db.select(
+            "SELECT id FROM aichat_models WHERE alias = 'Gemma 4 12B' LIMIT 1",
+          );
+          if (oldFormat.isNotEmpty) {
+            logger.i("AppDatabase: Swapping alias/name to correct semantic order...");
+            await _db.execute(
+              'UPDATE aichat_models SET alias = name, name = alias',
+            );
+          }
+          // Migrate: update Gemini 2.5 rows to 3.5
+          await _db.execute(
+            "UPDATE aichat_models SET "
+            "  alias = REPLACE(alias, '2.5', '3.5'), "
+            "  name  = REPLACE(name,  '2.5', '3.5') "
+            "WHERE \"group\" = 'gemini' AND (alias LIKE '%2.5%' OR name LIKE '%2.5%')",
+          );
+        }
+      } catch (e) {
+        logger.e("AppDatabase: Migration of aichat_models table failed: $e");
+      }
+    }
+  }
+
+  static Future<void> _seedAichatModels(Database db) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final models = [
+      // Default local model — always enabled, bundled with the app
+      {'id': const Uuid().v4(), 'alias': 'gemma4:12b', 'group': 'local', 'name': 'Gemma 4 12B', 'type': 'gguf', 'enabled': 1},
+      // Gemini
+      {'id': const Uuid().v4(), 'alias': 'gemini-3.5-flash', 'group': 'gemini', 'name': 'Gemini 3.5 Flash', 'type': 'api'},
+      {'id': const Uuid().v4(), 'alias': 'gemini-3.5-pro', 'group': 'gemini', 'name': 'Gemini 3.5 Pro', 'type': 'api'},
+      // Claude
+      {'id': const Uuid().v4(), 'alias': 'claude-sonnet-4-6', 'group': 'claude', 'name': 'Claude Sonnet', 'type': 'api'},
+      {'id': const Uuid().v4(), 'alias': 'claude-opus-4-8', 'group': 'claude', 'name': 'Claude Opus', 'type': 'api'},
+      // OpenAI
+      {'id': const Uuid().v4(), 'alias': 'gpt-4o', 'group': 'openai', 'name': 'OpenAI 5.5', 'type': 'api'},
+      // Grok
+      {'id': const Uuid().v4(), 'alias': 'grok-beta', 'group': 'grok', 'name': 'Grok', 'type': 'api'},
+      // Ollama placeholder
+      {'id': const Uuid().v4(), 'alias': 'ollama', 'group': 'ollama', 'name': 'Ollama', 'type': 'ollama', 'base_url': 'http://localhost:11434'},
+    ];
+    for (final m in models) {
+      final enabled = (m['enabled'] as int?) ?? 0;
+      await db.execute(
+        'INSERT OR IGNORE INTO aichat_models (id, alias, "group", name, file, mmproj, type, api_key, base_url, enabled, created_at, updated_at) '
+        'VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?, ?, ?)',
+        [m['id'], m['alias'], m['group'], m['name'], m['type'], m['base_url'], enabled, now, now],
+      );
     }
   }
 
@@ -713,5 +787,24 @@ class AppDatabase {
       FOREIGN KEY (conversation_id) REFERENCES aichat_conversations(id) ON DELETE CASCADE
     );
     ''',
+    // aichat_models
+    _aichatModelsDDL,
   ];
+
+  static const String _aichatModelsDDL = '''
+    CREATE TABLE IF NOT EXISTS aichat_models (
+      id TEXT PRIMARY KEY,
+      alias TEXT NOT NULL,
+      "group" TEXT NOT NULL,
+      name TEXT NOT NULL,
+      file TEXT,
+      mmproj TEXT,
+      type TEXT NOT NULL DEFAULT 'api',
+      api_key TEXT,
+      base_url TEXT,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  ''';
 }

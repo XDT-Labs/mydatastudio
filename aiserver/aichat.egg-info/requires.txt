@@ -1,6 +1,6 @@
 uvicorn[standard]==0.38.0
 pydantic==2.12.3
-llama-cpp-python>=0.3.7
+llama-cpp-python>=0.3.31
 numpy==1.26.4
 python-multipart==0.0.9
 pytest==8.3.3

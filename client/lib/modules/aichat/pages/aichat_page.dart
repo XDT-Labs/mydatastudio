@@ -7,8 +7,11 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/aichat/services/local_llm_content_generator.dart';
 import 'package:mydatastudio/python_manager.dart';
+import 'package:mydatastudio/models/tables/aichat_model.dart';
+import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 import 'package:mydatastudio/repositories/aichat_repository.dart';
 import 'package:file_picker/file_picker.dart';
+import 'dart:async';
 
 // Dark theme colors
 const _bgColor = Color(0xFF000000);
@@ -24,7 +27,9 @@ class AichatPage extends StatefulWidget {
   const AichatPage({super.key});
 
   /// Drawer writes here to load a conversation (null = new conversation).
-  static final ValueNotifier<String?> selectConversationId = ValueNotifier(null);
+  static final ValueNotifier<String?> selectConversationId = ValueNotifier(
+    null,
+  );
 
   /// True while an LLM response is streaming — navigation is disabled during this time.
   static final ValueNotifier<bool> isStreaming = ValueNotifier(false);
@@ -38,7 +43,8 @@ sealed class ChatItem {}
 class TextMessageItem extends ChatItem {
   final String role;
   final String text;
-  TextMessageItem({required this.role, required this.text});
+  final String? model;
+  TextMessageItem({required this.role, required this.text, this.model});
 }
 
 class GenUiSurfaceItem extends ChatItem {
@@ -49,13 +55,9 @@ class GenUiSurfaceItem extends ChatItem {
 class _AichatPage extends State<AichatPage> {
   AppLogger logger = AppLogger(null);
   bool _isLLMServiceRunning = PythonManager.isLLMServiceRunning.value;
-  String _selectedModel = 'Local LLM';
-  final List<String> _models = ['Local LLM', 'Gemini'];
-
-  static const Map<String, String> _modelAliases = {
-    'Local LLM': 'gemma4:12b',
-    'Gemini': 'gemini',
-  };
+  String _selectedModel = 'gemma4:12b';
+  List<AichatModel> _dbModels = [];
+  StreamSubscription<List<AichatModel>>? _modelsSub;
 
   final _textController = TextEditingController();
   final _titleController = TextEditingController();
@@ -100,6 +102,7 @@ class _AichatPage extends State<AichatPage> {
     });
 
     AichatPage.selectConversationId.addListener(_onConversationSelected);
+    _loadDbModels();
 
     _a2uiMessageProcessor = A2uiMessageProcessor(
       catalogs: [CoreCatalogItems.asCatalog()],
@@ -122,7 +125,11 @@ class _AichatPage extends State<AichatPage> {
     _contentGenerator.textResponseStream.listen((text) {
       if (mounted) {
         setState(() {
-          _chatItems.add(TextMessageItem(role: 'assistant', text: text));
+          _chatItems.add(TextMessageItem(
+            role: 'assistant',
+            text: text,
+            model: _contentGenerator.lastResponseModel,
+          ));
           _streamingText = null;
         });
         AichatPage.isStreaming.value = false;
@@ -151,6 +158,7 @@ class _AichatPage extends State<AichatPage> {
 
   @override
   void dispose() {
+    _modelsSub?.cancel();
     AichatPage.selectConversationId.removeListener(_onConversationSelected);
     _textController.dispose();
     _titleController.dispose();
@@ -158,6 +166,69 @@ class _AichatPage extends State<AichatPage> {
     _focusNode.dispose();
     _genUiConversation.dispose();
     super.dispose();
+  }
+
+  void _loadDbModels() {
+    final db = DatabaseManager.instance.database;
+    if (db == null) return;
+    final repo = AichatModelRepository(db);
+    _modelsSub = repo.watchAll().listen((models) {
+      if (!mounted) return;
+      setState(() {
+        _dbModels = models;
+      });
+    });
+  }
+
+  /// Ordered group labels for the dropdown headers.
+  static const List<(String, String)> _groupOrder = [
+    ('local', 'Local LLM'),
+    ('ollama', 'Ollama'),
+    ('gemini', 'Gemini'),
+    ('claude', 'Claude'),
+    ('openai', 'OpenAI'),
+    ('grok', 'Grok'),
+  ];
+
+  List<DropdownMenuItem<String>> _buildModelItems() {
+    final items = <DropdownMenuItem<String>>[];
+
+    for (final (group, label) in _groupOrder) {
+      final groupModels =
+          _dbModels.where((m) => m.group == group && m.enabled).toList();
+      if (groupModels.isEmpty) continue;
+
+      // Header (not selectable)
+      items.add(
+        DropdownMenuItem<String>(
+          enabled: false,
+          value: '__header_$group',
+          child: Text(
+            label.toUpperCase(),
+            style: const TextStyle(
+              color: _hintColor,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ),
+      );
+
+      for (final m in groupModels) {
+        items.add(
+          DropdownMenuItem<String>(
+            value: m.alias,
+            child: Text(
+              m.name,
+              style: const TextStyle(color: _mutedColor, fontSize: 13),
+            ),
+          ),
+        );
+      }
+    }
+
+    return items;
   }
 
   void _onConversationSelected() {
@@ -205,14 +276,8 @@ class _AichatPage extends State<AichatPage> {
     if (rows != null && rows.isNotEmpty) {
       conversationName = rows.first['name'] as String? ?? '';
       final savedModel = rows.first['model'] as String?;
-      if (savedModel != null) {
-        final displayModel = _modelAliases.entries
-            .where((e) => e.value == savedModel)
-            .map((e) => e.key)
-            .firstOrNull;
-        if (displayModel != null && mounted) {
-          setState(() => _selectedModel = displayModel);
-        }
+      if (savedModel != null && mounted) {
+        setState(() => _selectedModel = savedModel);
       }
     }
 
@@ -237,7 +302,7 @@ class _AichatPage extends State<AichatPage> {
     if (repo == null) return;
 
     final name = _defaultName(firstMessage);
-    final alias = _modelAliases[_selectedModel] ?? _selectedModel;
+    final alias = _selectedModel;
     final conv = await repo.createConversation(name: name, model: alias);
 
     if (mounted) {
@@ -254,7 +319,7 @@ class _AichatPage extends State<AichatPage> {
     if (id == null || repo == null) return;
     await repo.addMessage(conversationId: id, role: 'assistant', content: text);
     // Keep model in sync
-    final alias = _modelAliases[_selectedModel] ?? _selectedModel;
+    final alias = _selectedModel;
     await repo.updateConversation(id, model: alias);
   }
 
@@ -314,7 +379,9 @@ class _AichatPage extends State<AichatPage> {
     await _ensureConversation(message);
 
     if (_pendingFiles.isNotEmpty) {
-      logger.d('[ATTACH] Reading ${_pendingFiles.length} file(s): ${_pendingFiles.map((f) => f.name).toList()}');
+      logger.d(
+        '[ATTACH] Reading ${_pendingFiles.length} file(s): ${_pendingFiles.map((f) => f.name).toList()}',
+      );
       final List<Uint8List> bytes = await Future.wait(
         _pendingFiles
             .where((f) => f.path != null)
@@ -336,8 +403,14 @@ class _AichatPage extends State<AichatPage> {
       await repo.addMessage(conversationId: id, role: 'user', content: message);
     }
 
-    final alias = _modelAliases[_selectedModel] ?? _selectedModel;
+    final alias = _selectedModel;
     _contentGenerator.model = alias;
+    // Pass file paths for downloaded local models so the server can load
+    // them directly without needing a registry entry.
+    final selectedDbModel =
+        _dbModels.where((m) => m.alias == _selectedModel).firstOrNull;
+    _contentGenerator.modelPath = selectedDbModel?.file;
+    _contentGenerator.mmprojPath = selectedDbModel?.mmproj;
 
     _genUiConversation.sendRequest(UserMessage.text(message));
     _textController.clear();
@@ -378,42 +451,77 @@ class _AichatPage extends State<AichatPage> {
     );
   }
 
-  Widget _buildAssistantBubble(String text, {bool streaming = false}) {
+  Widget _buildAssistantBubble(String text, {bool streaming = false, String? model}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.85,
-          ),
-          child: MarkdownBody(
-            data: streaming ? '$text▋' : text,
-            styleSheet: MarkdownStyleSheet(
-              p: const TextStyle(color: Colors.white, fontSize: 15, height: 1.5),
-              code: TextStyle(
-                backgroundColor: const Color(0xFF2C2C2E),
-                color: const Color(0xFFE5E5EA),
-                fontFamily: 'monospace',
-                fontSize: 13,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (model != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  model,
+                  style: const TextStyle(color: _hintColor, fontSize: 11),
+                ),
               ),
-              codeblockDecoration: BoxDecoration(
-                color: const Color(0xFF1C1C1E),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _inputBorderColor),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.85,
               ),
-              blockquoteDecoration: BoxDecoration(
-                color: const Color(0xFF1C1C1E),
-                border: Border(left: BorderSide(color: _mutedColor, width: 3)),
+              child: MarkdownBody(
+                data: streaming ? '$text▋' : text,
+                styleSheet: MarkdownStyleSheet(
+                  p: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    height: 1.5,
+                  ),
+                  code: TextStyle(
+                    backgroundColor: const Color(0xFF2C2C2E),
+                    color: const Color(0xFFE5E5EA),
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                  ),
+                  codeblockDecoration: BoxDecoration(
+                    color: const Color(0xFF1C1C1E),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _inputBorderColor),
+                  ),
+                  blockquoteDecoration: BoxDecoration(
+                    color: const Color(0xFF1C1C1E),
+                    border: Border(left: BorderSide(color: _mutedColor, width: 3)),
+                  ),
+                  h1: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  h2: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  h3: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  listBullet: const TextStyle(color: Colors.white),
+                  strong: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  em: const TextStyle(
+                    color: Color(0xFFE5E5EA),
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
               ),
-              h1: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-              h2: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-              h3: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-              listBullet: const TextStyle(color: Colors.white),
-              strong: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              em: const TextStyle(color: Color(0xFFE5E5EA), fontStyle: FontStyle.italic),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -424,7 +532,9 @@ class _AichatPage extends State<AichatPage> {
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
       decoration: const BoxDecoration(
         color: _bgColor,
-        border: Border(bottom: BorderSide(color: _inputBorderColor, width: 0.5)),
+        border: Border(
+          bottom: BorderSide(color: _inputBorderColor, width: 0.5),
+        ),
       ),
       child: TextField(
         controller: _titleController,
@@ -435,7 +545,11 @@ class _AichatPage extends State<AichatPage> {
         ),
         decoration: const InputDecoration(
           hintText: 'New conversation',
-          hintStyle: TextStyle(color: _hintColor, fontSize: 16, fontWeight: FontWeight.w400),
+          hintStyle: TextStyle(
+            color: _hintColor,
+            fontSize: 16,
+            fontWeight: FontWeight.w400,
+          ),
           border: InputBorder.none,
           isDense: true,
           contentPadding: EdgeInsets.zero,
@@ -471,219 +585,204 @@ class _AichatPage extends State<AichatPage> {
     final itemCount = _chatItems.length + (_streamingText != null ? 1 : 0);
 
     return Scaffold(
-        backgroundColor: _bgColor,
-        body: Column(
-          children: [
-            _buildTitleBar(),
-            Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.only(
-                  bottom: 20,
-                  left: 24,
-                  right: 24,
-                  top: 24,
-                ),
-                itemCount: itemCount,
-                itemBuilder: (context, index) {
-                  if (index == _chatItems.length && _streamingText != null) {
-                    return _buildAssistantBubble(
-                      _streamingText!,
-                      streaming: true,
-                    );
-                  }
-
-                  final item = _chatItems[index];
-
-                  if (item is TextMessageItem) {
-                    return item.role == 'user'
-                        ? _buildUserBubble(item.text)
-                        : _buildAssistantBubble(item.text);
-                  }
-
-                  if (item is GenUiSurfaceItem) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: GenUiSurface(
-                        host: _genUiConversation.host,
-                        surfaceId: item.surfaceId,
-                      ),
-                    );
-                  }
-
-                  return const SizedBox.shrink();
-                },
+      backgroundColor: _bgColor,
+      body: Column(
+        children: [
+          _buildTitleBar(),
+          Expanded(
+            child: ListView.builder(
+              controller: _scrollController,
+              padding: const EdgeInsets.only(
+                bottom: 20,
+                left: 24,
+                right: 24,
+                top: 24,
               ),
+              itemCount: itemCount,
+              itemBuilder: (context, index) {
+                if (index == _chatItems.length && _streamingText != null) {
+                  return _buildAssistantBubble(
+                    _streamingText!,
+                    streaming: true,
+                  );
+                }
+
+                final item = _chatItems[index];
+
+                if (item is TextMessageItem) {
+                  return item.role == 'user'
+                      ? _buildUserBubble(item.text)
+                      : _buildAssistantBubble(item.text, model: item.model);
+                }
+
+                if (item is GenUiSurfaceItem) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: GenUiSurface(
+                      host: _genUiConversation.host,
+                      surfaceId: item.surfaceId,
+                    ),
+                  );
+                }
+
+                return const SizedBox.shrink();
+              },
             ),
-            Container(
-              color: _bgColor,
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: _inputBgColor,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: _inputBorderColor, width: 1),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Focus(
-                      focusNode: _focusNode,
-                      onKeyEvent: _handleKeyEvent,
-                      child: TextField(
-                        controller: _textController,
-                        keyboardType: TextInputType.multiline,
-                        minLines: 1,
-                        maxLines: 10,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          color: Colors.white,
+          ),
+          Container(
+            color: _bgColor,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: Container(
+              decoration: BoxDecoration(
+                color: _inputBgColor,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _inputBorderColor, width: 1),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Focus(
+                    focusNode: _focusNode,
+                    onKeyEvent: _handleKeyEvent,
+                    child: TextField(
+                      controller: _textController,
+                      keyboardType: TextInputType.multiline,
+                      minLines: 1,
+                      maxLines: 10,
+                      style: const TextStyle(fontSize: 15, color: Colors.white),
+                      decoration: const InputDecoration(
+                        hintText: "Ask a question",
+                        hintStyle: TextStyle(color: _hintColor, fontSize: 15),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 14.0,
+                          vertical: 14.0,
                         ),
-                        decoration: const InputDecoration(
-                          hintText: "Send a message... (@ to mention, / for commands)",
-                          hintStyle: TextStyle(
-                            color: _hintColor,
-                            fontSize: 15,
-                          ),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 14.0,
-                            vertical: 14.0,
-                          ),
-                          border: InputBorder.none,
-                          isDense: true,
-                        ),
+                        border: InputBorder.none,
+                        isDense: true,
                       ),
                     ),
-                    if (_pendingFiles.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8, top: 4),
-                        child: Wrap(
-                          spacing: 6,
-                          children: _pendingFiles.map((f) {
-                            return Chip(
-                              label: Text(
-                                f.name,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              backgroundColor: const Color(0xFF3A3A3C),
-                              deleteIcon: const Icon(
-                                Icons.close,
-                                size: 14,
-                                color: _mutedColor,
-                              ),
-                              onDeleted: () =>
-                                  setState(() => _pendingFiles.remove(f)),
-                              materialTapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                            );
-                          }).toList(),
-                        ),
-                      ),
+                  ),
+                  if (_pendingFiles.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(6, 4, 8, 8),
-                      child: Row(
-                        children: [
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            icon: const Icon(
-                              Icons.add,
-                              color: _mutedColor,
-                              size: 20,
-                            ),
-                            onPressed: () async {
-                              FilePickerResult? result =
-                                  await FilePicker.platform.pickFiles(
-                                allowMultiple: true,
-                              );
-                              if (result != null) {
-                                setState(
-                                    () => _pendingFiles.addAll(result.files));
-                              }
-                            },
-                          ),
-                          const SizedBox(width: 12),
-                          Theme(
-                            data: Theme.of(context).copyWith(
-                              hoverColor: Colors.transparent,
-                              splashColor: Colors.transparent,
-                            ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<String>(
-                                value: _selectedModel,
-                                dropdownColor: const Color(0xFF2C2C2E),
-                                icon: const Padding(
-                                  padding: EdgeInsets.only(left: 4.0),
-                                  child: Icon(
-                                    Icons.keyboard_arrow_up,
-                                    size: 16,
-                                    color: _mutedColor,
+                      padding: const EdgeInsets.only(left: 8, top: 4),
+                      child: Wrap(
+                        spacing: 6,
+                        children:
+                            _pendingFiles.map((f) {
+                              return Chip(
+                                label: Text(
+                                  f.name,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.white,
                                   ),
                                 ),
-                                elevation: 2,
-                                onChanged: (String? newValue) {
-                                  if (newValue != null) {
-                                    setState(() {
-                                      _selectedModel = newValue;
-                                    });
-                                  }
-                                },
-                                items: _models.map<DropdownMenuItem<String>>(
-                                  (String value) {
-                                    return DropdownMenuItem<String>(
-                                      value: value,
-                                      child: Text(
-                                        value,
-                                        style: const TextStyle(
-                                          color: _mutedColor,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w400,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ).toList(),
-                              ),
-                            ),
-                          ),
-                          const Spacer(),
-                          GestureDetector(
-                            onTap: _canSend && _streamingText == null
-                                ? () => _sendMessage(_textController.text)
-                                : null,
-                            child: Container(
-                              width: 30,
-                              height: 30,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _canSend && _streamingText == null
-                                    ? _sendEnabledBg
-                                    : _sendDisabledBg,
-                              ),
-                              child: Icon(
-                                Icons.arrow_upward_rounded,
-                                color: _canSend && _streamingText == null
-                                    ? Colors.black
-                                    : _mutedColor,
-                                size: 18,
-                              ),
-                            ),
-                          ),
-                        ],
+                                backgroundColor: const Color(0xFF3A3A3C),
+                                deleteIcon: const Icon(
+                                  Icons.close,
+                                  size: 14,
+                                  color: _mutedColor,
+                                ),
+                                onDeleted:
+                                    () =>
+                                        setState(() => _pendingFiles.remove(f)),
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                              );
+                            }).toList(),
                       ),
                     ),
-                  ],
-                ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(6, 4, 8, 8),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(
+                            Icons.add,
+                            color: _mutedColor,
+                            size: 20,
+                          ),
+                          onPressed: () async {
+                            FilePickerResult? result = await FilePicker.platform
+                                .pickFiles(allowMultiple: true);
+                            if (result != null) {
+                              setState(
+                                () => _pendingFiles.addAll(result.files),
+                              );
+                            }
+                          },
+                        ),
+                        const SizedBox(width: 12),
+                        Theme(
+                          data: Theme.of(context).copyWith(
+                            hoverColor: Colors.transparent,
+                            splashColor: Colors.transparent,
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _buildModelItems().any((i) => i.value == _selectedModel) ? _selectedModel : null,
+                              dropdownColor: const Color(0xFF2C2C2E),
+                              icon: const Padding(
+                                padding: EdgeInsets.only(left: 4.0),
+                                child: Icon(
+                                  Icons.keyboard_arrow_up,
+                                  size: 16,
+                                  color: _mutedColor,
+                                ),
+                              ),
+                              elevation: 2,
+                              onChanged: (String? newValue) {
+                                if (newValue != null) {
+                                  setState(() {
+                                    _selectedModel = newValue;
+                                  });
+                                }
+                              },
+                              items: _buildModelItems(),
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        GestureDetector(
+                          onTap:
+                              _canSend && _streamingText == null
+                                  ? () => _sendMessage(_textController.text)
+                                  : null,
+                          child: Container(
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color:
+                                  _canSend && _streamingText == null
+                                      ? _sendEnabledBg
+                                      : _sendDisabledBg,
+                            ),
+                            child: Icon(
+                              Icons.arrow_upward_rounded,
+                              color:
+                                  _canSend && _streamingText == null
+                                      ? Colors.black
+                                      : _mutedColor,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-      );
+          ),
+        ],
+      ),
+    );
   }
 }

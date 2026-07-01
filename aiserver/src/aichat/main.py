@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, DEFAULT_MODEL_ALIAS, MODEL_REGISTRY, API_TITLE, API_DESCRIPTION
-from .utils import get_local_path, find_local_model
+from .utils import get_local_path, find_local_model, _resolve_models_base
 from . import routes
 
 
@@ -43,13 +43,16 @@ app.post("/v1/embeddings", summary="OpenAI-compatible text embeddings")(routes.g
 
 # Util
 app.post("/util/download-model", summary="Download a GGUF model from Hugging Face")(routes.download_model)
+app.post("/util/delete-model", summary="Delete a downloaded GGUF model file")(routes.delete_model)
 app.post("/util/embedding", summary="Multimodal embeddings (text or image)")(routes.generate_embedding)
 app.post("/util/thumbnail", summary="Generate image thumbnail (incl. RAW formats)")(routes.generate_thumbnail)
 app.post("/util/import/pst", summary="Stream-parse an Outlook PST file")(routes.import_pst)
 
 
 def main() -> None:
-    os.makedirs("models", exist_ok=True)
+    models_dir = _resolve_models_base()
+    os.makedirs(models_dir, exist_ok=True)
+    print(f"[STARTUP] Models directory: {models_dir}")
 
     # Auto-load default model at startup if present locally.
     # Resolve through registry so the stored ID matches what the client sends.

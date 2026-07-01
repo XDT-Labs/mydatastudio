@@ -17,6 +17,7 @@ import 'package:mydatastudio/modules/social/pages/twitter_page.dart';
 import 'package:mydatastudio/modules/social/widgets/social_drawer.dart';
 import 'package:mydatastudio/pages/home.dart';
 import 'package:mydatastudio/pages/login.dart';
+import 'package:mydatastudio/modules/aichat/pages/aichat_models_settings_page.dart';
 import 'package:mydatastudio/pages/settings.dart';
 import 'package:mydatastudio/pages/settings_drawer.dart';
 import 'package:mydatastudio/pages/setup.dart';
@@ -101,6 +102,17 @@ class AppRouter {
                 ),
               );
             },
+            routes: [
+              GoRoute(
+                path: 'aichat-models',
+                pageBuilder: (context, state) => const RoutePage(
+                  body: NavigationWrapper(
+                    body: AichatModelsSettingsPage(),
+                    drawer: SettingsDrawer(),
+                  ),
+                ),
+              ),
+            ],
           ),
 
           GoRoute(

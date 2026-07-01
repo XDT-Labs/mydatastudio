@@ -10,28 +10,50 @@ import urllib.request
 from typing import Optional
 
 
+def _resolve_models_base() -> str:
+    """
+    Resolve the absolute base directory for model storage using this priority chain:
+
+    1. AICHAT_MODELS_DIR env var — set by Flutter's PythonManager when spawning
+       the subprocess. Always wins when present.
+    2. PyInstaller frozen binary — use the directory containing sys.executable.
+       The binary lives in Application Support/aichat/, so models land beside it.
+    3. macOS dev fallback — scan ~/Library/Application Support for the known bundle
+       IDs and use the first one whose aichat/ sub-directory already exists.
+    4. Last resort — ./models/ relative to CWD (original behaviour).
+    """
+    import sys
+
+    if env_dir := os.environ.get('AICHAT_MODELS_DIR'):
+        return env_dir
+
+    if getattr(sys, 'frozen', False):
+        return os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'models')
+
+    if sys.platform == 'darwin':
+        app_support = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support')
+        for bundle_id in ('com.xdtlabs.mydatastudio.dev', 'com.xdtlabs.mydatastudio'):
+            bundle_dir = os.path.join(app_support, bundle_id)
+            if os.path.isdir(bundle_dir):
+                return os.path.join(bundle_dir, 'aichat', 'models')
+
+    return os.path.join(os.getcwd(), 'models')
+
+
 def get_local_path(model_id: str) -> str:
     """
-    Generate a local directory path for storing a model.
-    
-    Converts a Hugging Face model ID into a safe local directory path
-    by replacing forward slashes with hyphens and adding a suffix.
-    
+    Return the absolute directory path for storing a specific model's files.
+
     Args:
         model_id (str): Hugging Face model identifier (e.g., 'google/gemma-2-9b-it')
-        
+
     Returns:
-        str: Local directory path (e.g., '../models/google-gemma-2-9b-it-local/')
-        
-    Example:
-        >>> get_local_path("google/gemma-2-9b-it")
-        './models/google-gemma-2-9b-it-local/'
+        str: Absolute directory path for this model.
     """
     if model_id is None:
         model_id = "unknown"
-    # Use a sanitized version of the model ID for the directory name
     safe_model_name = model_id.replace('/', '-').replace('..', '')
-    return f"./models/{safe_model_name}-local/"
+    return os.path.join(_resolve_models_base(), f"{safe_model_name}-local")
 
 
 def get_local_zip_path(model_id: str) -> str:
@@ -177,7 +199,7 @@ def find_local_model(filename: str, local_path: str) -> Optional[str]:
     return None
 
 
-def download_gguf_model(model_id: str, filename: str, local_path: str) -> str:
+def download_gguf_model(model_id: str, filename: str, local_path: str, hf_token: Optional[str] = None) -> str:
     """
     Download a GGUF model from Hugging Face Hub into local_path.
 
@@ -188,6 +210,7 @@ def download_gguf_model(model_id: str, filename: str, local_path: str) -> str:
         model_id (str): Hugging Face model repository identifier.
         filename (str): The specific GGUF filename to download.
         local_path (str): Target directory for the downloaded file.
+        hf_token (str | None): Optional HuggingFace API token for gated models.
 
     Returns:
         str: Absolute path to the downloaded .gguf file.
@@ -202,10 +225,65 @@ def download_gguf_model(model_id: str, filename: str, local_path: str) -> str:
     downloaded_path = hf_hub_download(
         repo_id=model_id,
         filename=filename,
-        local_dir=local_path
+        local_dir=local_path,
+        token=hf_token or None,
     )
     print(f"[LOADER] Download complete: {downloaded_path}")
     return downloaded_path
+
+
+def stream_download_gguf(model_id: str, filename: str, local_path: str, hf_token: Optional[str] = None):
+    """
+    Generator that streams a GGUF file download from HuggingFace and yields
+    SSE-formatted progress events ('data: <json>\\n\\n').
+
+    Events:
+        {"status": "downloading", "progress": 0.0-1.0, "downloaded_mb": float, "total_mb": float}
+        {"status": "complete",    "progress": 1.0, "model_path": str}
+        {"status": "error",       "message": str}
+    """
+    import json
+    import requests as req_lib
+    from huggingface_hub import hf_hub_url
+
+    os.makedirs(local_path, exist_ok=True)
+    dest_path = os.path.join(local_path, os.path.basename(filename))
+
+    req_headers = {'User-Agent': 'mydatastudio/1.0'}
+    if hf_token:
+        req_headers['Authorization'] = f'Bearer {hf_token}'
+
+    try:
+        url = hf_hub_url(repo_id=model_id, filename=filename)
+
+        head = req_lib.head(url, headers=req_headers, allow_redirects=True, timeout=30)
+        total_bytes = int(head.headers.get('content-length', 0))
+        total_mb = round(total_bytes / (1024 * 1024), 1)
+
+        yield f'data: {json.dumps({"status": "downloading", "progress": 0.0, "downloaded_mb": 0.0, "total_mb": total_mb})}\n\n'
+
+        downloaded = 0
+        last_reported = -1.0
+
+        with req_lib.get(url, headers=req_headers, stream=True, timeout=60) as r:
+            r.raise_for_status()
+            with open(dest_path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=524288):  # 512 KB
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    progress = downloaded / total_bytes if total_bytes > 0 else 0.0
+                    # Emit at most one event per 1% progress
+                    if progress - last_reported >= 0.01 or progress >= 1.0:
+                        downloaded_mb = round(downloaded / (1024 * 1024), 1)
+                        yield f'data: {json.dumps({"status": "downloading", "progress": round(progress, 4), "downloaded_mb": downloaded_mb, "total_mb": total_mb})}\n\n'
+                        last_reported = progress
+
+        print(f"[LOADER] Stream download complete: {dest_path}")
+        yield f'data: {json.dumps({"status": "complete", "progress": 1.0, "model_path": dest_path})}\n\n'
+
+    except Exception as e:
+        print(f"[ERROR] Stream download failed for {model_id}/{filename}: {e}")
+        yield f'data: {json.dumps({"status": "error", "message": str(e)})}\n\n'
 
 
 def download_gguf_model_if_needed(model_id: str, filename: str, local_path: str) -> str:

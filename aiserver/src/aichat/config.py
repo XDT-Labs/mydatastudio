@@ -12,6 +12,19 @@ MODEL_REGISTRY: dict = {
         "model_name": "ggml-org/gemma-4-12B-it-GGUF",
         "model_file": "gemma-4-12B-it-Q4_K_M.gguf",
         "model_file_mmproj": "mmproj-gemma-4-12B-it-Q8_0.gguf",
+        "chat_handler": "Gemma4ChatHandler",
+    },
+    "qwen2.5-vl:7b": {
+        "model_name": "bartowski/Qwen2.5-VL-7B-Instruct-GGUF",
+        "model_file": "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+        "model_file_mmproj": "mmproj-Qwen2.5-VL-7B-Instruct-f16.gguf",
+        "chat_handler": "Qwen2VLChatHandler",
+    },
+    "qwen2.5-vl:3b": {
+        "model_name": "bartowski/Qwen2.5-VL-3B-Instruct-GGUF",
+        "model_file": "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+        "model_file_mmproj": "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf",
+        "chat_handler": "Qwen2VLChatHandler",
     },
 }
 

@@ -57,7 +57,12 @@ def load_gemini_model() -> ChatGoogleGenerativeAI:
     return llm
 
 
-def load_local_model(model_name: str, model_path: str, clip_model_path: Optional[str] = None):
+def load_local_model(
+    model_name: str,
+    model_path: str,
+    clip_model_path: Optional[str] = None,
+    chat_handler_name: Optional[str] = None,
+):
     """
     Load a GGUF model directly via llama_cpp.Llama.
 
@@ -65,6 +70,7 @@ def load_local_model(model_name: str, model_path: str, clip_model_path: Optional
         model_name (str): HF repo ID or display name (used for logging only)
         model_path (str): Full absolute path to the .gguf file
         clip_model_path (str | None): Path to mmproj .gguf for vision; None = text-only
+        chat_handler_name (str | None): llama_chat_format class name (e.g. 'Gemma4ChatHandler')
     """
     import llama_cpp
 
@@ -72,9 +78,14 @@ def load_local_model(model_name: str, model_path: str, clip_model_path: Optional
 
     chat_handler = None
     if clip_model_path:
-        from llama_cpp.llama_chat_format import Gemma4ChatHandler
-        print(f"[LOADER] Vision mode — Gemma4ChatHandler with mmproj: {clip_model_path}")
-        chat_handler = Gemma4ChatHandler(clip_model_path=clip_model_path, verbose=False)
+        handler_cls_name = chat_handler_name or "Gemma4ChatHandler"
+        from llama_cpp import llama_chat_format
+        handler_cls = getattr(llama_chat_format, handler_cls_name, None)
+        if handler_cls is None:
+            print(f"[LOADER] Unknown chat handler '{handler_cls_name}', falling back to Gemma4ChatHandler")
+            handler_cls = llama_chat_format.Gemma4ChatHandler
+        print(f"[LOADER] Vision mode — {handler_cls_name} with mmproj: {clip_model_path}")
+        chat_handler = handler_cls(clip_model_path=clip_model_path, verbose=False)
 
     return llama_cpp.Llama(
         model_path=model_path,

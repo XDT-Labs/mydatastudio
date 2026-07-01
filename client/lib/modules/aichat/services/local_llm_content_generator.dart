@@ -20,8 +20,20 @@ class LocalLlmContentGenerator implements ContentGenerator {
 
   String? model;
 
+  /// Absolute path to the .gguf file for the selected model.
+  /// Set when a downloaded local model is selected so the server can load it
+  /// directly without a registry lookup.
+  String? modelPath;
+
+  /// Absolute path to the mmproj .gguf file for multimodal vision models.
+  String? mmprojPath;
+
   /// Image bytes to include in the next request. Cleared after each send.
   List<Uint8List> pendingAttachments = [];
+
+  /// The model alias the server reported in its last response.
+  /// Reflects what was actually loaded, not what the client requested.
+  String? lastResponseModel;
 
   // Client-side conversation history in OpenAI format (content may be string or list).
   final List<Map<String, dynamic>> _messages = [];
@@ -99,10 +111,13 @@ class LocalLlmContentGenerator implements ContentGenerator {
       request.headers['Content-Type'] = 'application/json; charset=UTF-8';
       request.body = jsonEncode({
         'model': model ?? '',
+        if (modelPath != null && modelPath!.isNotEmpty) 'model_path': modelPath,
+        if (mmprojPath != null && mmprojPath!.isNotEmpty) 'mmproj_path': mmprojPath,
         'messages': requestMessages,
         'stream': true,
       });
 
+      lastResponseModel = null;
       final client = http.Client();
       try {
         final streamedResponse = await client.send(request);
@@ -125,6 +140,7 @@ class LocalLlmContentGenerator implements ContentGenerator {
           if (data == '[DONE]') break;
           try {
             final parsed = jsonDecode(data) as Map<String, dynamic>;
+            lastResponseModel ??= parsed['model'] as String?;
             final choices = parsed['choices'] as List?;
             if (choices != null && choices.isNotEmpty) {
               final delta =
