@@ -552,11 +552,12 @@ async def delete_model(request: DeleteModelRequest) -> Dict[str, Any]:
     parent = os.path.realpath(os.path.dirname(model_path))
     _assert_within_models_dir(parent, models_dir, "Directory")
 
-    HF_NOISE = {'.gitattributes', '.cache', '.locks', 'blobs', 'refs', 'snapshots'}
-    remaining = {f for f in os.listdir(parent) if f not in HF_NOISE}
-    if not remaining:
-        shutil.rmtree(parent, ignore_errors=True)
-        print(f"[DELETE] Removed empty model directory: {parent}")
+    if parent != models_dir:
+        HF_NOISE = {'.gitattributes', '.cache', '.locks', 'blobs', 'refs', 'snapshots'}
+        remaining = {f for f in os.listdir(parent) if f not in HF_NOISE}
+        if not remaining:
+            shutil.rmtree(parent, ignore_errors=True)
+            print(f"[DELETE] Removed empty model directory: {parent}")
 
     return {"status": "success", "message": f"Deleted {os.path.basename(model_path)}"}
 

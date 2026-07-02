@@ -5,8 +5,8 @@ import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from fastapi import HTTPException
 
-from aichat.routes import health_check, generate_chat_completion, generate_embedding
-from aichat.models import ChatCompletionRequest, ChatMessage, EmbeddingRequest
+from aichat.routes import health_check, generate_chat_completion, generate_embedding, delete_model
+from aichat.models import ChatCompletionRequest, ChatMessage, EmbeddingRequest, DeleteModelRequest
 
 
 class TestHealthCheck:
@@ -207,3 +207,53 @@ class TestMultimodalEmbedding:
 
             assert exc_info.value.status_code == 400
             assert "LlamaCpp does not support image embeddings" in str(exc_info.value.detail)
+
+
+class TestDeleteModel:
+
+    @pytest.mark.asyncio
+    async def test_delete_model_in_root_does_not_delete_root(self, tmp_path):
+        import os
+        models_dir = str(tmp_path / "models")
+        os.makedirs(models_dir, exist_ok=True)
+        
+        # Place a model directly in the root of models_dir
+        model_file = tmp_path / "models" / "model.gguf"
+        model_file.write_text("dummy model content")
+        
+        request = DeleteModelRequest(model_path=str(model_file))
+        
+        with patch.dict(os.environ, {"AICHAT_MODELS_DIR": models_dir}):
+            result = await delete_model(request)
+            
+        assert result["status"] == "success"
+        # The file itself must be deleted
+        assert not model_file.exists()
+        # The root models directory MUST NOT be deleted
+        assert os.path.exists(models_dir)
+
+    @pytest.mark.asyncio
+    async def test_delete_model_in_subdir_deletes_empty_subdir(self, tmp_path):
+        import os
+        models_dir = str(tmp_path / "models")
+        os.makedirs(models_dir, exist_ok=True)
+        
+        # Place a model in a subdirectory under models_dir
+        subdir = tmp_path / "models" / "some-model-repo"
+        subdir.mkdir()
+        model_file = subdir / "model.gguf"
+        model_file.write_text("dummy model content")
+        
+        request = DeleteModelRequest(model_path=str(model_file))
+        
+        with patch.dict(os.environ, {"AICHAT_MODELS_DIR": models_dir}):
+            result = await delete_model(request)
+            
+        assert result["status"] == "success"
+        # The file itself must be deleted
+        assert not model_file.exists()
+        # The subdirectory (parent) should be deleted since it has no remaining files
+        assert not subdir.exists()
+        # The root models directory MUST NOT be deleted
+        assert os.path.exists(models_dir)
+
