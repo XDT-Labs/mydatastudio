@@ -169,10 +169,11 @@ class _SimilarFilesTabState extends State<SimilarFilesTab> {
     if (confirmed != true || !mounted) return;
 
     try {
-      final resolvedPath =
+      final resolvedPath = file.localPath ?? (
           file.collectionId == widget.collection.id
               ? FilePathResolver.absolute(file, widget.collection)
-              : file.path;
+              : file.path
+      );
       final ioFile = io.File(resolvedPath);
       if (await ioFile.exists()) await ioFile.delete();
 

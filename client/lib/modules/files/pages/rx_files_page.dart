@@ -845,7 +845,7 @@ class _RxFilesPage extends State<RxFilesPage> {
       if (item is File) {
         try {
           // Reconstruct absolute path for filesystem delete.
-          final absPath = FilePathResolver.absolute(item, collection!);
+          final absPath = item.localPath ?? FilePathResolver.absolute(item, collection!);
           final ioFile = io.File(absPath);
           if (await ioFile.exists()) {
             await ioFile.delete();
