@@ -10,7 +10,7 @@
         {
             "label": "Build aichat (macOS)",
             "type": "shell",
-            "command": "cd aiserver && pdm install && pdm run pyinstaller -y main.spec && mkdir -p ../client/app && rm -f ../client/app/aichat-macos.zip && cd dist/aichat && zip -r ../../../client/app/aichat-macos.zip .",
+            "command": "cd aiserver && pdm install && pdm run pyinstaller -y main.spec && mkdir -p ../client/app && rm -f ../client/app/aiserver-macos.zip && cd dist/aichat && zip -r ../../../client/app/aiserver-macos.zip .",
             "problemMatcher": [],
             "group": "build"
         },
