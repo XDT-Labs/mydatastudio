@@ -26,7 +26,8 @@ class PythonManager {
 
   final AppLogger logger = AppLogger(null);
   Completer<void>? _startupCompleter;
-  final RegExp _urlRegex = RegExp(r'(https?:\/\/[^\s]+)');
+  @visibleForTesting
+  final RegExp urlRegex = RegExp(r'(http://(?:127\.0\.0\.1|localhost):\d+)');
 
   PythonManager._() {
     _initOutputStreams();
@@ -46,7 +47,7 @@ class PythonManager {
     // Update splash screen progress
     PythonManager.startupProgress.value = line;
 
-    final match = _urlRegex.firstMatch(line);
+    final match = urlRegex.firstMatch(line);
     if (match != null) {
       final url = match.group(1);
       if (url != null) {
