@@ -455,6 +455,7 @@ class AppDatabase {
               conversation_id TEXT NOT NULL,
               role TEXT NOT NULL,
               content TEXT NOT NULL,
+              token_count INTEGER,
               created_at INTEGER NOT NULL,
               FOREIGN KEY (conversation_id) REFERENCES aichat_conversations(id) ON DELETE CASCADE
             );
@@ -685,6 +686,23 @@ class AppDatabase {
           "AppDatabase: Migration v21 (hf_repo/chat_handler) failed: $e",
         );
       }
+
+      // v22: add token_count to aichat_conversation_history
+      try {
+        final historyCols = await _db.select(
+          "PRAGMA table_info(aichat_conversation_history)",
+        );
+        final hasTokenCount = historyCols.any((c) => c['name'] == 'token_count');
+        if (!hasTokenCount) {
+          await _db.execute(
+            "ALTER TABLE aichat_conversation_history ADD COLUMN token_count INTEGER",
+          );
+        }
+      } catch (e) {
+        logger.e(
+          "AppDatabase: Migration v22 (token_count) failed: $e",
+        );
+      }
     }
   }
 
@@ -855,7 +873,7 @@ class AppDatabase {
         'group': 'ollama',
         'name': 'Ollama',
         'type': 'ollama',
-        'base_url': 'http://localhost:11434',
+        'base_url': null,
       },
     ];
     for (final m in models) {

@@ -72,13 +72,14 @@ class AichatRepository {
     required String conversationId,
     required String role,
     required String content,
+    int? tokenCount,
   }) async {
     final id = _uuid.v4();
     final now = DateTime.now().millisecondsSinceEpoch;
     await db.execute(
       'INSERT INTO aichat_conversation_history '
-      '(id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
-      [id, conversationId, role, content, now],
+      '(id, conversation_id, role, content, token_count, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, conversationId, role, content, tokenCount, now],
     );
     await db.execute(
       'UPDATE aichat_conversations SET updated_at = ? WHERE id = ?',
@@ -90,6 +91,7 @@ class AichatRepository {
       role: role,
       content: content,
       createdAt: DateTime.fromMillisecondsSinceEpoch(now),
+      tokenCount: tokenCount,
     );
   }
 

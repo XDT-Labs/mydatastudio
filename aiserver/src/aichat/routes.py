@@ -123,15 +123,14 @@ async def _handle_gemini_request(request: "ChatCompletionRequest"):
     if request.stream:
         def _gemini_sse_stream() -> Generator[str, None, None]:
             reset_stop()
-            usage_meta = None
+            accumulated = None
             try:
                 for chunk in llm.stream(lc_messages):
                     if is_stop_requested():
                         break
                     delta = chunk.content if hasattr(chunk, 'content') else str(chunk)
-                    # Accumulate usage from the last chunk that carries it
-                    if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
-                        usage_meta = chunk.usage_metadata
+                    # Accumulate chunks so the final result carries usage_metadata
+                    accumulated = chunk if accumulated is None else accumulated + chunk
                     if delta:
                         payload = {
                             "id": completion_id,
@@ -155,12 +154,17 @@ async def _handle_gemini_request(request: "ChatCompletionRequest"):
                 "model": current_model,
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
             }
+            usage_meta = getattr(accumulated, 'usage_metadata', None) if accumulated else None
             if usage_meta:
-                final["usage"] = {
-                    "prompt_tokens": usage_meta.get("input_tokens", 0),
-                    "completion_tokens": usage_meta.get("output_tokens", 0),
-                    "total_tokens": usage_meta.get("total_tokens", 0),
-                }
+                input_t = usage_meta.get("input_tokens", 0) if isinstance(usage_meta, dict) else getattr(usage_meta, 'input_tokens', 0)
+                output_t = usage_meta.get("output_tokens", 0) if isinstance(usage_meta, dict) else getattr(usage_meta, 'output_tokens', 0)
+                total_t = usage_meta.get("total_tokens", 0) if isinstance(usage_meta, dict) else getattr(usage_meta, 'total_tokens', 0)
+                if total_t:
+                    final["usage"] = {
+                        "prompt_tokens": input_t,
+                        "completion_tokens": output_t,
+                        "total_tokens": total_t,
+                    }
             yield f"data: {json.dumps(final)}\n\n"
             yield "data: [DONE]\n\n"
 

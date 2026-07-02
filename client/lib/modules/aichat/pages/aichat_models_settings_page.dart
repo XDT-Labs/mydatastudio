@@ -101,7 +101,7 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     final models = await _repo.getAll();
 
     final ollamaModel = models.where((m) => m.group == 'ollama').firstOrNull;
-    final ollamaUrl = ollamaModel?.baseUrl ?? 'http://localhost:11434';
+    final ollamaUrl = ollamaModel?.baseUrl ?? '';
 
     // Load all API keys from providers table in one query
     final db = DatabaseManager.instance.database!;
@@ -197,8 +197,15 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
 
   Future<void> _saveOllamaUrl() async {
     final url = _ollamaUrlController.text.trim();
-    if (url.isEmpty) return;
     final existing = _byGroup('ollama');
+    if (url.isEmpty) {
+      if (existing.isNotEmpty && (existing.first.baseUrl?.isNotEmpty ?? false)) {
+        await _repo.setBaseUrl(existing.first.id, '');
+        await _repo.setEnabled(existing.first.id, false);
+        _showSnack('Ollama disabled');
+      }
+      return;
+    }
     if (existing.isEmpty) {
       await _repo.create(
         alias: 'Ollama',
@@ -210,6 +217,7 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
       );
     } else {
       await _repo.setBaseUrl(existing.first.id, url);
+      await _repo.setEnabled(existing.first.id, true);
     }
     _showSnack('Saved Ollama URL');
   }
@@ -632,6 +640,13 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
               decoration: const InputDecoration(
                 labelText: 'Server URL',
                 border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Default url is: http://localhost:11434',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],

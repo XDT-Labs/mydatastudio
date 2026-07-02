@@ -14,6 +14,7 @@ import 'package:mydatastudio/modules/files/services/repositories/file_repository
 import 'package:mydatastudio/modules/files/services/repositories/folder_repository.dart';
 
 import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -253,6 +254,28 @@ void main() {
       await dbRepo.deleteFileEmbedding(fileId);
       rows = await db.select('SELECT * FROM files_embeddings WHERE file_id = ?', [fileId]);
       expect(rows, isEmpty);
+    });
+
+    test('AichatModelRepository Ollama model initialization and update', () async {
+      final db = databaseManager.database!;
+      final repo = AichatModelRepository(db);
+
+      // Fetch all models
+      final models = await repo.getAll();
+      final ollamaModel = models.firstWhere((m) => m.group == 'ollama');
+
+      // Verify default is disabled and has null base_url
+      expect(ollamaModel.baseUrl, isNull);
+      expect(ollamaModel.enabled, isFalse);
+
+      // Verify setBaseUrl and setEnabled
+      await repo.setBaseUrl(ollamaModel.id, 'http://localhost:11434');
+      await repo.setEnabled(ollamaModel.id, true);
+
+      final updatedModels = await repo.getAll();
+      final updatedOllama = updatedModels.firstWhere((m) => m.id == ollamaModel.id);
+      expect(updatedOllama.baseUrl, equals('http://localhost:11434'));
+      expect(updatedOllama.enabled, isTrue);
     });
   });
 }

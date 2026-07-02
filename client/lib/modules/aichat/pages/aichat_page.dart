@@ -91,6 +91,19 @@ class _AichatPage extends State<AichatPage> with RouteAware {
   bool get _canSend =>
       _textController.text.trim().isNotEmpty || _pendingFiles.isNotEmpty;
 
+  /// Sum of total_tokens across all cloud-model assistant responses this session.
+  /// Local models return -1 for usage; those are excluded from the count.
+  int get _sessionTotalTokens {
+    int total = 0;
+    for (final item in _chatItems) {
+      if (item is TextMessageItem && item.role == 'assistant') {
+        final t = item.usage?['total_tokens'] ?? 0;
+        if (t > 0) total += t;
+      }
+    }
+    return total;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -294,7 +307,10 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     String conversationName = '';
 
     for (final m in messages) {
-      chatItems.add(TextMessageItem(role: m.role, text: m.content));
+      final usage = (m.tokenCount != null && m.tokenCount! > 0)
+          ? {'total_tokens': m.tokenCount!}
+          : null;
+      chatItems.add(TextMessageItem(role: m.role, text: m.content, usage: usage));
       llmHistory.add({'role': m.role, 'content': m.content});
     }
 
@@ -347,7 +363,13 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     final id = _conversationId;
     final repo = _repo;
     if (id == null || repo == null) return;
-    await repo.addMessage(conversationId: id, role: 'assistant', content: text);
+    final t = _contentGenerator.lastUsage?['total_tokens'] ?? 0;
+    await repo.addMessage(
+      conversationId: id,
+      role: 'assistant',
+      content: text,
+      tokenCount: t > 0 ? t : null,
+    );
     // Keep model in sync
     final alias = _selectedModel;
     await repo.updateConversation(id, model: alias);
@@ -541,12 +563,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     );
   }
 
-  Widget _buildAssistantBubble(String text, {bool streaming = false, String? model, Map<String, int>? usage}) {
-    final totalTokens = usage?['total_tokens'];
-    final tokenLabel = (totalTokens != null && totalTokens > 0)
-        ? '${_formatTokens(totalTokens)} tokens'
-        : null;
-
+  Widget _buildAssistantBubble(String text, {bool streaming = false, String? model}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Align(
@@ -616,14 +633,6 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                 ),
               ),
             ),
-            if (tokenLabel != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  tokenLabel,
-                  style: const TextStyle(color: _hintColor, fontSize: 11),
-                ),
-              ),
           ],
         ),
       ),
@@ -723,7 +732,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                 if (item is TextMessageItem) {
                   return item.role == 'user'
                       ? _buildUserBubble(item.text, images: item.images)
-                      : _buildAssistantBubble(item.text, model: item.model, usage: item.usage);
+                      : _buildAssistantBubble(item.text, model: item.model);
                 }
 
                 if (item is GenUiSurfaceItem) {
@@ -743,13 +752,26 @@ class _AichatPage extends State<AichatPage> with RouteAware {
           ),
           Container(
             color: _bgColor,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            child: Container(
-              decoration: BoxDecoration(
-                color: _inputBgColor,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _inputBorderColor, width: 1),
-              ),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (_sessionTotalTokens > 0)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 6, 4, 4),
+                    child: Text(
+                      '${_formatTokens(_sessionTotalTokens)} total tokens',
+                      style: const TextStyle(color: _mutedColor, fontSize: 11),
+                    ),
+                  )
+                else
+                  const SizedBox(height: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    color: _inputBgColor,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _inputBorderColor, width: 1),
+                  ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -902,6 +924,8 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                   ),
                 ],
               ),
+            ),
+              ],
             ),
           ),
         ],

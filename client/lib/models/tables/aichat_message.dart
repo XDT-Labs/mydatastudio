@@ -4,6 +4,7 @@ class AichatMessage {
   final String role; // 'user', 'assistant', 'system'
   final String content;
   final DateTime createdAt;
+  final int? tokenCount;
 
   AichatMessage({
     required this.id,
@@ -11,6 +12,7 @@ class AichatMessage {
     required this.role,
     required this.content,
     required this.createdAt,
+    this.tokenCount,
   });
 
   factory AichatMessage.fromDbMap(Map<String, dynamic> map) {
@@ -20,6 +22,7 @@ class AichatMessage {
       role: map['role'] as String,
       content: map['content'] as String,
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
+      tokenCount: map['token_count'] as int?,
     );
   }
 }
