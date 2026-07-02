@@ -22,10 +22,97 @@ jobs:
   build:
     name: Build macOS Release
     runs-on: macos-latest
+    outputs:
+      version_tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      # ------------------------------------------
+      # 0. Install Apple Certificate (Required early so we can sign Python binaries during build-python)
+      # ------------------------------------------
+      - name: Validate signing secrets
+        env:
+          CERT: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          PROFILE: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          P12_PASS: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASS: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          MISSING=""
+          [ -z "$CERT" ]         && MISSING="$MISSING\n  - BUILD_CERTIFICATE_BASE64"
+          [ -z "$PROFILE" ]      && MISSING="$MISSING\n  - BUILD_PROVISION_PROFILE_BASE64"
+          [ -z "$P12_PASS" ]     && MISSING="$MISSING\n  - P12_PASSWORD"
+          [ -z "$KEYCHAIN_PASS" ] && MISSING="$MISSING\n  - KEYCHAIN_PASSWORD"
+          if [ -n "$MISSING" ]; then
+            printf "Error: missing required signing secrets:%b\n" "$MISSING"
+            exit 1
+          fi
+
+      - name: Install Apple Certificate and Provisioning Profile
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode > $CERTIFICATE_PATH
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > $PP_PATH
+          # Verify the P12 is valid before importing (gives a clear error if wrong file/password)
+          openssl pkcs12 -in $CERTIFICATE_PATH -nokeys -passin pass:"$P12_PASSWORD" -legacy 2>&1 | head -5 || {
+            echo "ERROR: Could not read P12. Check BUILD_CERTIFICATE_BASE64 (must be a .p12, not .cer) and P12_PASSWORD."
+            exit 1
+          }
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          curl -o $RUNNER_TEMP/AppleWWDRCAG3.cer https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          security import $RUNNER_TEMP/AppleWWDRCAG3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign
+          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+
+      - name: Update Version in pubspec.prod.yaml
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          python3 -c "
+          import re, os
+          input_version = os.environ.get('INPUT_VERSION')
+          run_number = os.environ.get('GITHUB_RUN_NUMBER', '1')
+          with open('client/pubspec.prod.yaml', 'r') as f:
+              content = f.read()
+          pattern = r'^version:\s*(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?'
+          match = re.search(pattern, content, re.MULTILINE)
+          if not match:
+              print('Error: Could not find version line in pubspec.prod.yaml')
+              exit(1)
+          if input_version:
+              input_match = re.match(r'^(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$', input_version)
+              if input_match:
+                  major = input_match.group(1)
+                  minor = input_match.group(2)
+                  patch = input_match.group(3)
+                  build = input_match.group(4) or run_number
+                  new_version = f'version: {major}.{minor}.{patch}+{build}'
+              else:
+                  print(f'Error: Invalid input version format: {input_version}')
+                  exit(1)
+          else:
+              major = match.group(1)
+              minor = match.group(2)
+              new_version = f'version: {major}.{minor}.{run_number}+{run_number}'
+          new_content = re.sub(pattern, new_version, content, flags=re.MULTILINE)
+          with open('client/pubspec.prod.yaml', 'w') as f:
+              f.write(new_content)
+          print(f'Updated pubspec.prod.yaml version to: {new_version}')
+          "
 
       # ------------------------------------------
       # 1. Set up Python + PDM (shared by models and Python service build)
@@ -94,54 +181,8 @@ jobs:
           flutter pub get
 
       # ------------------------------------------
-      # 5. Apple Code Signing (applied after pub get so SPM can't overwrite it)
+      # 5. Apple Code Signing Configuration (applied after pub get so SPM can't overwrite it)
       # ------------------------------------------
-      - name: Validate signing secrets
-        env:
-          CERT: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
-          PROFILE: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
-          P12_PASS: ${{ secrets.P12_PASSWORD }}
-          KEYCHAIN_PASS: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          MISSING=""
-          [ -z "$CERT" ]         && MISSING="$MISSING\n  - BUILD_CERTIFICATE_BASE64"
-          [ -z "$PROFILE" ]      && MISSING="$MISSING\n  - BUILD_PROVISION_PROFILE_BASE64"
-          [ -z "$P12_PASS" ]     && MISSING="$MISSING\n  - P12_PASSWORD"
-          [ -z "$KEYCHAIN_PASS" ] && MISSING="$MISSING\n  - KEYCHAIN_PASSWORD"
-          if [ -n "$MISSING" ]; then
-            printf "Error: missing required signing secrets:%b\n" "$MISSING"
-            exit 1
-          fi
-
-      - name: Install Apple Certificate and Provisioning Profile
-        env:
-          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
-
-          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
-          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode > $CERTIFICATE_PATH
-          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > $PP_PATH
-          # Verify the P12 is valid before importing (gives a clear error if wrong file/password)
-          openssl pkcs12 -in $CERTIFICATE_PATH -nokeys -passin pass:"$P12_PASSWORD" -legacy 2>&1 | head -5 || {
-            echo "ERROR: Could not read P12. Check BUILD_CERTIFICATE_BASE64 (must be a .p12, not .cer) and P12_PASSWORD."
-            exit 1
-          }
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          curl -o $RUNNER_TEMP/AppleWWDRCAG3.cer https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
-          security import $RUNNER_TEMP/AppleWWDRCAG3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign
-          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
-
       - name: Update Code Signing Settings
         working-directory: client
         run: |
@@ -163,6 +204,16 @@ jobs:
       # ------------------------------------------
       - name: Build Flutter Client
         run: make build-client
+
+      # ------------------------------------------
+      # 6.5. Notarize macOS App
+      # ------------------------------------------
+      - name: Notarize macOS App
+        run: make notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       # ------------------------------------------
       # 7. Create DMG installer
@@ -222,21 +273,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Resolve Version Tag
-        id: version
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          if [ -n "$INPUT_VERSION" ]; then
-            echo "tag=v${INPUT_VERSION}" >> $GITHUB_OUTPUT
-          else
-            VERSION=$(grep '^version:' client/pubspec.yaml | sed 's/version: //' | cut -d'+' -f1 | tr -d '[:space:]')
-            echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -245,8 +281,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: MyDataStudio ${{ steps.version.outputs.tag }}
+          tag_name: ${{ needs.build.outputs.version_tag }}
+          name: MyDataStudio ${{ needs.build.outputs.version_tag }}
           files: |
             artifacts/macos-dmg/*.dmg
             artifacts/aiserver-macos/*.zip

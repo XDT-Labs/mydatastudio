@@ -6,6 +6,7 @@
 #   make models         - Download GGUF models from Hugging Face
 #   make build-python   - Build and zip the Python aichat service
 #   make build-client   - Build the Flutter Desktop client (macOS release)
+#   make notarize       - Notarize the macOS build (requires APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID env vars)
 #   make clean          - Remove all build artifacts
 # ==============================================================================
 
@@ -26,7 +27,9 @@ HF_MMPROJ_FILE = mmproj-gemma-4-12B-it-Q8_0.gguf
 HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
 HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
 
-
+# Apple config
+APPLE_ID = mike@xdtlabs.com
+APPLE_TEAM_ID = TTM6V47DL9
 
 # Flutter Config
 FLUTTER_DIR = client
@@ -35,7 +38,7 @@ FLUTTER_DIR = client
 # --- Targets ---
 
 .PHONY: all
-all: models build-python local-install-python build-client
+all: models build-python local-install-python build-client 
 
 .PHONY: dev
 dev: models build-python local-install-python
@@ -81,12 +84,27 @@ build-python:
 	@echo "--- 🐍 Building Python aichat service ---"
 	@cd $(PYTHON_DIR) && \
 		pdm install && \
-		FORCE_CMAKE=1 CMAKE_ARGS="-DGGML_METAL=on -DGGML_NATIVE=off" pdm run pyinstaller -y main.spec && \
-		mkdir -p ../client/app && \
-		rm -f ../client/app/$(APP_ZIP_NAME) && \
-		cd dist/aichat && \
-		zip -r ../../../client/app/$(APP_ZIP_NAME) .
+		FORCE_CMAKE=1 CMAKE_ARGS="-DGGML_METAL=on -DGGML_NATIVE=off" pdm run pyinstaller -y main.spec
+	@IDENTITY="$(CODESIGN_IDENTITY)"; \
+	if [ -z "$$IDENTITY" ]; then \
+		IDENTITY=$$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' 2>/dev/null || true); \
+	fi; \
+	if [ -z "$$IDENTITY" ]; then \
+		echo "ERROR: No Developer ID Application certificate found in keychain. Python binaries will be unsigned and notarization will fail."; \
+		echo "Set CODESIGN_IDENTITY or install a Developer ID Application certificate."; \
+		exit 1; \
+	fi; \
+	echo "Signing Python service binaries inside dist/aichat with identity: $$IDENTITY"; \
+	find $(PYTHON_DIR)/dist/aichat -type f | while read -r file; do \
+		if file "$$file" | grep -q "Mach-O"; then \
+			codesign --force --options runtime --timestamp --sign "$$IDENTITY" "$$file"; \
+		fi; \
+	done
+	@mkdir -p client/app
+	@rm -f client/app/$(APP_ZIP_NAME)
+	@cd $(PYTHON_DIR)/dist/aichat && zip -r ../../../client/app/$(APP_ZIP_NAME) .
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
+
 
 # 3. Build Flutter Desktop Client
 .PHONY: build-client
@@ -104,6 +122,7 @@ build-client:
 		cp -r $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app /Applications/MyDataStudio.app; \
 	fi
 
+
 # Local Install (Testing)
 .PHONY: local-install-python
 local-install-python: build-python
@@ -116,6 +135,58 @@ local-install-python: build-python
 	done
 	@echo "--- ✅ Copy complete ---"
 
+
+
+# 4. Notarize macOS Build
+.PHONY: notarize
+notarize: build-python build-client
+	@echo "--- 🔐 Notarizing macOS build ---"
+	@if [ -z "$(APPLE_ID)" ] || [ -z "$$APPLE_PASSWORD" ] || [ -z "$(APPLE_TEAM_ID)" ]; then \
+		echo "Error: APPLE_ID, APPLE_PASSWORD, and APPLE_TEAM_ID variables must be set."; \
+		exit 1; \
+	fi
+	@if [ ! -d "$(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app" ]; then \
+		echo "Error: Release build not found at $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app. Run 'make build-client' first."; \
+		exit 1; \
+	fi
+	@echo "Checking codesign identity..."
+	@IDENTITY="$(CODESIGN_IDENTITY)"; \
+	if [ -z "$$IDENTITY" ]; then \
+		IDENTITY=$$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/'); \
+	fi; \
+	if [ -z "$$IDENTITY" ]; then \
+		echo "Error: No Developer ID Application codesigning identity found in keychain. Set CODESIGN_IDENTITY environment variable."; \
+		exit 1; \
+	fi; \
+	echo "Signing nested frameworks and libraries with identity: $$IDENTITY"; \
+	if [ -d "$(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app/Contents/Frameworks" ]; then \
+		find "$(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app/Contents/Frameworks" -type f | while read -r file; do \
+			if file "$$file" | grep -q "Mach-O"; then \
+				codesign --force --options runtime --timestamp --sign "$$IDENTITY" "$$file"; \
+			fi; \
+		done; \
+	fi; \
+	echo "Signing main application bundle with entitlements: $$IDENTITY"; \
+	codesign --force --options runtime --timestamp --entitlements $(FLUTTER_DIR)/macos/Runner/Release.entitlements --sign "$$IDENTITY" "$(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app"
+	@echo "Zipping application for notarization..."
+	@rm -f $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.zip
+	@ditto -c -k --keepParent $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.zip
+	@echo "Submitting to Apple Notary Service..."
+	xcrun notarytool submit $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.zip \
+		--apple-id "$(APPLE_ID)" \
+		--password "$$APPLE_PASSWORD" \
+		--team-id "$(APPLE_TEAM_ID)" \
+		--wait
+	@echo "Stapling notarization ticket to the application..."
+	xcrun stapler staple $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app
+	@rm -f $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.zip
+	@echo "--- ✅ Notarization complete ---"
+
+	# Log errors
+	# xcrun notarytool log <job_id> \
+	#   --apple-id "mike@xdtlabs.com" \
+	#   --password "<password>" \
+	#   --team-id "TTM6V47DL9"
 
 
 # Cleanup
