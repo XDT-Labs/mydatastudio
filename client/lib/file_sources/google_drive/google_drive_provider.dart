@@ -2,12 +2,12 @@ import 'dart:io' as io;
 
 import 'package:meta/meta.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/file_sources/file_source_file.dart';
-import 'package:mydatatools/file_sources/file_source_provider.dart';
-import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
-import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/file_sources/file_source_file.dart';
+import 'package:mydatastudio/file_sources/file_source_provider.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 /// [FileSourceProvider] implementation for Google Drive collections.
@@ -178,9 +178,7 @@ class GoogleDriveProvider implements FileSourceProvider {
   @protected
   @visibleForTesting
   Future<drive.DriveApi> buildApi(Collection collection) async {
-    final accessToken = await GoogleAuthService.getValidAccessToken(
-      collection,
-    );
+    final accessToken = await GoogleAuthService.getValidAccessToken(collection);
 
     final authHttpClient = AuthenticatedHttpClient.bearer(accessToken);
 

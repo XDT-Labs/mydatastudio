@@ -1,6 +1,6 @@
 import 'dart:io' as io;
 import 'package:flutter/material.dart';
-import 'package:mydatatools/models/tables/file.dart' as model;
+import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:open_filex/open_filex.dart';
 
 class AttachmentThumbnailWidget extends StatelessWidget {
@@ -38,20 +38,24 @@ class AttachmentThumbnailWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: isImage
-                  ? Image.file(
-                      io.File(file.path),
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) =>
-                          const Icon(Icons.broken_image, color: Colors.grey),
-                    )
-                  : Center(
-                      child: Icon(
-                        _iconForType(file.contentType),
-                        size: 32,
-                        color: Colors.grey.shade400,
+              child:
+                  isImage
+                      ? Image.file(
+                        io.File(file.path),
+                        fit: BoxFit.cover,
+                        errorBuilder:
+                            (context, error, stackTrace) => const Icon(
+                              Icons.broken_image,
+                              color: Colors.grey,
+                            ),
+                      )
+                      : Center(
+                        child: Icon(
+                          _iconForType(file.contentType),
+                          size: 32,
+                          color: Colors.grey.shade400,
+                        ),
                       ),
-                    ),
             ),
             Container(
               padding: const EdgeInsets.all(6),

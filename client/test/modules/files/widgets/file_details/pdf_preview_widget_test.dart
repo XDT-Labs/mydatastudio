@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/pdf_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/pdf_preview_widget.dart';
 
 void main() {
   group('PdfPreviewWidget', () {
-    testWidgets('shows loading indicator on first pump (no testController)',
-        (tester) async {
+    testWidgets('shows loading indicator on first pump (no testController)', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/text_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/text_preview_widget.dart';
 
 import '../../../../helpers/file_fixture.dart';
 
@@ -26,7 +26,11 @@ void main() {
     });
 
     testWidgets('shows Edit button for markdown files', (tester) async {
-      final file = makeTestFile(name: 'note.md', path: '/tmp/note.md', contentType: 'text/markdown');
+      final file = makeTestFile(
+        name: 'note.md',
+        path: '/tmp/note.md',
+        contentType: 'text/markdown',
+      );
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -46,7 +50,11 @@ void main() {
 
     testWidgets('calls onSave with edited content', (tester) async {
       String? savedContent;
-      final file = makeTestFile(name: 'note.md', path: '/tmp/note.md', contentType: 'text/markdown');
+      final file = makeTestFile(
+        name: 'note.md',
+        path: '/tmp/note.md',
+        contentType: 'text/markdown',
+      );
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(

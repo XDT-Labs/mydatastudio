@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:mydatatools/services/get_collections_service.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 
 class HomePage extends StatefulWidget {
@@ -31,9 +31,7 @@ class _HomePageState extends State<HomePage> {
 
     return const Padding(
       padding: EdgeInsetsGeometry.all(16),
-      child:Column(
-          children: [Placeholder()]
-      )
+      child: Column(children: [Placeholder()]),
     );
   }
 }

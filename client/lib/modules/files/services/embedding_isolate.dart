@@ -5,12 +5,12 @@ import 'dart:isolate';
 import 'package:flutter/services.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/repositories/database_repository.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/repositories/database_repository.dart';
 
 class EmbeddingIsolate {
   Isolate? _isolate;
@@ -171,8 +171,7 @@ class EmbeddingIsolate {
             logger.e("Error processing file ${file.path}: $e");
           }
         }
-
-        break; // temporary while debugging
+        
       } catch (e, stack) {
         logger.e(
           "Error in EmbeddingIsolate loop: $e",
@@ -199,7 +198,7 @@ class EmbeddingIsolate {
     }
 
     final bytes = await ioFile.readAsBytes();
-    return await _generateEmbedding(bytes, serviceUrl, logger);
+    return await _generateEmbedding(bytes, file.name, serviceUrl, logger);
   }
 
   static Future<List<double>?> _processGDriveFile(
@@ -256,7 +255,7 @@ class EmbeddingIsolate {
               )
               as drive.Media;
       final bytes = await http.ByteStream(media.stream).toBytes();
-      return await _generateEmbedding(bytes, serviceUrl, logger);
+      return await _generateEmbedding(bytes, file.name, serviceUrl, logger);
     } catch (e) {
       logger.e("Error downloading GDrive file: $e");
       return null;
@@ -265,6 +264,7 @@ class EmbeddingIsolate {
 
   static Future<List<double>?> _generateEmbedding(
     List<int> bytes,
+    String filename,
     String serviceUrl,
     AppLogger logger,
   ) async {
@@ -272,11 +272,11 @@ class EmbeddingIsolate {
 
     try {
       final response = await http.post(
-        Uri.parse("$serviceUrl/embedding"),
+        Uri.parse("$serviceUrl/util/embedding"),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'model_name': 'google/siglip2-so400m-patch16-naflex',
-          'filename': '',
+          'filename': filename,
           'image_base64': base64Image,
         }),
       );

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/file.dart';
 import 'package:xml/xml.dart';
 
 class TextPreviewWidget extends StatefulWidget {
@@ -17,6 +17,7 @@ class TextPreviewWidget extends StatefulWidget {
   final String ext;
   final double previewHeight;
   final Future<void> Function(String content) onSave;
+
   /// If provided, skips filesystem I/O and uses this content directly.
   final String? initialContent;
 
@@ -135,7 +136,9 @@ class _TextPreviewWidgetState extends State<TextPreviewWidget> {
             ),
           ),
           const Spacer(),
-          if (isMarkdown && !_isEditing && !widget.file.path.startsWith('gdrive://'))
+          if (isMarkdown &&
+              !_isEditing &&
+              !widget.file.path.startsWith('gdrive://'))
             TextButton.icon(
               key: const Key('edit_button'),
               onPressed: () {
@@ -186,9 +189,7 @@ class _TextPreviewWidgetState extends State<TextPreviewWidget> {
     if (widget.ext == '.md' || widget.ext == '.markdown') {
       return MarkdownBody(data: content);
     }
-    if (widget.ext == '.xml' ||
-        widget.ext == '.xsl' ||
-        widget.ext == '.xslt') {
+    if (widget.ext == '.xml' || widget.ext == '.xsl' || widget.ext == '.xslt') {
       return Text(
         _tidyXml(content),
         style: const TextStyle(fontFamily: 'Courier', fontSize: 12),

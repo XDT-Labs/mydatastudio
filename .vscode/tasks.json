@@ -4,13 +4,13 @@
         {
             "label": "clean app dir",
             "type": "shell",
-            "command": "rm -fr '${env:HOME}/Library/Application Support/mydata.tools' && rm -fr client/app/*.zip",
+            "command": "rm -fr '${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio' && rm -fr client/app/*.zip",
             "problemMatcher": []
         },
         {
             "label": "Build aichat (macOS)",
             "type": "shell",
-            "command": "cd client/assets/python/aichat && pdm install && python -m PyInstaller -y main.spec --clean --noconfirm && cd dist/aichat && zip -r ../../../../../app/aichat-macos.zip aichat",
+            "command": "cd aiserver && pdm install && pdm run pyinstaller -y main.spec && mkdir -p ../client/app && rm -f ../client/app/aiserver-macos.zip && cd dist/aichat && zip -r ../../../client/app/aiserver-macos.zip .",
             "problemMatcher": [],
             "group": "build"
         },

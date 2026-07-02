@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/exif_metadata_tab.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/exif_metadata_tab.dart';
 
 void main() {
   group('ExifMetadataTab', () {
@@ -29,9 +29,7 @@ void main() {
     testWidgets('shows no-data message when exifData is empty', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(
-            body: ExifMetadataTab(exifData: {}, isLoading: false),
-          ),
+          home: Scaffold(body: ExifMetadataTab(exifData: {}, isLoading: false)),
         ),
       );
       expect(find.text('No EXIF data available.'), findsOneWidget);

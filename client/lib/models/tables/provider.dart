@@ -4,6 +4,7 @@ class Provider {
   String? clientSecret;
   String? apiKey;
   List<String>? permissions;
+  String type;
 
   Provider({
     required this.service,
@@ -11,6 +12,7 @@ class Provider {
     this.clientSecret,
     this.apiKey,
     this.permissions,
+    this.type = 'collection',
   });
 
   factory Provider.fromDbMap(Map<String, dynamic> map) {
@@ -21,6 +23,7 @@ class Provider {
       clientSecret: map['client_secret'] as String?,
       apiKey: map['api_key'] as String?,
       permissions: permissionsStr.isEmpty ? [] : permissionsStr.split(','),
+      type: map['type'] as String? ?? 'collection',
     );
   }
 
@@ -31,6 +34,7 @@ class Provider {
       'client_secret': clientSecret,
       'api_key': apiKey,
       'permissions': (permissions ?? []).join(','),
+      'type': type,
     };
   }
 }

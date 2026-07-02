@@ -2,26 +2,26 @@ import 'dart:isolate';
 import 'package:enough_mail/enough_mail.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:mydatatools/models/tables/file.dart' as db_file;
-import 'package:mydatatools/models/tables/folder.dart' as db_folder;
-import 'package:mydatatools/modules/email/services/email_folder_upsert_service.dart';
-import 'package:mydatatools/modules/email/services/email_repository.dart';
-import 'package:mydatatools/modules/email/services/email_upsert_service.dart';
-import 'package:mydatatools/modules/email/services/get_emails_service.dart';
-import 'package:mydatatools/modules/files/files_constants.dart';
-import 'package:mydatatools/modules/files/services/file_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
+import 'package:mydatastudio/models/tables/file.dart' as db_file;
+import 'package:mydatastudio/models/tables/folder.dart' as db_folder;
+import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/email_repository.dart';
+import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
+import 'package:mydatastudio/modules/files/files_constants.dart';
+import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
 import 'dart:io' as io;
 
-import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
 
 /// [YahooScannerIsolate] is the client-side manager for the Yahoo scanning
@@ -41,7 +41,9 @@ class YahooScannerIsolate {
   Isolate? _isolate;
   final AppLogger logger = AppLogger(null);
 
-  YahooScannerIsolate({this.token, required this.appDir});
+  YahooScannerIsolate({this.token, required this.appDir, required this.dbDir});
+
+  final String dbDir;
 
   /// Spawns the Yahoo background worker isolate.
   ///
@@ -72,6 +74,7 @@ class YahooScannerIsolate {
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'force': force,
       'appDir': appDir,
+      'dbDir': dbDir,
     };
 
     _isolate = await spawnIsolate(YahooScannerIsolateWorker.worker, args);
@@ -108,9 +111,9 @@ class YahooScannerIsolate {
                 (message['uids'] as List).cast<int>(),
               )
               .then((_) {
-            isCleanupInProgress = false;
-            checkDone();
-          });
+                isCleanupInProgress = false;
+                checkDone();
+              });
         }
 
         if (message['status'] == 'done') {
@@ -142,6 +145,7 @@ class YahooScannerIsolate {
       'uids': uids,
       'type': 'move_to_trash',
       'appDir': appDir,
+      'dbDir': dbDir,
     };
 
     // We use a fresh isolate for the move operation to avoid blocking or being blocked by long-running scans
@@ -178,6 +182,7 @@ class YahooScannerIsolateWorker {
         lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
     final bool force = args['force'] ?? false;
     final String appDir = args['appDir'] as String;
+    final String dbDir = args['dbDir'] as String? ?? appDir;
     final List<int>? uidsToMove =
         args['uids'] != null ? (args['uids'] as List).cast<int>() : null;
 
@@ -244,7 +249,7 @@ class YahooScannerIsolateWorker {
         return;
       }
 
-      final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName);
+      final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
 
       final scanStartTime = DateTime.now();
       int totalFound = 0;
@@ -281,8 +286,18 @@ class YahooScannerIsolateWorker {
           // We subtract 1 day to be safe around timezones/boundaries
           final sinceDate = lastScanDate.subtract(const Duration(days: 1));
           final monthNames = [
-            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+            'Jan',
+            'Feb',
+            'Mar',
+            'Apr',
+            'May',
+            'Jun',
+            'Jul',
+            'Aug',
+            'Sep',
+            'Oct',
+            'Nov',
+            'Dec',
           ];
           final dateStr =
               "${sinceDate.day}-${monthNames[sinceDate.month - 1]}-${sinceDate.year}";
@@ -312,7 +327,9 @@ class YahooScannerIsolateWorker {
       } else {
         const int batchSize = 50;
         final reversedUids = allUids.reversed.toList();
-        logger.s("Processing ${reversedUids.length} messages in $targetFolder...");
+        logger.s(
+          "Processing ${reversedUids.length} messages in $targetFolder...",
+        );
 
         for (int i = 0; i < reversedUids.length; i += batchSize) {
           final end =
@@ -345,7 +362,8 @@ class YahooScannerIsolateWorker {
 
               // Refine incremental check with second-level precision
               if (!force && lastScanDate != null) {
-                final lastScanSecs = lastScanDate.millisecondsSinceEpoch ~/ 1000;
+                final lastScanSecs =
+                    lastScanDate.millisecondsSinceEpoch ~/ 1000;
                 final msgSecs = msgDate.millisecondsSinceEpoch ~/ 1000;
 
                 if (msgSecs <= lastScanSecs) {

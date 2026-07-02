@@ -1,23 +1,23 @@
 import 'dart:async';
 import 'dart:io' as io;
 import 'dart:isolate';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/modules/files/files_constants.dart';
-import 'package:mydatatools/modules/files/services/batch_file_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/cleanup_deleted_files_service.dart';
-import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/files/files_constants.dart';
+import 'package:mydatastudio/modules/files/services/batch_file_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
+import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:flutter/services.dart';
-import 'package:mydatatools/scanners/collection_scanner.dart';
-import 'package:mydatatools/modules/files/services/scanners/scanner_path_helper.dart';
+import 'package:mydatastudio/scanners/collection_scanner.dart';
+import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
 import 'package:path/path.dart' as p;
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/modules/files/services/utilities/thumbnail_generator.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 
 /// [LocalFileIsolate] is a collection scanner responsible for indexing files
 /// on the local filesystem. It uses a background Dart isolate to crawl
@@ -38,7 +38,8 @@ class LocalFileIsolate extends CollectionScanner {
   Isolate? isolate;
   AppLogger? logger;
 
-  LocalFileIsolate(this.loggerIsolatePort, {this.storagePath, this.dbName}) : super() {
+  LocalFileIsolate(this.loggerIsolatePort, {this.storagePath, this.dbName})
+    : super() {
     logger = AppLogger(loggerIsolatePort);
   }
 
@@ -80,6 +81,7 @@ class LocalFileIsolate extends CollectionScanner {
       'collectionId': collection.id,
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'llmServiceUrl': MainApp.llmServiceUrl.valueOrNull,
+      'port': p.sendPort,
     };
 
     //// Invoked the _scan() method in an isolate thread
@@ -178,23 +180,77 @@ class LocalFileIsolateWorker {
     unicode: true,
   );
 
-  //constructor
   LocalFileIsolateWorker(
     this.token,
     this.receiverPort,
     this.storagePath,
     this.dbName,
     this.loggerPort,
+  );
+
+  final List<Future<void> Function()> _thumbnailQueue = [];
+  int _activeThumbnailJobs = 0;
+  static const int _maxConcurrentThumbnails = 4;
+  Completer<void>? _thumbnailCompleter;
+
+  void _enqueueThumbnailJob(
+    AppDatabase appDb,
+    String fileId,
+    String absPath,
+    String mimeType,
+    String? llmServiceUrl,
   ) {
-    // Ensure the background binary messenger is initialized so plugins/platform channels work
-    if (token != null) {
-      BackgroundIsolateBinaryMessenger.ensureInitialized(token!);
+    _thumbnailQueue.add(() async {
+      try {
+        final thumbnail = await ThumbnailGenerator().pathImageToBase64(
+          absPath,
+          mimeType,
+          llmServiceUrl: llmServiceUrl,
+        );
+        if (thumbnail != null) {
+          await appDb.execute(
+            "UPDATE files SET thumbnail = ? WHERE id = ?",
+            [thumbnail, fileId],
+          );
+          logger?.d('LocalScanner: Saved thumbnail for $absPath');
+        }
+      } catch (e) {
+        logger?.e('LocalScanner: Error generating thumbnail for $absPath: $e');
+      }
+    });
+    _processThumbnailQueue();
+  }
+
+  void _processThumbnailQueue() {
+    if (_thumbnailQueue.isEmpty && _activeThumbnailJobs == 0) {
+      if (_thumbnailCompleter != null && !_thumbnailCompleter!.isCompleted) {
+        _thumbnailCompleter!.complete();
+      }
+      return;
+    }
+
+    while (_activeThumbnailJobs < _maxConcurrentThumbnails &&
+        _thumbnailQueue.isNotEmpty) {
+      _activeThumbnailJobs++;
+      final job = _thumbnailQueue.removeAt(0);
+      Future(() async {
+        try {
+          await job();
+        } finally {
+          _activeThumbnailJobs--;
+          _processThumbnailQueue();
+        }
+      });
     }
   }
 
   // start scanning
   void _scan(Map<String, dynamic> args) async {
     logger = AppLogger(loggerPort);
+
+    if (token != null) {
+      BackgroundIsolateBinaryMessenger.ensureInitialized(token!);
+    }
 
     final appDb = await AppDatabase.create(null, storagePath, dbName);
 
@@ -223,11 +279,15 @@ class LocalFileIsolateWorker {
     // Fetch existing file metadata to avoid redundant processing
     final Map<String, File> metadataCache = {};
     try {
-      final List<File> files = await FileDesktopRepository(appDb).getScanMetadata(collectionId);
+      final List<File> files = await FileDesktopRepository(
+        appDb,
+      ).getScanMetadata(collectionId);
       for (final f in files) {
         metadataCache[f.id] = f;
       }
-      logger?.i('LocalScan: Loaded ${metadataCache.length} existing file records for caching');
+      logger?.i(
+        'LocalScan: Loaded ${metadataCache.length} existing file records for caching',
+      );
     } catch (e) {
       logger?.e('LocalScan: Failed to fetch metadata cache: $e');
     }
@@ -251,7 +311,9 @@ class LocalFileIsolateWorker {
     generatedThumbnails = results['generatedThumbnails'] ?? 0;
     totalFiles = results['total'] ?? 0;
 
-    logger?.i('LocalScan: Scan finished. Found $fileCount items. Stats: Total=$totalFiles, CacheHits=$cacheHits, NewThumbs=$generatedThumbnails');
+    logger?.i(
+      'LocalScan: Scan finished. Found $fileCount items. Stats: Total=$totalFiles, CacheHits=$cacheHits, NewThumbs=$generatedThumbnails',
+    );
 
     // Final cleanup — mark anything not seen this scan as deleted.
     final cleanupRelPath = p.relative(path, from: rootPath);
@@ -272,6 +334,13 @@ class LocalFileIsolateWorker {
       col.scanStatus = 'idle';
       col.lastScanDate = scanStartTime;
       await colRepo.updateCollection(col);
+    }
+
+    // Wait for any remaining thumbnails to finish generating
+    if (_activeThumbnailJobs > 0 || _thumbnailQueue.isNotEmpty) {
+      logger?.i('LocalScan: Waiting for ${_thumbnailQueue.length + _activeThumbnailJobs} remaining thumbnails to generate...');
+      _thumbnailCompleter = Completer<void>();
+      await _thumbnailCompleter!.future;
     }
 
     // return file count
@@ -307,12 +376,7 @@ class LocalFileIsolateWorker {
       logger.i('Found ${dirList.length} items in ${dir.path}');
     } catch (e) {
       logger.e('Failed to list directory ${dir.path}: $e');
-      return {
-        'count': 0,
-        'cacheHits': 0,
-        'generatedThumbnails': 0,
-        'total': 0,
-      };
+      return {'count': 0, 'cacheHits': 0, 'generatedThumbnails': 0, 'total': 0};
     }
 
     for (var asset in dirList) {
@@ -330,9 +394,19 @@ class LocalFileIsolateWorker {
 
         final file = validation['file'] as File?;
         if (validation['isCacheHit'] == true) cacheHits++;
-        if (validation['isGenerated'] == true) generatedThumbnails++;
 
         if (file != null) {
+          if (validation['isCacheHit'] == false &&
+              file.contentType == FilesConstants.mimeTypeImage) {
+            _enqueueThumbnailJob(
+              appDb,
+              file.id,
+              asset.path,
+              file.contentType,
+              llmServiceUrl,
+            );
+            generatedThumbnails++;
+          }
           fileBatch.add(file);
           if (fileBatch.length >= 100) {
             logger.i('Found ${fileBatch.length} files, saving batch');
@@ -463,7 +537,7 @@ class LocalFileIsolateWorker {
       'isCacheHit': false,
       'isGenerated': false,
     };
-    
+
     String absPath = file_.path;
     if (absPath.length > 1 && absPath.endsWith('/')) {
       absPath = absPath.substring(0, absPath.length - 1);
@@ -496,7 +570,7 @@ class LocalFileIsolateWorker {
       // SQLite stores DateTime as unix seconds, losing milliseconds.
       final bool mtimeMatches =
           (cached.dateLastModified.millisecondsSinceEpoch ~/ 1000) ==
-              (lmDate.millisecondsSinceEpoch ~/ 1000);
+          (lmDate.millisecondsSinceEpoch ~/ 1000);
 
       final bool hasThumbnail = cached.thumbnail != null;
       final bool isImage = getMimeType(name) == FilesConstants.mimeTypeImage;
@@ -527,26 +601,7 @@ class LocalFileIsolateWorker {
       }
     }
 
-    // Generate thumbnail if it's an image
-    String? thumbnail;
     final mimeType = getMimeType(name);
-    if (mimeType == FilesConstants.mimeTypeImage) {
-      try {
-        // Thumbnail generation can be slow, but this is a background isolate.
-        // We use the absolute path for generation.
-        logger?.i('LocalScanner: Generating thumbnail for $absPath');
-        thumbnail = await ThumbnailGenerator().pathImageToBase64(
-          absPath,
-          mimeType,
-          llmServiceUrl: llmServiceUrl,
-        );
-        if (thumbnail != null) {
-          result['isGenerated'] = true;
-        }
-      } catch (e) {
-        logger?.e('LocalScanner: Error generating thumbnail for $absPath: $e');
-      }
-    }
 
     result['file'] = File(
       id: fileId,
@@ -560,7 +615,7 @@ class LocalFileIsolateWorker {
       isDeleted: false,
       size: file_.lengthSync(),
       contentType: mimeType,
-      thumbnail: thumbnail,
+      thumbnail: null,
     );
 
     return result;
@@ -590,6 +645,20 @@ class LocalFileIsolateWorker {
         return FilesConstants.mimeTypeUnKnown;
     }
   }
+
+  void enqueueThumbnailJobForTesting(
+    AppDatabase appDb,
+    String fileId,
+    String absPath,
+    String mimeType,
+    String? llmServiceUrl,
+  ) {
+    _enqueueThumbnailJob(appDb, fileId, absPath, mimeType, llmServiceUrl);
+  }
+
+  Completer<void>? get thumbnailCompleterForTesting => _thumbnailCompleter;
+  int get activeThumbnailJobsForTesting => _activeThumbnailJobs;
+  int get queueLengthForTesting => _thumbnailQueue.length;
 }
 
 /** TODO map extra types and move to helper class

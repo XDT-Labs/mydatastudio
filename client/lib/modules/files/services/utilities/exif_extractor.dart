@@ -1,6 +1,6 @@
 import 'dart:io' as io;
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/modules/files/files_constants.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:exif/exif.dart';
 
 class ExifExtractor {

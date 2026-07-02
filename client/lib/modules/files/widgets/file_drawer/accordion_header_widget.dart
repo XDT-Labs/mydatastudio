@@ -20,45 +20,40 @@ class AccordionHeaderWidget extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 0.5),
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
-          color: isExpanded
-              ? theme.colorScheme.primaryContainer
-              : theme.colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.zero,
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: Colors.transparent,
+            width: 1,
+          ),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
             Icon(
               icon,
-              size: 20,
-              color: isExpanded
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.onSurfaceVariant,
+              size: 18,
+              color: theme.colorScheme.onSurfaceVariant,
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 title,
                 style: TextStyle(
-                  fontWeight:
-                      isExpanded ? FontWeight.bold : FontWeight.w500,
+                  fontWeight: FontWeight.w500,
                   fontSize: 14,
-                  color: isExpanded
-                      ? theme.colorScheme.onPrimaryContainer
-                      : theme.colorScheme.onSurface,
+                  color: theme.colorScheme.onSurface,
                 ),
               ),
             ),
             Icon(
               isExpanded
-                  ? Icons.keyboard_arrow_up
-                  : Icons.keyboard_arrow_down,
+                  ? Icons.keyboard_arrow_down
+                  : Icons.keyboard_arrow_right,
               size: 18,
-              color: isExpanded
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.onSurfaceVariant,
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ],
         ),

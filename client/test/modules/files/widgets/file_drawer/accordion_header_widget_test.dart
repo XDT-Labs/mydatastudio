@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer/accordion_header_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
 
 void main() {
   group('AccordionHeaderWidget', () {
@@ -21,7 +21,7 @@ void main() {
       expect(find.text('Files'), findsOneWidget);
     });
 
-    testWidgets('shows down arrow when collapsed', (tester) async {
+    testWidgets('shows right arrow when collapsed', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -35,11 +35,11 @@ void main() {
         ),
       );
 
-      expect(find.byIcon(Icons.keyboard_arrow_down), findsOneWidget);
-      expect(find.byIcon(Icons.keyboard_arrow_up), findsNothing);
+      expect(find.byIcon(Icons.keyboard_arrow_right), findsOneWidget);
+      expect(find.byIcon(Icons.keyboard_arrow_down), findsNothing);
     });
 
-    testWidgets('shows up arrow when expanded', (tester) async {
+    testWidgets('shows down arrow when expanded', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -53,8 +53,8 @@ void main() {
         ),
       );
 
-      expect(find.byIcon(Icons.keyboard_arrow_up), findsOneWidget);
-      expect(find.byIcon(Icons.keyboard_arrow_down), findsNothing);
+      expect(find.byIcon(Icons.keyboard_arrow_down), findsOneWidget);
+      expect(find.byIcon(Icons.keyboard_arrow_right), findsNothing);
     });
 
     testWidgets('calls onTap when tapped', (tester) async {

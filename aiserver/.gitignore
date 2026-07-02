@@ -1,0 +1,13 @@
+dist/
+google-gemma-*
+build/
+models/
+.py[cod]
+__pycache__/
+__pypackages__
+.venv
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.pdm-python
+aichat.egg-info

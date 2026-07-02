@@ -19,7 +19,7 @@ class ScanningPlaceholderWidget extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'This may take a minute for large accounts.',
+            'This may take a minute for large folders.',
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
         ],

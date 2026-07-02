@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/gmail_error_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_error_view.dart';
 
 void main() {
   group('GmailErrorView', () {
@@ -20,10 +20,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: GmailErrorView(
-              errorMessage: 'Network error',
-              onRetry: () {},
-            ),
+            body: GmailErrorView(errorMessage: 'Network error', onRetry: () {}),
           ),
         ),
       );

@@ -2,11 +2,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:http/http.dart' as http;
 
 import 'package:flutter/foundation.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/main.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/main.dart';
 import 'package:path/path.dart' as p;
 
 class PythonManager {
@@ -25,8 +25,42 @@ class PythonManager {
   static ValueNotifier<String> startupProgress = ValueNotifier('Starting...');
 
   final AppLogger logger = AppLogger(null);
+  Completer<void>? _startupCompleter;
+  @visibleForTesting
+  final RegExp urlRegex = RegExp(r'(http://(?:127\.0\.0\.1|localhost):\d+)');
 
-  PythonManager._();
+  PythonManager._() {
+    _initOutputStreams();
+  }
+
+  void _initOutputStreams() {
+    stdoutLines.listen(_handleOutputLine);
+    stderrLines.listen(_handleOutputLine);
+  }
+
+  void _handleOutputLine(String line) {
+    logger.i('[python] $line');
+    print('[python] $line'); // Ensure standard Flutter debug console output
+    if (line.contains('[LOADER]')) {
+      logger.s(line.replaceAll('[LOADER]', '').trim());
+    }
+    // Update splash screen progress
+    PythonManager.startupProgress.value = line;
+
+    final match = urlRegex.firstMatch(line);
+    if (match != null) {
+      final url = match.group(1);
+      if (url != null) {
+        logger.i('[python] AI Chat service is running at: $url');
+        print('[python] AI Chat service is running at: $url');
+        MainApp.llmServiceUrl.add(url);
+        isLLMServiceRunning.value = true;
+        if (_startupCompleter != null && !_startupCompleter!.isCompleted) {
+          _startupCompleter!.complete();
+        }
+      }
+    }
+  }
 
   /// Create manager for `supportDir/flet/app`.
   static Future<PythonManager> forAppSupport() async {
@@ -42,8 +76,7 @@ class PythonManager {
   Future<void> startAiChatService() async {
     const remoteUrl = String.fromEnvironment('PYTHON_SERVER_URL');
     if (remoteUrl.isNotEmpty) {
-      logger.i('[python] Using remote AI Chat service at: $remoteUrl');
-      print('[python] Using remote AI Chat service at: $remoteUrl');
+      logger.i('[python] Starting remote AI Chat service at: $remoteUrl');
       MainApp.llmServiceUrl.add(remoteUrl);
       isLLMServiceRunning.value = true;
       PythonManager.startupProgress.value = 'Connected to remote AI service';
@@ -53,12 +86,18 @@ class PythonManager {
     PythonManager.startupProgress.value = 'Preparing AI service...';
     // Use a completer to ensure the aichat assets are available before proceeding.
     Completer<void> completer = Completer<void>();
+    _startupCompleter = completer;
 
     // Ensure bundled aichat assets are available in Application Support before proceeding.
     logger.d('[python] Ensuring aichat assets are available');
-    await ensureAichatUnzipped().then((_) => completer.complete());
+    try {
+      await ensureAichatUnzipped();
+    } catch (e) {
+      completer.completeError(e);
+      return completer.future;
+    }
 
-    var supportPath = MainApp.appDataDirectory.value!;
+    var supportPath = await DatabaseManager.getRealApplicationSupportPath();
     _pythonDir = p.join(supportPath, "aichat");
 
     // Check for existing PID file and kill previous process if it exists
@@ -96,7 +135,8 @@ class PythonManager {
       final msg = 'Python executable not found at $executablePath';
       _stderrController.add(msg);
       logger.e('[python] $msg');
-      return;
+      completer.completeError(Exception(msg));
+      return completer.future;
     }
 
     // Ensure executable permission on Unix-like systems if using compiled binary
@@ -116,6 +156,8 @@ class PythonManager {
           'GOOGLE_API_KEY': '', //todo pass from client
           'MODEL_DOWNLOAD_URL':
               'https://gcs-file-downloader-10805446439.us-central1.run.app', // todo get from remote config
+          'APP_SUPPORT_DIR': supportPath,
+          'AICHAT_MODELS_DIR': p.join(_pythonDir!, 'models'),
         },
       );
 
@@ -131,62 +173,6 @@ class PythonManager {
       );
 
       await _pipeOutput(_pythonProc!);
-
-      //Start default session
-      MainApp.llmServiceUrl.listen((llmServiceUrl) async {
-        if (llmServiceUrl != null) {
-          final session = await http.post(
-            Uri.parse("$llmServiceUrl/start-session"),
-            headers: <String, String>{
-              'Content-Type': 'application/json; charset=UTF-8',
-            },
-            body: jsonEncode(<String, dynamic>{
-              "model_name": "bartowski/gemma-3-4b-it-GGUF",
-              "filename": "gemma-3-4b-it-Q4_K_M.gguf",
-            }),
-          );
-          logger.d(
-            'Started default session: ${session.statusCode} ${session.body}',
-          );
-        }
-      });
-
-      stdoutLines.listen((line) {
-        logger.i('[python] $line');
-        print('[python] $line'); // Ensure standard Flutter debug console output
-        // If it's a downloading/loading message, blast it to the UI status bar!
-        if (line.contains('[LOADER]')) {
-          logger.s(line.replaceAll('[LOADER]', '').trim());
-        }
-        // Update splash screen progress
-        PythonManager.startupProgress.value = line;
-      });
-
-      final urlRegex = RegExp(r'(http?:\/\/[^\s]+)');
-      stderrLines.listen((line) {
-        logger.i('[python] $line');
-        print('[python] $line');
-        if (line.contains('[LOADER]')) {
-          logger.s(line.replaceAll('[LOADER]', '').trim());
-        }
-        // Update splash screen progress
-        PythonManager.startupProgress.value = line;
-        
-        final match = urlRegex.firstMatch(line);
-        if (match != null) {
-          final url = match.group(1);
-          if (url != null) {
-            logger.i('[python] AI Chat service is running at: $url');
-            print('[python] AI Chat service is running at: $url');
-            // Store this URL in a variable for later use.
-            MainApp.llmServiceUrl.add(url);
-            isLLMServiceRunning.value = true;
-            if (!completer.isCompleted) {
-              completer.complete();
-            }
-          }
-        }
-      });
     } catch (e) {
       final msg = 'Failed to start AI Chat service: $e';
       _stderrController.add(msg);
@@ -243,7 +229,7 @@ class PythonManager {
   /// If the destination directory already exists, this is a no-op.
   Future<void> ensureAichatUnzipped() async {
     try {
-      var supportPath = MainApp.appDataDirectory.value!;
+      var supportPath = await DatabaseManager.getRealApplicationSupportPath();
       final destDir = Directory(p.join(supportPath, 'aichat'));
 
       if (destDir.existsSync()) {
@@ -254,25 +240,35 @@ class PythonManager {
         return;
       }
 
-      String zipName = 'aichat.zip';
+      String zipName = 'aiserver.zip';
       if (Platform.isMacOS) {
-        zipName = 'aichat-macos.zip';
+        zipName = 'aiserver-macos.zip';
       } else if (Platform.isWindows) {
-        zipName = 'aichat-windows.zip';
+        zipName = 'aiserver-windows.zip';
       } else if (Platform.isLinux) {
-        zipName = 'aichat-linux.zip';
+        zipName = 'aiserver-linux.zip';
       }
 
       // Candidate locations for the zip file in common run contexts
       final candidates =
           <String>[
+            // when manually placed/copied for local testing via makefile
+            p.join(supportPath, zipName),
             // when running from the project root
+            p.join(Directory.current.path, 'client', 'app', zipName),
+            // fallback when running from client folder directly
             p.join(Directory.current.path, 'app', zipName),
-            // fallback to generic name
-            p.join(Directory.current.path, 'app', 'aichat.zip'),
             // when running from a built executable next to an `app` folder
             p.join(p.dirname(Platform.resolvedExecutable), 'app', zipName),
-            p.join(p.dirname(Platform.resolvedExecutable), 'app', 'aichat.zip'),
+            // inside a macOS .app bundle flutter_assets folder
+            p.join(
+              p.dirname(Platform.resolvedExecutable),
+              '..',
+              'Resources',
+              'flutter_assets',
+              'app',
+              zipName,
+            ),
             // inside a macOS .app bundle Resources folder
             p.join(
               p.dirname(Platform.resolvedExecutable),
@@ -281,16 +277,9 @@ class PythonManager {
               'app',
               zipName,
             ),
-            p.join(
-              p.dirname(Platform.resolvedExecutable),
-              '..',
-              'Resources',
-              'app',
-              'aichat.zip',
-            ),
           ].map((s) => p.normalize(s)).toList();
 
-      //logger.d('[python] Candidates: ${candidates.join(', ')}');
+      logger.d('[python] Candidate search paths: ${candidates.join(', ')}');
 
       String? zipPath;
       for (final c in candidates) {
@@ -301,10 +290,11 @@ class PythonManager {
       }
 
       if (zipPath == null) {
-        final msg = 'aichat zip not found. Searched: ${candidates.join(', ')}';
+        final msg =
+            'aichat zip not found. Searched candidates: ${candidates.join(', ')}';
         _stderrController.add(msg);
         logger.e('[python] $msg');
-        return;
+        throw Exception(msg);
       }
 
       final tempDir = Directory(p.join(supportPath, 'aichat_temp'));
@@ -345,8 +335,10 @@ class PythonManager {
 
         final exitCode = await proc.exitCode;
         if (exitCode != 0) {
-          _stderrController.add('Expand-Archive failed (exit $exitCode)');
-          return;
+          final msg = 'Expand-Archive failed (exit $exitCode)';
+          _stderrController.add(msg);
+          logger.e('[python] $msg');
+          throw Exception(msg);
         } else {
           _stdoutController.add('Unzip completed via PowerShell');
         }
@@ -369,8 +361,9 @@ class PythonManager {
                 int now = DateTime.now().millisecondsSinceEpoch;
                 if (now - lastUpdate > 100) {
                   String file = line.split('inflating:')[1].trim();
-                  if (file.length > 50)
-                    file = '...' + file.substring(file.length - 47);
+                  if (file.length > 50) {
+                    file = '...${file.substring(file.length - 47)}';
+                  }
                   PythonManager.startupProgress.value = 'Unzipping: $file';
                   lastUpdate = now;
                 }
@@ -386,8 +379,10 @@ class PythonManager {
 
         final exitCode = await proc.exitCode;
         if (exitCode != 0) {
-          _stderrController.add('unzip failed (exit $exitCode)');
-          return;
+          final msg = 'unzip failed (exit $exitCode)';
+          _stderrController.add(msg);
+          logger.e('[python] $msg');
+          throw Exception(msg);
         } else {
           _stdoutController.add('Unzip completed');
         }
@@ -401,7 +396,7 @@ class PythonManager {
           }).toList();
 
       if (contents.length == 1 && contents.first is Directory) {
-        // It's a nested folder structure (e.g. aichat-macos/), move it to destDir
+        // It's a nested folder structure (e.g. aiserver-macos/), move it to destDir
         PythonManager.startupProgress.value = 'Finalizing setup...';
         final nestedDir = contents.first as Directory;
         _stdoutController.add(
@@ -419,6 +414,7 @@ class PythonManager {
       final msg = 'Exception while unzipping aichat bundle: $e';
       _stderrController.add(msg);
       logger.e('[python] $msg');
+      rethrow;
     }
   }
 
@@ -439,7 +435,11 @@ class PythonManager {
         .listen(_stderrController.add);
     proc.exitCode.then((code) {
       _stdoutController.add('Python exited with code $code');
-      // cleanup references when it exits
+      if (_startupCompleter != null && !_startupCompleter!.isCompleted) {
+        _startupCompleter!.completeError(
+          Exception('Python server exited with code $code.'),
+        );
+      }
       _pythonProc = null;
     });
   }

@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:mydatatools/models/tables/app_user.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/repositories/user_repository.dart';
-import 'package:mydatatools/widgets/login_form.dart';
+import 'package:mydatastudio/models/tables/app_user.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/repositories/user_repository.dart';
+import 'package:mydatastudio/widgets/login_form.dart';
 import 'package:password_dart/password_dart.dart';
 import 'package:uuid/uuid.dart';
 
@@ -50,7 +50,8 @@ void main() {
     );
     final hash = Password.hash(password, algorithm);
 
-    final String tempPath = '${tempDir.path}/mydatatools_test_${const Uuid().v4()}';
+    final String tempPath =
+        '${tempDir.path}/mydatastudio_test_${const Uuid().v4()}';
     final user = AppUser(
       id: const Uuid().v4(),
       name: 'testuser',
@@ -118,7 +119,8 @@ void main() {
     );
     final hash = Password.hash(password, algorithm);
 
-    final String tempPath = '${tempDir.path}/mydatatools_test_nokeys_${const Uuid().v4()}';
+    final String tempPath =
+        '${tempDir.path}/mydatastudio_test_nokeys_${const Uuid().v4()}';
     final user = AppUser(
       id: const Uuid().v4(),
       name: 'testuser',

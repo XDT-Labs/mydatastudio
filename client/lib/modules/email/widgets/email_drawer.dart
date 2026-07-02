@@ -1,20 +1,25 @@
 import 'dart:async';
 
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:mydatatools/modules/email/widgets/email_drawer/email_folder_tile_widget.dart';
-import 'package:mydatatools/modules/email/pages/email_page.dart';
-import 'package:mydatatools/modules/email/services/get_email_folders_service.dart';
-import 'package:mydatatools/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
+import 'package:mydatastudio/modules/email/widgets/email_drawer/email_folder_tile_widget.dart';
+import 'package:mydatastudio/modules/email/pages/email_page.dart';
+import 'package:mydatastudio/modules/email/services/get_email_folders_service.dart';
+import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/collection_tile_widget.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+
+enum _EmailAccordionSection { gmail, yahoo, outlook, other }
 
 class EmailDrawer extends StatefulWidget {
   const EmailDrawer({super.key});
@@ -35,6 +40,8 @@ class _EmailDrawer extends State<EmailDrawer> {
   Collection? collection;
   String? selectedFolderId;
 
+  _EmailAccordionSection? _expandedSection = _EmailAccordionSection.gmail;
+
   @override
   void initState() {
     _collectionsServiceSub = _collectionsService.sink.listen((value) {
@@ -49,6 +56,10 @@ class _EmailDrawer extends State<EmailDrawer> {
       if (mounted) {
         setState(() {
           collection = value;
+          // Auto-expand the section containing the selected account
+          if (value != null) {
+            _expandedSection = _sectionFor(value.scanner);
+          }
         });
       }
     });
@@ -61,9 +72,6 @@ class _EmailDrawer extends State<EmailDrawer> {
       }
     });
 
-    // Deferred to post-frame: prevents the BehaviorSubject from replaying
-    // its last value synchronously in initState(), which cascades setState()
-    // calls before the first frame can render.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _collectionsService.invoke(GetCollectionsServiceCommand("email"));
     });
@@ -78,152 +86,230 @@ class _EmailDrawer extends State<EmailDrawer> {
     super.dispose();
   }
 
+  _EmailAccordionSection _sectionFor(String scanner) {
+    switch (scanner) {
+      case AppConstants.scannerEmailGmail:
+        return _EmailAccordionSection.gmail;
+      case AppConstants.scannerEmailYahoo:
+        return _EmailAccordionSection.yahoo;
+      case AppConstants.scannerEmailOutlook:
+      case AppConstants.scannerEmailOutlookPst:
+        return _EmailAccordionSection.outlook;
+      default:
+        return _EmailAccordionSection.other;
+    }
+  }
+
+  String _getDisplayName(Collection c) {
+    final name = c.name;
+    // If name contains an email in parens, show just the email
+    final match = RegExp(r'\(([^)]+)\)').firstMatch(name);
+    if (match != null) {
+      return match.group(1) ?? name;
+    }
+    return name;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // 1. Grouping
-    final Map<String, List<Collection>> grouped = {};
-    for (var c in collections) {
-      final groupName = _getGroupName(c);
-      grouped.putIfAbsent(groupName, () => []).add(c);
-    }
-
-    // 2. Sort groups by their defined order
-    final sortedGroupNames =
-        grouped.keys.toList()..sort((a, b) {
-          final orderA = _getGroupOrder(grouped[a]!.first.scanner);
-          final orderB = _getGroupOrder(grouped[b]!.first.scanner);
-          return orderA.compareTo(orderB);
-        });
-
-    // 3. Flatten into a list with headers for the ListView
-    final List<dynamic> flatList = [];
-    for (final groupName in sortedGroupNames) {
-      flatList.add(groupName);
-
-      final groupItems = grouped[groupName]!;
-      // Sort within the group alphabetically
-      groupItems.sort(
-        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-      );
-      flatList.addAll(groupItems);
-    }
+    final gmailAccounts =
+        collections
+            .where((c) => c.scanner == AppConstants.scannerEmailGmail)
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
+    final yahooAccounts =
+        collections
+            .where((c) => c.scanner == AppConstants.scannerEmailYahoo)
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
+    final outlookAccounts =
+        collections
+            .where(
+              (c) =>
+                  c.scanner == AppConstants.scannerEmailOutlook ||
+                  c.scanner == AppConstants.scannerEmailOutlookPst,
+            )
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
+    final otherAccounts =
+        collections
+            .where(
+              (c) =>
+                  c.scanner != AppConstants.scannerEmailGmail &&
+                  c.scanner != AppConstants.scannerEmailYahoo &&
+                  c.scanner != AppConstants.scannerEmailOutlook &&
+                  c.scanner != AppConstants.scannerEmailOutlookPst,
+            )
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
 
     return SizedBox.expand(
       child: Container(
-        height: double.infinity,
-        color: Colors.white,
-        padding: const EdgeInsets.all(8),
+        color: Colors.transparent,
         child: Scaffold(
-          backgroundColor: Colors.white,
-          floatingActionButton: FloatingActionButton(
-            tooltip: "Add Email",
-            backgroundColor: Colors.white,
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-              side: const BorderSide(color: Colors.grey, width: 1),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Icon(Icons.add, color: Colors.grey),
-            onPressed: () {
-              GoRouter.of(context).go("/email/add");
-            },
+          backgroundColor: Colors.transparent,
+          floatingActionButton: FloatingActionButton.small(
+            tooltip: "Add Email Account",
+            onPressed: () => GoRouter.of(context).go("/email/add"),
+            backgroundColor: theme.colorScheme.surfaceContainerHigh,
+            foregroundColor: theme.colorScheme.onSurface,
+            shape: const CircleBorder(),
+            child: const Icon(Icons.add, size: 20),
           ),
+          floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
           body: Column(
             children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8.0),
-                child: Align(
-                  alignment: Alignment.topLeft,
-                  child: Text(
-                    "SOURCES",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                      color: Colors.grey,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                ),
-              ),
               Expanded(
-                child: ListView.builder(
-                  padding: EdgeInsets.zero,
-                  itemCount: flatList.length,
-                  itemBuilder: (context, index) {
-                    final item = flatList[index];
-
-                    if (item is String) {
-                      return Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 16, 8, 4),
-                        child: Text(
-                          item.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onSurface.withValues(
-                              alpha: 0.1,
-                            ),
-                            letterSpacing: 1.0,
-                          ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildSectionHeader("SOURCES"),
+                      if (gmailAccounts.isNotEmpty) ...[
+                        AccordionHeaderWidget(
+                          title: 'Gmail',
+                          icon: Icons.email_outlined,
+                          isExpanded:
+                              _expandedSection == _EmailAccordionSection.gmail,
+                          onTap:
+                              () => setState(() {
+                                _expandedSection =
+                                    _expandedSection ==
+                                            _EmailAccordionSection.gmail
+                                        ? null
+                                        : _EmailAccordionSection.gmail;
+                              }),
                         ),
-                      );
-                    }
-
-                    final col = item as Collection;
-                    return _AccountExpansionTile(
-                      collection: col,
-                      isSelected: collection?.id == col.id,
-                      selectedFolderId: selectedFolderId,
-                      onAccountTap: () {
-                        EmailPage.selectedCollection.add(col);
-                        EmailPage.selectedFolder.add(null);
-                        context.go('/email');
-                      },
-                      onFolderTap: (folderId) {
-                        EmailPage.selectedCollection.add(col);
-                        EmailPage.selectedFolder.add(folderId);
-                        context.go('/email');
-                      },
-                      onDelete:
-                          () => _showDeleteConfirmationDialog(context, col),
-                      onSync: () async {
-                        if (col.scanner ==
-                            AppConstants.scannerEmailOutlookPst) {
-                          // For PST we run one-time import isolate
-                          final serverUrl = MainApp.llmServiceUrl.valueOrNull;
-                          final appDataDir =
-                              MainApp.appDataDirectory.valueOrNull;
-
-                          if (serverUrl != null && appDataDir != null) {
-                            final pstIsolate = OutlookPstScannerIsolate(
-                              token: RootIsolateToken.instance,
-                              appDir: appDataDir,
-                              serverUrl: serverUrl,
-                            );
-                            ScannerManager.getInstance().pstScanners[col.id] =
-                                pstIsolate;
-                            await pstIsolate.start(col, force: true);
-                          } else {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Cannot start PST sync: services or directory not ready',
-                                  ),
-                                ),
-                              );
-                            }
-                          }
-                        } else {
-                          ScannerManager.getInstance()
-                              .getScanner(col)
-                              ?.start(col, null, true, true);
-                        }
-                      },
-                    );
-                  },
+                        if (_expandedSection == _EmailAccordionSection.gmail)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children:
+                                  gmailAccounts
+                                      .map(
+                                        (c) => _buildAccountSection(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
+                            ),
+                          ),
+                      ],
+                      if (yahooAccounts.isNotEmpty) ...[
+                        AccordionHeaderWidget(
+                          title: 'Yahoo',
+                          icon: Icons.mail_outlined,
+                          isExpanded:
+                              _expandedSection == _EmailAccordionSection.yahoo,
+                          onTap:
+                              () => setState(() {
+                                _expandedSection =
+                                    _expandedSection ==
+                                            _EmailAccordionSection.yahoo
+                                        ? null
+                                        : _EmailAccordionSection.yahoo;
+                              }),
+                        ),
+                        if (_expandedSection == _EmailAccordionSection.yahoo)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children:
+                                  yahooAccounts
+                                      .map(
+                                        (c) => _buildAccountSection(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
+                            ),
+                          ),
+                      ],
+                      if (outlookAccounts.isNotEmpty) ...[
+                        AccordionHeaderWidget(
+                          title: 'Outlook',
+                          icon: Icons.inbox_outlined,
+                          isExpanded:
+                              _expandedSection ==
+                              _EmailAccordionSection.outlook,
+                          onTap:
+                              () => setState(() {
+                                _expandedSection =
+                                    _expandedSection ==
+                                            _EmailAccordionSection.outlook
+                                        ? null
+                                        : _EmailAccordionSection.outlook;
+                              }),
+                        ),
+                        if (_expandedSection == _EmailAccordionSection.outlook)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children:
+                                  outlookAccounts
+                                      .map(
+                                        (c) => _buildAccountSection(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
+                            ),
+                          ),
+                      ],
+                      if (otherAccounts.isNotEmpty) ...[
+                        AccordionHeaderWidget(
+                          title: 'Other',
+                          icon: Icons.alternate_email,
+                          isExpanded:
+                              _expandedSection == _EmailAccordionSection.other,
+                          onTap:
+                              () => setState(() {
+                                _expandedSection =
+                                    _expandedSection ==
+                                            _EmailAccordionSection.other
+                                        ? null
+                                        : _EmailAccordionSection.other;
+                              }),
+                        ),
+                        if (_expandedSection == _EmailAccordionSection.other)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children:
+                                  otherAccounts
+                                      .map(
+                                        (c) => _buildAccountSection(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
+                            ),
+                          ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -233,29 +319,97 @@ class _EmailDrawer extends State<EmailDrawer> {
     );
   }
 
-  String _getGroupName(Collection c) {
-    switch (c.scanner) {
-      case AppConstants.scannerEmailGmail:
-        return 'Gmail';
-      case AppConstants.scannerEmailYahoo:
-        return 'Yahoo';
-      case AppConstants.scannerEmailOutlook:
-        return 'Outlook';
-      default:
-        return 'Other';
-    }
+  Widget _buildSectionHeader(String title, {double leftPadding = 16.0}) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: leftPadding,
+        right: 16.0,
+        top: 12,
+        bottom: 12,
+      ),
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: Text(
+          title.toUpperCase(),
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 11,
+            color: Colors.grey,
+            letterSpacing: 1.5,
+          ),
+        ),
+      ),
+    );
   }
 
-  int _getGroupOrder(String scanner) {
-    switch (scanner) {
-      case AppConstants.scannerEmailGmail:
-        return 0;
-      case AppConstants.scannerEmailYahoo:
-        return 1;
-      case AppConstants.scannerEmailOutlook:
-        return 2;
-      default:
-        return 3;
+  Widget _buildAccountSection(
+    BuildContext context,
+    ThemeData theme,
+    Collection col,
+  ) {
+    final isAccountSelected = collection?.id == col.id;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CollectionTileWidget(
+          collection: col,
+          isSelected: isAccountSelected,
+          displayName: _getDisplayName(col),
+          onTap: () {
+            EmailPage.selectedCollection.add(col);
+            EmailPage.selectedFolder.add(null);
+            context.go('/email');
+          },
+          onSync: () => _syncAccount(context, col),
+          onDelete: () => _showDeleteConfirmationDialog(context, col),
+        ),
+        if (isAccountSelected)
+          Padding(
+            padding: const EdgeInsets.only(left: 8.0),
+            child: _EmailFolderList(
+              collection: col,
+              selectedFolderId: selectedFolderId,
+              onFolderTap: (folderId) {
+                EmailPage.selectedCollection.add(col);
+                EmailPage.selectedFolder.add(folderId);
+                context.go('/email');
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _syncAccount(BuildContext context, Collection col) async {
+    if (col.scanner == AppConstants.scannerEmailOutlookPst) {
+      final serverUrl = MainApp.llmServiceUrl.valueOrNull;
+      final appDataDir = MainApp.appDataDirectory.valueOrNull;
+
+      if (serverUrl != null && appDataDir != null) {
+        final pstIsolate = OutlookPstScannerIsolate(
+          token: RootIsolateToken.instance,
+          appDir: appDataDir,
+          dbDir: DatabaseManager.instance.databaseDirectoryPath!,
+          serverUrl: serverUrl,
+        );
+        ScannerManager.getInstance().pstScanners[col.id] = pstIsolate;
+        await pstIsolate.start(col, force: true);
+      } else {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Cannot start PST sync: services or directory not ready',
+              ),
+            ),
+          );
+        }
+      }
+    } else {
+      ScannerManager.getInstance()
+          .getScanner(col)
+          ?.start(col, null, true, true);
     }
   }
 
@@ -282,24 +436,17 @@ class _EmailDrawer extends State<EmailDrawer> {
               onPressed: () async {
                 Navigator.of(dialogContext).pop();
 
-                // 1. Show progress in the header
                 EmailPage.isDeleting.add(true);
 
                 try {
-                  // 2. Stop any running scanner for this collection
                   ScannerManager.getInstance().stopScanner(collection.id);
 
-                  // 3. Cancel the reactive folder watch for this account so
-                  //    the orphaned subscription can't keep firing on the main
-                  //    thread after the account data is gone.
                   GetEmailFoldersService.instance.disposeCollection(
                     collection.id,
                   );
 
-                  // 4. Delete collection
                   await CollectionRepository().deleteCollection(collection.id);
 
-                  // 5. Refresh and cleanup
                   _collectionsService.invoke(
                     GetCollectionsServiceCommand("email"),
                   );
@@ -307,7 +454,6 @@ class _EmailDrawer extends State<EmailDrawer> {
                     EmailPage.selectedCollection.add(null);
                   }
                 } finally {
-                  // 6. Hide progress
                   EmailPage.isDeleting.add(false);
                 }
               },
@@ -319,39 +465,31 @@ class _EmailDrawer extends State<EmailDrawer> {
   }
 }
 
-class _AccountExpansionTile extends StatefulWidget {
+class _EmailFolderList extends StatefulWidget {
   final Collection collection;
-  final bool isSelected;
   final String? selectedFolderId;
-  final VoidCallback onAccountTap;
   final Function(String?) onFolderTap;
-  final VoidCallback onSync;
-  final VoidCallback onDelete;
 
-  const _AccountExpansionTile({
+  const _EmailFolderList({
     required this.collection,
-    required this.isSelected,
     required this.selectedFolderId,
-    required this.onAccountTap,
     required this.onFolderTap,
-    required this.onSync,
-    required this.onDelete,
   });
 
   @override
-  State<_AccountExpansionTile> createState() => _AccountExpansionTileState();
+  State<_EmailFolderList> createState() => _EmailFolderListState();
 }
 
-class _AccountExpansionTileState extends State<_AccountExpansionTile> {
+class _EmailFolderListState extends State<_EmailFolderList> {
   StreamSubscription? _folderSub;
   List<EmailFolder> folders = [];
+  bool _showAllFolders = false;
 
   @override
   void initState() {
     super.initState();
     _folderSub = GetEmailFoldersService.instance.sink.listen((value) {
       if (mounted) {
-        // Filter folders for this specific collection
         final myFolders =
             value.where((f) => f.collectionId == widget.collection.id).toList();
         if (myFolders.isNotEmpty) {
@@ -361,10 +499,7 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
         }
       }
     });
-    // Deferred to post-frame: each visible account tile calls invoke() when
-    // mounted. Without deferral, N accounts fire N simultaneous DB queries
-    // whose BehaviorSubject callbacks all cascade setState() before the first
-    // frame can paint, causing the OS spinner on source click.
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         GetEmailFoldersService.instance.invoke(
@@ -384,7 +519,6 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // Find Inbox and Sent folders
     EmailFolder? inbox;
     EmailFolder? sent;
     final List<EmailFolder> otherFolders = [];
@@ -402,93 +536,76 @@ class _AccountExpansionTileState extends State<_AccountExpansionTile> {
       }
     }
 
-    // Sort other folders alphabetically
     otherFolders.sort(
       (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
     );
 
-    return ExpansionTile(
-      initiallyExpanded: widget.isSelected,
-      shape: const Border(),
-      collapsedShape: const Border(),
-      tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-      title: Text(
-        widget.collection.name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        softWrap: false,
-        style: TextStyle(
-          fontWeight: widget.isSelected ? FontWeight.bold : FontWeight.normal,
-        ),
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, size: 20),
-            onSelected: (val) {
-              if (val == 'sync') widget.onSync();
-              if (val == 'delete') widget.onDelete();
-            },
-            itemBuilder:
-                (context) => [
-                  const PopupMenuItem(
-                    value: 'sync',
-                    child: Text('Sync Account'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'delete',
-                    child: Text('Delete Account'),
-                  ),
-                ],
-          ),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (inbox != null)
-          _buildFolderTile(context, inbox, "Inbox", Icons.inbox),
-        if (sent != null) _buildFolderTile(context, sent, "Sent", Icons.send),
-
-        if (otherFolders.isNotEmpty)
-          Theme(
-            data: theme.copyWith(dividerColor: Colors.transparent),
-            child: ExpansionTile(
-              tilePadding: const EdgeInsets.only(left: 48.0, right: 16.0),
-              title: const Text("All Folders", style: TextStyle(fontSize: 13)),
-              leading: const Icon(Icons.folder_outlined, size: 20),
-              dense: true,
-              children:
-                  otherFolders
-                      .map(
-                        (f) => _buildFolderTile(
-                          context,
-                          f,
-                          f.name,
-                          null,
-                          indent: 32,
-                        ),
-                      )
-                      .toList(),
+          EmailFolderTileWidget(
+            folder: inbox,
+            label: 'Inbox',
+            icon: Icons.inbox,
+            isSelected: widget.selectedFolderId == inbox.id,
+            onTap: () => widget.onFolderTap(inbox!.id),
+          ),
+        if (sent != null)
+          EmailFolderTileWidget(
+            folder: sent,
+            label: 'Sent',
+            icon: Icons.send,
+            isSelected: widget.selectedFolderId == sent.id,
+            onTap: () => widget.onFolderTap(sent!.id),
+          ),
+        if (otherFolders.isNotEmpty) ...[
+          InkWell(
+            onTap: () => setState(() => _showAllFolders = !_showAllFolders),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    _showAllFolders
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    size: 16,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'All Folders',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
+          if (_showAllFolders)
+            Padding(
+              padding: const EdgeInsets.only(left: 8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children:
+                    otherFolders
+                        .map(
+                          (f) => EmailFolderTileWidget(
+                            folder: f,
+                            label: f.name,
+                            isSelected: widget.selectedFolderId == f.id,
+                            onTap: () => widget.onFolderTap(f.id),
+                          ),
+                        )
+                        .toList(),
+              ),
+            ),
+        ],
       ],
-    );
-  }
-
-  Widget _buildFolderTile(
-    BuildContext context,
-    EmailFolder f,
-    String label,
-    IconData? icon, {
-    double indent = 48.0,
-  }) {
-    return EmailFolderTileWidget(
-      folder: f,
-      label: label,
-      icon: icon,
-      isSelected: widget.isSelected && widget.selectedFolderId == f.id,
-      onTap: () => widget.onFolderTap(f.id),
-      indent: indent,
     );
   }
 }

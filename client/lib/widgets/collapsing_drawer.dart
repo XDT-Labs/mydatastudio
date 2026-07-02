@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/models/tables/app.dart' as m;
-import 'package:mydatatools/services/get_apps_service.dart';
-import 'package:mydatatools/services/get_user_service.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/models/tables/app.dart' as m;
+import 'package:mydatastudio/services/get_apps_service.dart';
+import 'package:mydatastudio/services/get_user_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
@@ -40,7 +40,7 @@ class _CollapsingDrawerState extends State<CollapsingDrawer> {
     });
     //list of all apps
     _appsSub = _getAppsService!.sink.listen((value) {
-      if( context.mounted ) {
+      if (context.mounted) {
         setState(() {
           apps = value;
         });
@@ -66,8 +66,8 @@ class _CollapsingDrawerState extends State<CollapsingDrawer> {
 
     if (isLoading) {
       return const SizedBox(
-        width: 72, 
-        child: Center(child: CircularProgressIndicator())
+        width: 72,
+        child: Center(child: CircularProgressIndicator()),
       );
     }
 
@@ -84,6 +84,7 @@ class _CollapsingDrawerState extends State<CollapsingDrawer> {
         ),
       ...appApps.map((app) {
         return NavigationRailDestination(
+          // ignore: non_const_argument_for_const_parameter
           icon: Icon(IconData(app.icon ?? 0xe08f, fontFamily: 'MaterialIcons')),
           label: Text(app.name),
         );
@@ -96,6 +97,7 @@ class _CollapsingDrawerState extends State<CollapsingDrawer> {
         ),
       ...collectionApps.map((app) {
         return NavigationRailDestination(
+          // ignore: non_const_argument_for_const_parameter
           icon: Icon(IconData(app.icon ?? 0xe08f, fontFamily: 'MaterialIcons')),
           label: Text(app.name),
         );
@@ -110,27 +112,27 @@ class _CollapsingDrawerState extends State<CollapsingDrawer> {
         setState(() {
           selectedIndex = index;
         });
-        
+
         if (index == 0) {
           GoRouter.of(context).go("/");
           return;
-        } 
-        
+        }
+
         int currentIndex = 1; // Start after Home
         if (appApps.isNotEmpty || collectionApps.isNotEmpty) {
           currentIndex++; // Skip first divider
         }
-        
+
         if (index < currentIndex + appApps.length) {
           GoRouter.of(context).go(appApps[index - currentIndex].route);
           return;
         }
         currentIndex += appApps.length;
-        
+
         if (appApps.isNotEmpty && collectionApps.isNotEmpty) {
           currentIndex++; // Skip second divider
         }
-        
+
         if (index < currentIndex + collectionApps.length) {
           GoRouter.of(context).go(collectionApps[index - currentIndex].route);
           return;

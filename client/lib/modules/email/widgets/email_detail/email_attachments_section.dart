@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:mydatatools/models/tables/file.dart' as model;
-import 'package:mydatatools/modules/email/widgets/email_detail/attachment_thumbnail_widget.dart';
+import 'package:mydatastudio/models/tables/file.dart' as model;
+import 'package:mydatastudio/modules/email/widgets/email_detail/attachment_thumbnail_widget.dart';
 
 class EmailAttachmentsSection extends StatelessWidget {
   const EmailAttachmentsSection({super.key, required this.attachments});
@@ -26,8 +26,9 @@ class EmailAttachmentsSection extends StatelessWidget {
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: attachments.length,
-              itemBuilder: (context, index) =>
-                  AttachmentThumbnailWidget(file: attachments[index]),
+              itemBuilder:
+                  (context, index) =>
+                      AttachmentThumbnailWidget(file: attachments[index]),
             ),
           ),
         ],

@@ -1,9 +1,9 @@
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/modules/email/services/email_repository.dart';
-import 'package:mydatatools/services/rx_service.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/modules/email/services/email_repository.dart';
+import 'package:mydatastudio/services/rx_service.dart';
 
 class GetEmailsService extends RxService<EmailServiceCommand, List<Email>> {
   static final GetEmailsService _singleton = GetEmailsService();

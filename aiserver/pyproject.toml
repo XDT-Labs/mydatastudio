@@ -1,0 +1,58 @@
+[project]
+name = "aichat"
+version = "0.1.0"
+description = "Default template for PDM package"
+authors = [
+    {name = "Mike Nimer", email = "mnimer@gmail.com"},
+]
+dependencies = [
+    "uvicorn[standard]==0.38.0",
+    "pydantic==2.12.3",
+    "llama-cpp-python>=0.3.31",
+    "numpy==1.26.4",
+    "python-multipart==0.0.9",
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "fastapi==0.120.4",
+    "langchain-core==0.3.79",
+    "langchain==0.3.27",
+    "huggingface-hub==0.36.0",
+    "langchain-google-genai",
+    "langchain-community",
+    "transformers>=4.57.0",
+    "qwen-vl-utils",
+    "torch",
+    "torchvision",
+    "pillow",
+    "accelerate",
+    "libpff-python",
+    "rawpy==0.26.1",
+]
+
+requires-python = ">=3.11,<3.15"
+readme = "README.md"
+license = {text = "Apache"}
+
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.options]
+# Use standard virtual environment instead of PEP 582 for VS Code compatibility
+use_venv = true
+
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+namespaces = false
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.19.0",
+    "sentencepiece>=0.2.0",
+    "gguf>=0.6.0",
+    "mistral-common>=1.4.4",
+    "tiktoken>=0.7.0",
+    "protobuf>=5.0.0",
+]

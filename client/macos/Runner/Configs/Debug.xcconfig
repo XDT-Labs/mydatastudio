@@ -1,3 +1,6 @@
 #include "../../Flutter/Flutter-Debug.xcconfig"
 #include "../../Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
 #include "Warnings.xcconfig"
+
+PRODUCT_BUNDLE_IDENTIFIER = com.xdtlabs.mydatastudio.dev
+

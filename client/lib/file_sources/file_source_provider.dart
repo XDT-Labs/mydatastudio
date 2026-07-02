@@ -1,7 +1,7 @@
 import 'dart:io' as io;
 
-import 'package:mydatatools/file_sources/file_source_file.dart';
-import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatastudio/file_sources/file_source_file.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 
 /// Abstract data-access contract for all file sources (local, Google Drive,
 /// Dropbox, OneDrive, etc.).

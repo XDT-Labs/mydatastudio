@@ -1,26 +1,15 @@
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/file.dart' as model;
-import 'package:mydatatools/modules/email/services/email_repository.dart';
-import 'package:mydatatools/modules/email/widgets/email_detail/email_attachments_section.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/file.dart' as model;
+import 'package:mydatastudio/modules/email/services/email_repository.dart';
+import 'package:mydatastudio/modules/email/widgets/email_detail/email_attachments_section.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 class EmailDetails extends StatefulWidget {
-  const EmailDetails({
-    super.key,
-    required this.email,
-    required this.width,
-    required this.isExpanded,
-    required this.onClose,
-    required this.onExpand,
-  });
+  const EmailDetails({super.key, required this.email});
 
   final Email email;
-  final double width;
-  final bool isExpanded;
-  final VoidCallback onClose;
-  final VoidCallback onExpand;
 
   @override
   State<EmailDetails> createState() => _EmailDetails();
@@ -57,7 +46,8 @@ class _EmailDetails extends State<EmailDetails> {
     }
   }
 
-  static const _csp = '<meta http-equiv="Content-Security-Policy" '
+  static const _csp =
+      '<meta http-equiv="Content-Security-Policy" '
       "content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data: https: http:;\">";
 
   void _loadEmailContent() {
@@ -90,23 +80,38 @@ class _EmailDetails extends State<EmailDetails> {
 
   static String _sanitizeHtml(String html) {
     var s = html;
-    // Remove script tags and content
-    s = s.replaceAll(RegExp(r'<script[\s\S]*?</script>', caseSensitive: false), '');
-    // Remove event handlers (on*)
-    s = s.replaceAll(RegExp(r"""\s+on\w+\s*=\s*["'][^"']*["']""", caseSensitive: false), '');
+    s = s.replaceAll(
+      RegExp(r'<script[\s\S]*?</script>', caseSensitive: false),
+      '',
+    );
+    s = s.replaceAll(
+      RegExp(r"""\s+on\w+\s*=\s*["'][^"']*["']""", caseSensitive: false),
+      '',
+    );
     s = s.replaceAll(RegExp(r'\s+on\w+\s*=\s*\S+', caseSensitive: false), '');
-    // Remove dangerous tags
-    s = s.replaceAll(RegExp(r'<(iframe|object|embed|form|applet|base)[\s\S]*?(/?>|</\1>)', caseSensitive: false), '');
-    // Block javascript: URLs
-    s = s.replaceAll(RegExp(r'javascript\s*:', caseSensitive: false), 'blocked:');
-    // Remove existing meta tags (we inject our own CSP)
+    s = s.replaceAll(
+      RegExp(
+        r'<(iframe|object|embed|form|applet|base)[\s\S]*?(/?>|</\1>)',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    s = s.replaceAll(
+      RegExp(r'javascript\s*:', caseSensitive: false),
+      'blocked:',
+    );
     s = s.replaceAll(RegExp(r'<meta[^>]*>', caseSensitive: false), '');
 
-    // Inject CSP meta tag
     if (s.contains(RegExp(r'<head', caseSensitive: false))) {
-      s = s.replaceFirst(RegExp(r'<head([^>]*)>', caseSensitive: false), '<head\$1>$_csp');
+      s = s.replaceFirst(
+        RegExp(r'<head([^>]*)>', caseSensitive: false),
+        '<head\$1>$_csp',
+      );
     } else if (s.contains(RegExp(r'<html', caseSensitive: false))) {
-      s = s.replaceFirst(RegExp(r'<html([^>]*)>', caseSensitive: false), '<html\$1><head>$_csp</head>');
+      s = s.replaceFirst(
+        RegExp(r'<html([^>]*)>', caseSensitive: false),
+        '<html\$1><head>$_csp</head>',
+      );
     } else {
       s = '<html><head>$_csp</head><body>$s</body></html>';
     }
@@ -115,63 +120,13 @@ class _EmailDetails extends State<EmailDetails> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      decoration: BoxDecoration(color: theme.colorScheme.surface),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHigh,
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.email_outlined, size: 16),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Email Details',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                ),
-                IconButton(
-                  icon: Icon(
-                    widget.isExpanded
-                        ? Icons.close_fullscreen
-                        : Icons.open_in_full,
-                    color: Colors.black,
-                  ),
-                  tooltip: widget.isExpanded ? 'Restore' : 'Expand',
-                  onPressed: widget.onExpand,
-                  padding: const EdgeInsets.all(4),
-                  constraints: const BoxConstraints(),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 18),
-                  tooltip: 'Close',
-                  onPressed: widget.onClose,
-                  padding: const EdgeInsets.all(4),
-                  constraints: const BoxConstraints(),
-                ),
-              ],
-            ),
-          ),
-          // Content
-          Expanded(child: WebViewWidget(controller: _controller)),
-
-          // Attachments Row
-          if (_attachments.isNotEmpty) _buildAttachmentsSection(),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(child: WebViewWidget(controller: _controller)),
+        if (_attachments.isNotEmpty)
+          EmailAttachmentsSection(attachments: _attachments),
+      ],
     );
   }
-
-  Widget _buildAttachmentsSection() {
-    return EmailAttachmentsSection(attachments: _attachments);
-  }
-
 }

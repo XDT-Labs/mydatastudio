@@ -1,18 +1,18 @@
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/modules/files/pages/rx_files_page.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
-import 'package:mydatatools/modules/files/widgets/file_collection_setup/coming_soon_tab_view.dart';
-import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_error_view.dart';
-import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_idle_view.dart';
-import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_loading_view.dart';
-import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_success_view.dart';
-import 'package:mydatatools/modules/files/widgets/file_collection_setup/google_drive_configure_view.dart';
-import 'package:mydatatools/modules/files/widgets/file_collection_setup/local_files_tab_view.dart';
-import 'package:mydatatools/oauth/login_providers.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/files/pages/rx_files_page.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/coming_soon_tab_view.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_error_view.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_idle_view.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_loading_view.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_success_view.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_configure_view.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/local_files_tab_view.dart';
+import 'package:mydatastudio/oauth/login_providers.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -43,9 +43,9 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
         children: [
           const TabBar(
             tabs: [
-              Tab(text: 'Local Files'),
-              Tab(text: 'Google Drive'),
-              Tab(text: 'Dropbox'),
+              Tab(icon: Icon(Icons.folder), text: 'Local Files'),
+              Tab(icon: Icon(Icons.cloud), text: 'Google Drive'),
+              Tab(icon: Icon(Icons.cloud), text: 'Dropbox'),
             ],
           ),
           Expanded(
@@ -97,13 +97,13 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
         needsReAuth: false,
       );
 
-      CollectionRepository(DatabaseManager.instance.database!).addCollection(fc).then((_) {
+      CollectionRepository(
+        DatabaseManager.instance.database!,
+      ).addCollection(fc).then((_) {
         GetCollectionsService.instance.invoke(
           GetCollectionsServiceCommand(null),
         );
-        ScannerManager.getInstance()
-            .getScanner(fc)
-            ?.start(fc, fc.path, true, true);
+        ScannerManager.getInstance().startScanner(fc);
         RxFilesPage.selectedCollection.add(fc);
       });
 
@@ -182,9 +182,7 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
         return;
       }
 
-      ScannerManager.getInstance()
-          .getScanner(collection)
-          ?.start(collection, collection.path, true, true);
+      ScannerManager.getInstance().startScanner(collection);
 
       final nameMatch = RegExp(r'\((.+?)\)').firstMatch(collection.name);
       setState(() {
@@ -200,9 +198,10 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
       setState(() {
         _authState = _DriveAuthState.error;
         final raw = e.toString();
-        _errorMessage = raw.startsWith('Exception:')
-            ? raw.replaceFirst('Exception:', '').trim()
-            : raw;
+        _errorMessage =
+            raw.startsWith('Exception:')
+                ? raw.replaceFirst('Exception:', '').trim()
+                : raw;
       });
     }
   }
@@ -214,57 +213,58 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
         constraints: const BoxConstraints(maxWidth: 480),
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 280),
-          transitionBuilder: (child, animation) => FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.04),
-                end: Offset.zero,
-              ).animate(animation),
-              child: child,
-            ),
-          ),
+          transitionBuilder:
+              (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.04),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
+                ),
+              ),
           child: switch (_authState) {
             _DriveAuthState.checking => const Center(
-                key: ValueKey('checking'),
-                child: Padding(
-                  padding: EdgeInsets.all(48),
-                  child: CircularProgressIndicator(),
-                ),
+              key: ValueKey('checking'),
+              child: Padding(
+                padding: EdgeInsets.all(48),
+                child: CircularProgressIndicator(),
               ),
+            ),
             _DriveAuthState.loading => _cardContainer(
-                key: const ValueKey('loading'),
-                child: const GoogleDriveLoadingView(),
-              ),
+              key: const ValueKey('loading'),
+              child: const GoogleDriveLoadingView(),
+            ),
             _DriveAuthState.success => _cardContainer(
-                key: const ValueKey('success'),
-                child: GoogleDriveSuccessView(connectedEmail: _connectedEmail),
-              ),
+              key: const ValueKey('success'),
+              child: GoogleDriveSuccessView(connectedEmail: _connectedEmail),
+            ),
             _DriveAuthState.error => _cardContainer(
-                key: const ValueKey('error'),
-                child: GoogleDriveErrorView(
-                  errorMessage: _errorMessage,
-                  onRetry: _connectGoogleDrive,
-                ),
+              key: const ValueKey('error'),
+              child: GoogleDriveErrorView(
+                errorMessage: _errorMessage,
+                onRetry: _connectGoogleDrive,
               ),
+            ),
             _DriveAuthState.configure => _cardContainer(
-                key: const ValueKey('configure'),
-                child: GoogleDriveConfigureView(
-                  onConfigured: _checkConfiguration,
-                ),
+              key: const ValueKey('configure'),
+              child: GoogleDriveConfigureView(
+                onConfigured: _checkConfiguration,
               ),
+            ),
             _DriveAuthState.idle => _cardContainer(
-                key: const ValueKey('idle'),
-                child: GoogleDriveIdleView(
-                  onConnect: _connectGoogleDrive,
-                  saveLocalCopy: _saveLocalCopy,
-                  onSaveLocalCopyChanged: (value) {
-                    setState(() {
-                      _saveLocalCopy = value ?? true;
-                    });
-                  },
-                ),
+              key: const ValueKey('idle'),
+              child: GoogleDriveIdleView(
+                onConnect: _connectGoogleDrive,
+                saveLocalCopy: _saveLocalCopy,
+                onSaveLocalCopyChanged: (value) {
+                  setState(() {
+                    _saveLocalCopy = value ?? true;
+                  });
+                },
               ),
+            ),
           },
         ),
       ),

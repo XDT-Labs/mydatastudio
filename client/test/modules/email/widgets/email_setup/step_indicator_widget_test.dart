@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/step_indicator_widget.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/step_indicator_widget.dart';
 
 void main() {
   group('StepIndicatorWidget', () {

@@ -1,5 +1,5 @@
-import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
-import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:test/test.dart';
 import 'package:uuid/uuid.dart';
 
@@ -7,19 +7,18 @@ Collection _makeCollection({
   String? accessToken,
   String? refreshToken,
   DateTime? expiration,
-}) =>
-    Collection(
-      id: const Uuid().v4(),
-      name: 'Google Drive (test@example.com)',
-      path: 'root',
-      type: 'file',
-      scanner: 'file.gdrive',
-      scanStatus: 'pending',
-      needsReAuth: false,
-      accessToken: accessToken,
-      refreshToken: refreshToken,
-      expiration: expiration,
-    );
+}) => Collection(
+  id: const Uuid().v4(),
+  name: 'Google Drive (test@example.com)',
+  path: 'root',
+  type: 'file',
+  scanner: 'file.gdrive',
+  scanStatus: 'pending',
+  needsReAuth: false,
+  accessToken: accessToken,
+  refreshToken: refreshToken,
+  expiration: expiration,
+);
 
 void main() {
   group('GoogleAuthService', () {
@@ -33,36 +32,34 @@ void main() {
         );
       });
 
-      test('throws GoogleAuthException when token expired and no refresh token',
-          () async {
-        final collection = _makeCollection(
-          accessToken: 'expired-token',
-          refreshToken: null,
-          expiration:
-              DateTime.now().toUtc().subtract(const Duration(hours: 1)),
-        );
-
-        expect(
-          () => GoogleAuthService.getValidAccessToken(collection),
-          throwsA(isA<GoogleAuthException>()),
-        );
-      });
-
       test(
-        'returns stored token immediately when not near expiry',
+        'throws GoogleAuthException when token expired and no refresh token',
         () async {
           final collection = _makeCollection(
-            accessToken: 'still-valid-token',
-            refreshToken: 'refresh-tok',
-            expiration: DateTime.now().toUtc().add(const Duration(hours: 1)),
+            accessToken: 'expired-token',
+            refreshToken: null,
+            expiration: DateTime.now().toUtc().subtract(
+              const Duration(hours: 1),
+            ),
           );
 
-          final token = await GoogleAuthService.getValidAccessToken(
-            collection,
+          expect(
+            () => GoogleAuthService.getValidAccessToken(collection),
+            throwsA(isA<GoogleAuthException>()),
           );
-          expect(token, equals('still-valid-token'));
         },
       );
+
+      test('returns stored token immediately when not near expiry', () async {
+        final collection = _makeCollection(
+          accessToken: 'still-valid-token',
+          refreshToken: 'refresh-tok',
+          expiration: DateTime.now().toUtc().add(const Duration(hours: 1)),
+        );
+
+        final token = await GoogleAuthService.getValidAccessToken(collection);
+        expect(token, equals('still-valid-token'));
+      });
     });
 
     group('isTokenExpired', () {
@@ -71,14 +68,16 @@ void main() {
       });
 
       test('returns true when token is expired', () {
-        final expired =
-            DateTime.now().toUtc().subtract(const Duration(hours: 1));
+        final expired = DateTime.now().toUtc().subtract(
+          const Duration(hours: 1),
+        );
         expect(GoogleAuthService.isTokenExpired(expired), isTrue);
       });
 
       test('returns true when token is within refresh threshold', () {
-        final nearExpiry =
-            DateTime.now().toUtc().add(const Duration(minutes: 3));
+        final nearExpiry = DateTime.now().toUtc().add(
+          const Duration(minutes: 3),
+        );
         expect(GoogleAuthService.isTokenExpired(nearExpiry), isTrue);
       });
 
@@ -88,8 +87,7 @@ void main() {
       });
 
       test('respects custom refresh threshold', () {
-        final expiry =
-            DateTime.now().toUtc().add(const Duration(minutes: 3));
+        final expiry = DateTime.now().toUtc().add(const Duration(minutes: 3));
         // Default threshold is 5 min, so 3 min out should be expired
         expect(GoogleAuthService.isTokenExpired(expiry), isTrue);
         // With 1 min threshold, 3 min out should be valid

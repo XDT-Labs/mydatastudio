@@ -1,19 +1,19 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/provider.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
-import 'package:mydatatools/oauth/desktop_oauth_manager.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/provider.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/oauth/desktop_oauth_manager.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
-import 'package:mydatatools/database_manager.dart';
+import 'package:mydatastudio/database_manager.dart';
 
 // ignore: constant_identifier_names
 enum LoginProviders { google, googleDrive, azure, outlook }
@@ -77,7 +77,10 @@ extension LoginProviderExtension on LoginProviders {
   Future<String> get clientId async {
     final db = DatabaseManager.instance.database;
     if (db != null) {
-      final rows = await db.select("SELECT * FROM providers WHERE service = ?", [key]);
+      final rows = await db.select(
+        "SELECT * FROM providers WHERE service = ?",
+        [key],
+      );
       if (rows.isNotEmpty) {
         final provider = Provider.fromDbMap(rows.first);
         if (provider.clientId != null && provider.clientId!.isNotEmpty) {
@@ -109,10 +112,14 @@ extension LoginProviderExtension on LoginProviders {
   Future<String> get clientSecret async {
     final db = DatabaseManager.instance.database;
     if (db != null) {
-      final rows = await db.select("SELECT * FROM providers WHERE service = ?", [key]);
+      final rows = await db.select(
+        "SELECT * FROM providers WHERE service = ?",
+        [key],
+      );
       if (rows.isNotEmpty) {
         final provider = Provider.fromDbMap(rows.first);
-        if (provider.clientSecret != null && provider.clientSecret!.isNotEmpty) {
+        if (provider.clientSecret != null &&
+            provider.clientSecret!.isNotEmpty) {
           return provider.clientSecret!;
         }
       }
@@ -173,7 +180,9 @@ extension LoginProviderExtension on LoginProviders {
     try {
       final appDataDir = MainApp.appDataDirectory.valueOrNull;
       if (appDataDir == null) {
-        throw Exception('App data directory not initialized. Please restart the app.');
+        throw Exception(
+          'App data directory not initialized. Please restart the app.',
+        );
       }
       final oauthManager = DesktopOAuthManager(
         loginProvider: LoginProviders.google,
@@ -186,15 +195,13 @@ extension LoginProviderExtension on LoginProviders {
         Uri.parse(
           "https://people.googleapis.com/v1/people/me?personFields=emailAddresses",
         ),
-        headers: {
-          "Authorization": "Bearer ${client.credentials.accessToken}",
-        },
+        headers: {"Authorization": "Bearer ${client.credentials.accessToken}"},
       );
 
       if (peopleResponse.statusCode != 200) {
-        AppLogger(null).e(
-          'Google People API error (${peopleResponse.statusCode})',
-        );
+        AppLogger(
+          null,
+        ).e('Google People API error (${peopleResponse.statusCode})');
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -212,8 +219,9 @@ extension LoginProviderExtension on LoginProviders {
       final emails = userData['emailAddresses'] as List;
       final email =
           emails.firstWhere(
-            (e) => (e['metadata']['primary'] ?? false) == true,
-          )['value'] as String;
+                (e) => (e['metadata']['primary'] ?? false) == true,
+              )['value']
+              as String;
 
       final collectionId = existing?.id ?? const Uuid().v4().toString();
       final extractionRoot = '$appDataDir/files/email/$collectionId';
@@ -252,7 +260,9 @@ extension LoginProviderExtension on LoginProviders {
       AppLogger(null).e('Gmail OAuth failed', error: e, stackTrace: stack);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Gmail sign-in failed. Please try again.')),
+          const SnackBar(
+            content: Text('Gmail sign-in failed. Please try again.'),
+          ),
         );
       }
       return null;
@@ -304,15 +314,13 @@ extension LoginProviderExtension on LoginProviders {
         Uri.parse(
           "https://people.googleapis.com/v1/people/me?personFields=emailAddresses",
         ),
-        headers: {
-          "Authorization": "Bearer ${client.credentials.accessToken}",
-        },
+        headers: {"Authorization": "Bearer ${client.credentials.accessToken}"},
       );
 
       if (peopleResponse.statusCode != 200) {
-        AppLogger(null).e(
-          'Google People API error (${peopleResponse.statusCode})',
-        );
+        AppLogger(
+          null,
+        ).e('Google People API error (${peopleResponse.statusCode})');
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -325,14 +333,14 @@ extension LoginProviderExtension on LoginProviders {
         return null;
       }
 
-      final userData =
-          jsonDecode(peopleResponse.body) as Map<String, dynamic>;
+      final userData = jsonDecode(peopleResponse.body) as Map<String, dynamic>;
       final userId = (userData['resourceName'] as String).split("/")[1];
       final emails = userData['emailAddresses'] as List;
       final email =
           emails.firstWhere(
-            (e) => (e['metadata']['primary'] ?? false) == true,
-          )['value'] as String;
+                (e) => (e['metadata']['primary'] ?? false) == true,
+              )['value']
+              as String;
 
       final collectionId = existing?.id ?? const Uuid().v4().toString();
 
@@ -373,10 +381,14 @@ extension LoginProviderExtension on LoginProviders {
 
       return collection;
     } catch (e, stack) {
-      AppLogger(null).e('Google Drive OAuth failed', error: e, stackTrace: stack);
+      AppLogger(
+        null,
+      ).e('Google Drive OAuth failed', error: e, stackTrace: stack);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Google Drive sign-in failed. Please try again.')),
+          const SnackBar(
+            content: Text('Google Drive sign-in failed. Please try again.'),
+          ),
         );
       }
       return null;
@@ -403,7 +415,9 @@ extension LoginProviderExtension on LoginProviders {
     try {
       final appDataDir = MainApp.appDataDirectory.valueOrNull;
       if (appDataDir == null) {
-        throw Exception('App data directory not initialized. Please restart the app.');
+        throw Exception(
+          'App data directory not initialized. Please restart the app.',
+        );
       }
       final oauthManager = DesktopOAuthManager(
         loginProvider: LoginProviders.outlook,
@@ -425,22 +439,29 @@ extension LoginProviderExtension on LoginProviders {
           final payload = credentials.idToken!.split('.')[1];
           // Use base64Url.normalize to fix padding if necessary, then decode
           final normalizedPayload = base64Url.normalize(payload);
-          final decodedPayload = utf8.decode(base64Url.decode(normalizedPayload));
+          final decodedPayload = utf8.decode(
+            base64Url.decode(normalizedPayload),
+          );
           final claims = jsonDecode(decodedPayload) as Map<String, dynamic>;
           final preferred = claims['preferred_username'] as String?;
           final mail = claims['email'] as String?;
           final upn = claims['upn'] as String?;
 
-          // Prioritize preferred_username/UPN for IMAP as they are more likely to correspond 
+          // Prioritize preferred_username/UPN for IMAP as they are more likely to correspond
           // to the actual mailbox than an external 'email' claim.
           email = preferred ?? mail ?? upn;
 
-          // Special case: if the identity appears to be an external one but there is 
+          // Special case: if the identity appears to be an external one but there is
           // a Microsoft-hosted alias, favor the alias to ensure IMAP authentication works.
-          if (email != null && (email.endsWith('@gmail.com') || email.endsWith('@yahoo.com'))) {
-            if (preferred != null && !preferred.endsWith('@gmail.com') && !preferred.endsWith('@yahoo.com')) {
+          if (email != null &&
+              (email.endsWith('@gmail.com') || email.endsWith('@yahoo.com'))) {
+            if (preferred != null &&
+                !preferred.endsWith('@gmail.com') &&
+                !preferred.endsWith('@yahoo.com')) {
               email = preferred;
-            } else if (upn != null && !upn.endsWith('@gmail.com') && !upn.endsWith('@yahoo.com')) {
+            } else if (upn != null &&
+                !upn.endsWith('@gmail.com') &&
+                !upn.endsWith('@yahoo.com')) {
               email = upn;
             }
           }
@@ -451,7 +472,7 @@ extension LoginProviderExtension on LoginProviders {
         }
       }
 
-      // If OIDC info is missing, fallback to Microsoft Graph (though this may 
+      // If OIDC info is missing, fallback to Microsoft Graph (though this may
       // fail now that we've removed the Graph scope which was causing conflicts).
       if (email == null || userId == null) {
         final response = await http.get(
@@ -463,7 +484,8 @@ extension LoginProviderExtension on LoginProviders {
 
         if (response.statusCode == 200) {
           final userData = jsonDecode(response.body) as Map<String, dynamic>;
-          email ??= userData['mail'] ?? userData['userPrincipalName'] as String?;
+          email ??=
+              userData['mail'] ?? userData['userPrincipalName'] as String?;
           userId ??= userData['id'] as String?;
         } else {
           AppLogger(null).e(
@@ -476,7 +498,9 @@ extension LoginProviderExtension on LoginProviders {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Failed to fetch Outlook profile information. Please try again.'),
+              content: Text(
+                'Failed to fetch Outlook profile information. Please try again.',
+              ),
             ),
           );
         }
@@ -520,11 +544,12 @@ extension LoginProviderExtension on LoginProviders {
       AppLogger(null).e('Outlook OAuth failed', error: e, stackTrace: stack);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Outlook sign-in failed. Please try again.')),
+          const SnackBar(
+            content: Text('Outlook sign-in failed. Please try again.'),
+          ),
         );
       }
       return null;
     }
   }
 }
-

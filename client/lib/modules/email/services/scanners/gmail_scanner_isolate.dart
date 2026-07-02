@@ -5,21 +5,21 @@ import 'dart:isolate';
 import 'package:flutter/services.dart';
 import 'package:googleapis/gmail/v1.dart';
 import 'package:path/path.dart' as p;
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/modules/email/services/email_folder_upsert_service.dart';
-import 'package:mydatatools/modules/email/services/email_upsert_service.dart';
-import 'package:mydatatools/modules/email/services/get_emails_service.dart';
-import 'package:mydatatools/modules/files/services/file_upsert_service.dart';
-import 'package:mydatatools/modules/files/services/folder_upsert_service.dart';
-import 'package:mydatatools/file_sources/google_drive/google_auth_service.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
+import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
 
 /// [GmailScannerIsolate] is the client-side manager for the Gmail scanning
@@ -36,10 +36,11 @@ import 'package:uuid/uuid.dart';
 class GmailScannerIsolate {
   final RootIsolateToken? token;
   final String appDir;
+  final String dbDir;
   Isolate? _isolate;
   final AppLogger logger = AppLogger(null);
 
-  GmailScannerIsolate({this.token, required this.appDir});
+  GmailScannerIsolate({this.token, required this.appDir, required this.dbDir});
 
   /// Spawns the Gmail background worker isolate.
   ///
@@ -71,6 +72,7 @@ class GmailScannerIsolate {
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'force': force,
       'appDir': appDir,
+      'dbDir': dbDir,
     };
 
     _isolate = await spawnIsolate(GmailScannerIsolateWorker.worker, args);
@@ -131,6 +133,7 @@ class GmailScannerIsolateWorker {
         lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
     final bool force = args['force'] ?? false;
     final String appDir = args['appDir'];
+    final String dbDir = args['dbDir'] ?? appDir;
 
     if (token != null) {
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
@@ -144,7 +147,9 @@ class GmailScannerIsolateWorker {
     final accessTokenRaw = collection.accessToken;
     final refreshTokenRaw = collection.refreshToken;
     if (accessTokenRaw == null || refreshTokenRaw == null) {
-      logger.e('GmailScannerIsolate: no tokens for "${collection.name}" — aborting scan');
+      logger.e(
+        'GmailScannerIsolate: no tokens for "${collection.name}" — aborting scan',
+      );
       Isolate.exit(clientPort, {'error': 'auth_failed'});
     }
     final String safeAccessToken = accessTokenRaw;
@@ -165,7 +170,7 @@ class GmailScannerIsolateWorker {
       Isolate.exit(clientPort, {'error': 'auth_failed'});
     }
 
-    final appDb = await AppDatabase.create(null, appDir, AppConstants.dbName);
+    final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
 
     final authHttpClient = AuthenticatedHttpClient.bearer(accessToken);
     final GmailApi gmailApi = GmailApi(authHttpClient);
@@ -284,11 +289,7 @@ class GmailScannerIsolateWorker {
 
     final messages = response.messages ?? [];
     if (messages.isEmpty) {
-      return {
-        'total': 0,
-        'new': 0,
-        'skipped': 0,
-      };
+      return {'total': 0, 'new': 0, 'skipped': 0};
     }
 
     List<Email> emailBatch = [];
@@ -563,7 +564,13 @@ class GmailScannerIsolateWorker {
     final labelPath = p.normalize(p.join(rootPath, labelName));
     await FolderUpsertService.instance.invoke(
       FolderUpsertServiceCommand(
-        _createFolderObj(labelPath, rootPath, labelName, collection.id, msgDate),
+        _createFolderObj(
+          labelPath,
+          rootPath,
+          labelName,
+          collection.id,
+          msgDate,
+        ),
         appDb,
       ),
     );

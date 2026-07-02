@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io' as io;
 
-import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/file.dart';
 import 'package:flutter/material.dart';
 import 'package:progressive_image/progressive_image.dart';
 
@@ -24,37 +24,40 @@ class _PhotoCardState extends State<PhotoCard> {
           width: widget.width,
           height: widget.width,
           child: Container(
-             color: Colors.black,
-             child: Stack(
-               children: [
-                 ProgressiveImage(
-                   placeholder: const AssetImage('assets/placeholder.jpg'),
-                   // size: 1.87KB
-                   thumbnail: getImageComponent(widget.file),
-                   // size: 1.29MB
-                   image: getImageComponent(widget.file),
-                   fit: BoxFit.fitHeight,
-                   repeat: ImageRepeat.noRepeat,
-                   height: widget.width,
-                   width: widget.width,
-                 ),
-                 Align(
-                   alignment: Alignment.bottomCenter,
-                   child: Container(
-                     width: double.infinity,
-                     height: widget.width / 4,
-                     decoration: const BoxDecoration(color: Colors.black26),
-                     child: Center(
-                       child: Text(
-                         widget.file.name,
-                         style: const TextStyle(color: Colors.white, fontSize: 12),
-                       ),
-                     ),
-                   ),
-                 ),
-               ],
-             ),
-           ),
+            color: Colors.black,
+            child: Stack(
+              children: [
+                ProgressiveImage(
+                  placeholder: const AssetImage('assets/placeholder.jpg'),
+                  // size: 1.87KB
+                  thumbnail: getImageComponent(widget.file),
+                  // size: 1.29MB
+                  image: getImageComponent(widget.file),
+                  fit: BoxFit.fitHeight,
+                  repeat: ImageRepeat.noRepeat,
+                  height: widget.width,
+                  width: widget.width,
+                ),
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Container(
+                    width: double.infinity,
+                    height: widget.width / 4,
+                    decoration: const BoxDecoration(color: Colors.black26),
+                    child: Center(
+                      child: Text(
+                        widget.file.name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:mydatatools/modules/email/widgets/email_setup/step_indicator_widget.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/step_indicator_widget.dart';
 import 'package:reactive_forms/reactive_forms.dart';
 
 class YahooIdleView extends StatelessWidget {
@@ -62,7 +62,8 @@ class YahooIdleView extends StatelessWidget {
                   ),
                   const StepIndicatorWidget(
                     number: 3,
-                    text: 'Select "Other App", name it "MyDataTools", and click Generate.',
+                    text:
+                        'Select "Other App", name it "mydatastudio", and click Generate.',
                   ),
                   const StepIndicatorWidget(
                     number: 4,

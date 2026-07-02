@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/helpers/file_path_resolver.dart';
 
 class DatabaseRepository {
   AppDatabase db;
@@ -32,6 +33,10 @@ class DatabaseRepository {
     String fileId,
     List<double> embedding,
   ) async {
+    // Route to correct column based on embedding length (1152 for SigLip2, 2048 for Qwen3-8B)
+    final isSigLip = embedding.length == 1152;
+    final column = isSigLip ? 'siglip2_embedding' : 'qwen3_8b_embedding';
+
     // Build JSON array string that sqlite_vector's vector_as_f32() accepts.
     final jsonArray = '[${embedding.join(',')}]';
 
@@ -40,10 +45,10 @@ class DatabaseRepository {
         // Use vector_as_f32() to pack the JSON float array into a BLOB.
         await tx.execute(
           '''
-          INSERT INTO files_embeddings (file_id, qwen3_8b_embedding)
+          INSERT INTO files_embeddings (file_id, $column)
           VALUES (?, vector_as_f32(?))
           ON CONFLICT(file_id) DO UPDATE SET
-            qwen3_8b_embedding = excluded.qwen3_8b_embedding
+            $column = excluded.$column
           ''',
           [fileId, jsonArray],
         );
@@ -55,10 +60,10 @@ class DatabaseRepository {
         final blob = Float32List.fromList(embedding).buffer.asUint8List();
         await tx.execute(
           '''
-          INSERT INTO files_embeddings (file_id, qwen3_8b_embedding)
+          INSERT INTO files_embeddings (file_id, $column)
           VALUES (?, ?)
           ON CONFLICT(file_id) DO UPDATE SET
-            qwen3_8b_embedding = excluded.qwen3_8b_embedding
+            $column = excluded.$column
           ''',
           [fileId, blob],
         );
@@ -73,10 +78,9 @@ class DatabaseRepository {
   /// Should be called when the corresponding file is permanently deleted.
   Future<void> deleteFileEmbedding(String fileId) async {
     await db.transaction((tx) async {
-      await tx.execute(
-        'DELETE FROM files_embeddings WHERE file_id = ?',
-        [fileId],
-      );
+      await tx.execute('DELETE FROM files_embeddings WHERE file_id = ?', [
+        fileId,
+      ]);
     });
     logger.d('deleteFileEmbedding: fileId=$fileId');
   }
@@ -119,24 +123,88 @@ class DatabaseRepository {
         .toList();
   }
 
+  /// Fetches the SigLip2 visual embedding for [fileId].
+  /// Returns null if no embedding exists for this file.
+  Future<List<double>?> getFileSiglip2Embedding(String fileId) async {
+    final rows = await db.select(
+      'SELECT siglip2_embedding FROM files_embeddings WHERE file_id = ? LIMIT 1',
+      [fileId],
+    );
+    if (rows.isEmpty || rows.first['siglip2_embedding'] == null) return null;
+    final blob = rows.first['siglip2_embedding'] as Uint8List;
+    return Float32List.view(blob.buffer).toList();
+  }
+
+  /// Returns files visually similar to [queryEmbedding] using the SigLip2 index.
+  /// [excludeFileId] removes the source file from results.
+  /// Similarity is (1 − L2distance/2)×100 assuming L2-normalised unit vectors.
+  Future<List<({File file, double similarity})>> findSimilarImages(
+    List<double> queryEmbedding, {
+    String? excludeFileId,
+    int limit = 100,
+  }) async {
+    final jsonArray = '[${queryEmbedding.join(',')}]';
+    final excludeClause = excludeFileId != null ? 'AND e.file_id != ?' : '';
+    final params = [jsonArray, limit, if (excludeFileId != null) excludeFileId];
+
+    final rows = await db.select(
+      '''
+      SELECT f.*, v.distance
+      FROM files_embeddings AS e
+      JOIN files AS f ON f.id = e.file_id
+      JOIN vector_full_scan(
+        'files_embeddings',
+        'siglip2_embedding',
+        vector_as_f32(?),
+        ?
+      ) AS v ON e.rowid = v.rowid
+      WHERE f.is_deleted = 0
+        $excludeClause
+      ORDER BY v.distance ASC
+      ''',
+      params,
+    );
+
+    return rows.map((row) {
+      final distance = (row['distance'] as num).toDouble();
+      final similarity = ((1.0 - distance / 2.0) * 100).clamp(0.0, 100.0);
+      return (file: File.fromDbMap(row), similarity: similarity);
+    }).toList();
+  }
+
   /// Returns a list of files that do not have a corresponding entry in the
   /// `files_embeddings` table, limited to [limit] results.
   /// Filters for image content types.
   Future<List<File>> getFilesWithMissingEmbeddings({int limit = 10}) async {
     final rows = await db.select(
       '''
-      SELECT f.*
+      SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner
       FROM files f
       LEFT OUTER JOIN files_embeddings fe ON fe.file_id = f.id
       INNER JOIN collections c ON c.id = f.collection_id
-      WHERE fe.file_id IS NULL
-        AND f.content_type LIKE 'image/%'
+      WHERE (fe.file_id IS NULL OR fe.siglip2_embedding IS NULL)
+        AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
         AND f.is_deleted = 0
       LIMIT ?
       ''',
       [limit],
     );
-    return rows.map((row) => File.fromDbMap(row)).toList();
+    var results = rows.map((row) {
+      final file = File.fromDbMap(row);
+      final fakeCollection = Collection(
+        id: file.collectionId,
+        name: '',
+        path: (row['col_path'] as String?) ?? '',
+        type: '',
+        scanner: (row['scanner'] as String?) ?? '',
+        scanStatus: '',
+        needsReAuth: false,
+        localCopyPath: row['local_copy_path'] as String?,
+      );
+      file.path = FilePathResolver.absolute(file, fakeCollection);
+      return file;
+    }).toList();
+    return results;
   }
 
   Future<Collection?> getCollection(String id) async {

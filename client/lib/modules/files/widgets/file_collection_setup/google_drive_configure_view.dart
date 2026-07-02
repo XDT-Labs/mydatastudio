@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:mydatatools/database_manager.dart';
+import 'package:mydatastudio/database_manager.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
@@ -9,7 +9,8 @@ class GoogleDriveConfigureView extends StatefulWidget {
   const GoogleDriveConfigureView({super.key, required this.onConfigured});
 
   @override
-  State<GoogleDriveConfigureView> createState() => _GoogleDriveConfigureViewState();
+  State<GoogleDriveConfigureView> createState() =>
+      _GoogleDriveConfigureViewState();
 }
 
 class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
@@ -33,7 +34,9 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
 
     if (clientId.isEmpty || clientSecret.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Client ID and Client Secret are required')),
+        const SnackBar(
+          content: Text('Client ID and Client Secret are required'),
+        ),
       );
       return;
     }
@@ -44,8 +47,8 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
 
     try {
       await DatabaseManager.instance.database!.execute(
-        'INSERT INTO providers (service, client_id, client_secret, api_key) '
-        'VALUES (?, ?, ?, ?) '
+        'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
+        'VALUES (?, ?, ?, ?, \'collection\') '
         'ON CONFLICT(service) DO UPDATE SET '
         'client_id = excluded.client_id, '
         'client_secret = excluded.client_secret, '
@@ -86,15 +89,26 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
         Text(
           'To connect to Google Drive, you must provide your own OAuth Client ID and Secret.',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.5),
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey.shade600,
+            height: 1.5,
+          ),
         ),
         const SizedBox(height: 8),
         InkWell(
-          onTap: () => launchUrl(Uri.parse('https://console.cloud.google.com/apis/credentials')),
+          onTap:
+              () => launchUrl(
+                Uri.parse('https://console.cloud.google.com/apis/credentials'),
+              ),
           child: const Text(
             'Get Credentials from Google Cloud Console',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14, color: Colors.blue, decoration: TextDecoration.underline),
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.blue,
+              decoration: TextDecoration.underline,
+            ),
           ),
         ),
         const SizedBox(height: 24),
@@ -120,9 +134,17 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 16),
           ),
-          child: _isSaving 
-            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-            : const Text('Save & Continue', style: TextStyle(fontSize: 16)),
+          child:
+              _isSaving
+                  ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                  : const Text(
+                    'Save & Continue',
+                    style: TextStyle(fontSize: 16),
+                  ),
         ),
       ],
     );

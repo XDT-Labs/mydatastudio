@@ -1,11 +1,11 @@
 // [ignoring loop detection]
 import 'dart:io' as io;
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/file.dart' as model;
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/file.dart' as model;
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 
 class EmailRepository {
   final AppDatabase database;
@@ -14,7 +14,10 @@ class EmailRepository {
   EmailRepository(this.database);
 
   Future<List<model.File>> getAttachments(String emailId) async {
-    final rows = await database.select("SELECT * FROM files WHERE email_id = ?", [emailId]);
+    final rows = await database.select(
+      "SELECT * FROM files WHERE email_id = ?",
+      [emailId],
+    );
     return rows.map((r) => model.File.fromDbMap(r)).toList();
   }
 
@@ -64,7 +67,10 @@ class EmailRepository {
   }
 
   Future<int> emailCount(String collectionId) async {
-    final rows = await database.select("SELECT COUNT(*) AS c FROM emails WHERE collection_id = ?", [collectionId]);
+    final rows = await database.select(
+      "SELECT COUNT(*) AS c FROM emails WHERE collection_id = ?",
+      [collectionId],
+    );
     if (rows.isEmpty) return 0;
     return rows.first['c'] as int;
   }
@@ -90,7 +96,10 @@ class EmailRepository {
   Future<List<Email>> getAllById(List<String> ids) async {
     if (ids.isEmpty) return [];
     final placeholders = List.filled(ids.length, '?').join(',');
-    final rows = await database.select("SELECT * FROM emails WHERE id IN ($placeholders)", ids);
+    final rows = await database.select(
+      "SELECT * FROM emails WHERE id IN ($placeholders)",
+      ids,
+    );
     return rows.map((r) => Email.fromDbMap(r)).toList();
   }
 
@@ -170,11 +179,17 @@ class EmailRepository {
         if (files.isNotEmpty) {
           final fileIds = files.map((f) => f.id).toList();
           final placeholders = List.filled(fileIds.length, '?').join(',');
-          await tx.execute("DELETE FROM files WHERE id IN ($placeholders)", fileIds);
+          await tx.execute(
+            "DELETE FROM files WHERE id IN ($placeholders)",
+            fileIds,
+          );
         }
 
         final emailPlaceholders = List.filled(ids.length, '?').join(',');
-        await tx.execute("DELETE FROM emails WHERE id IN ($emailPlaceholders)", ids);
+        await tx.execute(
+          "DELETE FROM emails WHERE id IN ($emailPlaceholders)",
+          ids,
+        );
       });
     } catch (err) {
       logger.e("Error during bulk email deletion: $err");
@@ -190,19 +205,20 @@ class EmailRepository {
       "SELECT id, uid FROM emails WHERE collection_id = ? AND folder_id = ?",
       [collection.id, folder],
     );
-    final localEmails = rows.map((row) => (
-      id: row['id'] as String,
-      uid: row['uid'] as int?,
-    )).toList();
+    final localEmails =
+        rows
+            .map((row) => (id: row['id'] as String, uid: row['uid'] as int?))
+            .toList();
 
     final remoteUidSet = remoteUids.toSet();
-    final toDeleteIds = localEmails
-        .where((e) {
-          if (e.uid == null) return false;
-          return !remoteUidSet.contains(e.uid);
-        })
-        .map((e) => e.id)
-        .toList();
+    final toDeleteIds =
+        localEmails
+            .where((e) {
+              if (e.uid == null) return false;
+              return !remoteUidSet.contains(e.uid);
+            })
+            .map((e) => e.id)
+            .toList();
 
     if (toDeleteIds.isNotEmpty) {
       logger.i(
@@ -221,19 +237,20 @@ class EmailRepository {
       "SELECT id, uid FROM emails WHERE collection_id = ? AND folder_id = ?",
       [collection.id, folder],
     );
-    final localEmails = rows.map((row) => (
-      id: row['id'] as String,
-      uid: row['uid'] as int?,
-    )).toList();
+    final localEmails =
+        rows
+            .map((row) => (id: row['id'] as String, uid: row['uid'] as int?))
+            .toList();
 
     final remoteUidSet = remoteUids.toSet();
-    final toDeleteIds = localEmails
-        .where((e) {
-          if (e.uid == null) return false;
-          return !remoteUidSet.contains(e.uid);
-        })
-        .map((e) => e.id)
-        .toList();
+    final toDeleteIds =
+        localEmails
+            .where((e) {
+              if (e.uid == null) return false;
+              return !remoteUidSet.contains(e.uid);
+            })
+            .map((e) => e.id)
+            .toList();
 
     if (toDeleteIds.isNotEmpty) {
       logger.i(

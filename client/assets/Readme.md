@@ -4,30 +4,30 @@ PDM is simply a package manager (like Node's NPM) that installs Python dependenc
 
 To create the standalone `aichat` executable that your Flutter app expects to run, you must compile the code using `PyInstaller`.
 ```bash
-cd client/assets/python/aichat
+cd aiserver
 
 # 1. Install dependencies
 pdm install
 
 # 2. Download the default GGUF model manually
 # This is required so the model is bundled in the final zip via main.spec
-hf download bartowski/google_gemma-3-4b-it-GGUF google_gemma-3-4b-it-Q4_K_M.gguf --local-dir models
+hf download ggml-org/gemma-4-E4B-it-GGUF gemma-4-E4B-it-Q4_K_M.gguf --local-dir models
 
 # 3. Compile the executable
 pdm run pyinstaller -y main.spec
 
 # 3. Zip the compiled output for Flutter
 cd dist/aichat
-zip -r ../../../../../app/aichat-macos.zip .
-cd ../../../../../app/
+zip -r ../../../client/app/aiserver-macos.zip .
+cd ../../../client/app/
 
 # 4. Copy to your application support directory to test locally
-cp ./*.zip ~/Library/Application\ Support/mydata.tools/
+cp ./*.zip ~/Library/Application\ Support/com.xdtlabs.mydatastudio/
 ```
 
 ## All in one
 ```
-clear && cd client/assets/python/aichat && pdm install && pdm run pyinstaller -y main.spec && cd dist/aichat && zip -r ../../../../../app/aichat-macos.zip . && cd ../../../../../app/ && cp ./*.zip ~/Library/Application\ Support/mydata.tools/ && cd ../..
+clear && cd aiserver && pdm install && pdm run pyinstaller -y main.spec && cd dist/aichat && zip -r ../../../client/app/aiserver-macos.zip . && cd ../../../client/app/ && cp ./*.zip ~/Library/Application\ Support/com.xdtlabs.mydatastudio/ && cd ../..
 ```
 
 

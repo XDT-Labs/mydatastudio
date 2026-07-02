@@ -1,19 +1,18 @@
 import 'dart:async';
 
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/modules/files/pages/rx_files_page.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer/accordion_header_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer/collection_tile_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_drawer/section_sub_header_widget.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
-import 'package:mydatatools/app_constants.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/files/pages/rx_files_page.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_drawer/collection_tile_widget.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/app_constants.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-enum AccordionSection { files, email, social }
+enum AccordionSection { localFiles, cloudDrives, email, social }
 
 class FileDrawer extends StatefulWidget {
   const FileDrawer({super.key});
@@ -81,7 +80,7 @@ class _FileDrawer extends State<FileDrawer> {
     return null;
   }
 
-  AccordionSection _expandedSection = AccordionSection.files;
+  AccordionSection? _expandedSection = AccordionSection.localFiles;
 
   @override
   Widget build(BuildContext context) {
@@ -116,59 +115,22 @@ class _FileDrawer extends State<FileDrawer> {
             .where((c) => c.scanner == AppConstants.scannerFileOneDrive)
             .toList();
 
-    final List<Collection> gmailEmails =
-        filtered
-            .where((c) => c.scanner == AppConstants.scannerEmailGmail)
-            .toList();
-    final List<Collection> yahooEmails =
-        filtered
-            .where((c) => c.scanner == AppConstants.scannerEmailYahoo)
-            .toList();
-    final List<Collection> pstEmails =
-        filtered
-            .where((c) => c.scanner == AppConstants.scannerEmailOutlookPst)
-            .toList();
-
-    final List<Collection> facebookSocial =
-        filtered
-            .where((c) => c.scanner.toLowerCase().contains('facebook'))
-            .toList();
-    final List<Collection> twitterSocial =
-        filtered
-            .where((c) => c.scanner.toLowerCase().contains('twitter'))
-            .toList();
-    final List<Collection> tiktokSocial =
-        filtered
-            .where((c) => c.scanner.toLowerCase().contains('tiktok'))
-            .toList();
-
     return SizedBox.expand(
       child: Container(
-        color: Colors.white,
+        color: Colors.transparent,
         child: Scaffold(
           backgroundColor: Colors.transparent,
-          floatingActionButton: FloatingActionButton(
+          floatingActionButton: FloatingActionButton.small(
             tooltip: "Add Source",
             onPressed: () => GoRouter.of(context).go("/files/add"),
-            child: const Icon(Icons.add),
+            backgroundColor: theme.colorScheme.surfaceContainerHigh,
+            foregroundColor: theme.colorScheme.onSurface,
+            shape: const CircleBorder(),
+            child: const Icon(Icons.add, size: 20),
           ),
+          floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
           body: Column(
             children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12),
-                child: Align(
-                  alignment: Alignment.topLeft,
-                  child: Text(
-                    "SOURCES",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                      color: Colors.grey,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
-                ),
-              ),
               StreamBuilder<bool>(
                 stream: _collectionService!.isLoading,
                 builder: (context, snapshot) {
@@ -183,110 +145,127 @@ class _FileDrawer extends State<FileDrawer> {
                   return const SizedBox.shrink();
                 },
               ),
-              const SizedBox(height: 4),
               Expanded(
-                child: Column(
-                  children: [
-                    // --- FILES ---
-                    _buildAccordionHeader(
-                      theme,
-                      AccordionSection.files,
-                      "Files",
-                      Icons.folder_outlined,
-                    ),
-                    if (_expandedSection == AccordionSection.files)
-                      Expanded(
-                        child: SingleChildScrollView(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildSectionHeader("SOURCES"),
+                      _buildAccordionHeader(
+                        theme,
+                        AccordionSection.localFiles,
+                        "Local Files",
+                        Icons.folder_outlined,
+                      ),
+                      if (_expandedSection == AccordionSection.localFiles)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 16.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildSubHeader(theme, "Local Sources"),
-                              ...localFiles.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
-                              _buildSubHeader(theme, "Google Drive"),
-                              ...gdriveFiles.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
-                              _buildSubHeader(theme, "DropBox (future)"),
-                              ...dropboxFiles.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
-                              if (onedriveFiles.isNotEmpty) ...[
-                                _buildSubHeader(theme, "OneDrive"),
-                                ...onedriveFiles.map(
-                                  (c) =>
-                                      _buildCollectionTile(context, theme, c),
-                                ),
-                              ],
-                            ],
+                            children:
+                                localFiles
+                                    .map(
+                                      (c) => _buildCollectionTile(
+                                        context,
+                                        theme,
+                                        c,
+                                      ),
+                                    )
+                                    .toList(),
                           ),
                         ),
+                      _buildAccordionHeader(
+                        theme,
+                        AccordionSection.cloudDrives,
+                        "Cloud Drives",
+                        Icons.cloud_outlined,
                       ),
-
-                    // --- EMAIL ATTACHMENTS ---
-                    _buildAccordionHeader(
-                      theme,
-                      AccordionSection.email,
-                      "Email Attachments",
-                      Icons.email_outlined,
-                    ),
-                    if (_expandedSection == AccordionSection.email)
-                      Expanded(
-                        child: SingleChildScrollView(
+                      if (_expandedSection == AccordionSection.cloudDrives) ...[
+                        _buildSectionHeader("GOOGLE DRIVE", leftPadding: 32.0),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 24.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildSubHeader(theme, "GMail"),
-                              ...gmailEmails.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
-                              _buildSubHeader(theme, "Yahoo Mail"),
-                              ...yahooEmails.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
-                              _buildSubHeader(theme, "PST Backups"),
-                              ...pstEmails.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
-                            ],
+                            children:
+                                gdriveFiles
+                                    .map(
+                                      (c) => _buildCollectionTile(
+                                        context,
+                                        theme,
+                                        c,
+                                      ),
+                                    )
+                                    .toList(),
                           ),
                         ),
-                      ),
-
-                    // --- SOCIAL MEDIA ---
-                    _buildAccordionHeader(
-                      theme,
-                      AccordionSection.social,
-                      "Social Media",
-                      Icons.share_outlined,
-                    ),
-                    if (_expandedSection == AccordionSection.social)
-                      Expanded(
-                        child: SingleChildScrollView(
+                        _buildSectionHeader(
+                          "DROPBOX (FUTURE)",
+                          leftPadding: 32.0,
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 24.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildSubHeader(theme, "Facebook"),
-                              ...facebookSocial.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
-                              _buildSubHeader(theme, "Twitter"),
-                              ...twitterSocial.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
-                              _buildSubHeader(theme, "Tiktok"),
-                              ...tiktokSocial.map(
-                                (c) => _buildCollectionTile(context, theme, c),
-                              ),
-                            ],
+                            children:
+                                dropboxFiles
+                                    .map(
+                                      (c) => _buildCollectionTile(
+                                        context,
+                                        theme,
+                                        c,
+                                      ),
+                                    )
+                                    .toList(),
                           ),
                         ),
-                      ),
-                  ],
+                        if (onedriveFiles.isNotEmpty) ...[
+                          _buildSectionHeader("ONEDRIVE", leftPadding: 32.0),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 24.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children:
+                                  onedriveFiles
+                                      .map(
+                                        (c) => _buildCollectionTile(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, {double leftPadding = 16.0}) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: leftPadding,
+        right: 16.0,
+        top: 12,
+        bottom: 12,
+      ),
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: Text(
+          title.toUpperCase(),
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 11,
+            color: Colors.grey,
+            letterSpacing: 1.5,
           ),
         ),
       ),
@@ -303,12 +282,15 @@ class _FileDrawer extends State<FileDrawer> {
       title: title,
       icon: icon,
       isExpanded: _expandedSection == section,
-      onTap: () => setState(() => _expandedSection = section),
+      onTap:
+          () => setState(() {
+            if (_expandedSection == section) {
+              _expandedSection = null;
+            } else {
+              _expandedSection = section;
+            }
+          }),
     );
-  }
-
-  Widget _buildSubHeader(ThemeData theme, String title) {
-    return SectionSubHeaderWidget(title: title);
   }
 
   Widget _buildCollectionTile(
@@ -326,9 +308,10 @@ class _FileDrawer extends State<FileDrawer> {
         RxFilesPage.selectedPath.add(col.path);
         GoRouter.of(context).go('/files');
       },
-      onSync: () => ScannerManager.getInstance()
-          .getScanner(col)
-          ?.start(col, col.path, true, true),
+      onSync: () async {
+        final scanner = await ScannerManager.getInstance().getScannerAsync(col);
+        await scanner.start(col, null, true, true);
+      },
       onDelete: () => _showDeleteConfirmationDialog(context, col),
     );
   }
@@ -365,7 +348,9 @@ class _FileDrawer extends State<FileDrawer> {
                   Navigator.of(dialogContext).pop();
 
                   // Delete the collection and all related metadata (files, folders, etc.)
-                  await CollectionRepository(DatabaseManager.instance.database!).deleteCollection(collection.id);
+                  await CollectionRepository(
+                    DatabaseManager.instance.database!,
+                  ).deleteCollection(collection.id);
 
                   // Reload collections list
                   GetCollectionsService.instance.invoke(

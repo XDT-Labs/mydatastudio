@@ -1,9 +1,9 @@
 import 'dart:io' as io;
 
 import 'package:flutter/material.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/file_type_icon_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/thumbnail_widget.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/file_type_icon_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/thumbnail_widget.dart';
 
 class ImagePreviewWidget extends StatelessWidget {
   const ImagePreviewWidget({

@@ -3,26 +3,26 @@ import 'dart:io' as io;
 
 import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/models/tables/file_asset.dart';
-import 'package:mydatatools/modules/files/files_constants.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/models/tables/file_asset.dart';
+import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:path/path.dart' as p;
-import 'package:mydatatools/file_sources/google_drive/google_drive_auth_service.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_drive_auth_service.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:http/http.dart' as http;
-import 'package:mydatatools/modules/files/widgets/video_file_preview.dart';
-import 'package:mydatatools/helpers/file_path_resolver.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/file_metadata_section.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/folder_metadata_section.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/tabbed_metadata_section.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/image_preview_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/thumbnail_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/file_type_icon_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/pdf_preview_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/stl_preview_widget.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/text_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/video_file_preview.dart';
+import 'package:mydatastudio/helpers/file_path_resolver.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/file_metadata_section.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/folder_metadata_section.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/tabbed_metadata_section.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/image_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/thumbnail_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/file_type_icon_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/pdf_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/stl_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/text_preview_widget.dart';
 
 class FileDetailsDrawer extends StatefulWidget {
   const FileDetailsDrawer({
@@ -32,6 +32,8 @@ class FileDetailsDrawer extends StatefulWidget {
     required this.width,
     required this.onClose,
     this.onExpand,
+    this.onNavigateToFile,
+    this.onDeleteFile,
   });
 
   final FileAsset asset;
@@ -39,6 +41,8 @@ class FileDetailsDrawer extends StatefulWidget {
   final double width;
   final VoidCallback onClose;
   final VoidCallback? onExpand;
+  final void Function(File)? onNavigateToFile;
+  final void Function(File)? onDeleteFile;
 
   @override
   State<FileDetailsDrawer> createState() => _FileDetailsDrawerState();
@@ -89,7 +93,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         file.collectionId,
       );
       if (collection == null) return null;
-      final token = await GoogleDriveAuthService.getValidAccessToken(collection);
+      final token = await GoogleDriveAuthService.getValidAccessToken(
+        collection,
+      );
 
       Uri uri;
       if (file.path.startsWith('gdrive://')) {
@@ -130,9 +136,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving file: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error saving file: $e')));
       }
     }
   }
@@ -145,7 +151,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       child: Container(
         height: _previewHeight,
         width: double.infinity,
-        color: background ?? Colors.grey.shade100,
+        color: background ?? Colors.transparent,
         child: child,
       ),
     );
@@ -153,12 +159,11 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final isImage = widget.asset is File && _isImage(widget.asset as File);
     final tabCount = isImage ? 3 : 1;
 
     return Container(
-      decoration: BoxDecoration(color: theme.colorScheme.surface),
+      decoration: const BoxDecoration(color: Colors.transparent),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -170,9 +175,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
               top: 4,
               bottom: 4,
             ),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHigh,
-            ),
+            decoration: const BoxDecoration(color: Colors.transparent),
             child: Row(
               children: [
                 const Icon(Icons.info_outline, size: 16),
@@ -192,7 +195,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                       size: 16,
                     ),
                     tooltip:
-                        widget.width >= 700.0 ? 'Restore Width' : 'Maximize Width',
+                        widget.width >= 700.0
+                            ? 'Restore Width'
+                            : 'Maximize Width',
                     onPressed: widget.onExpand,
                     padding: const EdgeInsets.all(4),
                     constraints: const BoxConstraints(),
@@ -224,9 +229,12 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                       const SizedBox(height: 16),
                       TabbedMetadataSection(
                         file: widget.asset as File,
+                        collection: widget.collection,
                         exifData: _exifData,
                         isLoadingExif: _loadingExif,
                         showExif: isImage,
+                        onNavigateToFile: widget.onNavigateToFile,
+                        onDeleteFile: widget.onDeleteFile,
                       ),
                     ] else ...[
                       FolderMetadataSection(
@@ -250,16 +258,28 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     if (asset is File) {
       final ext = p.extension(asset.name).toLowerCase();
       const textExts = [
-        '.txt', '.html', '.xml', '.xsl', '.xslt',
-        '.md', '.markdown', '.json', '.yaml', '.yml',
-        '.dart', '.py', '.js', '.css',
+        '.txt',
+        '.html',
+        '.xml',
+        '.xsl',
+        '.xslt',
+        '.md',
+        '.markdown',
+        '.json',
+        '.yaml',
+        '.yml',
+        '.dart',
+        '.py',
+        '.js',
+        '.css',
       ];
 
       if (_isPdf(asset)) {
         return PdfPreviewWidget(
-          filePath: asset.path.startsWith('gdrive://')
-              ? asset.path
-              : _resolvedPath(asset),
+          filePath:
+              asset.path.startsWith('gdrive://')
+                  ? asset.path
+                  : _resolvedPath(asset),
           previewHeight: _previewHeight,
         );
       } else if (ext == '.stl') {
@@ -283,7 +303,8 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
             onDownloadGDrive: () => _getGDriveFileBytes(asset),
           ),
         );
-      } else if (textExts.contains(ext) || asset.contentType.startsWith('text/')) {
+      } else if (textExts.contains(ext) ||
+          asset.contentType.startsWith('text/')) {
         return _buildTextPreview(asset, ext);
       } else if (_isImage(asset) || asset.path.startsWith('gdrive://')) {
         return _previewContainer(
@@ -333,8 +354,16 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     if (file.contentType == FilesConstants.mimeTypeImage) return true;
     if (file.contentType.startsWith('image/')) return true;
     final ext = p.extension(file.name).toLowerCase();
-    return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.psd']
-        .contains(ext);
+    return [
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.webp',
+      '.bmp',
+      '.tif',
+      '.psd',
+    ].contains(ext);
   }
 
   bool _isPdf(File file) {

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:moment_dart/moment_dart.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/info_row.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/section_widget.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/info_row.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/section_widget.dart';
 import 'package:path/path.dart' as p;
 
 class FileMetadataSection extends StatelessWidget {
@@ -40,6 +40,7 @@ class FileMetadataSection extends StatelessWidget {
           tooltip: modifiedMoment.format(fullDateFormat),
         ),
         infoRowSelectable('Path', file.path),
+
         if (file.downloadUrl != null)
           infoRowSelectable('Download URL', file.downloadUrl!),
       ],

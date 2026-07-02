@@ -1,4 +1,4 @@
-import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/file.dart';
 
 class Email {
   String id;

@@ -1,31 +1,40 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:ui';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/image_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/pdf_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/stl_preview_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/video_file_preview.dart';
 
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/models/tables/file_asset.dart';
-import 'package:mydatatools/models/tables/folder.dart';
-import 'package:mydatatools/modules/files/notifications/file_notification.dart';
-import 'package:mydatatools/modules/files/notifications/path_changed_notification.dart';
-import 'package:mydatatools/modules/files/notifications/sort_changed_notification.dart';
-import 'package:mydatatools/modules/files/pages/new_file_collection_page.dart';
-import 'package:mydatatools/modules/files/services/get_files_and_folders_service.dart';
-import 'package:mydatatools/modules/files/widgets/file_table.dart';
-import 'package:mydatatools/modules/files/widgets/file_details_drawer.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/file_asset.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/files/notifications/file_notification.dart';
+import 'package:mydatastudio/modules/files/notifications/path_changed_notification.dart';
+import 'package:mydatastudio/modules/files/notifications/sort_changed_notification.dart';
+import 'package:mydatastudio/modules/files/pages/new_file_collection_page.dart';
+import 'package:mydatastudio/modules/files/services/get_files_and_folders_service.dart';
+import 'package:mydatastudio/modules/files/widgets/file_table.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details_drawer.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/app_constants.dart';
 
-import 'package:mydatatools/helpers/file_path_resolver.dart';
+import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io' as io;
 import 'package:path/path.dart' as p;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:mydatatools/file_sources/google_drive/google_drive_auth_service.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_drive_auth_service.dart';
 import 'package:flutter_breadcrumb/flutter_breadcrumb.dart';
 import 'package:rxdart/rxdart.dart';
-import 'package:mydatatools/scanners/scanner_manager.dart';
+import 'package:mydatastudio/scanners/scanner_manager.dart';
 
 class RxFilesPage extends StatefulWidget {
   const RxFilesPage({super.key});
@@ -77,7 +86,8 @@ class _RxFilesPage extends State<RxFilesPage> {
   bool sortAsc = true;
   List<FileAsset> selectedItems = [];
   FileAsset? selectedAsset;
-  double _drawerWidth = 300;
+  FileAsset? _lastSelectedAsset;
+  bool _showLightbox = false;
 
   @override
   void initState() {
@@ -89,8 +99,12 @@ class _RxFilesPage extends State<RxFilesPage> {
         collections = value;
       });
       if (value.isNotEmpty) {
-        //select default collection
-        RxFilesPage.selectedCollection.add(value.first);
+        // Find first local file collection to select by default, or fallback to first collection
+        final defaultCollection = value.firstWhere(
+          (c) => c.type == 'file' && c.scanner == AppConstants.scannerFileLocal,
+          orElse: () => value.first,
+        );
+        RxFilesPage.selectedCollection.add(defaultCollection);
       }
     });
 
@@ -126,6 +140,7 @@ class _RxFilesPage extends State<RxFilesPage> {
           // '' = relative root path (stored as empty string in DB)
           GetFileAndFoldersServiceCommand(value, ''),
         );
+        _triggerShallowScan(value, '');
       }
       setState(() {
         collection = value;
@@ -133,6 +148,7 @@ class _RxFilesPage extends State<RxFilesPage> {
         _breadcrumbTrail = []; // reset trail on collection change
         selectedItems = []; // reset selection on collection change
         selectedAsset = null; // close details drawer on collection change
+        _showLightbox = false;
       });
     });
 
@@ -195,6 +211,24 @@ class _RxFilesPage extends State<RxFilesPage> {
     });
   }
 
+  void _triggerShallowScan(Collection col, String targetPath) {
+    if (col.type != 'file') {
+      return;
+    }
+    final absPath = FilePathResolver.absoluteFromPath(targetPath, col);
+    ScannerManager.getInstance()
+        .getScannerAsync(col)
+        .then((scanner) {
+          if (scanner.isScanning.value) {
+            return;
+          }
+          scanner.start(col, absPath, false, true);
+        })
+        .catchError((e) {
+          logger.e("Error triggering shallow scan: $e");
+        });
+  }
+
   /// Loads the next page of files for the current collection and path.
   void _loadMoreFiles() {
     if (_isLoadingMore || !_hasMoreFiles) return;
@@ -233,7 +267,13 @@ class _RxFilesPage extends State<RxFilesPage> {
 
   @override
   Widget build(BuildContext context) {
-    print('RxFilesPage.build: collections.length = ${collections.length}, collection = $collection');
+    if (selectedAsset == null) {
+      _showLightbox = false;
+    }
+    final theme = Theme.of(context);
+    print(
+      'RxFilesPage.build: collections.length = ${collections.length}, collection = $collection',
+    );
     if (collections.isEmpty) {
       return const NewFileCollectionPage();
     }
@@ -241,236 +281,392 @@ class _RxFilesPage extends State<RxFilesPage> {
     if (collection == null) {
       return Container();
     }
-    //parse path into a breadcrumb
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        centerTitle: false,
-        title: getBreadcrumb(collection!, path ?? collection!.path),
-        bottom:
-            (_isLoadingMore || _isServiceLoading || isScanning)
-                ? const PreferredSize(
-                  preferredSize: Size.fromHeight(2.0),
-                  child: LinearProgressIndicator(
+      backgroundColor: Colors.transparent,
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: (FocusNode node, KeyEvent event) {
+          if (event is KeyDownEvent) {
+            if (event.logicalKey == LogicalKeyboardKey.space) {
+              if (selectedAsset != null && !_isTextInputFocused()) {
+                setState(() {
+                  _showLightbox = !_showLightbox;
+                });
+                return KeyEventResult.handled;
+              }
+            } else if (event.logicalKey == LogicalKeyboardKey.escape) {
+              if (_showLightbox) {
+                setState(() {
+                  _showLightbox = false;
+                });
+                return KeyEventResult.handled;
+              } else if (selectedAsset != null) {
+                setState(() {
+                  selectedAsset = null;
+                });
+                return KeyEventResult.handled;
+              }
+            }
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Stack(
+          children: [
+            // ─── Main Content (Column: header bar + body row) ──
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_isLoadingMore || _isServiceLoading || isScanning)
+                  LinearProgressIndicator(
                     minHeight: 2,
                     backgroundColor: Colors.transparent,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      theme.colorScheme.primary,
+                    ),
                   ),
-                )
-                : null,
-        actions: <Widget>[
-          IconButton(
-            icon: const Icon(Icons.add, color: Colors.black, weight: 200),
-            tooltip: 'Upload file',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('todo: add file to current folder'),
-                ),
-              );
-            },
-          ),
-          IconButton(
-            // TODO: disable is no files are checked
-            icon: const Icon(Icons.refresh, color: Colors.black, weight: 100),
-            tooltip: 'Refresh',
-            onPressed: () async {
-              if (collection != null) {
-                logger.s("Refreshing folder $path");
-
-                // Get absolute path for scanning
-                final absPath = FilePathResolver.absoluteFromPath(
-                  path ?? '',
-                  collection!,
-                );
-
-                // Start a scan for this specific folder (non-recursive)
-                final mgr = ScannerManager.getInstance();
-                final scanner = await mgr.getScannerAsync(collection!);
-                await scanner.start(collection!, absPath, false, true);
-
-                // Also refresh the UI from the database
-                _filesAndFoldersService!.invoke(
-                  GetFileAndFoldersServiceCommand(collection!, path ?? ''),
-                );
-              }
-            },
-          ),
-          const VerticalDivider(
-            color: Colors.grey,
-            thickness: 1,
-            indent: 10,
-            endIndent: 10,
-          ),
-          IconButton(
-            icon: const Icon(Icons.download, color: Colors.black, weight: 200),
-            tooltip: 'Download File(s)',
-            onPressed:
-                selectedItems.isEmpty
-                    ? null
-                    : () => _downloadSelectedFiles(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete, color: Colors.black, weight: 300),
-            tooltip: 'Delete File(s)',
-            onPressed:
-                selectedItems.isEmpty
-                    ? null
-                    : () => _showBulkDeleteConfirmationDialog(context),
-          ),
-        ],
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: Row(
-              mainAxisSize: MainAxisSize.max,
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Stack(
-                    children: [
-                      if (filesAndFolders.isEmpty &&
-                          (_isLoadingMore || _isServiceLoading))
-                        const Center(child: CircularProgressIndicator())
-                      else if (filesAndFolders.isEmpty && isScanning)
-                        _buildScanningPlaceholder()
-                      else
-                        NotificationListener<FiledNotification>(
-                          child: FileTable(
-                            data: filesAndFolders,
-                            collection: collection,
-                            scrollController: _scrollController,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Container(
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainer,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.3,
+                        ),
+                        width: 1,
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: getBreadcrumb(
+                            theme,
+                            collection!,
+                            path ?? collection!.path,
                           ),
-                          onNotification: (FiledNotification n) {
-                            if (n is PathChangedNotification) {
-                              if (n.asset.path != path) {
-                                //make sure path changed before triggering reload
-                                setState(() {
-                                  path = n.asset.path;
-                                  // Push this folder onto the breadcrumb trail
-                                  _breadcrumbTrail = [
-                                    ..._breadcrumbTrail,
-                                    _BreadcrumbEntry(
-                                      name: n.asset.name,
-                                      path: n.asset.path,
-                                    ),
-                                  ];
-                                  selectedItems =
-                                      []; // reset selection on path change
-                                  selectedAsset =
-                                      null; // close drawer when drilling into folder
-                                });
-                                // Reset pagination before loading the new path.
-                                _fileOffset = 0;
-                                _hasMoreFiles = true;
-                                _filesAndFoldersService!.invoke(
-                                  GetFileAndFoldersServiceCommand(
-                                    collection!,
-                                    n.asset.path,
-                                  ),
-                                );
-                                return true;
-                              }
-                            }
-                            if (n is SortChangedNotification) {
-                              sortColumn = n.sortColumn;
-                              sortAsc = n.sortAsc;
-                              setState(() {
-                                filesAndFolders = _mergeAndSortRowData(
-                                  filesAndFolders,
-                                  sortColumn,
-                                  sortAsc,
-                                );
-                              });
-                              return true;
-                            }
-                            if (n is FileDeletedNotification) {
+                        ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.add_box_outlined,
+                            color: theme.colorScheme.onSurfaceVariant,
+                            size: 20,
+                          ),
+                          tooltip: 'Upload file',
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'todo: add file to current folder',
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: Icon(
+                            Icons.refresh,
+                            color: theme.colorScheme.onSurfaceVariant,
+                            size: 20,
+                          ),
+                          tooltip: 'Refresh',
+                          onPressed: () async {
+                            if (collection != null) {
+                              logger.s("Refreshing folder $path");
+                              final absPath = FilePathResolver.absoluteFromPath(
+                                path ?? '',
+                                collection!,
+                              );
+                              final mgr = ScannerManager.getInstance();
+                              final scanner = await mgr.getScannerAsync(
+                                collection!,
+                              );
+                              await scanner.start(
+                                collection!,
+                                absPath,
+                                false,
+                                true,
+                              );
                               _filesAndFoldersService!.invoke(
                                 GetFileAndFoldersServiceCommand(
                                   collection!,
                                   path ?? '',
-                                  refreshOnly: true,
                                 ),
                               );
-                              return true;
                             }
-                            if (n is SelectionChangedNotification) {
-                              setState(() {
-                                selectedItems = n.selectedItems;
-                              });
-                              return true;
-                            }
-                            if (n is FileSelectedNotification) {
-                              setState(() {
-                                selectedAsset = n.asset;
-                              });
-                              return true;
-                            }
-                            return false;
                           },
                         ),
-                    ],
-                  ),
-                ),
-                if (selectedAsset != null) ...[
-                  // ─── Drag handle ───────────────────────────
-                  MouseRegion(
-                    cursor: SystemMouseCursors.resizeColumn,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onHorizontalDragUpdate: (details) {
-                        setState(() {
-                          _drawerWidth = (_drawerWidth - details.delta.dx)
-                              .clamp(200.0, 700.0);
-                        });
-                      },
-                      child: Container(
-                        width: 6,
-                        color: Colors.transparent,
-                        child: Center(
-                          child: Container(
-                            width: 2,
-                            color: Colors.grey.shade300,
+                        const SizedBox(width: 8),
+                        Container(
+                          height: 20,
+                          width: 1,
+                          color: theme.colorScheme.outlineVariant.withValues(
+                            alpha: 0.3,
                           ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.download_outlined, size: 20),
+                          color: theme.colorScheme.onSurfaceVariant,
+                          disabledColor: theme.colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.3),
+                          tooltip: 'Download File(s)',
+                          onPressed:
+                              selectedItems.isEmpty
+                                  ? null
+                                  : () => _downloadSelectedFiles(context),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          color: theme.colorScheme.error,
+                          disabledColor: theme.colorScheme.error.withValues(
+                            alpha: 0.3,
+                          ),
+                          tooltip: 'Delete File(s)',
+                          onPressed:
+                              selectedItems.isEmpty
+                                  ? null
+                                  : () => _showBulkDeleteConfirmationDialog(
+                                    context,
+                                  ),
+                        ),
+                      ],
                     ),
                   ),
-                  // ─── Drawer ────────────────────────────────
-                  SizedBox(
-                    width: _drawerWidth,
-                    child: FileDetailsDrawer(
-                      asset: selectedAsset!,
-                      collection: collection!,
-                      width: _drawerWidth,
-                      onClose: () => setState(() => selectedAsset = null),
-                      onExpand:
-                          () => setState(() {
-                            _drawerWidth =
-                                _drawerWidth >= 700.0 ? 300.0 : 700.0;
-                          }),
+                ),
+                // ─── Body Row: table + optional details panel ──
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // File table fills all remaining horizontal space
+                        Expanded(child: _buildFileTableArea()),
+                        // Details panel animates in alongside the table
+                        _buildDetailsPanel(theme),
+                      ],
                     ),
                   ),
-                ],
+                ),
               ],
             ),
-          ),
-        ],
+            // ─── Lightbox fullscreen overlay (on top of everything) ──
+            _buildLightboxOverlay(theme),
+          ],
+        ),
       ),
     );
   }
 
-  BreadCrumb getBreadcrumb(Collection collection, String path) {
+  /// Builds the file table area with loading/scanning/empty states.
+  Widget _buildFileTableArea() {
+    if (filesAndFolders.isEmpty && (_isLoadingMore || _isServiceLoading)) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (filesAndFolders.isEmpty && isScanning) {
+      return _buildScanningPlaceholder();
+    }
+    return NotificationListener<FiledNotification>(
+      onNotification: (FiledNotification n) {
+        io.stderr.writeln(
+          "DEBUG: Received notification of type: ${n.runtimeType}",
+        );
+        if (n is PathChangedNotification) {
+          io.stderr.writeln(
+            "DEBUG: n.asset.path = ${n.asset.path}, current path = $path",
+          );
+          if (n.asset.path != path) {
+            setState(() {
+              path = n.asset.path;
+              _breadcrumbTrail = [
+                ..._breadcrumbTrail,
+                _BreadcrumbEntry(name: n.asset.name, path: n.asset.path),
+              ];
+              selectedItems = [];
+              selectedAsset = null;
+              _showLightbox = false;
+            });
+            _fileOffset = 0;
+            _hasMoreFiles = true;
+            _filesAndFoldersService!.invoke(
+              GetFileAndFoldersServiceCommand(collection!, n.asset.path),
+            );
+            _triggerShallowScan(collection!, n.asset.path);
+            return true;
+          }
+        }
+        if (n is SortChangedNotification) {
+          sortColumn = n.sortColumn;
+          sortAsc = n.sortAsc;
+          setState(() {
+            filesAndFolders = _mergeAndSortRowData(
+              filesAndFolders,
+              sortColumn,
+              sortAsc,
+            );
+          });
+          return true;
+        }
+        if (n is FileDeletedNotification) {
+          _filesAndFoldersService!.invoke(
+            GetFileAndFoldersServiceCommand(
+              collection!,
+              path ?? '',
+              refreshOnly: true,
+            ),
+          );
+          return true;
+        }
+        if (n is SelectionChangedNotification) {
+          setState(() => selectedItems = n.selectedItems);
+          return true;
+        }
+        if (n is FileSelectedNotification) {
+          setState(() {
+            selectedAsset = n.asset;
+            _lastSelectedAsset = n.asset;
+            _showLightbox = false;
+          });
+          return true;
+        }
+        return false;
+      },
+      child: FileTable(
+        data: filesAndFolders,
+        collection: collection,
+        scrollController: _scrollController,
+      ),
+    );
+  }
+
+  /// Builds the inline file-details card that sits to the right of the table.
+  /// Animates in/out smoothly without overlaying the table.
+  Widget _buildDetailsPanel(ThemeData theme) {
+    final asset = selectedAsset ?? _lastSelectedAsset;
+    final isVisible = selectedAsset != null;
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      alignment: Alignment.topRight,
+      child:
+          isVisible
+              ? Padding(
+                padding: const EdgeInsets.only(
+                  left: 16,
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                ),
+                child: SizedBox(
+                  width: 300,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainer,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.2,
+                        ),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.18),
+                          blurRadius: 16,
+                          spreadRadius: 0,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: FileDetailsDrawer(
+                      asset: asset!,
+                      collection: collection!,
+                      width: 300,
+                      onClose:
+                          () => setState(() {
+                            selectedAsset = null;
+                            _showLightbox = false;
+                          }),
+                      onNavigateToFile: (file) async {
+                        // Resolve the target collection — may differ from the
+                        // current one since findSimilarImages searches all
+                        // collections.
+                        var targetCollection = collection!;
+                        if (file.collectionId != collection!.id) {
+                          final found = await DatabaseManager.instance.repository
+                              ?.getCollection(file.collectionId);
+                          if (!mounted) return;
+                          if (found == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Could not find collection for this file'),
+                              ),
+                            );
+                            return;
+                          }
+                          targetCollection = found;
+                        }
+                        setState(() {
+                          collection = targetCollection;
+                          path = file.parent;
+                          selectedAsset = file;
+                          _lastSelectedAsset = file;
+                          _showLightbox = false;
+                          _breadcrumbTrail = _trailFromFolderPath(file.parent);
+                        });
+                        _fileOffset = 0;
+                        _hasMoreFiles = true;
+                        _filesAndFoldersService!.invoke(
+                          GetFileAndFoldersServiceCommand(
+                            targetCollection,
+                            file.parent,
+                          ),
+                        );
+                      },
+                      onDeleteFile: (file) {
+                        if (selectedAsset?.id == file.id) {
+                          setState(() {
+                            selectedAsset = null;
+                            _showLightbox = false;
+                          });
+                        }
+                        _filesAndFoldersService!.invoke(
+                          GetFileAndFoldersServiceCommand(
+                            collection!,
+                            path ?? '',
+                            refreshOnly: true,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              )
+              : const SizedBox.shrink(),
+    );
+  }
+
+  BreadCrumb getBreadcrumb(
+    ThemeData theme,
+    Collection collection,
+    String path,
+  ) {
+    final isCollectionActive = _breadcrumbTrail.isEmpty;
     return BreadCrumb(
       items: <BreadCrumbItem>[
         BreadCrumbItem(
-          content: const Icon(Icons.home, color: Colors.black),
+          content: Icon(
+            Icons.home_outlined,
+            color: theme.colorScheme.onSurfaceVariant,
+            size: 20,
+          ),
           onTap: () {
             setState(() {
               this.path = '';
@@ -480,10 +676,22 @@ class _RxFilesPage extends State<RxFilesPage> {
             _filesAndFoldersService!.invoke(
               GetFileAndFoldersServiceCommand(collection, ''),
             );
+            _triggerShallowScan(collection, '');
           },
         ),
         BreadCrumbItem(
-          content: Text(collection.name),
+          content: Text(
+            collection.name,
+            style: TextStyle(
+              color:
+                  isCollectionActive
+                      ? theme.colorScheme.onSurface
+                      : theme.colorScheme.onSurfaceVariant,
+              fontWeight:
+                  isCollectionActive ? FontWeight.bold : FontWeight.normal,
+              fontSize: 14,
+            ),
+          ),
           onTap: () {
             setState(() {
               this.path = '';
@@ -493,14 +701,26 @@ class _RxFilesPage extends State<RxFilesPage> {
             _filesAndFoldersService!.invoke(
               GetFileAndFoldersServiceCommand(collection, ''),
             );
+            _triggerShallowScan(collection, '');
           },
         ),
         // One item per folder the user has drilled into
         ..._breadcrumbTrail.asMap().entries.map((entry) {
           final index = entry.key;
           final crumb = entry.value;
+          final isLast = index == _breadcrumbTrail.length - 1;
           return BreadCrumbItem(
-            content: Text(crumb.name),
+            content: Text(
+              crumb.name,
+              style: TextStyle(
+                color:
+                    isLast
+                        ? theme.colorScheme.onSurface
+                        : theme.colorScheme.onSurfaceVariant,
+                fontWeight: isLast ? FontWeight.bold : FontWeight.normal,
+                fontSize: 14,
+              ),
+            ),
             onTap: () {
               // Navigate to this level and trim everything after it
               setState(() {
@@ -511,16 +731,36 @@ class _RxFilesPage extends State<RxFilesPage> {
               _filesAndFoldersService!.invoke(
                 GetFileAndFoldersServiceCommand(collection, crumb.path),
               );
+              _triggerShallowScan(collection, crumb.path);
             },
           );
         }),
       ],
-      divider: const Icon(Icons.chevron_right, color: Colors.black),
+      divider: Icon(
+        Icons.chevron_right,
+        color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+        size: 16,
+      ),
       overflow: const WrapOverflow(
         keepLastDivider: false,
         direction: Axis.horizontal,
       ),
     );
+  }
+
+  /// Builds a breadcrumb trail from a relative folder path.
+  /// e.g. 'Photos/2024/vacation' → [Photos, Photos/2024, Photos/2024/vacation]
+  List<_BreadcrumbEntry> _trailFromFolderPath(String folderPath) {
+    if (folderPath.isEmpty) return [];
+    final parts = folderPath.split('/').where((s) => s.isNotEmpty).toList();
+    final trail = <_BreadcrumbEntry>[];
+    for (int i = 0; i < parts.length; i++) {
+      trail.add(_BreadcrumbEntry(
+        name: parts[i],
+        path: parts.sublist(0, i + 1).join('/'),
+      ));
+    }
+    return trail;
   }
 
   List<FileAsset> _mergeAndSortRowData(
@@ -605,13 +845,15 @@ class _RxFilesPage extends State<RxFilesPage> {
       if (item is File) {
         try {
           // Reconstruct absolute path for filesystem delete.
-          final absPath = FilePathResolver.absolute(item, collection!);
+          final absPath = item.localPath ?? FilePathResolver.absolute(item, collection!);
           final ioFile = io.File(absPath);
           if (await ioFile.exists()) {
             await ioFile.delete();
           }
           // Delete from database
-          await FileDesktopRepository(DatabaseManager.instance.database!).delete(item);
+          await FileDesktopRepository(
+            DatabaseManager.instance.database!,
+          ).delete(item);
           deletedCount++;
         } catch (e) {
           logger.e("Error deleting ${item.path}: $e");
@@ -716,11 +958,308 @@ class _RxFilesPage extends State<RxFilesPage> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'This may take a minute for large accounts.',
+            'This may take a minute for large folders.',
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
         ],
       ),
+    );
+  }
+
+  bool _isTextInputFocused() {
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    if (primaryFocus == null) return false;
+    final context = primaryFocus.context;
+    if (context == null) return false;
+
+    bool isInput = false;
+    context.visitAncestorElements((element) {
+      if (element.widget is EditableText) {
+        isInput = true;
+        return false;
+      }
+      return true;
+    });
+    return isInput || context.widget is EditableText;
+  }
+
+  bool _isImage(File file) {
+    if (file.contentType.startsWith('image/')) return true;
+    final ext = p.extension(file.name).toLowerCase();
+    return [
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.webp',
+      '.bmp',
+      '.tif',
+      '.psd',
+    ].contains(ext);
+  }
+
+  bool _isPdf(File file) {
+    if (file.contentType == 'application/pdf' ||
+        file.contentType == 'application/x-pdf')
+      return true;
+    return p.extension(file.name).toLowerCase() == '.pdf';
+  }
+
+  bool _isText(File file) {
+    final ext = p.extension(file.name).toLowerCase();
+    const textExts = [
+      '.txt',
+      '.html',
+      '.xml',
+      '.xsl',
+      '.xslt',
+      '.md',
+      '.markdown',
+      '.json',
+      '.yaml',
+      '.yml',
+      '.dart',
+      '.py',
+      '.js',
+      '.css',
+    ];
+    return textExts.contains(ext) || file.contentType.startsWith('text/');
+  }
+
+  String _resolvedPath(File file) =>
+      FilePathResolver.absolute(file, collection!);
+
+  Future<List<int>?> _getGDriveFileBytes(File file) async {
+    try {
+      final token = await GoogleDriveAuthService.getValidAccessToken(
+        collection!,
+      );
+
+      Uri uri;
+      if (file.path.startsWith('gdrive://')) {
+        final fileId = file.path.replaceFirst('gdrive://', '');
+        uri = Uri.parse(
+          'https://www.googleapis.com/drive/v3/files/$fileId?alt=media',
+        );
+      } else if (file.downloadUrl != null) {
+        uri = Uri.parse(file.downloadUrl!);
+        final queryParams = Map<String, String>.from(uri.queryParameters);
+        queryParams.remove('authuser');
+        uri = uri.replace(queryParameters: queryParams);
+      } else {
+        return null;
+      }
+
+      final response = await http.get(
+        uri,
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (response.statusCode == 200) {
+        return response.bodyBytes;
+      }
+    } catch (e) {
+      debugPrint('Error downloading GDrive file for preview: $e');
+    }
+    return null;
+  }
+
+  Future<String> _loadTextContent(File file) async {
+    try {
+      if (file.path.startsWith('gdrive://')) {
+        final bytes = await _getGDriveFileBytes(file);
+        if (bytes != null) {
+          return utf8.decode(bytes);
+        }
+      } else {
+        final ioFile = io.File(_resolvedPath(file));
+        if (await ioFile.exists()) {
+          return await ioFile.readAsString();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading lightbox text preview: $e');
+    }
+    return 'Could not load file content.';
+  }
+
+  Widget _buildLightboxOverlay(ThemeData theme) {
+    if (!_showLightbox || _lastSelectedAsset == null) {
+      return const SizedBox.shrink();
+    }
+
+    final asset = _lastSelectedAsset!;
+    final ext = p.extension(asset.name).toLowerCase();
+
+    Widget content;
+    if (asset is File) {
+      if (_isPdf(asset)) {
+        content = PdfPreviewWidget(
+          filePath:
+              asset.path.startsWith('gdrive://')
+                  ? asset.path
+                  : _resolvedPath(asset),
+          previewHeight: double.infinity,
+        );
+      } else if (ext == '.stl') {
+        content = StlPreviewWidget(
+          file: asset,
+          previewHeight: double.infinity,
+          resolvedPath: _resolvedPath(asset),
+          onDownloadGDrive:
+              asset.path.startsWith('gdrive://')
+                  ? () => _getGDriveFileBytes(asset)
+                  : null,
+        );
+      } else if (asset.contentType.startsWith('video/') ||
+          ['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm'].contains(ext)) {
+        content = VideoFilePreview(
+          path: _resolvedPath(asset),
+          height: double.infinity,
+          isGDrive: asset.path.startsWith('gdrive://'),
+          onDownloadGDrive: () => _getGDriveFileBytes(asset),
+        );
+      } else if (_isImage(asset) || asset.path.startsWith('gdrive://')) {
+        content = ImagePreviewWidget(
+          file: asset,
+          resolvedPath: _resolvedPath(asset),
+        );
+      } else if (_isText(asset)) {
+        content = Container(
+          color: Colors.grey.shade900,
+          padding: const EdgeInsets.all(24),
+          child: SingleChildScrollView(
+            child: FutureBuilder<String>(
+              future: _loadTextContent(asset),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError || !snapshot.hasData) {
+                  return const Text(
+                    'Error loading preview',
+                    style: TextStyle(color: Colors.white),
+                  );
+                }
+                if (ext == '.md' || ext == '.markdown') {
+                  return MarkdownBody(
+                    data: snapshot.data!,
+                    styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+                      p: const TextStyle(color: Colors.white70),
+                      h1: const TextStyle(color: Colors.white),
+                      h2: const TextStyle(color: Colors.white),
+                      code: const TextStyle(
+                        backgroundColor: Colors.black38,
+                        color: Colors.amberAccent,
+                      ),
+                    ),
+                  );
+                }
+                return Text(
+                  snapshot.data!,
+                  style: const TextStyle(
+                    fontFamily: 'Courier',
+                    fontSize: 13,
+                    color: Colors.white70,
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      } else {
+        content = Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.insert_drive_file_outlined,
+              size: 80,
+              color: Colors.white54,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              asset.name,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Preview not supported for this file type in Lightroom.',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+          ],
+        );
+      }
+    } else {
+      content = Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.folder_outlined, size: 80, color: Colors.amber),
+          const SizedBox(height: 16),
+          Text(
+            asset.name,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Stack(
+      children: [
+        // Blur & Black Dim Backdrop
+        GestureDetector(
+          onTap: () => setState(() => _showLightbox = false),
+          child: ClipRect(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.85),
+                width: double.infinity,
+                height: double.infinity,
+              ),
+            ),
+          ),
+        ),
+        // Content Area
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.all(48.0),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 1200, maxHeight: 900),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                color: Colors.transparent,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: InteractiveViewer(maxScale: 4.0, child: content),
+              ),
+            ),
+          ),
+        ),
+        // Close Button (Top-Right)
+        Positioned(
+          top: 24,
+          right: 24,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.5),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white, size: 24),
+              tooltip: 'Close Preview (Esc)',
+              onPressed: () => setState(() => _showLightbox = false),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

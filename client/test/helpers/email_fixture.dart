@@ -1,5 +1,5 @@
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:uuid/uuid.dart';
 
 final _uuid = const Uuid();

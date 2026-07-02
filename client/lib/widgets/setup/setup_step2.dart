@@ -1,9 +1,10 @@
 import 'dart:io';
-import 'package:mydatatools/main.dart';
-import 'package:mydatatools/models/tables/app_user.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:reactive_forms/reactive_forms.dart';
+import 'package:mydatastudio/database_manager.dart';
 
 class SetupStep2 extends StatefulWidget {
   const SetupStep2({
@@ -23,10 +24,29 @@ class SetupStep2 extends StatefulWidget {
 
 class _SetupStep2State extends State<SetupStep2> {
   String? errorMessage;
+  bool isNetworkShare = false;
 
   final storageForm = FormGroup({
     'storageLocation': FormControl<String>(validators: [Validators.required]),
   });
+
+  @override
+  void initState() {
+    super.initState();
+    _checkInitialPathWal();
+  }
+
+  Future<void> _checkInitialPathWal() async {
+    final path = widget.appUser?.localStoragePath;
+    if (path != null && path.isNotEmpty) {
+      final supports = await DatabaseManager.testPathSupportsWal(path);
+      if (mounted) {
+        setState(() {
+          isNetworkShare = !supports;
+        });
+      }
+    }
+  }
 
   void onStepCancelHandler() {
     widget.onCancel();
@@ -37,7 +57,8 @@ class _SetupStep2State extends State<SetupStep2> {
 
     if (storageForm.valid && appUser != null) {
       String? dbDir = MainApp.appDataDirectory.value;
-      appUser.localStoragePath = (dbDir! is Directory) ? (dbDir as Directory).path : dbDir;
+      appUser.localStoragePath =
+          (dbDir! is Directory) ? (dbDir as Directory).path : dbDir;
 
       try {
         errorMessage = null;
@@ -65,12 +86,26 @@ class _SetupStep2State extends State<SetupStep2> {
           repoDir.createSync(recursive: true);
         }
 
+        // Test SQLite WAL support (fails on network/SMB shares)
+        setState(() {
+          errorMessage = 'Validating storage speed and locking...';
+        });
+        final supportsWal = await DatabaseManager.testPathSupportsWal(
+          appUser.localStoragePath,
+        );
+        setState(() {
+          isNetworkShare = !supportsWal;
+          errorMessage = null;
+        });
+
         //call callback and proceed to next step
         widget.onSubmit(appUser);
       } catch (e) {
         //Missing permissions required to use folder
         storageForm.findControl('storageLocation')?.value = '';
-        errorMessage = 'Missing permissions required to use folder';
+        setState(() {
+          errorMessage = 'Missing permissions required to use folder';
+        });
       }
     }
   }
@@ -80,9 +115,20 @@ class _SetupStep2State extends State<SetupStep2> {
     //handle async setup for validators
     var dir = MainApp.supportDirectory.valueOrNull;
     var field = storageForm.findControl('storageLocation');
-    if (field != null) {
-      field.value = (dir is String) ? dir : dir?.path;
-      MainApp.appDataDirectory.add(field.value);
+    if (field != null && (field.value == null || field.value!.isEmpty)) {
+      String? initialPath;
+      if (widget.appUser?.localStoragePath != null &&
+          widget.appUser!.localStoragePath.isNotEmpty) {
+        initialPath = widget.appUser!.localStoragePath;
+      } else if (dir is String) {
+        initialPath = dir as String;
+      } else if (dir is Directory) {
+        initialPath = dir.path;
+      }
+      if (initialPath != null) {
+        field.value = initialPath;
+        MainApp.appDataDirectory.add(initialPath);
+      }
     }
 
     return ReactiveForm(
@@ -100,14 +146,29 @@ class _SetupStep2State extends State<SetupStep2> {
           TextButton(
             onPressed: () async {
               String? result = await FilePicker.platform.getDirectoryPath();
-              storageForm.findControl('storageLocation')?.value = result;
-              MainApp.appDataDirectory.add(result);
+              if (result != null) {
+                storageForm.findControl('storageLocation')?.value = result;
+                MainApp.appDataDirectory.add(result);
+                final supportsWal = await DatabaseManager.testPathSupportsWal(result);
+                setState(() {
+                  isNetworkShare = !supportsWal;
+                });
+              }
             },
             child: const Text("Browse"),
           ),
           Container(height: 16),
           errorMessage != null
               ? Text(errorMessage!, style: const TextStyle(color: Colors.red))
+              : Container(),
+          isNetworkShare
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8.0),
+                  child: Text(
+                    'Notice: The selected path is on a network share. The database will be stored locally on your primary drive for compatibility and performance, while your files and backups will remain on the network share.',
+                    style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
+                  ),
+                )
               : Container(),
           const Align(
             alignment: Alignment.centerLeft,

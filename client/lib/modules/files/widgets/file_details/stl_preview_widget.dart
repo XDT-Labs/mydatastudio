@@ -1,7 +1,7 @@
 import 'dart:io' as io;
 
 import 'package:flutter/material.dart';
-import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/file.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:three_js/three_js.dart' as three;
@@ -21,11 +21,11 @@ class ThreeJsStlRenderer implements StlRenderer {
     required VoidCallback onSetupComplete,
     required void Function(String?) onError,
     required void Function(bool) onLoading,
-  })  : _filePath = filePath,
-        _onDownloadGDrive = onDownloadGDrive,
-        _onSetupComplete = onSetupComplete,
-        _onError = onError,
-        _onLoading = onLoading {
+  }) : _filePath = filePath,
+       _onDownloadGDrive = onDownloadGDrive,
+       _onSetupComplete = onSetupComplete,
+       _onError = onError,
+       _onLoading = onLoading {
     _threeJs = three.ThreeJS(
       onSetupComplete: _onSetupComplete,
       setup: () => _initScene(),
@@ -160,6 +160,7 @@ class StlPreviewWidget extends StatefulWidget {
   final double previewHeight;
   final String resolvedPath;
   final Future<List<int>?> Function()? onDownloadGDrive;
+
   /// Injected in tests to avoid platform channels / OpenGL.
   final StlRenderer Function(File)? rendererFactory;
 

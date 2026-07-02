@@ -1,6 +1,6 @@
-import 'package:mydatatools/models/tables/email.dart';
-import 'package:mydatatools/modules/email/notifications/email_selected_notification.dart';
-import 'package:mydatatools/modules/email/notifications/email_sort_changed_notification.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/modules/email/notifications/email_selected_notification.dart';
+import 'package:mydatastudio/modules/email/notifications/email_sort_changed_notification.dart';
 import 'package:flutter/material.dart';
 import 'package:moment_dart/moment_dart.dart';
 import 'dart:math' as math;
@@ -92,7 +92,7 @@ class _EmailTable extends State<EmailTable> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.white,
+      color: Colors.transparent,
       constraints: const BoxConstraints.expand(),
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
@@ -116,7 +116,7 @@ class _EmailTable extends State<EmailTable> {
                 dataRowMaxHeight: 40,
                 dataRowMinHeight: 40,
                 headingRowHeight: 40,
-                headingRowColor: WidgetStateProperty.all(Colors.white),
+                headingRowColor: WidgetStateProperty.all(Colors.transparent),
                 rows: getRows(context, widget.emails, constraints.maxWidth),
               ),
             ),

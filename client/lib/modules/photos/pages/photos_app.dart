@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:core';
 
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/modules/photos/services/photos_by_date_service.dart';
-import 'package:mydatatools/modules/photos/widgets/photo_card.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/photos/services/photos_by_date_service.dart';
+import 'package:mydatastudio/modules/photos/widgets/photo_card.dart';
 import 'package:flutter/material.dart';
 import 'package:timeline_tile/timeline_tile.dart';
 
@@ -61,10 +61,7 @@ class _PhotosApp extends State<PhotosApp> {
         title: const Text("My Photos"),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1.0),
-          child: Container(
-            height: 1.0,
-            color: Colors.grey.shade300,
-          ),
+          child: Container(height: 1.0, color: Colors.grey.shade300),
         ),
         actions: <Widget>[
           IconButton(

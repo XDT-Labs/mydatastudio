@@ -1,8 +1,8 @@
 import 'dart:io' as io;
-import 'package:mydatatools/app_constants.dart';
-import 'package:mydatatools/file_sources/file_source_file.dart';
-import 'package:mydatatools/file_sources/local/local_file_provider.dart';
-import 'package:mydatatools/models/tables/collection.dart';
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/file_sources/file_source_file.dart';
+import 'package:mydatastudio/file_sources/local/local_file_provider.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:test/test.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
@@ -22,14 +22,14 @@ void main() {
   });
 
   Collection makeCollection(String path) => Collection(
-        id: const Uuid().v4(),
-        name: 'Test Local',
-        path: path,
-        type: 'file',
-        scanner: AppConstants.scannerFileLocal,
-        scanStatus: 'pending',
-        needsReAuth: false,
-      );
+    id: const Uuid().v4(),
+    name: 'Test Local',
+    path: path,
+    type: 'file',
+    scanner: AppConstants.scannerFileLocal,
+    scanStatus: 'pending',
+    needsReAuth: false,
+  );
 
   group('LocalFileProvider', () {
     test('metadata is correct', () {
@@ -54,8 +54,11 @@ void main() {
         final collection = makeCollection(tempDir.path);
         final results = await provider.listFolder(collection);
 
-        expect(results.length, equals(3)); // text, image, subdir (hidden ignored)
-        
+        expect(
+          results.length,
+          equals(3),
+        ); // text, image, subdir (hidden ignored)
+
         final txtFile = results.firstWhere((f) => f.name == 'test.txt');
         expect(txtFile.isFolder, isFalse);
         expect(txtFile.mimeType, equals('text/plain'));
@@ -75,7 +78,10 @@ void main() {
         await io.File(p.join(subPath, 'inner.txt')).create();
 
         final collection = makeCollection(tempDir.path);
-        final results = await provider.listFolder(collection, folderId: subPath);
+        final results = await provider.listFolder(
+          collection,
+          folderId: subPath,
+        );
 
         expect(results.length, equals(1));
         expect(results.first.name, equals('inner.txt'));
@@ -86,10 +92,10 @@ void main() {
       test('downloadFile copies file if destPath differs', () async {
         final sourceFile = io.File(p.join(tempDir.path, 'source.txt'));
         await sourceFile.writeAsString('hello');
-        
+
         final destPath = p.join(tempDir.path, 'dest.txt');
         final collection = makeCollection(tempDir.path);
-        
+
         final result = await provider.downloadFile(
           collection,
           _makeFileSource(sourceFile.path),
@@ -104,7 +110,7 @@ void main() {
       test('downloadFile returns source if destPath is same', () async {
         final sourceFile = io.File(p.join(tempDir.path, 'source.txt'));
         await sourceFile.create();
-        
+
         final collection = makeCollection(tempDir.path);
         final result = await provider.downloadFile(
           collection,
@@ -118,7 +124,7 @@ void main() {
       test('deleteFile removes file from disk', () async {
         final file = io.File(p.join(tempDir.path, 'to_delete.txt'));
         await file.create();
-        
+
         final collection = makeCollection(tempDir.path);
         final success = await provider.deleteFile(
           collection,
@@ -161,7 +167,11 @@ void main() {
         for (final entry in results) {
           final ext = p.extension(entry.name).replaceFirst('.', '');
           if (extensions.containsKey(ext)) {
-            expect(entry.mimeType, equals(extensions[ext]), reason: 'Failed for .$ext');
+            expect(
+              entry.mimeType,
+              equals(extensions[ext]),
+              reason: 'Failed for .$ext',
+            );
           }
         }
       });

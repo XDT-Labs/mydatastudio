@@ -1,6 +1,6 @@
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/oauth/login_providers.dart';
-import 'package:mydatatools/services/get_collections_service.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/oauth/login_providers.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 
 class AuthDialogManager {

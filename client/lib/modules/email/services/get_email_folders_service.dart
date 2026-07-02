@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:mydatatools/modules/email/services/email_folder_repository.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/email_folder.dart';
-import 'package:mydatatools/services/rx_service.dart';
+import 'package:mydatastudio/modules/email/services/email_folder_repository.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
+import 'package:mydatastudio/services/rx_service.dart';
 
 class EmailFolderServiceCommand {
   final String collectionId;
@@ -56,12 +56,13 @@ class GetEmailFoldersService
     // Only set up the persistent stream if we don't already have one for
     // this collectionId. This prevents subscription leaks on repeated calls.
     if (!_watchSubs.containsKey(collectionId)) {
-      final stream = _database.stream(
-        "SELECT * FROM email_folders WHERE collection_id = ?",
-        [collectionId],
-      ).map((rows) {
-        return rows.map((r) => EmailFolder.fromDbMap(r)).toList();
-      });
+      final stream = _database
+          .stream("SELECT * FROM email_folders WHERE collection_id = ?", [
+            collectionId,
+          ])
+          .map((rows) {
+            return rows.map((r) => EmailFolder.fromDbMap(r)).toList();
+          });
 
       _watchSubs[collectionId] = stream.listen((updatedFolders) {
         sink.add(updatedFolders);

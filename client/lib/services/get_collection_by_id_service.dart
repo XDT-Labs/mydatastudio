@@ -1,6 +1,6 @@
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
-import 'package:mydatatools/services/rx_service.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/services/rx_service.dart';
 
 class GetCollectionByIdService
     extends RxService<GetCollectionByIdServiceCommand, Collection?> {

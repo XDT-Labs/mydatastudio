@@ -1,11 +1,15 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
             "name": "client (dev)",
+            "cwd": "client",
+            "request": "launch",
+            "type": "dart",
+            "preLaunchTask": "Use Dev Pubspec",
+        },
+        {
+            "name": "client (dev w/remote server)",
             "cwd": "client",
             "request": "launch",
             "type": "dart",
@@ -34,13 +38,13 @@
         },
         {
             "name": "aichat server (python)",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/client/assets/python/aichat/main.py",
+            "program": "${workspaceFolder}/aiserver/main.py",
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}/client/assets/python/aichat",
+            "cwd": "${workspaceFolder}/aiserver",
             "justMyCode": true,
-            "python": "${workspaceFolder}/client/assets/python/aichat/.venv/bin/python",
+            "python": "${workspaceFolder}/aiserver/.venv/bin/python",
             "env": {
                 "AICHAT_PORT": "8000"
             }
@@ -57,7 +61,10 @@
     "compounds": [
         {
             "name": "client + server (dev)",
-            "configurations": ["aichat server (python)", "client (dev)"]
+            "configurations": [
+                "aichat server (python)",
+                "client (dev w/remote server)"
+            ]
         }
     ]
 }

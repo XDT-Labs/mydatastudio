@@ -1,7 +1,7 @@
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/app_user.dart';
-import 'package:mydatatools/repositories/user_repository.dart';
-import 'package:mydatatools/services/rx_service.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/app_user.dart';
+import 'package:mydatastudio/repositories/user_repository.dart';
+import 'package:mydatastudio/services/rx_service.dart';
 
 class GetUserService extends RxService<GetUserServiceCommand, AppUser?> {
   static final GetUserService _singleton = GetUserService();

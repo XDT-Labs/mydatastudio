@@ -1,9 +1,10 @@
 import 'dart:isolate';
+import 'package:path/path.dart' as p;
 
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/modules/email/services/scanners/outlook_scanner_isolate.dart';
-import 'package:mydatatools/scanners/collection_scanner.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/email/services/scanners/outlook_scanner_isolate.dart';
+import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:flutter/services.dart';
 
 /// [OutlookScanner] is a collection scanner responsible for indexing emails
@@ -48,7 +49,7 @@ class OutlookScanner extends CollectionScanner {
     bool recursive,
     bool force,
   ) async {
-    // We no longer skip scanning if lastScanDate is not null. 
+    // We no longer skip scanning if lastScanDate is not null.
     // The underlying isolate will handle incremental sync logic based on the date.
 
     // If scanning already, don't restart.
@@ -56,9 +57,9 @@ class OutlookScanner extends CollectionScanner {
       logger.i("Registration-only mode: skipping scan for ${collection.name}");
       return 0;
     }
-    
+
     if (isScanning.value) return 0;
-    
+
     isScanning.add(true);
     logger.i("Outlook sync started for ${collection.name}");
 
@@ -77,8 +78,8 @@ class OutlookScanner extends CollectionScanner {
     RootIsolateToken? token = RootIsolateToken.instance;
     isolate = OutlookScannerIsolate(
       token: token,
-
       appDir: appDir,
+      dbDir: p.dirname(p.dirname(dbPath)),
     );
     await isolate!.start(
       collection,
@@ -97,19 +98,15 @@ class OutlookScanner extends CollectionScanner {
     List<int> uids,
   ) async {
     if (uids.isEmpty) return;
-    
+
     // Lazy-init isolate if needed
     isolate ??= OutlookScannerIsolate(
       token: RootIsolateToken.instance,
-
       appDir: appDir,
+      dbDir: p.dirname(p.dirname(dbPath)),
     );
-    
-    await isolate!.moveToTrash(
-      collection,
-      folderId: folderId,
-      uids: uids,
-    );
+
+    await isolate!.moveToTrash(collection, folderId: folderId, uids: uids);
   }
 
   @override

@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:logger/logger.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:path/path.dart' as p;
-import 'package:mydatatools/main.dart';
+import 'package:mydatastudio/main.dart';
 
 class ConcisePrinter extends LogPrinter {
   final PrettyPrinter _errorPrinter = PrettyPrinter(
@@ -52,8 +52,8 @@ class ConcisePrinter extends LogPrinter {
           if (match != null) {
             callSite = match.group(1) ?? "";
             // Clean up the path to be more concise
-            if (callSite.contains('package:mydatatools/')) {
-              callSite = callSite.replaceAll('package:mydatatools/', '');
+            if (callSite.contains('package:mydatastudio/')) {
+              callSite = callSite.replaceAll('package:mydatastudio/', '');
             } else if (callSite.contains('file:///')) {
               callSite = p.basename(callSite);
             }

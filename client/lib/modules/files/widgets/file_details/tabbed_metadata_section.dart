@@ -1,27 +1,34 @@
 import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:mydatatools/models/tables/file.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/exif_metadata_tab.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/gps_metadata_tab.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/similar_files_tab.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/exif_metadata_tab.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/gps_metadata_tab.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/similar_files_tab.dart';
 
 class TabbedMetadataSection extends StatelessWidget {
   const TabbedMetadataSection({
     super.key,
     required this.file,
+    required this.collection,
     required this.exifData,
     required this.isLoadingExif,
     required this.showExif,
     this.tileProvider,
+    this.onNavigateToFile,
+    this.onDeleteFile,
   });
 
   final File file;
+  final Collection collection;
   final Map<String, IfdTag>? exifData;
   final bool isLoadingExif;
   final bool showExif;
   // Passed through to GpsMetadataTab for test injection.
   final TileProvider? tileProvider;
+  final void Function(File)? onNavigateToFile;
+  final void Function(File)? onDeleteFile;
 
   @override
   Widget build(BuildContext context) {
@@ -52,11 +59,13 @@ class TabbedMetadataSection extends StatelessWidget {
                   tileProvider: tileProvider,
                 ),
               if (showExif)
-                ExifMetadataTab(
-                  exifData: exifData,
-                  isLoading: isLoadingExif,
-                ),
-              const SimilarFilesTab(),
+                ExifMetadataTab(exifData: exifData, isLoading: isLoadingExif),
+              SimilarFilesTab(
+                file: file,
+                collection: collection,
+                onNavigateToFile: onNavigateToFile,
+                onDeleteFile: onDeleteFile,
+              ),
             ],
           ),
         ),

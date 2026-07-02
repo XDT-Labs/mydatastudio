@@ -1,5 +1,5 @@
-import 'package:mydatatools/app_router.dart';
-import 'package:mydatatools/color_schemes.g.dart';
+import 'package:mydatastudio/app_router.dart';
+import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -7,7 +7,7 @@ class FamilyDamApp extends StatelessWidget {
   const FamilyDamApp({super.key});
 
   ThemeData _buildTheme(ColorScheme colorScheme, BuildContext context) {
-    final baseTextTheme = GoogleFonts.interTextTheme(
+    final baseTextTheme = GoogleFonts.publicSansTextTheme(
       Theme.of(context).textTheme,
     );
 
@@ -24,63 +24,63 @@ class FamilyDamApp extends StatelessWidget {
       ),
       textTheme: baseTextTheme
           .copyWith(
-            displayLarge: GoogleFonts.manrope(
+            displayLarge: GoogleFonts.montserrat(
               fontSize: 57,
               fontWeight: FontWeight.normal,
             ),
-            displayMedium: GoogleFonts.manrope(
+            displayMedium: GoogleFonts.montserrat(
               fontSize: 45,
               fontWeight: FontWeight.normal,
             ),
-            displaySmall: GoogleFonts.manrope(
+            displaySmall: GoogleFonts.montserrat(
               fontSize: 36,
               fontWeight: FontWeight.normal,
             ),
-            headlineLarge: GoogleFonts.manrope(
+            headlineLarge: GoogleFonts.montserrat(
               fontSize: 32,
               fontWeight: FontWeight.normal,
             ),
-            headlineMedium: GoogleFonts.manrope(
+            headlineMedium: GoogleFonts.montserrat(
               fontSize: 28,
               fontWeight: FontWeight.normal,
             ),
-            headlineSmall: GoogleFonts.manrope(
+            headlineSmall: GoogleFonts.montserrat(
               fontSize: 24,
               fontWeight: FontWeight.normal,
             ),
-            titleLarge: GoogleFonts.inter(
+            titleLarge: GoogleFonts.publicSans(
               fontSize: 22,
               fontWeight: FontWeight.w400,
             ),
-            titleMedium: GoogleFonts.inter(
+            titleMedium: GoogleFonts.publicSans(
               fontSize: 16,
               fontWeight: FontWeight.w400,
             ),
-            titleSmall: GoogleFonts.inter(
+            titleSmall: GoogleFonts.publicSans(
               fontSize: 14,
               fontWeight: FontWeight.w400,
             ),
-            bodyLarge: GoogleFonts.inter(
+            bodyLarge: GoogleFonts.publicSans(
               fontSize: 16,
               fontWeight: FontWeight.w400,
             ),
-            bodyMedium: GoogleFonts.inter(
+            bodyMedium: GoogleFonts.publicSans(
               fontSize: 14,
               fontWeight: FontWeight.w400,
             ),
-            bodySmall: GoogleFonts.inter(
+            bodySmall: GoogleFonts.publicSans(
               fontSize: 12,
               fontWeight: FontWeight.w400,
             ),
-            labelLarge: GoogleFonts.inter(
+            labelLarge: GoogleFonts.publicSans(
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),
-            labelMedium: GoogleFonts.inter(
+            labelMedium: GoogleFonts.publicSans(
               fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
-            labelSmall: GoogleFonts.inter(
+            labelSmall: GoogleFonts.publicSans(
               fontSize: 11,
               fontWeight: FontWeight.w500,
               letterSpacing: 0.5,
@@ -156,11 +156,12 @@ class FamilyDamApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp.router(
       restorationScopeId: 'mydata.tools',
-      title: "MyData / Tools",
+      title: "My Data Studio",
       debugShowCheckedModeBanner: false,
       routerConfig: AppRouter.instance,
       theme: _buildTheme(lightColorScheme, context),
-      themeMode: ThemeMode.light,
+      darkTheme: _buildTheme(darkColorScheme, context),
+      themeMode: ThemeMode.dark,
     );
   }
 }

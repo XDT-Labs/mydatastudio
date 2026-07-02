@@ -1,7 +1,7 @@
 // [ignoring loop detection]
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/file.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/file.dart';
 
 class FileDesktopRepository {
   AppLogger logger = AppLogger(null);
@@ -10,7 +10,9 @@ class FileDesktopRepository {
   FileDesktopRepository(this.db);
 
   Future<File?> getByPath(File f) async {
-    final rows = await db.select("SELECT * FROM files WHERE id = ? LIMIT 1", [f.id]);
+    final rows = await db.select("SELECT * FROM files WHERE id = ? LIMIT 1", [
+      f.id,
+    ]);
     if (rows.isEmpty) return null;
     return File.fromDbMap(rows.first);
   }
@@ -92,15 +94,22 @@ class FileDesktopRepository {
     return null;
   }
 
-  Future<void> markMissingAsDeleted(String collectionId, String scannedPath, DateTime scanStartTime, {bool recursive = true, bool isCloud = false, bool isFullScan = false}) async {
+  Future<void> markMissingAsDeleted(
+    String collectionId,
+    String scannedPath,
+    DateTime scanStartTime, {
+    bool recursive = true,
+    bool isCloud = false,
+    bool isFullScan = false,
+  }) async {
     String searchPath = scannedPath;
     if (!searchPath.endsWith('/')) {
       searchPath += '/';
     }
-    
+
     String query = "UPDATE files SET is_deleted = 1 WHERE collection_id = ? ";
     List<dynamic> args = [collectionId];
-    
+
     if (isCloud) {
       if (recursive && isFullScan) {
         // no extra parent condition
@@ -118,10 +127,10 @@ class FileDesktopRepository {
         args.add(scannedPath);
       }
     }
-    
+
     query += "AND (last_scanned_date IS NULL OR last_scanned_date < ?) ";
     args.add(scanStartTime.millisecondsSinceEpoch);
-    
+
     await db.execute(query, args);
   }
 
@@ -172,7 +181,10 @@ class FileDesktopRepository {
   }
 
   Future<List<File>> getByEmailId(String emailId) async {
-    final rows = await db.select("SELECT * FROM files WHERE email_id = ? AND is_deleted = 0", [emailId]);
+    final rows = await db.select(
+      "SELECT * FROM files WHERE email_id = ? AND is_deleted = 0",
+      [emailId],
+    );
     return rows.map((r) => File.fromDbMap(r)).toList();
   }
 
@@ -195,11 +207,16 @@ class FileDesktopRepository {
   }
 
   Future<List<File>> getScanMetadata(String collectionId) async {
-    final rows = await db.select("SELECT * FROM files WHERE collection_id = ?", [collectionId]);
+    final rows = await db.select(
+      "SELECT * FROM files WHERE collection_id = ?",
+      [collectionId],
+    );
     return rows.map((r) => File.fromDbMap(r)).toList();
   }
 
   Future<void> deleteAllByCollectionId(String collectionId) async {
-    await db.execute("DELETE FROM files WHERE collection_id = ?", [collectionId]);
+    await db.execute("DELETE FROM files WHERE collection_id = ?", [
+      collectionId,
+    ]);
   }
 }

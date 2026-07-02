@@ -1,7 +1,7 @@
 // [ignoring loop detection]
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/folder.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/folder.dart';
 
 class FolderDesktopRepository {
   AppLogger logger = AppLogger(null);
@@ -81,7 +81,14 @@ class FolderDesktopRepository {
     return null;
   }
 
-  Future<void> deleteMissing(String collectionId, String scannedPath, DateTime scanStartTime, {bool recursive = true, bool isCloud = false, bool isFullScan = false}) async {
+  Future<void> deleteMissing(
+    String collectionId,
+    String scannedPath,
+    DateTime scanStartTime, {
+    bool recursive = true,
+    bool isCloud = false,
+    bool isFullScan = false,
+  }) async {
     String searchPath = scannedPath;
     if (!searchPath.endsWith('/')) {
       searchPath += '/';
@@ -115,6 +122,8 @@ class FolderDesktopRepository {
   }
 
   Future<void> deleteAllByCollectionId(String collectionId) async {
-    await db.execute("DELETE FROM folders WHERE collection_id = ?", [collectionId]);
+    await db.execute("DELETE FROM folders WHERE collection_id = ?", [
+      collectionId,
+    ]);
   }
 }

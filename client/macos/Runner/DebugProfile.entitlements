@@ -16,6 +16,8 @@
 	<true/>
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
 	<key>com.apple.security.device.usb</key>
 	<true/>
 	<key>com.apple.security.files.downloads.read-write</key>
@@ -25,8 +27,6 @@
 	<key>com.apple.security.network.client</key>
 	<true/>
 	<key>com.apple.security.network.server</key>
-	<true/>
-	<key>com.apple.security.device.audio-input</key>
 	<true/>
 	<key>com.apple.security.speech-recognition</key>
 	<true/>

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatatools/modules/email/widgets/email_detail/email_attachments_section.dart';
+import 'package:mydatastudio/modules/email/widgets/email_detail/email_attachments_section.dart';
 import '../../../../helpers/file_fixture.dart';
 
 void main() {

@@ -1,7 +1,8 @@
 *.tar.gz
 app/
-dist/aichat
-dist/aichat.exe
+aiserver/dist/
+aiserver/models/
+
 
 # Miscellaneous
 *.class
@@ -58,8 +59,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
-client/app/aichat.zip
-client/app/aichat-*.zip
+client/app/*.zip
+
 
 # Secrets and Local Config
 secrets.json
@@ -69,3 +70,5 @@ client/config/secrets.json
 .env
 analyzer_output.txt
 .realm_name
+test*.txt
+*.db

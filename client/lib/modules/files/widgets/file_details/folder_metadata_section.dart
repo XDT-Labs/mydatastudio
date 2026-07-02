@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/info_row.dart';
-import 'package:mydatatools/modules/files/widgets/file_details/section_widget.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/info_row.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/section_widget.dart';
 
 class FolderMetadataSection extends StatelessWidget {
   const FolderMetadataSection({
@@ -17,10 +17,7 @@ class FolderMetadataSection extends StatelessWidget {
     return SectionWidget(
       title: 'Folder Info',
       icon: Icons.folder_outlined,
-      children: [
-        infoRow('Name', name),
-        infoRowSelectable('Path', path),
-      ],
+      children: [infoRow('Name', name), infoRowSelectable('Path', path)],
     );
   }
 }

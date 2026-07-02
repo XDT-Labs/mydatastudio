@@ -1,11 +1,11 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
-import 'package:mydatatools/app_logger.dart';
-import 'package:mydatatools/database_manager.dart';
-import 'package:mydatatools/models/tables/collection.dart';
-import 'package:mydatatools/oauth/login_providers.dart';
-import 'package:mydatatools/repositories/collection_repository.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/oauth/login_providers.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 
 /// Manages Google OAuth token lifecycle for all Google collections
 /// (Gmail and Drive).
@@ -48,7 +48,9 @@ class GoogleAuthService {
       return collection.accessToken!;
     }
 
-    _logger.i('Access token expired/near expiry — refreshing for "${collection.name}"');
+    _logger.i(
+      'Access token expired/near expiry — refreshing for "${collection.name}"',
+    );
 
     if (collection.refreshToken == null) {
       throw GoogleAuthException(
@@ -94,7 +96,9 @@ class GoogleAuthService {
     final clientSecret = await provider.clientSecret;
 
     if (clientId.isEmpty || clientSecret.isEmpty) {
-      throw ProviderConfigurationException('Please configure Client ID and Secret in Settings for ${provider.key}.');
+      throw ProviderConfigurationException(
+        'Please configure Client ID and Secret in Settings for ${provider.key}.',
+      );
     }
 
     // Google requires client_secret for desktop app token refresh,
@@ -146,7 +150,9 @@ class GoogleAuthService {
       collection.expiration = result.expiration;
       collection.needsReAuth = false;
 
-      await CollectionRepository(DatabaseManager.instance.database!).updateCollection(collection);
+      await CollectionRepository(
+        DatabaseManager.instance.database!,
+      ).updateCollection(collection);
       _logger.i(
         'Token refreshed successfully for "${collection.name}" — expires ${result.expiration}',
       );
@@ -155,7 +161,9 @@ class GoogleAuthService {
     } on GoogleAuthException {
       // Mark collection as needing re-auth so the UI can prompt the user
       collection.needsReAuth = true;
-      await CollectionRepository(DatabaseManager.instance.database!).updateCollection(collection);
+      await CollectionRepository(
+        DatabaseManager.instance.database!,
+      ).updateCollection(collection);
       rethrow;
     }
   }
@@ -193,7 +201,7 @@ class AuthenticatedHttpClient extends http.BaseClient {
 
   /// Convenience constructor from a Bearer access token.
   AuthenticatedHttpClient.bearer(String accessToken)
-      : _headers = {'Authorization': 'Bearer $accessToken'};
+    : _headers = {'Authorization': 'Bearer $accessToken'};
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {
