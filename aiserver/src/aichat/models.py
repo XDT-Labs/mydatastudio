@@ -31,6 +31,7 @@ class ChatCompletionRequest(BaseModel):
     temperature: Optional[float] = Field(None, description="Sampling temperature")
     max_tokens: Optional[int] = Field(None, description="Maximum tokens to generate")
     stream: bool = Field(False, description="Stream response as SSE (text/event-stream)")
+    api_key: Optional[str] = Field(None, description="API key for cloud providers (e.g., Gemini). Takes precedence over environment variables.")
 
     model_config = ConfigDict(
         json_schema_extra={

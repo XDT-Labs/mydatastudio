@@ -5,8 +5,9 @@ class AichatModel {
   final String name;
   final String? file;
   final String? mmproj;
+  final String? hfRepo;
+  final String? chatHandler;
   final String type;
-  final String? apiKey;
   final String? baseUrl;
   final bool enabled;
   final DateTime createdAt;
@@ -19,8 +20,9 @@ class AichatModel {
     required this.name,
     this.file,
     this.mmproj,
+    this.hfRepo,
+    this.chatHandler,
     required this.type,
-    this.apiKey,
     this.baseUrl,
     required this.enabled,
     required this.createdAt,
@@ -35,8 +37,9 @@ class AichatModel {
       name: map['name'] as String,
       file: map['file'] as String?,
       mmproj: map['mmproj'] as String?,
+      hfRepo: map['hf_repo'] as String?,
+      chatHandler: map['chat_handler'] as String?,
       type: map['type'] as String,
-      apiKey: map['api_key'] as String?,
       baseUrl: map['base_url'] as String?,
       enabled: (map['enabled'] as int) == 1,
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
@@ -52,8 +55,9 @@ class AichatModel {
       'name': name,
       'file': file,
       'mmproj': mmproj,
+      'hf_repo': hfRepo,
+      'chat_handler': chatHandler,
       'type': type,
-      'api_key': apiKey,
       'base_url': baseUrl,
       'enabled': enabled ? 1 : 0,
       'created_at': createdAt.millisecondsSinceEpoch,
@@ -67,8 +71,9 @@ class AichatModel {
     String? name,
     String? file,
     String? mmproj,
+    String? hfRepo,
+    String? chatHandler,
     String? type,
-    String? apiKey,
     String? baseUrl,
     bool? enabled,
   }) {
@@ -80,8 +85,9 @@ class AichatModel {
       name: name ?? this.name,
       file: file ?? this.file,
       mmproj: mmproj ?? this.mmproj,
+      hfRepo: hfRepo ?? this.hfRepo,
+      chatHandler: chatHandler ?? this.chatHandler,
       type: type ?? this.type,
-      apiKey: apiKey ?? this.apiKey,
       baseUrl: baseUrl ?? this.baseUrl,
       enabled: enabled ?? this.enabled,
       createdAt: createdAt,

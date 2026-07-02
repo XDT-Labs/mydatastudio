@@ -75,9 +75,7 @@ class DatabaseManager {
     MainApp.supportDirectory.add(io.Directory(supportPath));
 
     // Look for config file with user selected path for DB and Files
-    io.File file = io.File(
-      p.join(supportPath, AppConstants.configFileName),
-    );
+    io.File file = io.File(p.join(supportPath, AppConstants.configFileName));
     return file.absolute.path;
   }
 
@@ -143,7 +141,9 @@ class DatabaseManager {
       } catch (_) {}
 
       if (mode.toLowerCase() != 'wal') {
-        print("DEBUG testPathSupportsWal: Path does not support WAL mode (returned: $mode)");
+        print(
+          "DEBUG testPathSupportsWal: Path does not support WAL mode (returned: $mode)",
+        );
         return false;
       }
       return true;
@@ -312,7 +312,8 @@ class AppDatabase {
     // Check if the storagePath supports WAL. If not, redirect database to local Application Support Directory.
     final supportsWal = await DatabaseManager.testPathSupportsWal(storagePath);
     if (!supportsWal) {
-      final realSupportPath = await DatabaseManager.getRealApplicationSupportPath();
+      final realSupportPath =
+          await DatabaseManager.getRealApplicationSupportPath();
       finalDbDir = realSupportPath;
     }
 
@@ -398,7 +399,9 @@ class AppDatabase {
     } else {
       // Schema migration: Check if siglip2_embedding exists or if qwen3_8b_embedding is NOT NULL
       try {
-        final columns = await _db.select("PRAGMA table_info(files_embeddings);");
+        final columns = await _db.select(
+          "PRAGMA table_info(files_embeddings);",
+        );
         final hasSiglip2 = columns.any((c) => c['name'] == 'siglip2_embedding');
         bool isQwenNotNull = false;
         for (final c in columns) {
@@ -411,7 +414,9 @@ class AppDatabase {
         }
 
         if (!hasSiglip2 || isQwenNotNull) {
-          logger.i("AppDatabase: Re-creating files_embeddings table for new schema...");
+          logger.i(
+            "AppDatabase: Re-creating files_embeddings table for new schema...",
+          );
           await _db.execute("DROP TABLE IF EXISTS files_embeddings;");
           await _db.execute('''
             CREATE TABLE files_embeddings (
@@ -432,7 +437,9 @@ class AppDatabase {
           "SELECT name FROM sqlite_master WHERE type='table' AND name='aichat_conversations'",
         );
         if (aichatTables.isEmpty) {
-          logger.i("AppDatabase: Creating aichat_conversations and aichat_conversation_history tables...");
+          logger.i(
+            "AppDatabase: Creating aichat_conversations and aichat_conversation_history tables...",
+          );
           await _db.execute('''
             CREATE TABLE IF NOT EXISTS aichat_conversations (
               id TEXT PRIMARY KEY,
@@ -475,9 +482,17 @@ class AppDatabase {
             logger.i("AppDatabase: Backfilling default Gemma 4 12B model...");
             final now = DateTime.now().millisecondsSinceEpoch;
             await _db.execute(
-              'INSERT OR IGNORE INTO aichat_models (id, alias, "group", name, file, mmproj, type, api_key, base_url, enabled, created_at, updated_at) '
-              'VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, 1, ?, ?)',
-              [const Uuid().v4(), 'Gemma 4 12B', 'local', 'gemma4:12b', 'gguf', now, now],
+              'INSERT OR IGNORE INTO aichat_models (id, alias, "group", name, file, mmproj, type, base_url, enabled, created_at, updated_at) '
+              'VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, 1, ?, ?)',
+              [
+                const Uuid().v4(),
+                'Gemma 4 12B',
+                'local',
+                'gemma4:12b',
+                'gguf',
+                now,
+                now,
+              ],
             );
           }
           // Migrate: alias was incorrectly set to the display name; swap alias ↔ name for all rows
@@ -485,7 +500,9 @@ class AppDatabase {
             "SELECT id FROM aichat_models WHERE alias = 'Gemma 4 12B' LIMIT 1",
           );
           if (oldFormat.isNotEmpty) {
-            logger.i("AppDatabase: Swapping alias/name to correct semantic order...");
+            logger.i(
+              "AppDatabase: Swapping alias/name to correct semantic order...",
+            );
             await _db.execute(
               'UPDATE aichat_models SET alias = name, name = alias',
             );
@@ -496,6 +513,11 @@ class AppDatabase {
             "  alias = REPLACE(alias, '2.5', '3.5'), "
             "  name  = REPLACE(name,  '2.5', '3.5') "
             "WHERE \"group\" = 'gemini' AND (alias LIKE '%2.5%' OR name LIKE '%2.5%')",
+          );
+          // Migrate: rename gemini-3.5-pro → gemini-3.1-pro-preview
+          await _db.execute(
+            "UPDATE aichat_models SET alias = 'gemini-3.1-pro-preview', name = 'Gemini 3.1 Pro' "
+            "WHERE alias IN ('gemini-3.5-pro', 'gemini-3.1-pro')",
           );
         }
       } catch (e) {
@@ -515,6 +537,154 @@ class AppDatabase {
       } catch (e) {
         logger.e("AppDatabase: Migration of aichat_skills table failed: $e");
       }
+
+      // v20: add providers.type column; drop aichat_models.api_key column
+      try {
+        final providerCols = await _db.select("PRAGMA table_info(providers)");
+        final hasType = providerCols.any((c) => c['name'] == 'type');
+        if (!hasType) {
+          logger.i("AppDatabase: Adding type column to providers...");
+          await _db.execute(
+            "ALTER TABLE providers ADD COLUMN type TEXT NOT NULL DEFAULT 'collection'",
+          );
+          await _db.execute(
+            "UPDATE providers SET type = 'model' "
+            "WHERE service IN ('gemini', 'claude', 'openai', 'grok', 'huggingface')",
+          );
+        }
+      } catch (e) {
+        logger.e("AppDatabase: Migration v20 (providers.type) failed: $e");
+      }
+
+      try {
+        final modelCols = await _db.select("PRAGMA table_info(aichat_models)");
+        final hasApiKey = modelCols.any((c) => c['name'] == 'api_key');
+        if (hasApiKey) {
+          logger.i(
+            "AppDatabase: Dropping api_key column from aichat_models...",
+          );
+          await _db.execute("ALTER TABLE aichat_models DROP COLUMN api_key");
+        }
+      } catch (e) {
+        logger.e(
+          "AppDatabase: Migration v20 (aichat_models.api_key drop) failed: $e",
+        );
+      }
+
+      // v21: add hf_repo and chat_handler columns; backfill local models;
+      //      insert any new local models that aren't seeded yet
+      try {
+        final modelCols = await _db.select("PRAGMA table_info(aichat_models)");
+        final hasHfRepo = modelCols.any((c) => c['name'] == 'hf_repo');
+        if (!hasHfRepo) {
+          logger.i(
+            "AppDatabase: Adding hf_repo and chat_handler columns to aichat_models...",
+          );
+          await _db.execute(
+            "ALTER TABLE aichat_models ADD COLUMN hf_repo TEXT",
+          );
+          await _db.execute(
+            "ALTER TABLE aichat_models ADD COLUMN chat_handler TEXT",
+          );
+        }
+        // Backfill known local models regardless of whether the columns are new
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final localBackfills = [
+          {
+            'alias': 'gemma4:12b',
+            'hf_repo': 'ggml-org/gemma-4-12B-it-GGUF',
+            'file': 'gemma-4-12B-it-Q4_K_M.gguf',
+            'mmproj': 'mmproj-gemma-4-12B-it-Q8_0.gguf',
+            'chat_handler': 'Gemma4ChatHandler',
+          },
+          {
+            'alias': 'qwen3:4b',
+            'hf_repo': 'bartowski/Qwen_Qwen3.5-4B-GGUF',
+            'chat_handler': null,
+          },
+          {
+            'alias': 'llama3.2:3b',
+            'hf_repo': 'bartowski/Llama-3.2-3B-Instruct-GGUF',
+            'chat_handler': null,
+          },
+          {
+            'alias': 'phi4',
+            'hf_repo': 'Swicked86/phi4-mm-gguf',
+            'chat_handler': 'Phi3VisionChatHandler',
+          },
+        ];
+        for (final b in localBackfills) {
+          // Only set file/mmproj from backfill if the row has no path yet
+          final fileClause =
+              b.containsKey('file') ? ", file = COALESCE(NULLIF(file, ''), ?)" : '';
+          final mmprojClause =
+              b.containsKey('mmproj') ? ", mmproj = COALESCE(NULLIF(mmproj, ''), ?)" : '';
+          final params = <Object?>[
+            b['hf_repo'],
+            b['chat_handler'],
+            if (b.containsKey('file')) b['file'],
+            if (b.containsKey('mmproj')) b['mmproj'],
+            now,
+            b['alias'],
+          ];
+          await _db.execute(
+            'UPDATE aichat_models SET hf_repo = ?, chat_handler = ?$fileClause$mmprojClause, updated_at = ? '
+            'WHERE alias = ?',
+            params,
+          );
+        }
+        // Insert downloadable local models that aren't in the DB yet
+        final newLocalModels = [
+          {
+            'alias': 'qwen3:4b',
+            'name': 'Qwen 3 4B',
+            'file': 'Qwen_Qwen3.5-4B-Q3_K_L.gguf',
+            'mmproj': 'mmproj-Qwen_Qwen3.5-4B-f16.gguf',
+            'hf_repo': 'bartowski/Qwen_Qwen3.5-4B-GGUF',
+            'chat_handler': null,
+          },
+          {
+            'alias': 'llama3.2:3b',
+            'name': 'Meta Llama 3.2 3B',
+            'file': 'Llama-3.2-3B-Instruct-Q4_K_M.gguf',
+            'mmproj': null,
+            'hf_repo': 'bartowski/Llama-3.2-3B-Instruct-GGUF',
+            'chat_handler': null,
+          },
+          {
+            'alias': 'phi4',
+            'name': 'Microsoft Phi-4',
+            'file': 'phi4-mm-Q4_K_M.gguf',
+            'mmproj': 'mmproj-phi4-mm-f16.gguf',
+            'hf_repo': 'Swicked86/phi4-mm-gguf',
+            'chat_handler': 'Phi3VisionChatHandler',
+          },
+        ];
+        for (final m in newLocalModels) {
+          await _db.execute(
+            'INSERT OR IGNORE INTO aichat_models '
+            '(id, alias, "group", name, file, mmproj, hf_repo, chat_handler, type, enabled, created_at, updated_at) '
+            'SELECT ?, ?, \'local\', ?, ?, ?, ?, ?, \'gguf\', 0, ?, ? '
+            'WHERE NOT EXISTS (SELECT 1 FROM aichat_models WHERE alias = ?)',
+            [
+              const Uuid().v4(),
+              m['alias'],
+              m['name'],
+              m['file'],
+              m['mmproj'],
+              m['hf_repo'],
+              m['chat_handler'],
+              now,
+              now,
+              m['alias'],
+            ],
+          );
+        }
+      } catch (e) {
+        logger.e(
+          "AppDatabase: Migration v21 (hf_repo/chat_handler) failed: $e",
+        );
+      }
     }
   }
 
@@ -525,38 +695,51 @@ class AppDatabase {
         'trigger': '/summarize',
         'name': 'Summarize',
         'description': 'Condense content into a concise bullet-point summary.',
-        'system_prompt': 'You are a summarization assistant. Summarize the following content concisely using bullet points. Be brief and capture only the key points.',
+        'system_prompt':
+            'You are a summarization assistant. Summarize the following content concisely using bullet points. Be brief and capture only the key points.',
       },
       {
         'trigger': '/analyze',
         'name': 'Analyze',
         'description': 'Deep analysis of themes, patterns, and key insights.',
-        'system_prompt': 'You are an analytical assistant. Analyze the following content in depth. Identify themes, patterns, key insights, and notable details. Structure your response clearly.',
+        'system_prompt':
+            'You are an analytical assistant. Analyze the following content in depth. Identify themes, patterns, key insights, and notable details. Structure your response clearly.',
       },
       {
         'trigger': '/translate',
         'name': 'Translate',
         'description': 'Translate text to English.',
-        'system_prompt': 'You are a translation assistant. Translate the user\'s message to English. Output only the translation with no additional commentary.',
+        'system_prompt':
+            'You are a translation assistant. Translate the user\'s message to English. Output only the translation with no additional commentary.',
       },
       {
         'trigger': '/explain',
         'name': 'Explain',
         'description': 'Explain a concept or text in simple terms.',
-        'system_prompt': 'You are a teacher. Explain the following in simple, clear terms that anyone can understand. Use examples where helpful.',
+        'system_prompt':
+            'You are a teacher. Explain the following in simple, clear terms that anyone can understand. Use examples where helpful.',
       },
       {
         'trigger': '/rewrite',
         'name': 'Rewrite',
         'description': 'Rewrite text to be clearer and more professional.',
-        'system_prompt': 'You are a professional editor. Rewrite the following text to be clearer, more concise, and more professional while preserving the original meaning. Output only the rewritten text.',
+        'system_prompt':
+            'You are a professional editor. Rewrite the following text to be clearer, more concise, and more professional while preserving the original meaning. Output only the rewritten text.',
       },
     ];
     for (final s in skills) {
       await db.execute(
         'INSERT OR IGNORE INTO aichat_skills (id, trigger, name, description, system_prompt, enabled, created_at, updated_at) '
         'VALUES (?, ?, ?, ?, ?, 1, ?, ?)',
-        [const Uuid().v4(), s['trigger'], s['name'], s['description'], s['system_prompt'], now, now],
+        [
+          const Uuid().v4(),
+          s['trigger'],
+          s['name'],
+          s['description'],
+          s['system_prompt'],
+          now,
+          now,
+        ],
       );
     }
   }
@@ -564,27 +747,137 @@ class AppDatabase {
   static Future<void> _seedAichatModels(Database db) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     final models = [
-      // Default local model — always enabled, bundled with the app
-      {'id': const Uuid().v4(), 'alias': 'gemma4:12b', 'group': 'local', 'name': 'Gemma 4 12B', 'type': 'gguf', 'enabled': 1},
-      // Gemini
-      {'id': const Uuid().v4(), 'alias': 'gemini-3.5-flash', 'group': 'gemini', 'name': 'Gemini 3.5 Flash', 'type': 'api'},
-      {'id': const Uuid().v4(), 'alias': 'gemini-3.5-pro', 'group': 'gemini', 'name': 'Gemini 3.5 Pro', 'type': 'api'},
-      // Claude
-      {'id': const Uuid().v4(), 'alias': 'claude-sonnet-4-6', 'group': 'claude', 'name': 'Claude Sonnet', 'type': 'api'},
-      {'id': const Uuid().v4(), 'alias': 'claude-opus-4-8', 'group': 'claude', 'name': 'Claude Opus', 'type': 'api'},
-      // OpenAI
-      {'id': const Uuid().v4(), 'alias': 'gpt-4o', 'group': 'openai', 'name': 'OpenAI 5.5', 'type': 'api'},
-      // Grok
-      {'id': const Uuid().v4(), 'alias': 'grok-beta', 'group': 'grok', 'name': 'Grok', 'type': 'api'},
-      // Ollama placeholder
-      {'id': const Uuid().v4(), 'alias': 'ollama', 'group': 'ollama', 'name': 'Ollama', 'type': 'ollama', 'base_url': 'http://localhost:11434'},
+      // ── Local GGUF models ──────────────────────────────────────────────────
+      // gemma4:12b is bundled with the app; always enabled
+      {
+        'id': const Uuid().v4(),
+        'alias': 'gemma4:12b',
+        'group': 'local',
+        'name': 'Gemma 4 12B',
+        'type': 'gguf',
+        'file': 'gemma-4-12B-it-Q4_K_M.gguf',
+        'mmproj': 'mmproj-gemma-4-12B-it-Q8_0.gguf',
+        'hf_repo': 'ggml-org/gemma-4-12B-it-GGUF',
+        'chat_handler': 'Gemma4ChatHandler',
+        'enabled': 1,
+      },
+      // Downloadable local models — disabled until the user downloads them
+      {
+        'id': const Uuid().v4(),
+        'alias': 'qwen3:4b',
+        'group': 'local',
+        'name': 'Qwen 3 4B',
+        'type': 'gguf',
+        'file': 'Qwen_Qwen3.5-4B-Q3_K_L.gguf',
+        'mmproj': 'mmproj-Qwen_Qwen3.5-4B-f16.gguf',
+        'hf_repo': 'bartowski/Qwen_Qwen3.5-4B-GGUF',
+        'chat_handler': null,
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'llama3.2:3b',
+        'group': 'local',
+        'name': 'Meta Llama 3.2 3B',
+        'type': 'gguf',
+        'file': 'Llama-3.2-3B-Instruct-Q4_K_M.gguf',
+        'mmproj': null,
+        'hf_repo': 'bartowski/Llama-3.2-3B-Instruct-GGUF',
+        'chat_handler': null,
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'phi4',
+        'group': 'local',
+        'name': 'Microsoft Phi-4',
+        'type': 'gguf',
+        'file': 'phi4-mm-Q4_K_M.gguf',
+        'mmproj': 'mmproj-phi4-mm-f16.gguf',
+        'hf_repo': 'Swicked86/phi4-mm-gguf',
+        'chat_handler': 'Phi3VisionChatHandler',
+      },
+      // ── Gemini ────────────────────────────────────────────────────────────
+      {
+        'id': const Uuid().v4(),
+        'alias': 'gemini-2.5-flash',
+        'group': 'gemini',
+        'name': 'Gemini 2.5 Flash',
+        'type': 'api',
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'gemini-2.5-pro',
+        'group': 'gemini',
+        'name': 'Gemini 2.5 Pro',
+        'type': 'api',
+      },
+      // ── Claude ────────────────────────────────────────────────────────────
+      {
+        'id': const Uuid().v4(),
+        'alias': 'claude-sonnet-4-5',
+        'group': 'claude',
+        'name': 'Claude Sonnet 4.5',
+        'type': 'api',
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'claude-opus-4-8',
+        'group': 'claude',
+        'name': 'Claude Opus 4.8',
+        'type': 'api',
+      },
+      // ── OpenAI ────────────────────────────────────────────────────────────
+      {
+        'id': const Uuid().v4(),
+        'alias': 'gpt-4o',
+        'group': 'openai',
+        'name': 'GPT-4o',
+        'type': 'api',
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'o3',
+        'group': 'openai',
+        'name': 'OpenAI o3',
+        'type': 'api',
+      },
+      // ── Grok ──────────────────────────────────────────────────────────────
+      {
+        'id': const Uuid().v4(),
+        'alias': 'grok-3',
+        'group': 'grok',
+        'name': 'Grok 3',
+        'type': 'api',
+      },
+      // ── Ollama placeholder ────────────────────────────────────────────────
+      {
+        'id': const Uuid().v4(),
+        'alias': 'ollama',
+        'group': 'ollama',
+        'name': 'Ollama',
+        'type': 'ollama',
+        'base_url': 'http://localhost:11434',
+      },
     ];
     for (final m in models) {
       final enabled = (m['enabled'] as int?) ?? 0;
       await db.execute(
-        'INSERT OR IGNORE INTO aichat_models (id, alias, "group", name, file, mmproj, type, api_key, base_url, enabled, created_at, updated_at) '
-        'VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?, ?, ?)',
-        [m['id'], m['alias'], m['group'], m['name'], m['type'], m['base_url'], enabled, now, now],
+        'INSERT OR IGNORE INTO aichat_models (id, alias, "group", name, file, mmproj, hf_repo, chat_handler, type, base_url, enabled, created_at, updated_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          m['id'],
+          m['alias'],
+          m['group'],
+          m['name'],
+          m['file'],
+          m['mmproj'],
+          m['hf_repo'],
+          m['chat_handler'],
+          m['type'],
+          m['base_url'],
+          enabled,
+          now,
+          now,
+        ],
       );
     }
   }
@@ -820,7 +1113,8 @@ class AppDatabase {
       client_id TEXT NOT NULL,
       client_secret TEXT NOT NULL,
       api_key TEXT NOT NULL,
-      permissions TEXT
+      permissions TEXT,
+      type TEXT NOT NULL DEFAULT 'collection'
     );
     ''',
     // aichat_conversations
@@ -858,8 +1152,9 @@ class AppDatabase {
       name TEXT NOT NULL,
       file TEXT,
       mmproj TEXT,
+      hf_repo TEXT,
+      chat_handler TEXT,
       type TEXT NOT NULL DEFAULT 'api',
-      api_key TEXT,
       base_url TEXT,
       enabled INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,

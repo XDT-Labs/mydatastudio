@@ -17,7 +17,8 @@ from .models import (
     EmbeddingRequest, DownloadModelRequest, DeleteModelRequest, ThumbnailRequest, PstImportRequest,
 )
 from .skills import apply_skill, list_skills
-from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, MODEL_REGISTRY, DEFAULT_MODEL_ALIAS
+from .config import DEFAULT_MODEL_ALIAS
+from . import model_registry
 from .pst_parser import PstParser
 from .model_manager import (
     load_local_model,
@@ -36,13 +37,159 @@ from .state import (
 )
 
 
-def _resolve_model(alias: str) -> tuple:
-    """Resolve a model alias (e.g. 'gemma3:4b') to (model_name, model_file).
-    Falls back to treating the value as a raw HF repo ID if not in the registry."""
-    if alias in MODEL_REGISTRY:
-        entry = MODEL_REGISTRY[alias]
-        return entry["model_name"], entry["model_file"]
-    return alias or DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE
+def _resolve_embedding_model(alias: str) -> tuple:
+    """Resolve an embedding model alias to (hf_repo, filename).
+    Embedding models are identified by their HF repo ID directly, not via aichat_models."""
+    # Try DB first in case an embedding model was registered
+    row = model_registry.lookup(alias)
+    if row and row.get('hf_repo') and row.get('file'):
+        return row['hf_repo'], row['file']
+    # Fall back to treating the alias as a raw HF repo ID (existing behaviour)
+    return alias, alias.split('/')[-1] if '/' in alias else alias
+
+
+def _gemini_user_error(exc: Exception) -> str:
+    """Extract a short, human-readable error message from a Gemini API exception."""
+    msg = str(exc)
+    # Google API core exceptions carry a readable description after the status code
+    for marker in ("API key not valid", "API_KEY_INVALID", "INVALID_ARGUMENT",
+                   "PERMISSION_DENIED", "RESOURCE_EXHAUSTED", "quota", "model not found"):
+        if marker.lower() in msg.lower():
+            # Pull the first sentence / bracketed description when available
+            import re
+            clean = re.search(r'message:\s*"([^"]+)"', msg)
+            if clean:
+                return f"Gemini error: {clean.group(1)}"
+            # Fall through to trimmed raw message
+            break
+    # Generic fallback: first line of the exception, capped at 200 chars
+    first_line = msg.splitlines()[0][:200]
+    return f"Gemini error: {first_line}"
+
+
+def _sse_error_chunk(completion_id: str, created_at: int, model: str, message: str) -> str:
+    """Build a single SSE data line that delivers an error as assistant content."""
+    payload = {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": created_at,
+        "model": model,
+        "choices": [{"index": 0, "delta": {"content": message}, "finish_reason": "error"}],
+    }
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _error_chat_response(completion_id: str, created_at: int, model: str, message: str) -> dict:
+    """Return an error as a normal non-streaming assistant message so the client displays it."""
+    return {
+        "id": completion_id,
+        "object": "chat.completion",
+        "created": created_at,
+        "model": model,
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": message}, "finish_reason": "error"}],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
+async def _handle_gemini_request(request: "ChatCompletionRequest"):
+    """Create a per-request Gemini client and generate a response with token usage."""
+    from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+    created_at = int(time.time())
+    current_model = request.model
+
+    gemini_model_id = request.model  # alias == gemini model ID in the DB
+    try:
+        llm = load_gemini_model(model_id=gemini_model_id, api_key=request.api_key)
+    except ValueError as e:
+        error_msg = str(e)
+        if request.stream:
+            def _key_error_stream() -> Generator[str, None, None]:
+                yield _sse_error_chunk(completion_id, created_at, current_model, error_msg)
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(_key_error_stream(), media_type="text/event-stream")
+        return _error_chat_response(completion_id, created_at, current_model, error_msg)
+
+    lc_messages = []
+    for m in request.messages:
+        if m.role == "system":
+            lc_messages.append(SystemMessage(content=m.content))
+        elif m.role == "user":
+            lc_messages.append(HumanMessage(content=m.content))
+        elif m.role == "assistant":
+            lc_messages.append(AIMessage(content=m.content))
+
+    if request.stream:
+        def _gemini_sse_stream() -> Generator[str, None, None]:
+            reset_stop()
+            usage_meta = None
+            try:
+                for chunk in llm.stream(lc_messages):
+                    if is_stop_requested():
+                        break
+                    delta = chunk.content if hasattr(chunk, 'content') else str(chunk)
+                    # Accumulate usage from the last chunk that carries it
+                    if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
+                        usage_meta = chunk.usage_metadata
+                    if delta:
+                        payload = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_at,
+                            "model": current_model,
+                            "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(payload)}\n\n"
+            except Exception as e:
+                print(f"[ERROR] Gemini stream failed: {e}")
+                yield _sse_error_chunk(completion_id, created_at, current_model, _gemini_user_error(e))
+                yield "data: [DONE]\n\n"
+                return
+
+            # Final chunk with finish_reason and token usage
+            final: dict = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created_at,
+                "model": current_model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+            if usage_meta:
+                final["usage"] = {
+                    "prompt_tokens": usage_meta.get("input_tokens", 0),
+                    "completion_tokens": usage_meta.get("output_tokens", 0),
+                    "total_tokens": usage_meta.get("total_tokens", 0),
+                }
+            yield f"data: {json.dumps(final)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(_gemini_sse_stream(), media_type="text/event-stream")
+
+    # Non-streaming
+    try:
+        response = llm.invoke(lc_messages)
+    except Exception as e:
+        print(f"[ERROR] Gemini invoke failed: {e}")
+        return _error_chat_response(completion_id, created_at, current_model, _gemini_user_error(e))
+
+    content = response.content if hasattr(response, 'content') else str(response)
+    usage: dict = {"prompt_tokens": -1, "completion_tokens": -1, "total_tokens": -1}
+    if hasattr(response, 'usage_metadata') and response.usage_metadata:
+        meta = response.usage_metadata
+        usage = {
+            "prompt_tokens": meta.get("input_tokens", -1),
+            "completion_tokens": meta.get("output_tokens", -1),
+            "total_tokens": meta.get("total_tokens", -1),
+        }
+    return {
+        "id": completion_id,
+        "object": "chat.completion",
+        "created": created_at,
+        "model": current_model,
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
+        "usage": usage,
+    }
 
 
 async def health_check() -> Dict[str, Any]:
@@ -78,19 +225,23 @@ async def generate_chat_completion(request: ChatCompletionRequest):
     model_lock, _ = get_locks()
     target_alias = request.model or DEFAULT_MODEL_ALIAS
 
-    # Load or switch model if needed (compare by alias)
+    db_row = model_registry.lookup(target_alias)
+
+    # Cloud models (Gemini) are stateless API calls — no local loading needed.
+    if db_row and db_row.get('group') == 'gemini':
+        return await _handle_gemini_request(request)
+
+    # Load or switch local GGUF model if needed (compare by alias)
     if get_llm_instance() is None or target_alias != get_current_model_id():
         async with model_lock:
             # Re-check inside the lock to avoid double-loading
             if get_llm_instance() is None or target_alias != get_current_model_id():
                 mmproj_path = None
-                chat_handler_name = None
-                registry_entry = MODEL_REGISTRY.get(target_alias, {})
+                chat_handler_name = db_row.get('chat_handler') if db_row else None
+                model_name = target_alias
 
-                # When the client sends an explicit file path, use it directly
-                # instead of going through the registry lookup + file discovery.
+                # When the client sends an explicit file path, use it directly.
                 if request.model_path:
-                    model_name = target_alias
                     models_dir = os.path.realpath(_resolve_models_base())
                     model_path = os.path.realpath(request.model_path)
                     _assert_within_models_dir(model_path, models_dir, "model_path")
@@ -111,39 +262,57 @@ async def generate_chat_completion(request: ChatCompletionRequest):
                             mmproj_path = mmproj_candidate
                         else:
                             print(f"[LOADER] mmproj not found at {mmproj_candidate} — text-only mode")
-                    # No client-provided mmproj: fall back to the registry.
-                    # Downloaded models land in the same directory as their mmproj,
-                    # so check there first, then let find_local_model scan wider.
-                    if mmproj_path is None:
-                        mmproj_filename = registry_entry.get("model_file_mmproj")
-                        if mmproj_filename:
-                            model_dir = os.path.dirname(model_path)
-                            mmproj_path = find_local_model(mmproj_filename, model_dir)
-                            if mmproj_path:
-                                print(f"[LOADER] Found mmproj via registry fallback: {mmproj_path}")
+                    # No client-provided mmproj: fall back to DB row
+                    if mmproj_path is None and db_row:
+                        mmproj_val = db_row.get('mmproj') or ''
+                        if mmproj_val:
+                            if os.path.isabs(mmproj_val) and os.path.exists(mmproj_val):
+                                mmproj_path = mmproj_val
                             else:
-                                print(f"[LOADER] Registry mmproj '{mmproj_filename}' not found — text-only mode")
-                    # Chat handler comes from the registry if this alias is known
-                    chat_handler_name = registry_entry.get("chat_handler")
+                                model_dir = os.path.dirname(model_path)
+                                mmproj_path = find_local_model(mmproj_val, model_dir)
+                            if mmproj_path:
+                                print(f"[LOADER] Found mmproj via DB fallback: {mmproj_path}")
+                            else:
+                                print(f"[LOADER] DB mmproj '{mmproj_val}' not found — text-only mode")
                 else:
-                    model_name, filename = _resolve_model(target_alias)
+                    # DB-based resolution
+                    if not db_row:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Model '{target_alias}' not found in the model registry. "
+                                   f"Add it in Settings → AI Chat Models first."
+                        )
+                    file_val = db_row.get('file') or ''
+                    mmproj_val = db_row.get('mmproj') or ''
+                    hf_repo = db_row.get('hf_repo') or ''
+                    model_name = hf_repo or target_alias
 
-                    if model_name != "gemini":
-                        local_path = get_local_path(model_name)
-                        model_path = find_local_model(filename, local_path)
+                    if os.path.isabs(file_val) and os.path.exists(file_val):
+                        # Downloaded model — use stored path directly
+                        model_path = file_val
+                        if os.path.isabs(mmproj_val) and os.path.exists(mmproj_val):
+                            mmproj_path = mmproj_val
+                    elif hf_repo and file_val:
+                        # Bundled or HF-cache model — discover by filename
+                        local_path = get_local_path(hf_repo)
+                        model_path = find_local_model(file_val, local_path)
                         if model_path is None:
                             raise HTTPException(
                                 status_code=404,
-                                detail=f"Model '{target_alias}' ({filename}) not found locally. "
+                                detail=f"Model '{target_alias}' ({file_val}) not found locally. "
                                        f"Use /util/download-model to download it first."
                             )
-                        # Look up optional vision projector and handler from registry
-                        mmproj_filename = registry_entry.get("model_file_mmproj")
-                        chat_handler_name = registry_entry.get("chat_handler")
-                        if mmproj_filename:
-                            mmproj_path = find_local_model(mmproj_filename, local_path)
-                        if mmproj_filename and not mmproj_path:
-                            print(f"[LOADER] mmproj '{mmproj_filename}' not found — running text-only mode")
+                        if mmproj_val and not os.path.isabs(mmproj_val):
+                            mmproj_path = find_local_model(mmproj_val, local_path)
+                            if not mmproj_path:
+                                print(f"[LOADER] mmproj '{mmproj_val}' not found — text-only mode")
+                    else:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Model '{target_alias}' has no file path configured. "
+                                   f"Download it in Settings → AI Chat Models first."
+                        )
 
                 old_llm = get_llm_instance()
                 if old_llm is not None:
@@ -154,15 +323,12 @@ async def generate_chat_completion(request: ChatCompletionRequest):
                 set_current_model_id(None)
 
                 try:
-                    if model_name == "gemini":
-                        new_llm = load_gemini_model()
-                    else:
-                        new_llm = load_local_model(
-                            model_name=model_name,
-                            model_path=model_path,
-                            clip_model_path=mmproj_path,
-                            chat_handler_name=chat_handler_name,
-                        )
+                    new_llm = load_local_model(
+                        model_name=model_name,
+                        model_path=model_path,
+                        clip_model_path=mmproj_path,
+                        chat_handler_name=chat_handler_name,
+                    )
                     set_llm_instance(new_llm)
                     set_current_model_id(target_alias)  # store the alias, not the HF repo ID
                     print(f"[LOADER] Model '{target_alias}' loaded.")
@@ -189,82 +355,31 @@ async def generate_chat_completion(request: ChatCompletionRequest):
             messages = _strip_image_content(messages)
 
         # llama_cpp.Llama (local GGUF, text or vision)
-        if hasattr(llm_instance, 'create_chat_completion'):
-            kwargs: Dict[str, Any] = {"messages": messages}
-            if request.temperature is not None:
-                kwargs["temperature"] = request.temperature
-            if request.max_tokens is not None:
-                kwargs["max_tokens"] = request.max_tokens
-
-            if request.stream:
-                current_model = get_current_model_id()
-
-                def _sse_stream() -> Generator[str, None, None]:
-                    reset_stop()
-                    for chunk in llm_instance.create_chat_completion(
-                        stream=True, **kwargs
-                    ):
-                        if is_stop_requested():
-                            break
-                        chunk["model"] = current_model
-                        yield f"data: {json.dumps(chunk)}\n\n"
-                    yield "data: [DONE]\n\n"
-
-                return StreamingResponse(_sse_stream(), media_type="text/event-stream")
-
-            result = llm_instance.create_chat_completion(**kwargs)
-            result["model"] = get_current_model_id() or result.get("model", "unknown")
-            return result
-
-        # Gemini / other LangChain models
-        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-        lc_messages = []
-        for m in request.messages:
-            if m.role == "system":
-                lc_messages.append(SystemMessage(content=m.content))
-            elif m.role == "user":
-                lc_messages.append(HumanMessage(content=m.content))
-            elif m.role == "assistant":
-                lc_messages.append(AIMessage(content=m.content))
+        kwargs: Dict[str, Any] = {"messages": messages}
+        if request.temperature is not None:
+            kwargs["temperature"] = request.temperature
+        if request.max_tokens is not None:
+            kwargs["max_tokens"] = request.max_tokens
 
         if request.stream:
             current_model = get_current_model_id()
-            completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
-            created_at = int(time.time())
 
-            def _gemini_sse_stream() -> Generator[str, None, None]:
+            def _sse_stream() -> Generator[str, None, None]:
                 reset_stop()
-                for chunk in llm_instance.stream(lc_messages):
+                for chunk in llm_instance.create_chat_completion(
+                    stream=True, **kwargs
+                ):
                     if is_stop_requested():
                         break
-                    delta = chunk.content if hasattr(chunk, 'content') else str(chunk)
-                    if delta:
-                        payload = {
-                            "id": completion_id,
-                            "object": "chat.completion.chunk",
-                            "created": created_at,
-                            "model": current_model,
-                            "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}],
-                        }
-                        yield f"data: {json.dumps(payload)}\n\n"
+                    chunk["model"] = current_model
+                    yield f"data: {json.dumps(chunk)}\n\n"
                 yield "data: [DONE]\n\n"
 
-            return StreamingResponse(_gemini_sse_stream(), media_type="text/event-stream")
+            return StreamingResponse(_sse_stream(), media_type="text/event-stream")
 
-        response = llm_instance.invoke(lc_messages)
-        content = response.content if hasattr(response, 'content') else str(response)
-        return {
-            "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": get_current_model_id(),
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": content},
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": -1, "completion_tokens": -1, "total_tokens": -1},
-        }
+        result = llm_instance.create_chat_completion(**kwargs)
+        result["model"] = get_current_model_id() or result.get("model", "unknown")
+        return result
 
     except HTTPException:
         raise
@@ -297,7 +412,7 @@ async def generate_embedding_v1(request: EmbeddingV1Request) -> Dict[str, Any]:
         target_alias = request.model
         if embedding_model is None or get_embedding_model_id() != target_alias:
             try:
-                model_name, filename = _resolve_model(target_alias)
+                model_name, filename = _resolve_embedding_model(target_alias)
                 local_path = get_local_path(model_name)
                 model, processor = load_embedding_model(model_name, filename, local_path)
                 set_embedding_model(model, processor)

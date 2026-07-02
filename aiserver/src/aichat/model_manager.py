@@ -21,40 +21,29 @@ from .config import MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE
 from .utils import find_local_model, download_gguf_model
 
 
-def load_gemini_model() -> ChatGoogleGenerativeAI:
+def load_gemini_model(model_id: str = "gemini-2.0-flash", api_key: Optional[str] = None) -> ChatGoogleGenerativeAI:
     """
     Initializes a connection to the Google Gemini API.
 
-    This function creates a LangChain object for interacting with the
-    Google Gemini service. It requires the GOOGLE_API_KEY environment
-    variable to be set.
-
-    Returns:
-        ChatGoogleGenerativeAI: An instance of the LangChain Google AI chat model.
+    Args:
+        model_id: The Gemini model ID (e.g. "gemini-2.0-flash", "gemini-1.5-pro").
+        api_key: Google API key. Falls back to GOOGLE_API_KEY env var if not provided.
 
     Raises:
-        ValueError: If the GOOGLE_API_KEY environment variable is not set.
-        
-    Example:
-        >>> gemini_llm = load_gemini_model()
-        >>> response = gemini_llm.invoke("Hello, Gemini!")
+        ValueError: If no API key is available.
     """
-    print("[LOADER] Initializing Google Gemini client.")
+    resolved_key = api_key or os.environ.get("GOOGLE_API_KEY")
+    if not resolved_key:
+        raise ValueError(
+            "Gemini API key required. Pass 'api_key' in the request or set the GOOGLE_API_KEY environment variable."
+        )
 
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        raise ValueError("GOOGLE_API_KEY environment variable not set.")
-
-    # Initialize the ChatGoogleGenerativeAI client
-    # You can specify other parameters like temperature, top_p, etc.
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-3.1-pro-preview",
-        google_api_key=api_key,
+    print(f"[LOADER] Initializing Google Gemini client for model: {model_id}")
+    return ChatGoogleGenerativeAI(
+        model=model_id,
+        google_api_key=resolved_key,
         temperature=TEMPERATURE,
-        # convert_system_message_to_human=True # Use if needed for older models
     )
-
-    return llm
 
 
 def load_local_model(

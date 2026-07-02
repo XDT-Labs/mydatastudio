@@ -33,11 +33,16 @@ class AppRouter {
   static GlobalKey<NavigatorState> rootNavigatorKey =
       GlobalKey<NavigatorState>();
 
+  /// Shared observer — subscribe via RouteAware to get didPopNext() callbacks.
+  static final RouteObserver<PageRoute<dynamic>> routeObserver =
+      RouteObserver<PageRoute<dynamic>>();
+
   static final GoRouter instance = GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: '/',
     refreshListenable: DatabaseManager.isInitializedNotifier,
     debugLogDiagnostics: false,
+    observers: [routeObserver],
     redirect: (BuildContext context, GoRouterState state) async {
       if (state.uri.toString() == '/setup') return null;
 

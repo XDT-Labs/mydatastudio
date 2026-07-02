@@ -28,12 +28,19 @@ class LocalLlmContentGenerator implements ContentGenerator {
   /// Absolute path to the mmproj .gguf file for multimodal vision models.
   String? mmprojPath;
 
+  /// API key for cloud models (e.g., Gemini). Sent as `api_key` in the request body.
+  String? apiKey;
+
   /// Image bytes to include in the next request. Cleared after each send.
   List<Uint8List> pendingAttachments = [];
 
   /// The model alias the server reported in its last response.
   /// Reflects what was actually loaded, not what the client requested.
   String? lastResponseModel;
+
+  /// Token usage from the last completed response (prompt, completion, total).
+  /// Null for local models or when the server does not return usage data.
+  Map<String, int>? lastUsage;
 
   /// When set, overrides [systemInstruction] for the next request only.
   /// Cleared automatically after each send.
@@ -140,11 +147,13 @@ class LocalLlmContentGenerator implements ContentGenerator {
         'model': model ?? '',
         if (modelPath != null && modelPath!.isNotEmpty) 'model_path': modelPath,
         if (mmprojPath != null && mmprojPath!.isNotEmpty) 'mmproj_path': mmprojPath,
+        if (apiKey != null && apiKey!.isNotEmpty) 'api_key': apiKey,
         'messages': requestMessages,
         'stream': true,
       });
 
       lastResponseModel = null;
+      lastUsage = null;
       final client = http.Client();
       _activeClient = client;
       try {
@@ -183,6 +192,15 @@ class LocalLlmContentGenerator implements ContentGenerator {
                   buffer.write(content);
                   _streamingChunkController.add(content);
                 }
+              }
+              // Capture token usage from the final SSE chunk (Gemini / cloud models)
+              final usage = parsed['usage'] as Map<String, dynamic>?;
+              if (usage != null) {
+                lastUsage = {
+                  'prompt_tokens': (usage['prompt_tokens'] as num?)?.toInt() ?? 0,
+                  'completion_tokens': (usage['completion_tokens'] as num?)?.toInt() ?? 0,
+                  'total_tokens': (usage['total_tokens'] as num?)?.toInt() ?? 0,
+                };
               }
             } catch (_) {}
           }

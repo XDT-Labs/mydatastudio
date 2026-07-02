@@ -15,9 +15,9 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, DEFAULT_MODEL_ALIAS, MODEL_REGISTRY, API_TITLE, API_DESCRIPTION
+from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, DEFAULT_MODEL_ALIAS, API_TITLE, API_DESCRIPTION
 from .utils import get_local_path, find_local_model, _resolve_models_base
-from . import routes
+from . import routes, model_registry
 
 
 app = FastAPI(
@@ -60,11 +60,10 @@ def main() -> None:
     print(f"[STARTUP] Models directory: {models_dir}")
 
     # Auto-load default model at startup if present locally.
-    # Resolve through registry so the stored ID matches what the client sends.
-    default_entry = MODEL_REGISTRY.get(DEFAULT_MODEL_ALIAS, {})
-    startup_model_name = default_entry.get("model_name", DEFAULT_LOCAL_MODEL)
-    startup_model_file = default_entry.get("model_file", DEFAULT_GGUF_FILE)
-    startup_mmproj_file = default_entry.get("model_file_mmproj")
+    db_row = model_registry.lookup(DEFAULT_MODEL_ALIAS)
+    startup_model_name = (db_row or {}).get("hf_repo") or DEFAULT_LOCAL_MODEL
+    startup_model_file = (db_row or {}).get("file") or DEFAULT_GGUF_FILE
+    startup_mmproj_file = (db_row or {}).get("mmproj")
 
     local_path = get_local_path(startup_model_name)
     model_path = find_local_model(startup_model_file, local_path)

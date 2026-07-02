@@ -155,6 +155,7 @@ class PythonManager {
           'GOOGLE_API_KEY': '', //todo pass from client
           'MODEL_DOWNLOAD_URL':
               'https://gcs-file-downloader-10805446439.us-central1.run.app', // todo get from remote config
+          'APP_SUPPORT_DIR': supportPath,
           'AICHAT_MODELS_DIR': p.join(_pythonDir!, 'models'),
         },
       );

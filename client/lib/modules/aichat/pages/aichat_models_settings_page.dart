@@ -7,48 +7,7 @@ import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/aichat_model.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 
-// ─── Known local models available for download ────────────────────────────────
-
-class _KnownModel {
-  final String alias;
-  final String name;
-  final String hfRepo;
-  final String file;
-  final String mmprojFile;
-
-  const _KnownModel({
-    required this.alias,
-    required this.name,
-    required this.hfRepo,
-    required this.file,
-    this.mmprojFile = '',
-  });
-}
-
-const List<_KnownModel> _knownModels = [
-  _KnownModel(
-    alias: 'qwen3:4b',
-    name: 'Qwen 3 4b',
-    hfRepo: 'bartowski/Qwen_Qwen3.5-4B-GGUF',
-    file: 'Qwen_Qwen3.5-4B-Q3_K_L.gguf',
-    mmprojFile: 'mmproj-Qwen_Qwen3.5-4B-f16.gguf',
-  ),
-  _KnownModel(
-    alias: 'llama3.2:3b',
-    name: 'Meta Llama 3.2 3b',
-    hfRepo: 'bartowski/Llama-3.2-3B-Instruct-GGUF',
-    file: 'Llama-3.2-3B-Instruct-Q4_K_M.gguf',
-  ),
-  _KnownModel(
-    alias: 'phi4',
-    name: 'Microsoft Phi-4',
-    hfRepo: 'Swicked86/phi4-mm-gguf',
-    file: 'phi4-mm-Q4_K_M.gguf',
-    mmprojFile: 'mmproj-phi4-mm-f16.gguf',
-  ),
-];
-
-// ─── Cloud model definitions (seeded in DB; shown here for configuration) ────
+// ─── Cloud model definitions ──────────────────────────────────────────────────
 
 class _CloudGroup {
   final String group;
@@ -82,7 +41,7 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
 
   // Local LLM
   final _hfApiKeyController = TextEditingController();
-  _KnownModel? _selectedKnownModel;
+  AichatModel? _selectedModel;
   bool _isDownloading = false;
   String? _downloadError;
   double _downloadProgress = 0.0;
@@ -193,8 +152,8 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     final key = _hfApiKeyController.text.trim();
     if (key.isEmpty) return;
     await DatabaseManager.instance.database!.execute(
-      'INSERT INTO providers (service, client_id, client_secret, api_key) '
-      'VALUES (?, \'\', \'\', ?) '
+      'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
+      'VALUES (?, \'\', \'\', ?, \'model\') '
       'ON CONFLICT(service) DO UPDATE SET api_key = excluded.api_key',
       ['huggingface', key],
     );
@@ -223,8 +182,8 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     final key = _apiKeyControllers[group]?.text.trim() ?? '';
     if (key.isEmpty) return;
     await DatabaseManager.instance.database!.execute(
-      'INSERT INTO providers (service, client_id, client_secret, api_key) '
-      'VALUES (?, \'\', \'\', ?) '
+      'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
+      'VALUES (?, \'\', \'\', ?, \'model\') '
       'ON CONFLICT(service) DO UPDATE SET api_key = excluded.api_key',
       [group, key],
     );
@@ -325,8 +284,8 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
   }
 
   Future<void> _downloadModel() async {
-    if (_selectedKnownModel == null) return;
-    final known = _selectedKnownModel!;
+    if (_selectedModel == null) return;
+    final model = _selectedModel!;
 
     final serviceUrl = MainApp.llmServiceUrl.valueOrNull;
     if (serviceUrl == null) {
@@ -355,47 +314,42 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
       final modelPath = await _downloadSingleFile(
         client: client,
         serviceUrl: serviceUrl,
-        hfRepo: known.hfRepo,
-        filename: known.file,
+        hfRepo: model.hfRepo!,
+        filename: model.file!,
         hfToken: hfToken,
         label: 'model',
       );
       if (modelPath == null) return;
 
       String? mmprojPath;
-      if (known.mmprojFile.isNotEmpty) {
-        if (mounted)
+      final mmprojFilename = model.mmproj ?? '';
+      if (mmprojFilename.isNotEmpty && !mmprojFilename.startsWith('/')) {
+        if (mounted) {
           setState(() {
             _downloadProgress = 0.0;
             _downloadedMb = 0.0;
             _totalMb = 0.0;
           });
+        }
         mmprojPath = await _downloadSingleFile(
           client: client,
           serviceUrl: serviceUrl,
-          hfRepo: known.hfRepo,
-          filename: known.mmprojFile,
+          hfRepo: model.hfRepo!,
+          filename: mmprojFilename,
           hfToken: hfToken,
           label: 'vision projector',
         );
       }
 
-      await _repo.create(
-        alias: known.alias,
-        group: 'local',
-        name: known.name,
-        file: modelPath,
-        mmproj: mmprojPath,
-        type: 'gguf',
-        enabled: true,
-      );
+      // Update the existing seeded DB row with the downloaded file paths
+      await _repo.setLocalPath(model.id, modelPath, mmprojPath);
 
       if (!mounted) return;
       setState(() {
         _downloadProgress = 1.0;
-        _selectedKnownModel = null;
+        _selectedModel = null;
       });
-      _showSnack('Downloaded ${known.alias}');
+      _showSnack('Downloaded ${model.alias}');
     } catch (e) {
       if (mounted) setState(() => _downloadError = 'Error: $e');
     } finally {
@@ -507,9 +461,6 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
   // ── Default model card ─────────────────────────────────────────────────────
 
   Widget _defaultModelCard() {
-    final defaultModel =
-        _byGroup('local').where((m) => m.alias == 'gemma4:12b').firstOrNull;
-
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -538,8 +489,12 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
   // ── Hugging Face download card ──────────────────────────────────────────────
 
   Widget _localLlmCard() {
-    final downloaded =
-        _byGroup('local').where((m) => m.alias != 'gemma4:12b').toList();
+    final downloadable = _byGroup('local')
+        .where((m) => !m.enabled && (m.hfRepo ?? '').isNotEmpty)
+        .toList();
+    final downloaded = _byGroup('local')
+        .where((m) => m.alias != 'gemma4:12b' && m.enabled)
+        .toList();
 
     return Card(
       child: Padding(
@@ -569,7 +524,7 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
               style: Theme.of(context).textTheme.labelLarge,
             ),
             const SizedBox(height: 8),
-            // Known model dropdown
+            // DB-backed downloadable models dropdown
             InputDecorator(
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
@@ -580,27 +535,24 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
                 ),
               ),
               child: DropdownButtonHideUnderline(
-                child: DropdownButton<_KnownModel>(
-                  value: _selectedKnownModel,
+                child: DropdownButton<AichatModel>(
+                  value: _selectedModel,
                   isExpanded: true,
-                  items:
-                      _knownModels
-                          .map(
-                            (m) =>
-                                DropdownMenuItem(value: m, child: Text(m.name)),
-                          )
-                          .toList(),
-                  onChanged:
-                      _isDownloading
-                          ? null
-                          : (v) => setState(() => _selectedKnownModel = v),
+                  items: downloadable
+                      .map(
+                        (m) => DropdownMenuItem(value: m, child: Text(m.name)),
+                      )
+                      .toList(),
+                  onChanged: _isDownloading
+                      ? null
+                      : (v) => setState(() => _selectedModel = v),
                 ),
               ),
             ),
-            if (_selectedKnownModel != null) ...[
+            if (_selectedModel != null) ...[
               const SizedBox(height: 4),
               Text(
-                '${_selectedKnownModel!.hfRepo}  ·  ${_selectedKnownModel!.file}',
+                '${_selectedModel!.hfRepo}  ·  ${_selectedModel!.file}',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -637,7 +589,7 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
                 const SizedBox(height: 8),
               ],
               ElevatedButton.icon(
-                onPressed: _selectedKnownModel != null ? _downloadModel : null,
+                onPressed: _selectedModel != null ? _downloadModel : null,
                 icon: const Icon(Icons.download),
                 label: const Text('Download Model'),
               ),

@@ -41,16 +41,17 @@ class AichatModelRepository {
 
   Future<AichatModel> upsert(AichatModel model) async {
     await db.execute(
-      'INSERT INTO aichat_models (id, alias, "group", name, file, mmproj, type, api_key, base_url, enabled, created_at, updated_at) '
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
+      'INSERT INTO aichat_models (id, alias, "group", name, file, mmproj, hf_repo, chat_handler, type, base_url, enabled, created_at, updated_at) '
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
       'ON CONFLICT(id) DO UPDATE SET '
       'alias = excluded.alias, '
       '"group" = excluded."group", '
       'name = excluded.name, '
       'file = excluded.file, '
       'mmproj = excluded.mmproj, '
+      'hf_repo = excluded.hf_repo, '
+      'chat_handler = excluded.chat_handler, '
       'type = excluded.type, '
-      'api_key = excluded.api_key, '
       'base_url = excluded.base_url, '
       'enabled = excluded.enabled, '
       'updated_at = excluded.updated_at',
@@ -61,8 +62,9 @@ class AichatModelRepository {
         model.name,
         model.file,
         model.mmproj,
+        model.hfRepo,
+        model.chatHandler,
         model.type,
-        model.apiKey,
         model.baseUrl,
         model.enabled ? 1 : 0,
         model.createdAt.millisecondsSinceEpoch,
@@ -78,8 +80,9 @@ class AichatModelRepository {
     required String name,
     String? file,
     String? mmproj,
+    String? hfRepo,
+    String? chatHandler,
     required String type,
-    String? apiKey,
     String? baseUrl,
     bool enabled = false,
   }) async {
@@ -91,8 +94,9 @@ class AichatModelRepository {
       name: name,
       file: file,
       mmproj: mmproj,
+      hfRepo: hfRepo,
+      chatHandler: chatHandler,
       type: type,
-      apiKey: apiKey,
       baseUrl: baseUrl,
       enabled: enabled,
       createdAt: now,
@@ -101,19 +105,20 @@ class AichatModelRepository {
     return upsert(model);
   }
 
+  /// Called after a model is downloaded — updates the file paths and enables the row.
+  Future<void> setLocalPath(String id, String filePath, String? mmprojPath) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await db.execute(
+      'UPDATE aichat_models SET file = ?, mmproj = ?, enabled = 1, updated_at = ? WHERE id = ?',
+      [filePath, mmprojPath, now, id],
+    );
+  }
+
   Future<void> setEnabled(String id, bool enabled) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     await db.execute(
       'UPDATE aichat_models SET enabled = ?, updated_at = ? WHERE id = ?',
       [enabled ? 1 : 0, now, id],
-    );
-  }
-
-  Future<void> setApiKeyForGroup(String group, String apiKey) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await db.execute(
-      'UPDATE aichat_models SET api_key = ?, updated_at = ? WHERE "group" = ?',
-      [apiKey, now, group],
     );
   }
 
@@ -133,15 +138,5 @@ class AichatModelRepository {
     return db
         .stream('SELECT * FROM aichat_models ORDER BY "group", alias')
         .map((rows) => rows.map((r) => AichatModel.fromDbMap(r.cast<String, dynamic>())).toList());
-  }
-
-  /// Returns the api_key for the first model matching the group (all share one key per group).
-  Future<String?> getApiKeyForGroup(String group) async {
-    final rows = await db.select(
-      'SELECT api_key FROM aichat_models WHERE "group" = ? LIMIT 1',
-      [group],
-    );
-    if (rows.isEmpty) return null;
-    return rows.first['api_key'] as String?;
   }
 }

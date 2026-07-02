@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:genui/genui.dart';
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/app_router.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/aichat/services/local_llm_content_generator.dart';
 import 'package:mydatastudio/python_manager.dart';
@@ -46,7 +47,8 @@ class TextMessageItem extends ChatItem {
   final String text;
   final String? model;
   final List<Uint8List> images;
-  TextMessageItem({required this.role, required this.text, this.model, this.images = const []});
+  final Map<String, int>? usage;
+  TextMessageItem({required this.role, required this.text, this.model, this.images = const [], this.usage});
 }
 
 class GenUiSurfaceItem extends ChatItem {
@@ -54,7 +56,7 @@ class GenUiSurfaceItem extends ChatItem {
   GenUiSurfaceItem({required this.surfaceId});
 }
 
-class _AichatPage extends State<AichatPage> {
+class _AichatPage extends State<AichatPage> with RouteAware {
   AppLogger logger = AppLogger(null);
   bool _isLLMServiceRunning = PythonManager.isLLMServiceRunning.value;
   String _selectedModel = 'gemma4:12b';
@@ -131,6 +133,7 @@ class _AichatPage extends State<AichatPage> {
             role: 'assistant',
             text: text,
             model: _contentGenerator.lastResponseModel,
+            usage: _contentGenerator.lastUsage,
           ));
           _streamingText = null;
         });
@@ -159,7 +162,32 @@ class _AichatPage extends State<AichatPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      AppRouter.routeObserver.subscribe(this, route);
+    }
+  }
+
+  /// Called when the settings page (or any page pushed on top) is popped and
+  /// this page comes back into view. Re-fetches models so API key changes are
+  /// picked up immediately without requiring a full restart.
+  @override
+  void didPopNext() {
+    _reloadModels();
+  }
+
+  Future<void> _reloadModels() async {
+    final db = DatabaseManager.instance.database;
+    if (db == null || !mounted) return;
+    final models = await AichatModelRepository(db).getAll();
+    if (mounted) setState(() => _dbModels = models);
+  }
+
+  @override
   void dispose() {
+    AppRouter.routeObserver.unsubscribe(this);
     _modelsSub?.cancel();
     AichatPage.selectConversationId.removeListener(_onConversationSelected);
     _textController.dispose();
@@ -430,6 +458,21 @@ class _AichatPage extends State<AichatPage> {
     _contentGenerator.modelPath = selectedDbModel?.file;
     _contentGenerator.mmprojPath = selectedDbModel?.mmproj;
 
+    // API keys live in the providers table, keyed by the model's group name.
+    String? apiKey;
+    final group = selectedDbModel?.group;
+    if (group != null) {
+      final db = DatabaseManager.instance.database;
+      if (db != null) {
+        final rows = await db.select(
+          'SELECT api_key FROM providers WHERE service = ? LIMIT 1',
+          [group],
+        );
+        if (rows.isNotEmpty) apiKey = rows.first['api_key'] as String?;
+      }
+    }
+    _contentGenerator.apiKey = apiKey;
+
     _genUiConversation.sendRequest(UserMessage.text(llmMessage.isEmpty ? message : llmMessage));
     _textController.clear();
     _focusNode.requestFocus();
@@ -498,7 +541,12 @@ class _AichatPage extends State<AichatPage> {
     );
   }
 
-  Widget _buildAssistantBubble(String text, {bool streaming = false, String? model}) {
+  Widget _buildAssistantBubble(String text, {bool streaming = false, String? model, Map<String, int>? usage}) {
+    final totalTokens = usage?['total_tokens'];
+    final tokenLabel = (totalTokens != null && totalTokens > 0)
+        ? '${_formatTokens(totalTokens)} tokens'
+        : null;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Align(
@@ -568,10 +616,25 @@ class _AichatPage extends State<AichatPage> {
                 ),
               ),
             ),
+            if (tokenLabel != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  tokenLabel,
+                  style: const TextStyle(color: _hintColor, fontSize: 11),
+                ),
+              ),
           ],
         ),
       ),
     );
+  }
+
+  String _formatTokens(int count) {
+    if (count >= 1000) {
+      return '${(count / 1000).toStringAsFixed(count % 1000 == 0 ? 0 : 1)}k';
+    }
+    return count.toString();
   }
 
   Widget _buildTitleBar() {
@@ -660,7 +723,7 @@ class _AichatPage extends State<AichatPage> {
                 if (item is TextMessageItem) {
                   return item.role == 'user'
                       ? _buildUserBubble(item.text, images: item.images)
-                      : _buildAssistantBubble(item.text, model: item.model);
+                      : _buildAssistantBubble(item.text, model: item.model, usage: item.usage);
                 }
 
                 if (item is GenUiSurfaceItem) {

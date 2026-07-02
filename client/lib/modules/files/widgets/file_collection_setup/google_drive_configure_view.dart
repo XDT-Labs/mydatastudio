@@ -47,8 +47,8 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
 
     try {
       await DatabaseManager.instance.database!.execute(
-        'INSERT INTO providers (service, client_id, client_secret, api_key) '
-        'VALUES (?, ?, ?, ?) '
+        'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
+        'VALUES (?, ?, ?, ?, \'collection\') '
         'ON CONFLICT(service) DO UPDATE SET '
         'client_id = excluded.client_id, '
         'client_secret = excluded.client_secret, '
