@@ -94,15 +94,39 @@ build-python:
 		echo "Set CODESIGN_IDENTITY or install a Developer ID Application certificate."; \
 		exit 1; \
 	fi; \
-	echo "Signing Python service binaries inside dist/aichat with identity: $$IDENTITY"; \
-	find $(PYTHON_DIR)/dist/aichat -type f | while read -r file; do \
+	echo "--- Phase 1: Signing standalone Mach-O binaries (outside .framework bundles) ---"; \
+	find -L $(PYTHON_DIR)/dist/aichat -type f -not -path '*/*.framework/*' | while read -r file; do \
 		if file "$$file" | grep -q "Mach-O"; then \
+			echo "  Signing: $$file"; \
 			codesign --force --options runtime --timestamp --sign "$$IDENTITY" "$$file"; \
 		fi; \
-	done
+	done; \
+	echo "--- Phase 2: Signing .framework bundles as whole units ---"; \
+	find $(PYTHON_DIR)/dist/aichat -name '*.framework' -type d | while read -r fw; do \
+		echo "  Signing framework: $$fw"; \
+		codesign --force --options runtime --timestamp --sign "$$IDENTITY" "$$fw"; \
+	done; \
+	echo "--- Phase 3: Verifying all signatures ---"; \
+	VERIFY_FAIL_LOG=$$(mktemp); \
+	find -L $(PYTHON_DIR)/dist/aichat \( -type f \) | while read -r file; do \
+		if file "$$file" 2>/dev/null | grep -q "Mach-O"; then \
+			if ! codesign --verify --strict "$$file" 2>/dev/null; then \
+				echo "  FAILED: $$file"; \
+				echo "$$file" >> "$$VERIFY_FAIL_LOG"; \
+			fi; \
+		fi; \
+	done; \
+	if [ -s "$$VERIFY_FAIL_LOG" ]; then \
+		echo "ERROR: Some binaries failed signature verification:"; \
+		cat "$$VERIFY_FAIL_LOG"; \
+		rm -f "$$VERIFY_FAIL_LOG"; \
+		exit 1; \
+	fi; \
+	rm -f "$$VERIFY_FAIL_LOG"; \
+	echo "All signatures verified successfully."
 	@mkdir -p client/app
 	@rm -f client/app/$(APP_ZIP_NAME)
-	@cd $(PYTHON_DIR)/dist/aichat && zip -r ../../../client/app/$(APP_ZIP_NAME) .
+	@ditto -c -k --sequesterRsrc $(PYTHON_DIR)/dist/aichat client/app/$(APP_ZIP_NAME)
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
 
 
@@ -139,7 +163,7 @@ local-install-python: build-python
 
 # 4. Notarize macOS Build
 .PHONY: notarize
-notarize: build-python build-client
+notarize:
 	@echo "--- 🔐 Notarizing macOS build ---"
 	@if [ -z "$(APPLE_ID)" ] || [ -z "$$APPLE_PASSWORD" ] || [ -z "$(APPLE_TEAM_ID)" ]; then \
 		echo "Error: APPLE_ID, APPLE_PASSWORD, and APPLE_TEAM_ID variables must be set."; \

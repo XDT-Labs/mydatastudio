@@ -291,7 +291,7 @@ class PythonManager {
 
       if (zipPath == null) {
         final msg =
-            'aichat zip not found. Searched candidates: ${candidates.join(', ')}';
+            'aiserver zip not found. Searched candidates: ${candidates.join(', ')}';
         _stderrController.add(msg);
         logger.e('[python] $msg');
         throw Exception(msg);
