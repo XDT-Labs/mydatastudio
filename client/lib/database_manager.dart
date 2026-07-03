@@ -333,13 +333,8 @@ class AppDatabase {
       indexes: [
         SqliteVectorIndex(
           table: 'files_embeddings',
-          column: 'qwen3_8b_embedding',
+          column: 'qwen3_vl_embedding',
           dimension: 2048,
-        ),
-        SqliteVectorIndex(
-          table: 'files_embeddings',
-          column: 'siglip2_embedding',
-          dimension: 1152,
         ),
       ],
     );
@@ -397,32 +392,22 @@ class AppDatabase {
       await _loadInitialData(_db);
       await _seedAichatModels(_db);
     } else {
-      // Schema migration: Check if siglip2_embedding exists or if qwen3_8b_embedding is NOT NULL
+      // Schema migration: Recreate files_embeddings with single qwen3_vl_embedding column
       try {
         final columns = await _db.select(
           "PRAGMA table_info(files_embeddings);",
         );
-        final hasSiglip2 = columns.any((c) => c['name'] == 'siglip2_embedding');
-        bool isQwenNotNull = false;
-        for (final c in columns) {
-          if (c['name'] == 'qwen3_8b_embedding') {
-            if (c['notnull'] == 1) {
-              isQwenNotNull = true;
-            }
-            break;
-          }
-        }
+        final hasQwenVl = columns.any((c) => c['name'] == 'qwen3_vl_embedding');
 
-        if (!hasSiglip2 || isQwenNotNull) {
+        if (!hasQwenVl) {
           logger.i(
-            "AppDatabase: Re-creating files_embeddings table for new schema...",
+            "AppDatabase: Re-creating files_embeddings table for Qwen3-VL schema...",
           );
           await _db.execute("DROP TABLE IF EXISTS files_embeddings;");
           await _db.execute('''
             CREATE TABLE files_embeddings (
               file_id TEXT PRIMARY KEY,
-              qwen3_8b_embedding BLOB,
-              siglip2_embedding BLOB,
+              qwen3_vl_embedding BLOB,
               FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
             );
           ''');
@@ -1119,8 +1104,7 @@ class AppDatabase {
     '''
     CREATE TABLE IF NOT EXISTS files_embeddings (
       file_id TEXT PRIMARY KEY,
-      qwen3_8b_embedding BLOB,
-      siglip2_embedding BLOB,
+      qwen3_vl_embedding BLOB,
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
     ''',

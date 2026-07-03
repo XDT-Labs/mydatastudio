@@ -58,7 +58,7 @@ class _SimilarFilesTabState extends State<SimilarFilesTab> {
       return;
     }
 
-    final embedding = await repo.getFileSiglip2Embedding(widget.file.id);
+    final embedding = await repo.getFileEmbedding(widget.file.id);
     if (!mounted) return;
     if (embedding == null) {
       setState(() {

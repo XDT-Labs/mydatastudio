@@ -72,7 +72,7 @@ class EmbeddingRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "image_base64": "iVBORw0KGgo...",
-                "model_name": "google/siglip2-so400m-patch16-naflex"
+                "model_name": "Qwen/Qwen3-VL-Embedding-2B"
             }
         }
     )
