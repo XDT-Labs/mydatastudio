@@ -259,7 +259,7 @@ class MainAppState extends State<MainApp>
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'The configured storage location could not be accessed or initialized. If it is on a network/SMB share, SQLite WAL mode is not supported. Please select a local directory.',
+                    'The configured storage location could not be accessed. If the storage is on a network drive, please make sure the drive is mounted and connected. If you have moved the files, click "Pick New Location" below to select the new folder.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
                   ),
