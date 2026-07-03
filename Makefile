@@ -95,7 +95,7 @@ build-python:
 		exit 1; \
 	fi; \
 	echo "--- Phase 1: Signing standalone Mach-O binaries (outside .framework bundles) ---"; \
-	find $(PYTHON_DIR)/dist/aichat -type f -not -path '*/*.framework/*' | while read -r file; do \
+	find -L $(PYTHON_DIR)/dist/aichat -type f -not -path '*/*.framework/*' | while read -r file; do \
 		if file "$$file" | grep -q "Mach-O"; then \
 			echo "  Signing: $$file"; \
 			codesign --force --options runtime --timestamp --sign "$$IDENTITY" "$$file"; \
@@ -108,7 +108,7 @@ build-python:
 	done; \
 	echo "--- Phase 3: Verifying all signatures ---"; \
 	VERIFY_FAIL_LOG=$$(mktemp); \
-	find $(PYTHON_DIR)/dist/aichat \( -type f -o -type l \) | while read -r file; do \
+	find -L $(PYTHON_DIR)/dist/aichat \( -type f \) | while read -r file; do \
 		if file "$$file" 2>/dev/null | grep -q "Mach-O"; then \
 			if ! codesign --verify --strict "$$file" 2>/dev/null; then \
 				echo "  FAILED: $$file"; \
@@ -126,7 +126,7 @@ build-python:
 	echo "All signatures verified successfully."
 	@mkdir -p client/app
 	@rm -f client/app/$(APP_ZIP_NAME)
-	@cd $(PYTHON_DIR)/dist/aichat && zip -r ../../../client/app/$(APP_ZIP_NAME) .
+	@ditto -c -k --sequesterRsrc $(PYTHON_DIR)/dist/aichat client/app/$(APP_ZIP_NAME)
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
 
 
