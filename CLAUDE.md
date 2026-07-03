@@ -108,7 +108,7 @@ pdm run pyinstaller -y main.spec     # Compile to standalone binary
 
 ### Flutter → Python Communication
 
-On startup, `PythonManager` spawns the bundled `aichat` binary as a subprocess and parses its stderr for a URL pattern (`http://0.0.0.0:PORT`). Once found, that URL is broadcast via `MainApp.llmServiceUrl` (a `BehaviorSubject`) so all subscribers can start making HTTP calls.
+On startup, `PythonManager` spawns the bundled `aiserver` binary as a subprocess and parses its stderr for a URL pattern (`http://0.0.0.0:PORT`). Once found, that URL is broadcast via `MainApp.llmServiceUrl` (a `BehaviorSubject`) so all subscribers can start making HTTP calls.
 
 `LocalLlmContentGenerator` wraps those HTTP calls behind the `ContentGenerator` interface. Key endpoints:
 
