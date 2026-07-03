@@ -73,7 +73,7 @@ class PythonManager {
 
   bool get isRunning => _pythonProc != null;
 
-  Future<void> startAiChatService() async {
+  Future<void> startAiServerService() async {
     const remoteUrl = String.fromEnvironment('PYTHON_SERVER_URL');
     if (remoteUrl.isNotEmpty) {
       logger.i('[python] Starting remote AI Chat service at: $remoteUrl');
@@ -84,24 +84,24 @@ class PythonManager {
     }
 
     PythonManager.startupProgress.value = 'Preparing AI service...';
-    // Use a completer to ensure the aichat assets are available before proceeding.
+    // Use a completer to ensure the aiserver assets are available before proceeding.
     Completer<void> completer = Completer<void>();
     _startupCompleter = completer;
 
-    // Ensure bundled aichat assets are available in Application Support before proceeding.
-    logger.d('[python] Ensuring aichat assets are available');
+    // Ensure bundled aiserver assets are available in Application Support before proceeding.
+    logger.d('[python] Ensuring aiserver assets are available');
     try {
-      await ensureAichatUnzipped();
+      await ensureAiserverUnzipped();
     } catch (e) {
       completer.completeError(e);
       return completer.future;
     }
 
     var supportPath = await DatabaseManager.getRealApplicationSupportPath();
-    _pythonDir = p.join(supportPath, "aichat");
+    _pythonDir = p.join(supportPath, "aiserver");
 
     // Check for existing PID file and kill previous process if it exists
-    final pidFile = File(p.join(_pythonDir!, 'aichat.pid'));
+    final pidFile = File(p.join(_pythonDir!, 'aiserver.pid'));
     if (pidFile.existsSync()) {
       try {
         final oldPid = int.parse(pidFile.readAsStringSync().trim());
@@ -120,9 +120,9 @@ class PythonManager {
 
     logger.d('[python] Starting AI Chat service in `$_pythonDir`');
 
-    String executableName = 'aichat';
+    String executableName = 'aiserver';
     if (Platform.isWindows) {
-      executableName = 'aichat.exe';
+      executableName = 'aiserver.exe';
     }
 
     final executablePath = p.join(_pythonDir!, executableName);
@@ -183,7 +183,7 @@ class PythonManager {
     return completer.future;
   }
 
-  Future<void> stopAiChatService() async {
+  Future<void> stopAiServerService() async {
     // stop python proc first
     if (_pythonProc != null) {
       try {
@@ -209,7 +209,7 @@ class PythonManager {
     // Cleanup PID file
     if (_pythonDir != null) {
       try {
-        final pidFile = File(p.join(_pythonDir!, 'aichat.pid'));
+        final pidFile = File(p.join(_pythonDir!, 'aiserver.pid'));
         if (pidFile.existsSync()) {
           pidFile.deleteSync();
           logger.d('[python] Deleted PID file');
@@ -225,16 +225,16 @@ class PythonManager {
     _stderrSub = null;
   }
 
-  /// Ensure the bundled aichat zip is unzipped into Application Support/aichat.
+  /// Ensure the bundled aiserver zip is unzipped into Application Support/aiserver.
   /// If the destination directory already exists, this is a no-op.
-  Future<void> ensureAichatUnzipped() async {
+  Future<void> ensureAiserverUnzipped() async {
     try {
       var supportPath = await DatabaseManager.getRealApplicationSupportPath();
-      final destDir = Directory(p.join(supportPath, 'aichat'));
+      final destDir = Directory(p.join(supportPath, 'aiserver'));
 
       if (destDir.existsSync()) {
         _stdoutController.add(
-          'aichat directory already exists at ${destDir.path}; skipping unzip.',
+          'aiserver directory already exists at ${destDir.path}; skipping unzip.',
         );
         PythonManager.startupProgress.value = 'Starting AI service...';
         return;
@@ -297,7 +297,7 @@ class PythonManager {
         throw Exception(msg);
       }
 
-      final tempDir = Directory(p.join(supportPath, 'aichat_temp'));
+      final tempDir = Directory(p.join(supportPath, 'aiserver_temp'));
       if (tempDir.existsSync()) {
         tempDir.deleteSync(recursive: true);
       }
@@ -411,7 +411,7 @@ class PythonManager {
         tempDir.renameSync(destDir.path);
       }
     } catch (e) {
-      final msg = 'Exception while unzipping aichat bundle: $e';
+      final msg = 'Exception while unzipping aiserver bundle: $e';
       _stderrController.add(msg);
       logger.e('[python] $msg');
       rethrow;
@@ -419,7 +419,7 @@ class PythonManager {
   }
 
   Future<void> dispose() async {
-    await stopAiChatService();
+    await stopAiServerService();
     await _stdoutController.close();
     await _stderrController.close();
   }
@@ -452,8 +452,8 @@ class PythonManager {
       return;
     }
 
-    // Ensure bundled aichat assets are available in Application Support before proceeding.
-    await ensureAichatUnzipped();
+    // Ensure bundled aiserver assets are available in Application Support before proceeding.
+    await ensureAiserverUnzipped();
 
     if (!Directory(pythonDir).existsSync()) {
       _stderrController.add('Directory not found: `$pythonDir`');

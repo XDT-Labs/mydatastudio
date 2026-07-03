@@ -96,7 +96,7 @@ class MainAppState extends State<MainApp>
         // You can perform cleanup or prompt the user for confirmation here.
         // Return AppExitResponse.exit to allow exit, or AppExitResponse.cancel to prevent it.
         print('Exit requested!');
-        await pythonManager?.stopAiChatService();
+        await pythonManager?.stopAiServerService();
         return AppExitResponse.exit;
       },
       onStateChange: (AppLifecycleState state) {
@@ -153,7 +153,7 @@ class MainAppState extends State<MainApp>
       try {
         // 2. Initialize Python Manager
         final pythonMgr = await PythonManager.forAppSupport();
-        await pythonMgr.startAiChatService();
+        await pythonMgr.startAiServerService();
         pythonManager = pythonMgr;
       } catch (e) {
         if (mounted) {
@@ -184,7 +184,7 @@ class MainAppState extends State<MainApp>
     if (isPreventClose) {
       // Hide the window immediately for a snappier UX while background python service gracefully terminates
       await windowManager.hide();
-      await pythonManager?.stopAiChatService();
+      await pythonManager?.stopAiServerService();
       await windowManager.destroy();
     }
   }
