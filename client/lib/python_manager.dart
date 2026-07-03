@@ -158,6 +158,7 @@ class PythonManager {
               'https://gcs-file-downloader-10805446439.us-central1.run.app', // todo get from remote config
           'APP_SUPPORT_DIR': supportPath,
           'AICHAT_MODELS_DIR': p.join(_pythonDir!, 'models'),
+          'AISERVER_LOG_LEVEL': MainApp.logLevel,
         },
       );
 

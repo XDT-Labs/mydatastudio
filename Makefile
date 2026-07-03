@@ -24,8 +24,8 @@ APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = ggml-org/gemma-4-12B-it-GGUF
 HF_FILE = gemma-4-12B-it-Q4_K_M.gguf
 HF_MMPROJ_FILE = mmproj-gemma-4-12B-it-Q8_0.gguf
-HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
-HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
+HF_QWEN3_VL_MODEL = Qwen/Qwen3-VL-Embedding-2B
+HF_QWEN3_VL_DIR = $(PYTHON_DIR)/models/Qwen-Qwen3-VL-Embedding-2B-local
 
 # Apple config
 APPLE_ID = mike@xdtlabs.com
@@ -68,11 +68,11 @@ models:
 	else \
 		echo "$(HF_MMPROJ_FILE) already exists, skipping download."; \
 	fi
-	@if [ ! -d $(HF_SIGLIP_DIR) ]; then \
-		echo "Downloading SigLip 2 embedding model (Transformers)..."; \
-		hf download $(HF_SIGLIP_MODEL) --local-dir $(HF_SIGLIP_DIR); \
+	@if [ ! -d $(HF_QWEN3_VL_DIR) ]; then \
+		echo "Downloading Qwen3-VL-Embedding-2B model (Transformers)..."; \
+		hf download $(HF_QWEN3_VL_MODEL) --local-dir $(HF_QWEN3_VL_DIR); \
 	else \
-		echo "SigLip 2 embedding model already exists, skipping download."; \
+		echo "Qwen3-VL-Embedding-2B model already exists, skipping download."; \
 	fi
 
 	

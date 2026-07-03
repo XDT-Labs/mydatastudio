@@ -74,7 +74,6 @@ class CustomLogOutput extends LogOutput {
   final ConsoleOutput consoleOutput = ConsoleOutput();
   File? _logFile;
   bool _initialized = false;
-  String _currentDateStr = '';
 
   @override
   Future<void> init() async {
@@ -87,8 +86,7 @@ class CustomLogOutput extends LogOutput {
     consoleOutput.output(event);
 
     try {
-      final dateStr = DateTime.now().toIso8601String().split('T').first;
-      if (!_initialized || _currentDateStr != dateStr) {
+      if (!_initialized) {
         // Safe to check because in isolates, this subject is empty.
         if (MainApp.appDataDirectory.hasValue &&
             MainApp.appDataDirectory.value != null) {
@@ -98,9 +96,15 @@ class CustomLogOutput extends LogOutput {
           if (!logDir.existsSync()) {
             logDir.createSync(recursive: true);
           }
-          _logFile = File(p.join(logDir.path, 'app_$dateStr.log'));
+          // Unique timestamp per startup so each run gets its own log file.
+          final ts = DateTime.now()
+              .toIso8601String()
+              .split('.')
+              .first
+              .replaceAll(':', '-')
+              .replaceAll('T', '_');
+          _logFile = File(p.join(logDir.path, 'app_$ts.log'));
           _initialized = true;
-          _currentDateStr = dateStr;
         }
       }
 

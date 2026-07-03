@@ -10,6 +10,7 @@ import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/repositories/watchers/database_change_watcher.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/widgets/auth_dialog_manager.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:rxdart/rxdart.dart';
@@ -30,8 +31,19 @@ Future<void> main() async {
   // Intercept close events to manually shutdown python service before exit
   await windowManager.setPreventClose(true);
 
-  //set log level
-  Logger.level = Level.debug;
+  // Set log level: debug builds always use debug; release defaults to info
+  // unless the user passes --log-level=debug at launch.
+  if (kDebugMode) {
+    MainApp.logLevel = 'debug';
+  } else {
+    for (final arg in Platform.executableArguments) {
+      if (arg.startsWith('--log-level=')) {
+        MainApp.logLevel = arg.substring('--log-level='.length).toLowerCase();
+        break;
+      }
+    }
+  }
+  Logger.level = MainApp.logLevel == 'debug' ? Level.debug : Level.info;
 
   // Start desktop client
   runApp(const MainApp());
@@ -39,6 +51,9 @@ Future<void> main() async {
 
 class MainApp extends StatefulWidget {
   const MainApp({super.key});
+
+  // Active log level string ('debug' or 'info'), shared with PythonManager.
+  static String logLevel = 'info';
 
   // Moved static subjects/keys here so they can be referenced as MainApp.xxx
   // Default system directory for app config

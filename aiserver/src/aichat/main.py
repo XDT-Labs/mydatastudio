@@ -11,13 +11,79 @@ Endpoints:
   POST /util/thumbnail            Generate image thumbnails (incl. RAW formats)
   POST /util/import/pst           Stream-parse an Outlook PST file
 """
+import json
+import logging
 import os
+import sys
+from datetime import datetime
+from typing import Optional
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, DEFAULT_MODEL_ALIAS, API_TITLE, API_DESCRIPTION
 from .utils import get_local_path, find_local_model, _resolve_models_base
 from . import routes, model_registry
+
+logger = logging.getLogger(__name__)
+
+
+def _get_log_dir() -> Optional[str]:
+    """Resolve <storage>/logs from config.json, falling back to <app-support>/logs."""
+    support_dir = os.environ.get('APP_SUPPORT_DIR')
+    if not support_dir or not os.path.isdir(support_dir):
+        home = os.path.expanduser('~')
+        for bundle_id in ('com.xdtlabs.mydatastudio.dev', 'com.xdtlabs.mydatastudio'):
+            candidate = os.path.join(home, 'Library', 'Application Support', bundle_id)
+            if os.path.isdir(candidate):
+                support_dir = candidate
+                break
+
+    if not support_dir:
+        return None
+
+    config_path = os.path.join(support_dir, 'config.json')
+    if os.path.exists(config_path):
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+            storage = config.get('storage') or config.get('database')
+            if storage:
+                return os.path.join(storage, 'logs')
+        except Exception:
+            pass
+
+    return os.path.join(support_dir, 'logs')
+
+
+def setup_logging(log_level: str = 'info') -> None:
+    """Configure root logger with console + timestamped file handler."""
+    level = getattr(logging, log_level.upper(), logging.INFO)
+    fmt = logging.Formatter(
+        '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
+        datefmt='%Y-%m-%dT%H:%M:%S',
+    )
+
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    # Console handler (stderr — Flutter reads both stdout and stderr)
+    ch = logging.StreamHandler(sys.stderr)
+    ch.setLevel(level)
+    ch.setFormatter(fmt)
+    root.addHandler(ch)
+
+    # File handler — new timestamped file each startup
+    log_dir = _get_log_dir()
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        log_file = os.path.join(log_dir, f'aiserver_{timestamp}.log')
+        fh = logging.FileHandler(log_file, encoding='utf-8')
+        fh.setLevel(level)
+        fh.setFormatter(fmt)
+        root.addHandler(fh)
+        print(f"[STARTUP] Logging to: {log_file}")
 
 
 app = FastAPI(
@@ -55,9 +121,14 @@ app.post("/util/import/pst", summary="Stream-parse an Outlook PST file")(routes.
 
 
 def main() -> None:
+    # Debug builds (script) default to debug; frozen binaries default to info.
+    _default_level = 'info' if getattr(sys, 'frozen', False) else 'debug'
+    log_level = os.environ.get('AISERVER_LOG_LEVEL', _default_level)
+    setup_logging(log_level)
+
     models_dir = _resolve_models_base()
     os.makedirs(models_dir, exist_ok=True)
-    print(f"[STARTUP] Models directory: {models_dir}")
+    logger.info(f"[STARTUP] Models directory: {models_dir}")
 
     # Auto-load default model at startup if present locally.
     db_row = model_registry.lookup(DEFAULT_MODEL_ALIAS)
@@ -71,8 +142,8 @@ def main() -> None:
         try:
             mmproj_path = find_local_model(startup_mmproj_file, local_path) if startup_mmproj_file else None
             if startup_mmproj_file and not mmproj_path:
-                print(f"[STARTUP] mmproj '{startup_mmproj_file}' not found — loading text-only.")
-            print(f"[STARTUP] Loading '{DEFAULT_MODEL_ALIAS}' ({startup_model_name})...")
+                logger.warning(f"[STARTUP] mmproj '{startup_mmproj_file}' not found — loading text-only.")
+            logger.info(f"[STARTUP] Loading '{DEFAULT_MODEL_ALIAS}' ({startup_model_name})...")
             from .model_manager import load_local_model
             from .state import set_llm_instance, set_current_model_id
             llm = load_local_model(
@@ -82,15 +153,15 @@ def main() -> None:
             )
             set_llm_instance(llm)
             set_current_model_id(DEFAULT_MODEL_ALIAS)  # store alias, not HF repo ID
-            print(f"[STARTUP] Model '{DEFAULT_MODEL_ALIAS}' loaded successfully.")
+            logger.info(f"[STARTUP] Model '{DEFAULT_MODEL_ALIAS}' loaded successfully.")
         except Exception as e:
-            print(f"[STARTUP] Failed to load model: {e}")
+            logger.error(f"[STARTUP] Failed to load model: {e}")
     else:
-        print(f"[STARTUP] '{startup_model_file}' not found locally. Skipping auto-load.")
+        logger.info(f"[STARTUP] '{startup_model_file}' not found locally. Skipping auto-load.")
 
     import uvicorn
     port = int(os.environ.get("AICHAT_PORT", 0))
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info", reload=False)
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level=log_level, reload=False)
 
 
 if __name__ == "__main__":
