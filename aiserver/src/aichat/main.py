@@ -34,9 +34,21 @@ def _get_log_dir() -> Optional[str]:
     if not support_dir or not os.path.isdir(support_dir):
         home = os.path.expanduser('~')
         for bundle_id in ('com.xdtlabs.mydatastudio.dev', 'com.xdtlabs.mydatastudio'):
+            # Standard path
             candidate = os.path.join(home, 'Library', 'Application Support', bundle_id)
             if os.path.isdir(candidate):
                 support_dir = candidate
+                break
+
+            # Sandboxed App paths (check both with and without bundle_id suffix)
+            sandbox_base = os.path.join(home, 'Library', 'Containers', bundle_id, 'Data', 'Library', 'Application Support')
+            found_sandbox = False
+            for sandbox_cand in (os.path.join(sandbox_base, bundle_id), sandbox_base):
+                if os.path.isdir(sandbox_cand):
+                    support_dir = sandbox_cand
+                    found_sandbox = True
+                    break
+            if found_sandbox:
                 break
 
     if not support_dir:

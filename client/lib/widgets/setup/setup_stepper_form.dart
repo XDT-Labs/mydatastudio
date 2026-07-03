@@ -6,6 +6,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/helpers/encryption_helper.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/app_user.dart';
+import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/repositories/user_repository.dart';
 import 'package:mydatastudio/services/get_user_service.dart';
 
@@ -92,6 +93,18 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
 
       // Initialize database
       await DatabaseManager.instance.initializeDatabase();
+      MainApp.databaseManager = DatabaseManager.instance;
+
+      // Start the embedded aiserver process (normally done on the next app
+      // launch by MainAppState._initStartup, but the setup wizard completes
+      // within the same running process so it must start it here too).
+      try {
+        final pythonMgr = await PythonManager.forAppSupport();
+        await pythonMgr.startAiServerService();
+        MainApp.pythonManager = pythonMgr;
+      } catch (e) {
+        logger.e('Failed to start aiserver after setup: $e');
+      }
 
       //Create new instance of User
       AppUser u = AppUser(

@@ -355,14 +355,26 @@ class PythonManager {
           _stdoutController.add('Unzip completed via PowerShell');
         }
       } else {
-        // Use system `unzip` for macOS/Linux
+        // Use system extractor for macOS/Linux
         PythonManager.startupProgress.value = 'Unzipping AI Chat service...';
-        final proc = await Process.start('unzip', [
-          '-o',
-          zipPath,
-          '-d',
-          tempDir.path,
-        ]);
+        final Process proc;
+        if (Platform.isMacOS) {
+          // Use macOS ditto to support Zip64 (>4GB zip files) and preserve resource forks/symlinks
+          proc = await Process.start('ditto', [
+            '-x',
+            '-k',
+            zipPath,
+            tempDir.path,
+          ]);
+        } else {
+          // Use unzip on Linux
+          proc = await Process.start('unzip', [
+            '-o',
+            zipPath,
+            '-d',
+            tempDir.path,
+          ]);
+        }
 
         int lastUpdate = DateTime.now().millisecondsSinceEpoch;
         proc.stdout
@@ -386,17 +398,17 @@ class PythonManager {
             .transform(utf8.decoder)
             .transform(const LineSplitter())
             .listen((line) {
-              _stderrController.add('unzip err: $line');
+              _stderrController.add('extract err: $line');
             });
 
         final exitCode = await proc.exitCode;
         if (exitCode != 0) {
-          final msg = 'unzip failed (exit $exitCode)';
+          final msg = 'extraction failed (exit $exitCode)';
           _stderrController.add(msg);
           logger.e('[python] $msg');
           throw Exception(msg);
         } else {
-          _stdoutController.add('Unzip completed');
+          _stdoutController.add('Extraction completed');
         }
       }
 

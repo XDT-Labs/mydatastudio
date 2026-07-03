@@ -38,7 +38,7 @@ FLUTTER_DIR = client
 # --- Targets ---
 
 .PHONY: all
-all: models build-python local-install-python build-client 
+all: models build-python build-client 
 
 .PHONY: dev
 dev: models build-python local-install-python

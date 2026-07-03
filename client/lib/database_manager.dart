@@ -106,6 +106,7 @@ class DatabaseManager {
     config.remove('path');
     config['storage'] = storagePath;
     config['database'] = databasePath;
+
     file.writeAsStringSync(jsonEncode(config));
   }
 

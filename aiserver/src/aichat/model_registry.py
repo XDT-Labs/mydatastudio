@@ -27,26 +27,40 @@ def _resolve_support_dir() -> Optional[str]:
     # Last resort: macOS platform path (covers running directly from IDE)
     home = os.path.expanduser('~')
     for bundle_id in ('com.xdtlabs.mydatastudio.dev', 'com.xdtlabs.mydatastudio'):
+        # Standard path
         candidate = os.path.join(home, 'Library', 'Application Support', bundle_id)
         if os.path.isdir(candidate):
             return candidate
 
+        # Sandboxed App paths (check both with and without bundle_id suffix)
+        sandbox_base = os.path.join(home, 'Library', 'Containers', bundle_id, 'Data', 'Library', 'Application Support')
+        for sandbox_cand in (os.path.join(sandbox_base, bundle_id), sandbox_base):
+            if os.path.isdir(sandbox_cand):
+                return sandbox_cand
+
     return None
 
 
+_db_resolution_attempted = False
+
+
 def _resolve_db_path() -> Optional[str]:
-    global _db_path_cache
+    global _db_path_cache, _db_resolution_attempted
     if _db_path_cache is not None:
         return _db_path_cache
 
     support_dir = _resolve_support_dir()
     if not support_dir:
-        print("[DB] Could not locate Application Support directory")
+        if not _db_resolution_attempted:
+            print("[DB] Could not locate Application Support directory")
+            _db_resolution_attempted = True
         return None
 
     config_path = os.path.join(support_dir, 'config.json')
     if not os.path.exists(config_path):
-        print(f"[DB] config.json not found at {config_path}")
+        if not _db_resolution_attempted:
+            print(f"[DB] config.json not found at {config_path}")
+            _db_resolution_attempted = True
         return None
 
     try:
