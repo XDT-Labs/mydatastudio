@@ -153,7 +153,11 @@ class _CollapsingDrawerState extends State<CollapsingDrawer> {
               onPressed: () async {
                 // Logout logic
                 GetUserService.instance.invoke(GetUserServiceCommand(null));
-                FlutterSecureStorage storage = const FlutterSecureStorage();
+                FlutterSecureStorage storage = const FlutterSecureStorage(
+                  mOptions: MacOsOptions(
+                    useDataProtectionKeyChain: false,
+                  ),
+                );
                 await storage.write(
                   key: AppConstants.securePassword,
                   value: null,

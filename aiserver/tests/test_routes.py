@@ -88,6 +88,24 @@ class TestChatCompletion:
             assert "not found locally" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
+    @patch('aichat.routes.model_registry.lookup')
+    @patch('aichat.routes._handle_gemini_request')
+    async def test_chat_completion_gemini_fallback(self, mock_handle_gemini, mock_lookup):
+        """If model is not found in the DB (None) but starts with 'gemini', it treats it as Gemini."""
+        mock_lookup.return_value = None
+        mock_handle_gemini.return_value = {"choices": [{"message": {"content": "Gemini response"}}]}
+
+        request = ChatCompletionRequest(
+            model="gemini-3.5-flash",
+            messages=[ChatMessage(role="user", content="Hi")]
+        )
+
+        result = await generate_chat_completion(request)
+
+        mock_handle_gemini.assert_called_once_with(request)
+        assert result["choices"][0]["message"]["content"] == "Gemini response"
+
+    @pytest.mark.asyncio
     async def test_chat_completion_llama_cpp_path(self):
         """Uses llama_cpp's create_chat_completion when available."""
         mock_llm = Mock()

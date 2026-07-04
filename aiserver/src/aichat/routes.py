@@ -232,7 +232,14 @@ async def generate_chat_completion(request: ChatCompletionRequest):
     db_row = model_registry.lookup(target_alias)
 
     # Cloud models (Gemini) are stateless API calls — no local loading needed.
-    if db_row and db_row.get('group') == 'gemini':
+    is_gemini = False
+    if db_row:
+        is_gemini = db_row.get('group') == 'gemini'
+    else:
+        # Fallback for when the DB is inaccessible (e.g. remote server)
+        is_gemini = target_alias.lower().startswith('gemini')
+
+    if is_gemini:
         return await _handle_gemini_request(request)
 
     # Load or switch local GGUF model if needed (compare by alias)

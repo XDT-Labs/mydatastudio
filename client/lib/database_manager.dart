@@ -106,6 +106,7 @@ class DatabaseManager {
     config.remove('path');
     config['storage'] = storagePath;
     config['database'] = databasePath;
+
     file.writeAsStringSync(jsonEncode(config));
   }
 
@@ -172,6 +173,26 @@ class DatabaseManager {
       databaseDirectoryPath = config['database'] ?? storagePath;
     }
     String path = storagePath!;
+
+    if (!isTesting) {
+      final storageDir = io.Directory(path);
+      bool isAccessible = false;
+      try {
+        if (storageDir.existsSync()) {
+          storageDir.listSync();
+          isAccessible = true;
+        }
+      } catch (e) {
+        isAccessible = false;
+      }
+
+      if (!isAccessible) {
+        throw io.FileSystemException(
+          "The storage directory is not accessible. Please ensure your network drive is connected or choose a new location.",
+          path,
+        );
+      }
+    }
 
     // Ensure the global appDataDirectory subject has the value
     MainApp.appDataDirectory.add(path);
@@ -295,7 +316,7 @@ class AppDatabase {
 
   AppDatabase(this._db);
 
-  int get schemaVersion => 18;
+  int get schemaVersion => 1;
 
   Database get rawDb => _db;
 
@@ -333,13 +354,8 @@ class AppDatabase {
       indexes: [
         SqliteVectorIndex(
           table: 'files_embeddings',
-          column: 'qwen3_8b_embedding',
+          column: 'qwen3_vl_embedding',
           dimension: 2048,
-        ),
-        SqliteVectorIndex(
-          table: 'files_embeddings',
-          column: 'siglip2_embedding',
-          dimension: 1152,
         ),
       ],
     );
@@ -396,313 +412,7 @@ class AppDatabase {
       logger.i("AppDatabase: Loading initial data...");
       await _loadInitialData(_db);
       await _seedAichatModels(_db);
-    } else {
-      // Schema migration: Check if siglip2_embedding exists or if qwen3_8b_embedding is NOT NULL
-      try {
-        final columns = await _db.select(
-          "PRAGMA table_info(files_embeddings);",
-        );
-        final hasSiglip2 = columns.any((c) => c['name'] == 'siglip2_embedding');
-        bool isQwenNotNull = false;
-        for (final c in columns) {
-          if (c['name'] == 'qwen3_8b_embedding') {
-            if (c['notnull'] == 1) {
-              isQwenNotNull = true;
-            }
-            break;
-          }
-        }
-
-        if (!hasSiglip2 || isQwenNotNull) {
-          logger.i(
-            "AppDatabase: Re-creating files_embeddings table for new schema...",
-          );
-          await _db.execute("DROP TABLE IF EXISTS files_embeddings;");
-          await _db.execute('''
-            CREATE TABLE files_embeddings (
-              file_id TEXT PRIMARY KEY,
-              qwen3_8b_embedding BLOB,
-              siglip2_embedding BLOB,
-              FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
-            );
-          ''');
-        }
-      } catch (e) {
-        logger.e("AppDatabase: Migration of files_embeddings table failed: $e");
-      }
-
-      // v17: add aichat tables if missing
-      try {
-        final aichatTables = await _db.select(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='aichat_conversations'",
-        );
-        if (aichatTables.isEmpty) {
-          logger.i(
-            "AppDatabase: Creating aichat_conversations and aichat_conversation_history tables...",
-          );
-          await _db.execute('''
-            CREATE TABLE IF NOT EXISTS aichat_conversations (
-              id TEXT PRIMARY KEY,
-              name TEXT NOT NULL,
-              model TEXT,
-              created_at INTEGER NOT NULL,
-              updated_at INTEGER NOT NULL
-            );
-          ''');
-          await _db.execute('''
-            CREATE TABLE IF NOT EXISTS aichat_conversation_history (
-              id TEXT PRIMARY KEY,
-              conversation_id TEXT NOT NULL,
-              role TEXT NOT NULL,
-              content TEXT NOT NULL,
-              token_count INTEGER,
-              created_at INTEGER NOT NULL,
-              FOREIGN KEY (conversation_id) REFERENCES aichat_conversations(id) ON DELETE CASCADE
-            );
-          ''');
-        }
-      } catch (e) {
-        logger.e("AppDatabase: Migration of aichat tables failed: $e");
-      }
-
-      // v18: add aichat_models table if missing
-      try {
-        final modelsTables = await _db.select(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='aichat_models'",
-        );
-        if (modelsTables.isEmpty) {
-          logger.i("AppDatabase: Creating aichat_models table...");
-          await _db.execute(_aichatModelsDDL);
-          await _seedAichatModels(_db);
-        } else {
-          // Backfill: ensure the default Gemma 4 12B row exists (added after initial v18 seed)
-          final gemmaRows = await _db.select(
-            "SELECT id FROM aichat_models WHERE name = 'gemma4:12b' OR alias = 'gemma4:12b' LIMIT 1",
-          );
-          if (gemmaRows.isEmpty) {
-            logger.i("AppDatabase: Backfilling default Gemma 4 12B model...");
-            final now = DateTime.now().millisecondsSinceEpoch;
-            await _db.execute(
-              'INSERT OR IGNORE INTO aichat_models (id, alias, "group", name, file, mmproj, type, base_url, enabled, created_at, updated_at) '
-              'VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, 1, ?, ?)',
-              [
-                const Uuid().v4(),
-                'Gemma 4 12B',
-                'local',
-                'gemma4:12b',
-                'gguf',
-                now,
-                now,
-              ],
-            );
-          }
-          // Migrate: alias was incorrectly set to the display name; swap alias ↔ name for all rows
-          final oldFormat = await _db.select(
-            "SELECT id FROM aichat_models WHERE alias = 'Gemma 4 12B' LIMIT 1",
-          );
-          if (oldFormat.isNotEmpty) {
-            logger.i(
-              "AppDatabase: Swapping alias/name to correct semantic order...",
-            );
-            await _db.execute(
-              'UPDATE aichat_models SET alias = name, name = alias',
-            );
-          }
-          // Migrate: update Gemini 2.5 rows to 3.5
-          await _db.execute(
-            "UPDATE aichat_models SET "
-            "  alias = REPLACE(alias, '2.5', '3.5'), "
-            "  name  = REPLACE(name,  '2.5', '3.5') "
-            "WHERE \"group\" = 'gemini' AND (alias LIKE '%2.5%' OR name LIKE '%2.5%')",
-          );
-          // Migrate: rename gemini-3.5-pro → gemini-3.1-pro-preview
-          await _db.execute(
-            "UPDATE aichat_models SET alias = 'gemini-3.1-pro-preview', name = 'Gemini 3.1 Pro' "
-            "WHERE alias IN ('gemini-3.5-pro', 'gemini-3.1-pro')",
-          );
-        }
-      } catch (e) {
-        logger.e("AppDatabase: Migration of aichat_models table failed: $e");
-      }
-
-      // v19: add aichat_skills table if missing
-      try {
-        final skillsTables = await _db.select(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='aichat_skills'",
-        );
-        if (skillsTables.isEmpty) {
-          logger.i("AppDatabase: Creating aichat_skills table...");
-          await _db.execute(_aichatSkillsDDL);
-          await _seedAichatSkills(_db);
-        }
-      } catch (e) {
-        logger.e("AppDatabase: Migration of aichat_skills table failed: $e");
-      }
-
-      // v20: add providers.type column; drop aichat_models.api_key column
-      try {
-        final providerCols = await _db.select("PRAGMA table_info(providers)");
-        final hasType = providerCols.any((c) => c['name'] == 'type');
-        if (!hasType) {
-          logger.i("AppDatabase: Adding type column to providers...");
-          await _db.execute(
-            "ALTER TABLE providers ADD COLUMN type TEXT NOT NULL DEFAULT 'collection'",
-          );
-          await _db.execute(
-            "UPDATE providers SET type = 'model' "
-            "WHERE service IN ('gemini', 'claude', 'openai', 'grok', 'huggingface')",
-          );
-        }
-      } catch (e) {
-        logger.e("AppDatabase: Migration v20 (providers.type) failed: $e");
-      }
-
-      try {
-        final modelCols = await _db.select("PRAGMA table_info(aichat_models)");
-        final hasApiKey = modelCols.any((c) => c['name'] == 'api_key');
-        if (hasApiKey) {
-          logger.i(
-            "AppDatabase: Dropping api_key column from aichat_models...",
-          );
-          await _db.execute("ALTER TABLE aichat_models DROP COLUMN api_key");
-        }
-      } catch (e) {
-        logger.e(
-          "AppDatabase: Migration v20 (aichat_models.api_key drop) failed: $e",
-        );
-      }
-
-      // v21: add hf_repo and chat_handler columns; backfill local models;
-      //      insert any new local models that aren't seeded yet
-      try {
-        final modelCols = await _db.select("PRAGMA table_info(aichat_models)");
-        final hasHfRepo = modelCols.any((c) => c['name'] == 'hf_repo');
-        if (!hasHfRepo) {
-          logger.i(
-            "AppDatabase: Adding hf_repo and chat_handler columns to aichat_models...",
-          );
-          await _db.execute(
-            "ALTER TABLE aichat_models ADD COLUMN hf_repo TEXT",
-          );
-          await _db.execute(
-            "ALTER TABLE aichat_models ADD COLUMN chat_handler TEXT",
-          );
-        }
-        // Backfill known local models regardless of whether the columns are new
-        final now = DateTime.now().millisecondsSinceEpoch;
-        final localBackfills = [
-          {
-            'alias': 'gemma4:12b',
-            'hf_repo': 'ggml-org/gemma-4-12B-it-GGUF',
-            'file': 'gemma-4-12B-it-Q4_K_M.gguf',
-            'mmproj': 'mmproj-gemma-4-12B-it-Q8_0.gguf',
-            'chat_handler': 'Gemma4ChatHandler',
-          },
-          {
-            'alias': 'qwen3:4b',
-            'hf_repo': 'bartowski/Qwen_Qwen3.5-4B-GGUF',
-            'chat_handler': null,
-          },
-          {
-            'alias': 'llama3.2:3b',
-            'hf_repo': 'bartowski/Llama-3.2-3B-Instruct-GGUF',
-            'chat_handler': null,
-          },
-          {
-            'alias': 'phi4',
-            'hf_repo': 'Swicked86/phi4-mm-gguf',
-            'chat_handler': 'Phi3VisionChatHandler',
-          },
-        ];
-        for (final b in localBackfills) {
-          // Only set file/mmproj from backfill if the row has no path yet
-          final fileClause =
-              b.containsKey('file') ? ", file = COALESCE(NULLIF(file, ''), ?)" : '';
-          final mmprojClause =
-              b.containsKey('mmproj') ? ", mmproj = COALESCE(NULLIF(mmproj, ''), ?)" : '';
-          final params = <Object?>[
-            b['hf_repo'],
-            b['chat_handler'],
-            if (b.containsKey('file')) b['file'],
-            if (b.containsKey('mmproj')) b['mmproj'],
-            now,
-            b['alias'],
-          ];
-          await _db.execute(
-            'UPDATE aichat_models SET hf_repo = ?, chat_handler = ?$fileClause$mmprojClause, updated_at = ? '
-            'WHERE alias = ?',
-            params,
-          );
-        }
-        // Insert downloadable local models that aren't in the DB yet
-        final newLocalModels = [
-          {
-            'alias': 'qwen3:4b',
-            'name': 'Qwen 3 4B',
-            'file': 'Qwen_Qwen3.5-4B-Q3_K_L.gguf',
-            'mmproj': 'mmproj-Qwen_Qwen3.5-4B-f16.gguf',
-            'hf_repo': 'bartowski/Qwen_Qwen3.5-4B-GGUF',
-            'chat_handler': null,
-          },
-          {
-            'alias': 'llama3.2:3b',
-            'name': 'Meta Llama 3.2 3B',
-            'file': 'Llama-3.2-3B-Instruct-Q4_K_M.gguf',
-            'mmproj': null,
-            'hf_repo': 'bartowski/Llama-3.2-3B-Instruct-GGUF',
-            'chat_handler': null,
-          },
-          {
-            'alias': 'phi4',
-            'name': 'Microsoft Phi-4',
-            'file': 'phi4-mm-Q4_K_M.gguf',
-            'mmproj': 'mmproj-phi4-mm-f16.gguf',
-            'hf_repo': 'Swicked86/phi4-mm-gguf',
-            'chat_handler': 'Phi3VisionChatHandler',
-          },
-        ];
-        for (final m in newLocalModels) {
-          await _db.execute(
-            'INSERT OR IGNORE INTO aichat_models '
-            '(id, alias, "group", name, file, mmproj, hf_repo, chat_handler, type, enabled, created_at, updated_at) '
-            'SELECT ?, ?, \'local\', ?, ?, ?, ?, ?, \'gguf\', 0, ?, ? '
-            'WHERE NOT EXISTS (SELECT 1 FROM aichat_models WHERE alias = ?)',
-            [
-              const Uuid().v4(),
-              m['alias'],
-              m['name'],
-              m['file'],
-              m['mmproj'],
-              m['hf_repo'],
-              m['chat_handler'],
-              now,
-              now,
-              m['alias'],
-            ],
-          );
-        }
-      } catch (e) {
-        logger.e(
-          "AppDatabase: Migration v21 (hf_repo/chat_handler) failed: $e",
-        );
-      }
-
-      // v22: add token_count to aichat_conversation_history
-      try {
-        final historyCols = await _db.select(
-          "PRAGMA table_info(aichat_conversation_history)",
-        );
-        final hasTokenCount = historyCols.any((c) => c['name'] == 'token_count');
-        if (!hasTokenCount) {
-          await _db.execute(
-            "ALTER TABLE aichat_conversation_history ADD COLUMN token_count INTEGER",
-          );
-        }
-      } catch (e) {
-        logger.e(
-          "AppDatabase: Migration v22 (token_count) failed: $e",
-        );
-      }
+      await _seedAichatSkills(_db);
     }
   }
 
@@ -816,16 +526,16 @@ class AppDatabase {
       // ── Gemini ────────────────────────────────────────────────────────────
       {
         'id': const Uuid().v4(),
-        'alias': 'gemini-2.5-flash',
+        'alias': 'gemini-3.5-flash',
         'group': 'gemini',
-        'name': 'Gemini 2.5 Flash',
+        'name': 'Gemini 3.5 Flash',
         'type': 'api',
       },
       {
         'id': const Uuid().v4(),
-        'alias': 'gemini-2.5-pro',
+        'alias': 'gemini-3.1-pro-preview',
         'group': 'gemini',
-        'name': 'Gemini 2.5 Pro',
+        'name': 'Gemini 3.1 Pro',
         'type': 'api',
       },
       // ── Claude ────────────────────────────────────────────────────────────
@@ -1119,8 +829,7 @@ class AppDatabase {
     '''
     CREATE TABLE IF NOT EXISTS files_embeddings (
       file_id TEXT PRIMARY KEY,
-      qwen3_8b_embedding BLOB,
-      siglip2_embedding BLOB,
+      qwen3_vl_embedding BLOB,
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
     ''',
@@ -1152,6 +861,7 @@ class AppDatabase {
       conversation_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      token_count INTEGER,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (conversation_id) REFERENCES aichat_conversations(id) ON DELETE CASCADE
     );

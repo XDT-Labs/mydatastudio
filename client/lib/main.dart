@@ -10,6 +10,7 @@ import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/repositories/watchers/database_change_watcher.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/widgets/auth_dialog_manager.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:rxdart/rxdart.dart';
@@ -21,7 +22,7 @@ import 'package:media_kit/media_kit.dart';
 /// Then, it checks if the platform is Windows, Linux or macOS. If it is, it gets the current screen and sets the window title, minimum size and maximum size.
 /// Finally, it runs the FamilyDamApp widget wrapped in a ProviderScope using the runApp function.
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   // Must add this line.
@@ -30,8 +31,19 @@ Future<void> main() async {
   // Intercept close events to manually shutdown python service before exit
   await windowManager.setPreventClose(true);
 
-  //set log level
-  Logger.level = Level.debug;
+  // Set log level: debug builds always use debug; release defaults to info
+  // unless the user passes --log-level=debug at launch.
+  if (kDebugMode) {
+    MainApp.logLevel = 'debug';
+  } else {
+    for (final arg in args) {
+      if (arg.startsWith('--log-level=')) {
+        MainApp.logLevel = arg.substring('--log-level='.length).toLowerCase();
+        break;
+      }
+    }
+  }
+  Logger.level = MainApp.logLevel == 'debug' ? Level.debug : Level.info;
 
   // Start desktop client
   runApp(const MainApp());
@@ -39,6 +51,9 @@ Future<void> main() async {
 
 class MainApp extends StatefulWidget {
   const MainApp({super.key});
+
+  // Active log level string ('debug' or 'info'), shared with PythonManager.
+  static String logLevel = 'info';
 
   // Moved static subjects/keys here so they can be referenced as MainApp.xxx
   // Default system directory for app config
@@ -60,6 +75,8 @@ class MainApp extends StatefulWidget {
   static DatabaseChangeWatcher? collectionWatcher;
   // Manage all module scanners
   static ScannerManager? scannerManager;
+  // Embedded aiserver process manager, so setup wizard and normal startup share the same instance
+  static PythonManager? pythonManager;
 
   @override
   MainAppState createState() => MainAppState();
@@ -74,7 +91,6 @@ class MainAppState extends State<MainApp>
   String? _dbErrorPath;
   bool _pythonStartError = false;
   String? _pythonErrorMsg;
-  PythonManager? pythonManager;
   late final AppLifecycleListener _lifecycleListener;
 
   @override
@@ -96,7 +112,7 @@ class MainAppState extends State<MainApp>
         // You can perform cleanup or prompt the user for confirmation here.
         // Return AppExitResponse.exit to allow exit, or AppExitResponse.cancel to prevent it.
         print('Exit requested!');
-        await pythonManager?.stopAiChatService();
+        await MainApp.pythonManager?.stopAiServerService();
         return AppExitResponse.exit;
       },
       onStateChange: (AppLifecycleState state) {
@@ -153,8 +169,8 @@ class MainAppState extends State<MainApp>
       try {
         // 2. Initialize Python Manager
         final pythonMgr = await PythonManager.forAppSupport();
-        await pythonMgr.startAiChatService();
-        pythonManager = pythonMgr;
+        await pythonMgr.startAiServerService();
+        MainApp.pythonManager = pythonMgr;
       } catch (e) {
         if (mounted) {
           setState(() {
@@ -184,7 +200,7 @@ class MainAppState extends State<MainApp>
     if (isPreventClose) {
       // Hide the window immediately for a snappier UX while background python service gracefully terminates
       await windowManager.hide();
-      await pythonManager?.stopAiChatService();
+      await MainApp.pythonManager?.stopAiServerService();
       await windowManager.destroy();
     }
   }
@@ -221,17 +237,19 @@ class MainAppState extends State<MainApp>
       home: Scaffold(
         backgroundColor: Colors.grey.shade900,
         body: Center(
-          child: Card(
-            elevation: 8,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Container(
-              width: 500,
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Card(
+              elevation: 8,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Container(
+                width: 500,
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                   const Icon(
                     Icons.error_outline,
                     color: Colors.redAccent,
@@ -244,39 +262,45 @@ class MainAppState extends State<MainApp>
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'The configured storage location could not be accessed or initialized. If it is on a network/SMB share, SQLite WAL mode is not supported. Please select a local directory.',
+                    'The configured storage location could not be accessed. If the storage is on a network drive, please make sure the drive is mounted and connected. If you have moved the files, click "Pick New Location" below to select the new folder.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
                   ),
                   const SizedBox(height: 16),
-                  Container(
+                   Container(
+                    width: double.infinity,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: Colors.grey.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SelectableText(
-                          "Configured Location:\n${DatabaseManager.instance.storagePath ?? 'Unknown'}",
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontWeight: FontWeight.bold,
-                          ),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 180),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SelectableText(
+                              "Configured Location:\n${DatabaseManager.instance.storagePath ?? 'Unknown'}",
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            SelectableText(
+                              "Error Details:\n$_dbErrorPath",
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                color: Colors.red,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 12),
-                        SelectableText(
-                          "Error Details:\n$_dbErrorPath",
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            color: Colors.red,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -320,8 +344,9 @@ class MainAppState extends State<MainApp>
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _initSetupScreen() {
     // Handle case where database initialization fails but we want to show the main app anyway
@@ -358,17 +383,19 @@ class MainAppState extends State<MainApp>
       home: Scaffold(
         backgroundColor: Colors.grey.shade900,
         body: Center(
-          child: Card(
-            elevation: 8,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Container(
-              width: 500,
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Card(
+              elevation: 8,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Container(
+                width: 500,
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                   const Icon(
                     Icons.error_outline,
                     color: Colors.redAccent,
@@ -387,25 +414,31 @@ class MainAppState extends State<MainApp>
                   ),
                   const SizedBox(height: 16),
                   Container(
+                    width: double.infinity,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: Colors.grey.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SelectableText(
-                          "Error Details:\n$_pythonErrorMsg",
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            color: Colors.red,
-                          ),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 180),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SelectableText(
+                              "Error Details:\n$_pythonErrorMsg",
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                color: Colors.red,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -428,8 +461,9 @@ class MainAppState extends State<MainApp>
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {

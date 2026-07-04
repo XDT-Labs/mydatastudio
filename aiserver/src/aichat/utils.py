@@ -31,11 +31,19 @@ def _resolve_models_base() -> str:
         return os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'models')
 
     if sys.platform == 'darwin':
-        app_support = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support')
+        home = os.path.expanduser('~')
+        app_support = os.path.join(home, 'Library', 'Application Support')
         for bundle_id in ('com.xdtlabs.mydatastudio.dev', 'com.xdtlabs.mydatastudio'):
             bundle_dir = os.path.join(app_support, bundle_id)
             if os.path.isdir(bundle_dir):
                 return os.path.join(bundle_dir, 'aichat', 'models')
+
+            # Sandboxed App paths (check both with and without bundle_id suffix)
+            sandbox_base = os.path.join(home, 'Library', 'Containers', bundle_id, 'Data', 'Library', 'Application Support')
+            for sandbox_cand in (os.path.join(sandbox_base, bundle_id), sandbox_base):
+                sandbox_dir = os.path.join(sandbox_cand, 'aichat', 'models')
+                if os.path.isdir(os.path.join(sandbox_cand, 'aichat')):
+                    return sandbox_dir
 
     return os.path.join(os.getcwd(), 'models')
 
