@@ -22,7 +22,7 @@ import 'package:media_kit/media_kit.dart';
 /// Then, it checks if the platform is Windows, Linux or macOS. If it is, it gets the current screen and sets the window title, minimum size and maximum size.
 /// Finally, it runs the FamilyDamApp widget wrapped in a ProviderScope using the runApp function.
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   // Must add this line.
@@ -36,7 +36,7 @@ Future<void> main() async {
   if (kDebugMode) {
     MainApp.logLevel = 'debug';
   } else {
-    for (final arg in Platform.executableArguments) {
+    for (final arg in args) {
       if (arg.startsWith('--log-level=')) {
         MainApp.logLevel = arg.substring('--log-level='.length).toLowerCase();
         break;
