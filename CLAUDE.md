@@ -120,7 +120,7 @@ On startup, `PythonManager` spawns the bundled `aiserver` binary as a subprocess
 | `POST /import/pst` | Parse Outlook PST files |
 | `POST /download-model` | Download models from Hugging Face |
 
-On app close, `windowManager.onWindowClose` triggers `pythonManager.stopAiChatService()` (SIGTERM → 5s → SIGKILL).
+On app close, `windowManager.onWindowClose` triggers `pythonManager.stopAiServerService()` (SIGTERM → 5s → SIGKILL).
 
 ### Flutter State & Data Flow
 

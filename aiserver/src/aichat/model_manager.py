@@ -91,8 +91,8 @@ def load_embedding_model(model_id: str, filename: str, local_dir: str) -> Any:
     """
     print(f"[EMBEDDING] Attempting to load embedding model: {model_id}")
     
-    # Check if it's the Qwen-VL or SigLIP Transformers model
-    if "VL" in model_id or "siglip" in model_id.lower():
+    # Check if it's the Qwen-VL Transformers model
+    if "VL" in model_id:
         return load_transformers_embedding_model(model_id, local_dir)
     
     # Default to LlamaCpp for GGUF models
@@ -122,38 +122,13 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
     
     device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[EMBEDDING] Using device: {device}")
-    
-    import sys
+
     # The Makefile downloads the full repo into models/<org>/<model_name>/
     # so local_dir is already the parent, just use it directly.
     model_path = local_dir
     if not os.path.isdir(model_path):
-        # Build list of potential alternative paths for SigLip2
-        paths_to_check = []
-        if "siglip" in model_id.lower():
-            if getattr(sys, 'frozen', False):
-                # 1. PyInstaller onefile: sys._MEIPASS/models/siglip2
-                if hasattr(sys, '_MEIPASS'):
-                    paths_to_check.append(os.path.join(sys._MEIPASS, 'models', 'siglip2'))
-                # 2. PyInstaller onedir/COLLECT: <exe_dir>/_internal/models/siglip2
-                exe_dir = os.path.dirname(sys.executable)
-                paths_to_check.append(os.path.join(exe_dir, '_internal', 'models', 'siglip2'))
-                # 3. Inside execution directory
-                paths_to_check.append(os.path.join(exe_dir, 'models', 'siglip2'))
-            # 4. Local development path relative to workspace root
-            paths_to_check.append("./models/siglip2")
-            
-        found_alt = False
-        for alt_path in paths_to_check:
-            if os.path.isdir(alt_path):
-                model_path = alt_path
-                print(f"[EMBEDDING] Redirecting SigLip2 to local directory: {model_path}")
-                found_alt = True
-                break
-                
-        if not found_alt:
-            # Fallback to model_id for HF Hub auto-download
-            model_path = model_id
+        # Fallback to model_id for HF Hub auto-download
+        model_path = model_id
 
     print(f"[EMBEDDING] Loading from {model_path}...")
     model = AutoModel.from_pretrained(
@@ -189,65 +164,6 @@ def generate_embedding(
     return generate_transformers_multimodal_embedding(model, processor, text, image_base64, filename)
 
 
-def _generate_siglip_embedding(
-    model: Any, 
-    processor: Any, 
-    text: Optional[str] = None, 
-    image_base64: Optional[str] = None,
-    filename: Optional[str] = None
-) -> List[float]:
-    import base64
-    import io
-    from PIL import Image
-
-    device = next(model.parameters()).device
-    
-    images = []
-    if image_base64:
-        images.append(decode_base64_image(image_base64, filename))
-            
-    texts = [text] if text else None
-    
-    if images and texts:
-        inputs = processor(text=texts, images=images, padding="max_length", return_tensors="pt").to(device)
-        with torch.no_grad():
-            image_kwargs = {"pixel_values": inputs.pixel_values}
-            if "pixel_attention_mask" in inputs:
-                image_kwargs["attention_mask"] = inputs.pixel_attention_mask
-            if "spatial_shapes" in inputs:
-                image_kwargs["spatial_shapes"] = inputs.spatial_shapes
-            image_features = model.get_image_features(**image_kwargs)
-            text_kwargs = {"input_ids": inputs.input_ids}
-            if "attention_mask" in inputs:
-                text_kwargs["attention_mask"] = inputs.attention_mask
-            text_features = model.get_text_features(**text_kwargs)
-            image_embeds = torch.nn.functional.normalize(image_features, p=2, dim=1)
-            text_embeds = torch.nn.functional.normalize(text_features, p=2, dim=1)
-            embeddings = torch.nn.functional.normalize(image_embeds + text_embeds, p=2, dim=1)
-    elif images:
-        inputs = processor(images=images, padding="max_length", return_tensors="pt").to(device)
-        with torch.no_grad():
-            image_kwargs = {"pixel_values": inputs.pixel_values}
-            if "pixel_attention_mask" in inputs:
-                image_kwargs["attention_mask"] = inputs.pixel_attention_mask
-            if "spatial_shapes" in inputs:
-                image_kwargs["spatial_shapes"] = inputs.spatial_shapes
-            image_features = model.get_image_features(**image_kwargs)
-            embeddings = torch.nn.functional.normalize(image_features, p=2, dim=1)
-    elif texts:
-        inputs = processor(text=texts, padding="max_length", return_tensors="pt").to(device)
-        with torch.no_grad():
-            text_kwargs = {"input_ids": inputs.input_ids}
-            if "attention_mask" in inputs:
-                text_kwargs["attention_mask"] = inputs.attention_mask
-            text_features = model.get_text_features(**text_kwargs)
-            embeddings = torch.nn.functional.normalize(text_features, p=2, dim=1)
-    else:
-        raise ValueError("Either text or image_base64 must be provided.")
-        
-    return embeddings[0].tolist()
-
-
 def generate_transformers_multimodal_embedding(
     model: Any, 
     processor: Any, 
@@ -256,13 +172,8 @@ def generate_transformers_multimodal_embedding(
     filename: Optional[str] = None
 ) -> List[float]:
     """
-    Generate embeddings using Qwen-VL or SigLIP Transformers model.
+    Generate embeddings using Qwen3-VL Transformers model.
     """
-    model_type = getattr(getattr(model, 'config', object()), 'model_type', '')
-    model_name = getattr(getattr(model, 'config', object()), '_name_or_path', '')
-    if 'siglip' in model_type.lower() or 'siglip' in model_name.lower():
-        return _generate_siglip_embedding(model, processor, text, image_base64, filename)
-        
     device = next(model.parameters()).device
     
     content = []

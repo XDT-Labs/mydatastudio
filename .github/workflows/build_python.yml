@@ -47,33 +47,33 @@ jobs:
     #   run: choco install cmake ninja -y
 
     - name: Install Python Dependencies
-      working-directory: client/assets/python/aichat
+      working-directory: aiserver
       run: pdm install --dev
       env:
         FORCE_CMAKE: "1"
         CMAKE_ARGS: ${{ matrix.cmake_args }}
 
     - name: Build with PyInstaller
-      working-directory: client/assets/python/aichat
+      working-directory: aiserver
       run: pdm run pyinstaller -y main.spec
 
     - name: Upload Artifact (macOS)
       if: matrix.os == 'macos-latest'
       uses: actions/upload-artifact@v4
       with:
-        name: aichat-macos
-        path: client/assets/python/aichat/dist/aichat
+        name: aiserver-macos
+        path: aiserver/dist/aiserver
 
     # - name: Upload Artifact (Windows)
     #   if: matrix.os == 'windows-latest'
     #   uses: actions/upload-artifact@v4
     #   with:
-    #     name: aichat-windows
-    #     path: client/assets/python/aichat/dist/aichat.exe
+    #     name: aiserver-windows
+    #     path: aiserver/dist/aiserver.exe
 
     # - name: Upload Artifact (Linux)
     #   if: matrix.os == 'ubuntu-latest'
     #   uses: actions/upload-artifact@v4
     #   with:
-    #     name: aichat-linux
-    #     path: client/assets/python/aichat/dist/aichat
+    #     name: aiserver-linux
+    #     path: aiserver/dist/aiserver

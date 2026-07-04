@@ -2,7 +2,7 @@
 
 PDM is simply a package manager (like Node's NPM) that installs Python dependencies. Zipping the PDM project folder only zips raw source code; it **does not** create an executable.
 
-To create the standalone `aichat` executable that your Flutter app expects to run, you must compile the code using `PyInstaller`.
+To create the standalone `aiserver` executable that your Flutter app expects to run, you must compile the code using `PyInstaller`.
 ```bash
 cd aiserver
 
@@ -17,17 +17,17 @@ hf download ggml-org/gemma-4-E4B-it-GGUF gemma-4-E4B-it-Q4_K_M.gguf --local-dir 
 pdm run pyinstaller -y main.spec
 
 # 3. Zip the compiled output for Flutter
-cd dist/aichat
+cd dist/aiserver
 zip -r ../../../client/app/aiserver-macos.zip .
 cd ../../../client/app/
 
 # 4. Copy to your application support directory to test locally
-cp ./*.zip ~/Library/Application\ Support/com.xdtlabs.mydatastudio/
+cp ./*.zip ~/Library/Application\ Support/com.xdtlabs.mydatastudio.dev/
 ```
 
 ## All in one
 ```
-clear && cd aiserver && pdm install && pdm run pyinstaller -y main.spec && cd dist/aichat && zip -r ../../../client/app/aiserver-macos.zip . && cd ../../../client/app/ && cp ./*.zip ~/Library/Application\ Support/com.xdtlabs.mydatastudio/ && cd ../..
+clear && cd aiserver && pdm install && pdm run pyinstaller -y main.spec && cd dist/aiserver && zip -r ../../../client/app/aiserver-macos.zip . && cd ../../../client/app/ && cp ./*.zip ~/Library/Application\ Support/com.xdtlabs.mydatastudio.dev/ && cd ../..
 ```
 
 

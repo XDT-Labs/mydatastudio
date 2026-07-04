@@ -216,37 +216,19 @@ void main() {
       expect(missing.any((f) => f.id == fileId), isTrue);
       expect(missing.firstWhere((f) => f.id == fileId).path, equals('/photos/test_img.png'));
 
-      // Upsert a 2048-dimension embedding (Qwen3)
-      final qwenEmbedding = List<double>.filled(2048, 0.5);
-      await dbRepo.upsertFileEmbedding(fileId, qwenEmbedding);
+      // Upsert a 2048-dimension embedding (Qwen3-VL)
+      final embedding = List<double>.filled(2048, 0.5);
+      await dbRepo.upsertFileEmbedding(fileId, embedding);
 
-      // Check database to ensure qwen3_8b_embedding is populated but siglip2_embedding is null
+      // Check database to ensure qwen3_vl_embedding is populated
       var rows = await db.select(
-        'SELECT qwen3_8b_embedding, siglip2_embedding FROM files_embeddings WHERE file_id = ?',
+        'SELECT qwen3_vl_embedding FROM files_embeddings WHERE file_id = ?',
         [fileId],
       );
       expect(rows, isNotEmpty);
-      expect(rows.first['qwen3_8b_embedding'], isNotNull);
-      expect(rows.first['siglip2_embedding'], isNull);
+      expect(rows.first['qwen3_vl_embedding'], isNotNull);
 
-      // Since siglip2_embedding is still missing/null, getFilesWithMissingEmbeddings should still return it
-      missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 10);
-      expect(missing.any((f) => f.id == fileId), isTrue);
-
-      // Upsert a 1152-dimension embedding (SigLip2)
-      final siglipEmbedding = List<double>.filled(1152, 0.8);
-      await dbRepo.upsertFileEmbedding(fileId, siglipEmbedding);
-
-      // Check database to ensure both are populated now
-      rows = await db.select(
-        'SELECT qwen3_8b_embedding, siglip2_embedding FROM files_embeddings WHERE file_id = ?',
-        [fileId],
-      );
-      expect(rows, isNotEmpty);
-      expect(rows.first['qwen3_8b_embedding'], isNotNull);
-      expect(rows.first['siglip2_embedding'], isNotNull);
-
-      // Now both are present, so getFilesWithMissingEmbeddings should NOT return it
+      // Now the embedding is present, so getFilesWithMissingEmbeddings should NOT return it
       missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 10);
       expect(missing.any((f) => f.id == fileId), isFalse);
 

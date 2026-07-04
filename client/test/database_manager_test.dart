@@ -115,6 +115,30 @@ void main() {
       DatabaseManager.instance.dispose();
     });
 
+    test('initializeDatabase should throw FileSystemException if storage directory is inaccessible', () async {
+      DatabaseManager.isTesting = false;
+      final supportPath = await getApplicationSupportDirectory();
+      final configFile = io.File(p.join(supportPath.path, 'config.json'));
+
+      // Use a storage path that cannot be accessed or created
+      const inaccessiblePath = '/non_existent_volume_xyz_123/storage_dir';
+
+      configFile.createSync(recursive: true);
+      configFile.writeAsStringSync(jsonEncode({
+        'storage': inaccessiblePath,
+      }));
+
+      expect(
+        () => DatabaseManager.instance.initializeDatabase(),
+        throwsA(isA<io.FileSystemException>()),
+      );
+
+      // Cleanup
+      DatabaseManager.isTesting = true;
+      configFile.deleteSync();
+      DatabaseManager.instance.dispose();
+    });
+
     test('testPathSupportsWal should return true for local temporary path', () async {
       final testPath = p.join(tempDir!.path, 'wal_test_dir');
       final supports = await DatabaseManager.testPathSupportsWal(testPath);

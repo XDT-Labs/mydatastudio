@@ -275,7 +275,7 @@ class EmbeddingIsolate {
         Uri.parse("$serviceUrl/util/embedding"),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'model_name': 'google/siglip2-so400m-patch16-naflex',
+          'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
           'filename': filename,
           'image_base64': base64Image,
         }),

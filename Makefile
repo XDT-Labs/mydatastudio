@@ -4,7 +4,7 @@
 # Usage:
 #   make all            - Build everything (models, python, client)
 #   make models         - Download GGUF models from Hugging Face
-#   make build-python   - Build and zip the Python aichat service
+#   make build-python   - Build and zip the Python aiserver service
 #   make build-client   - Build the Flutter Desktop client (macOS release)
 #   make notarize       - Notarize the macOS build (requires APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID env vars)
 #   make clean          - Remove all build artifacts
@@ -24,8 +24,8 @@ APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = ggml-org/gemma-4-12B-it-GGUF
 HF_FILE = gemma-4-12B-it-Q4_K_M.gguf
 HF_MMPROJ_FILE = mmproj-gemma-4-12B-it-Q8_0.gguf
-HF_SIGLIP_MODEL = google/siglip2-so400m-patch16-naflex
-HF_SIGLIP_DIR = $(PYTHON_DIR)/models/siglip2
+HF_QWEN3_VL_MODEL = Qwen/Qwen3-VL-Embedding-2B
+HF_QWEN3_VL_DIR = $(PYTHON_DIR)/models/Qwen-Qwen3-VL-Embedding-2B-local
 
 # Apple config
 APPLE_ID = mike@xdtlabs.com
@@ -38,7 +38,7 @@ FLUTTER_DIR = client
 # --- Targets ---
 
 .PHONY: all
-all: models build-python local-install-python build-client 
+all: models build-python build-client 
 
 .PHONY: dev
 dev: models build-python local-install-python
@@ -68,11 +68,11 @@ models:
 	else \
 		echo "$(HF_MMPROJ_FILE) already exists, skipping download."; \
 	fi
-	@if [ ! -d $(HF_SIGLIP_DIR) ]; then \
-		echo "Downloading SigLip 2 embedding model (Transformers)..."; \
-		hf download $(HF_SIGLIP_MODEL) --local-dir $(HF_SIGLIP_DIR); \
+	@if [ ! -d $(HF_QWEN3_VL_DIR) ]; then \
+		echo "Downloading Qwen3-VL-Embedding-2B model (Transformers)..."; \
+		hf download $(HF_QWEN3_VL_MODEL) --local-dir $(HF_QWEN3_VL_DIR); \
 	else \
-		echo "SigLip 2 embedding model already exists, skipping download."; \
+		echo "Qwen3-VL-Embedding-2B model already exists, skipping download."; \
 	fi
 
 	
@@ -81,7 +81,7 @@ models:
 # 2. Build Python Service
 .PHONY: build-python
 build-python:
-	@echo "--- 🐍 Building Python aichat service ---"
+	@echo "--- 🐍 Building Python aiserver service ---"
 	@cd $(PYTHON_DIR) && \
 		pdm install && \
 		FORCE_CMAKE=1 CMAKE_ARGS="-DGGML_METAL=on -DGGML_NATIVE=off" pdm run pyinstaller -y main.spec
@@ -95,20 +95,20 @@ build-python:
 		exit 1; \
 	fi; \
 	echo "--- Phase 1: Signing standalone Mach-O binaries (outside .framework bundles) ---"; \
-	find -L $(PYTHON_DIR)/dist/aichat -type f -not -path '*/*.framework/*' | while read -r file; do \
+	find -L $(PYTHON_DIR)/dist/aiserver -type f -not -path '*/*.framework/*' | while read -r file; do \
 		if file "$$file" | grep -q "Mach-O"; then \
 			echo "  Signing: $$file"; \
 			codesign --force --options runtime --timestamp --sign "$$IDENTITY" "$$file"; \
 		fi; \
 	done; \
 	echo "--- Phase 2: Signing .framework bundles as whole units ---"; \
-	find $(PYTHON_DIR)/dist/aichat -name '*.framework' -type d | while read -r fw; do \
+	find $(PYTHON_DIR)/dist/aiserver -name '*.framework' -type d | while read -r fw; do \
 		echo "  Signing framework: $$fw"; \
 		codesign --force --options runtime --timestamp --sign "$$IDENTITY" "$$fw"; \
 	done; \
 	echo "--- Phase 3: Verifying all signatures ---"; \
 	VERIFY_FAIL_LOG=$$(mktemp); \
-	find -L $(PYTHON_DIR)/dist/aichat \( -type f \) | while read -r file; do \
+	find -L $(PYTHON_DIR)/dist/aiserver \( -type f \) | while read -r file; do \
 		if file "$$file" 2>/dev/null | grep -q "Mach-O"; then \
 			if ! codesign --verify --strict "$$file" 2>/dev/null; then \
 				echo "  FAILED: $$file"; \
@@ -126,7 +126,7 @@ build-python:
 	echo "All signatures verified successfully."
 	@mkdir -p client/app
 	@rm -f client/app/$(APP_ZIP_NAME)
-	@ditto -c -k --sequesterRsrc $(PYTHON_DIR)/dist/aichat client/app/$(APP_ZIP_NAME)
+	@ditto -c -k --sequesterRsrc $(PYTHON_DIR)/dist/aiserver client/app/$(APP_ZIP_NAME)
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
 
 
@@ -155,7 +155,7 @@ local-install-python: build-python
 		echo "Installing to realm: $$REALM"; \
 		mkdir -p ~/Library/Application\ Support/$$REALM/ && \
 		cp $(APP_ZIP_PATH) ~/Library/Application\ Support/$$REALM/ && \
-		rm -fr ~/Library/Application\ Support/$$REALM/aichat; \
+		rm -fr ~/Library/Application\ Support/$$REALM/aiserver; \
 	done
 	@echo "--- ✅ Copy complete ---"
 
