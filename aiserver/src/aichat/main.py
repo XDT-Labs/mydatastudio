@@ -16,7 +16,9 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from typing import Optional
 
 from fastapi import FastAPI
@@ -69,8 +71,25 @@ def _get_log_dir() -> Optional[str]:
     return os.path.join(support_dir, 'logs')
 
 
+def _cleanup_old_logs(log_dir: str, max_age_days: int = 7) -> None:
+    """Delete app_*/aiserver_* log files older than max_age_days, run once on startup."""
+    cutoff = time.time() - max_age_days * 86400
+    try:
+        for name in os.listdir(log_dir):
+            if not (name.startswith('app_') or name.startswith('aiserver_')):
+                continue
+            path = os.path.join(log_dir, name)
+            try:
+                if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
 def setup_logging(log_level: str = 'info') -> None:
-    """Configure root logger with console + timestamped file handler."""
+    """Configure root logger with console + timestamped, size-capped file handler."""
     level = getattr(logging, log_level.upper(), logging.INFO)
     fmt = logging.Formatter(
         '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
@@ -86,13 +105,18 @@ def setup_logging(log_level: str = 'info') -> None:
     ch.setFormatter(fmt)
     root.addHandler(ch)
 
-    # File handler — new timestamped file each startup
+    # File handler — new timestamped file each startup, capped at 10MB with
+    # up to 3 rotated backups so a single long-running session can't grow
+    # unbounded; anything older than 7 days is swept on startup.
     log_dir = _get_log_dir()
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
+        _cleanup_old_logs(log_dir)
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         log_file = os.path.join(log_dir, f'aiserver_{timestamp}.log')
-        fh = logging.FileHandler(log_file, encoding='utf-8')
+        fh = RotatingFileHandler(
+            log_file, maxBytes=10 * 1024 * 1024, backupCount=3, encoding='utf-8'
+        )
         fh.setLevel(level)
         fh.setFormatter(fmt)
         root.addHandler(fh)

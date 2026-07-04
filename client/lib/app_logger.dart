@@ -72,8 +72,16 @@ class ConcisePrinter extends LogPrinter {
 
 class CustomLogOutput extends LogOutput {
   final ConsoleOutput consoleOutput = ConsoleOutput();
-  File? _logFile;
-  bool _initialized = false;
+
+  // Shared across every AppLogger/CustomLogOutput instance in this isolate —
+  // AppLogger(...) is constructed ad-hoc throughout the app (and once per
+  // relayed message in isolate loops), but they must all append to the same
+  // session log file rather than each opening its own.
+  static File? _logFile;
+  static int _bytesWritten = 0;
+  static bool _cleanedOldLogs = false;
+  static const int _maxBytesPerFile = 10 * 1024 * 1024; // 10MB
+  static const Duration _maxLogAge = Duration(days: 7);
 
   @override
   Future<void> init() async {
@@ -86,27 +94,7 @@ class CustomLogOutput extends LogOutput {
     consoleOutput.output(event);
 
     try {
-      if (!_initialized) {
-        // Safe to check because in isolates, this subject is empty.
-        if (MainApp.appDataDirectory.hasValue &&
-            MainApp.appDataDirectory.value != null) {
-          final logDir = Directory(
-            p.join(MainApp.appDataDirectory.value!, 'logs'),
-          );
-          if (!logDir.existsSync()) {
-            logDir.createSync(recursive: true);
-          }
-          // Unique timestamp per startup so each run gets its own log file.
-          final ts = DateTime.now()
-              .toIso8601String()
-              .split('.')
-              .first
-              .replaceAll(':', '-')
-              .replaceAll('T', '_');
-          _logFile = File(p.join(logDir.path, 'app_$ts.log'));
-          _initialized = true;
-        }
-      }
+      _ensureLogFile();
 
       if (_logFile != null) {
         // Strip ANSI color codes
@@ -115,9 +103,68 @@ class CustomLogOutput extends LogOutput {
             .join('\n');
         final text = '$parsedLines\n';
         _logFile!.writeAsStringSync(text, mode: FileMode.append);
+        _bytesWritten += text.length;
+
+        if (_bytesWritten >= _maxBytesPerFile) {
+          _rotateLogFile(_logFile!.parent);
+        }
       }
     } catch (_) {
       // Ignore file writing errors
+    }
+  }
+
+  static void _ensureLogFile() {
+    if (_logFile != null) return;
+    // Safe to check because in isolates, this subject is empty.
+    if (!MainApp.appDataDirectory.hasValue ||
+        MainApp.appDataDirectory.value == null) {
+      return;
+    }
+
+    final logDir = Directory(p.join(MainApp.appDataDirectory.value!, 'logs'));
+    if (!logDir.existsSync()) {
+      logDir.createSync(recursive: true);
+    }
+
+    if (!_cleanedOldLogs) {
+      _cleanedOldLogs = true;
+      _deleteOldLogs(logDir);
+    }
+
+    _rotateLogFile(logDir);
+  }
+
+  /// Opens a new session log file. Called once at startup, and again if the
+  /// current file grows past [_maxBytesPerFile] during a long-running session.
+  static void _rotateLogFile(Directory logDir) {
+    final ts = DateTime.now()
+        .toIso8601String()
+        .split('.')
+        .first
+        .replaceAll(':', '-')
+        .replaceAll('T', '_');
+    _logFile = File(p.join(logDir.path, 'app_$ts.log'));
+    _bytesWritten = 0;
+  }
+
+  /// Deletes app/aiserver log files older than [_maxLogAge], run once per
+  /// process on first log write.
+  static void _deleteOldLogs(Directory logDir) {
+    final cutoff = DateTime.now().subtract(_maxLogAge);
+    try {
+      for (final entity in logDir.listSync()) {
+        if (entity is! File) continue;
+        final name = p.basename(entity.path);
+        if (!name.startsWith('app_') && !name.startsWith('aiserver_')) {
+          continue;
+        }
+        if (entity.statSync().modified.isBefore(cutoff)) {
+          entity.deleteSync();
+        }
+      }
+    } catch (_) {
+      // Ignore cleanup errors
     }
   }
 
