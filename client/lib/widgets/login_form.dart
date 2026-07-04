@@ -38,6 +38,7 @@ class _LoginFormState extends State<LoginForm> {
           synchronizable: true,
           accessibility: KeychainAccessibility.first_unlock,
         ),
+        mOptions: MacOsOptions(useDataProtectionKeyChain: false),
       );
 
       if (secureStorage != null) {
@@ -198,6 +199,7 @@ class _LoginFormState extends State<LoginForm> {
               synchronizable: true,
               accessibility: KeychainAccessibility.first_unlock,
             ),
+            mOptions: MacOsOptions(useDataProtectionKeyChain: false),
           );
           await storage.write(
             key: AppConstants.secureRememberMe,
