@@ -112,6 +112,9 @@ class _SetupStep2State extends State<SetupStep2> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
     //handle async setup for validators
     var dir = MainApp.supportDirectory.valueOrNull;
     var field = storageForm.findControl('storageLocation');
@@ -134,101 +137,119 @@ class _SetupStep2State extends State<SetupStep2> {
     return ReactiveForm(
       formGroup: storageForm,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          ReactiveTextField(
-            readOnly: true,
-            formControlName: 'storageLocation',
-            decoration: const InputDecoration(
-              label: Text('Storage Location'),
-              prefixIcon: Icon(Icons.folder_open),
+          Text(
+            'Choose your archive location',
+            style: textTheme.titleLarge?.copyWith(color: colorScheme.onSurface),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'This is where My Data Studio stores everything it downloads from your '
+            'other online services — files, emails, social media posts, and more. '
+            'Choose your largest hard drive. If you have an external NAS or drive, use that.',
+            style: textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
             ),
           ),
-          TextButton(
-            onPressed: () async {
-              String? result = await FilePicker.platform.getDirectoryPath();
-              if (result != null) {
-                storageForm.findControl('storageLocation')?.value = result;
-                MainApp.appDataDirectory.add(result);
-                final supportsWal = await DatabaseManager.testPathSupportsWal(result);
-                setState(() {
-                  isNetworkShare = !supportsWal;
-                });
-              }
-            },
-            child: const Text("Browse"),
-          ),
-          Container(height: 16),
-          errorMessage != null
-              ? Text(errorMessage!, style: const TextStyle(color: Colors.red))
-              : Container(),
-          isNetworkShare
-              ? const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8.0),
-                  child: Text(
-                    'Notice: The selected path is on a network share. The database will be stored locally on your primary drive for compatibility and performance, while your files and backups will remain on the network share.',
-                    style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
-                  ),
-                )
-              : Container(),
-          const Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'Select a directory, on your LARGEST DRIVE, to store all metadata and the local backup of all cloud drives, email attachements, and social media posts.',
-              textAlign: TextAlign.left,
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(10),
             ),
-          ),
-          Container(height: 8),
-          const Align(
-            alignment: Alignment.centerLeft,
             child: Row(
               children: [
-                Text(
-                  'Default: ',
-                  textAlign: TextAlign.left,
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                Icon(Icons.folder_outlined, color: colorScheme.onSurfaceVariant),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ReactiveTextField(
+                    readOnly: true,
+                    formControlName: 'storageLocation',
+                    style: TextStyle(color: colorScheme.onSurface),
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      isDense: true,
+                    ),
+                  ),
                 ),
-                Text(
-                  'OS Application Support Directory',
-                  textAlign: TextAlign.left,
+                const SizedBox(width: 12),
+                OutlinedButton(
+                  onPressed: () async {
+                    String? result =
+                        await FilePicker.platform.getDirectoryPath();
+                    if (result != null) {
+                      storageForm.findControl('storageLocation')?.value =
+                          result;
+                      MainApp.appDataDirectory.add(result);
+                      final supportsWal =
+                          await DatabaseManager.testPathSupportsWal(result);
+                      setState(() {
+                        isNetworkShare = !supportsWal;
+                      });
+                    }
+                  },
+                  child: const Text('Browse'),
                 ),
               ],
             ),
           ),
-          Container(height: 16),
-          ReactiveFormConsumer(
-            builder: (context, form, child) {
-              return Align(
-                alignment: Alignment.centerRight,
-                child: SizedBox(
-                  width: 170,
-                  height: 54,
-                  child: Row(
-                    children: <Widget>[
-                      TextButton(
-                        onPressed: () => onStepCancelHandler(),
-                        child: const Text('Back'),
-                      ),
-                      OutlinedButton(
-                        onPressed:
-                            storageForm.valid
-                                ? () => onStepContinueHandler(context)
-                                : null,
-                        style: ButtonStyle(
-                          backgroundColor:
-                              storageForm.valid
-                                  ? WidgetStateProperty.all<Color>(Colors.green)
-                                  : WidgetStateProperty.all<Color>(Colors.grey),
-                          foregroundColor: WidgetStateProperty.all<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                        child: const Text('Continue'),
-                      ),
-                    ],
-                  ),
+          const SizedBox(height: 12),
+          if (errorMessage != null)
+            Text(
+              errorMessage!,
+              style: TextStyle(color: colorScheme.error),
+            ),
+          if (isNetworkShare)
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: colorScheme.tertiaryContainer.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: colorScheme.tertiary),
                 ),
-              );
-            },
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, color: colorScheme.tertiary, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'This path is on a network share. The database will be stored '
+                        'locally on your primary drive for compatibility and performance, '
+                        'while your files and backups remain on the network share.',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              TextButton(
+                onPressed: () => onStepCancelHandler(),
+                child: const Text('Back'),
+              ),
+              const Spacer(),
+              ReactiveFormConsumer(
+                builder: (context, form, child) {
+                  return FilledButton(
+                    onPressed:
+                        storageForm.valid
+                            ? () => onStepContinueHandler(context)
+                            : null,
+                    child: const Text('Continue'),
+                  );
+                },
+              ),
+            ],
           ),
         ],
       ),

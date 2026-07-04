@@ -13,8 +13,7 @@ import 'package:mydatastudio/services/get_user_service.dart';
 import 'package:mydatastudio/widgets/setup/setup_step1.dart';
 import 'package:mydatastudio/widgets/setup/setup_step2.dart';
 import 'package:mydatastudio/widgets/setup/setup_step3.dart';
-import 'package:flutter/material.dart'
-    as material; //create alias because Padding is in multiple widgets
+import 'package:mydatastudio/widgets/setup/setup_step4.dart';
 import 'package:flutter/material.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:go_router/go_router.dart';
@@ -28,6 +27,12 @@ class SetupStepperForm extends StatefulWidget {
   State<SetupStepperForm> createState() => _SetupStepperFormState();
 }
 
+class _StepInfo {
+  const _StepInfo(this.title, this.icon);
+  final String title;
+  final IconData icon;
+}
+
 class _SetupStepperFormState extends State<SetupStepperForm> {
   final AppLogger logger = AppLogger(null);
   final windowManager = WindowManager.instance;
@@ -35,13 +40,51 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
   AppUser? appUser;
   int currentStep = 0;
 
+  static const _stepInfo = <_StepInfo>[
+    _StepInfo('Account', Icons.person_outline),
+    _StepInfo('Storage', Icons.folder_outlined),
+    _StepInfo('Encryption', Icons.key_outlined),
+    _StepInfo('Language', Icons.language),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    return Stepper(
-      type: StepperType.horizontal,
-      currentStep: currentStep,
-      controlsBuilder: (context, details) => Container(),
-      steps: getSteps(context),
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            for (int i = 0; i < _stepInfo.length; i++) ...[
+              if (i > 0) const SizedBox(width: 6),
+              Expanded(
+                child: Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color:
+                        i <= currentStep
+                            ? colorScheme.primary
+                            : colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Step ${currentStep + 1} of ${_stepInfo.length} — ${_stepInfo[currentStep].title}',
+          style: textTheme.labelLarge?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 24),
+        getSteps(context)[currentStep],
+      ],
     );
   }
 
@@ -62,7 +105,7 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
     //update user
     appUser = appUser_;
 
-    bool isLastStep = (step == getSteps(context).length - 1);
+    bool isLastStep = (step == _stepInfo.length - 1);
     if (isLastStep) {
       //final validation before saving user, redirect back if needed
       if (appUser == null) {
@@ -74,10 +117,12 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
         setState(() {
           currentStep = 1;
         });
+        return;
       } else if (appUser!.publicKey == null || appUser!.privateKey == null) {
         setState(() {
           currentStep = 2;
         });
+        return;
       }
 
       //Write storage location to local lookup file.
@@ -139,7 +184,6 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
         context.go("/");
       }
     } else if (appUser != null) {
-      //CurrentStep.gotoStep(step + 1);
       setState(() {
         currentStep = step + 1;
       });
@@ -158,45 +202,26 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
     return <String, dynamic>{'storage': storagePath, 'database': databasePath};
   }
 
-  List<Step> getSteps(BuildContext context) {
-    return <Step>[
-      Step(
-        state: currentStep > 0 ? StepState.complete : StepState.indexed,
-        isActive: currentStep >= 0,
-        title: const Text("Personal Info"),
-        content: material.Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 48),
-          child: SetupStep1(
-            onCancel: () => onStepCancelHandler(),
-            onSubmit: (user) => onStepContinueHandler(context, user, 0),
-          ),
-        ),
+  List<Widget> getSteps(BuildContext context) {
+    return <Widget>[
+      SetupStep1(
+        onCancel: () => onStepCancelHandler(),
+        onSubmit: (user) => onStepContinueHandler(context, user, 0),
       ),
-      Step(
-        state: currentStep > 1 ? StepState.complete : StepState.indexed,
-        isActive: currentStep >= 1,
-        title: const Text("Storage"),
-        content: material.Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 48),
-          child: SetupStep2(
-            appUser: appUser,
-            onCancel: () => onStepCancelHandler(),
-            onSubmit: (user) => onStepContinueHandler(context, user, 1),
-          ),
-        ),
+      SetupStep2(
+        appUser: appUser,
+        onCancel: () => onStepCancelHandler(),
+        onSubmit: (user) => onStepContinueHandler(context, user, 1),
       ),
-      Step(
-        state: currentStep > 2 ? StepState.complete : StepState.indexed,
-        isActive: currentStep >= 2,
-        title: const Text("Encryption Keys"),
-        content: material.Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 48),
-          child: SetupStep3(
-            appUser: appUser,
-            onCancel: () => onStepCancelHandler(),
-            onSubmit: (user) => onStepContinueHandler(context, user, 2),
-          ),
-        ),
+      SetupStep3(
+        appUser: appUser,
+        onCancel: () => onStepCancelHandler(),
+        onSubmit: (user) => onStepContinueHandler(context, user, 2),
+      ),
+      SetupStep4(
+        appUser: appUser,
+        onCancel: () => onStepCancelHandler(),
+        onSubmit: (user) => onStepContinueHandler(context, user, 3),
       ),
     ];
   }

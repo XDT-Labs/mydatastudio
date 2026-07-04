@@ -1,12 +1,12 @@
 import 'dart:io';
 
-import 'package:mydatastudio/helpers/encryption_form_validator.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mydatastudio/helpers/encryption_helper.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/models/tables/app_user.dart';
-import 'package:flutter/material.dart';
 import 'package:pointycastle/pointycastle.dart';
-import 'package:reactive_forms/reactive_forms.dart';
 
 class SetupStep3 extends StatefulWidget {
   const SetupStep3({
@@ -29,22 +29,8 @@ class _SetupStep3State extends State<SetupStep3> {
   final AppLogger logger = AppLogger(null);
   bool _isSubmitting = false;
 
-  final encryptionForm = FormGroup(
-    {
-      'publicKey': FormControl<String>(
-        value: '',
-        validators: [Validators.required],
-      ),
-      'privateKey': FormControl<String>(
-        value: '',
-        validators: [Validators.required],
-      ),
-    },
-    validators: [EncryptionFormValidator('publicKey', 'privateKey')],
-  );
-
   //async method to load os data and initialize form
-  AppUser initForm(AppUser appUser) {
+  AppUser _ensureKeys(AppUser appUser) {
     if (appUser.localStoragePath.isNotEmpty) {
       //check storage location for existing public & private pem files to use
       var keysDir = Directory(
@@ -59,7 +45,6 @@ class _SetupStep3State extends State<SetupStep3> {
       }
       //if existing files don't exists, generate new keys
       else if (appUser.publicKey == null) {
-        var encHelper = EncryptionHelper();
         AsymmetricKeyPair<RSAPublicKey, RSAPrivateKey> keys =
             encHelper.generateRSAkeyPair();
         appUser.publicKey = encHelper.encodePublicKeyToPemPKCS1(keys.publicKey);
@@ -67,137 +52,248 @@ class _SetupStep3State extends State<SetupStep3> {
           keys.privateKey,
         );
       }
-      return appUser;
     }
     return appUser;
   }
 
-  void onResetKeysHandler() {
-    encryptionForm.findControl('publicKey')?.value = '';
-    encryptionForm.findControl('privateKey')?.value = '';
+  Future<void> _confirmRegenerateKeys(AppUser appUser) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Regenerate encryption keys?'),
+            content: const Text(
+              'Any files already encrypted with the current keys will no longer '
+              'be readable. This cannot be undone.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Regenerate'),
+              ),
+            ],
+          ),
+    );
 
-    AsymmetricKeyPair<RSAPublicKey, RSAPrivateKey> keys =
-        encHelper.generateRSAkeyPair();
-    encryptionForm.findControl('publicKey')?.value = encHelper
-        .encodePublicKeyToPemPKCS1(keys.publicKey);
-    encryptionForm.findControl('privateKey')?.value = encHelper
-        .encodePrivateKeyToPemPKCS1(keys.privateKey);
+    if (confirmed == true) {
+      AsymmetricKeyPair<RSAPublicKey, RSAPrivateKey> keys =
+          encHelper.generateRSAkeyPair();
+      setState(() {
+        appUser.publicKey = encHelper.encodePublicKeyToPemPKCS1(keys.publicKey);
+        appUser.privateKey = encHelper.encodePrivateKeyToPemPKCS1(
+          keys.privateKey,
+        );
+      });
+    }
+  }
+
+  void _viewKeys(AppUser appUser) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Your Encryption Keys'),
+            content: SizedBox(
+              width: 480,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _keyBlock(context, 'Public Key', appUser.publicKey ?? ''),
+                    const SizedBox(height: 16),
+                    _keyBlock(context, 'Private Key', appUser.privateKey ?? ''),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  Widget _keyBlock(BuildContext context, String label, String value) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            IconButton(
+              icon: const Icon(Icons.copy, size: 18),
+              tooltip: 'Copy to clipboard',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: value));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('$label copied to clipboard')),
+                );
+              },
+            ),
+          ],
+        ),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: SelectableText(
+            value,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _downloadKeys(AppUser appUser) async {
+    final result = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Choose a location to save a backup copy of your keys',
+    );
+    if (result == null) return;
+
+    try {
+      File(
+        '$result${Platform.pathSeparator}public.pem',
+      ).writeAsStringSync(appUser.publicKey ?? '');
+      File(
+        '$result${Platform.pathSeparator}private.pem',
+      ).writeAsStringSync(appUser.privateKey ?? '');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Keys saved to $result')),
+        );
+      }
+    } catch (e) {
+      logger.e('Failed to save keys: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to save keys to that location')),
+        );
+      }
+    }
   }
 
   void onStepContinueHandler(BuildContext context, AppUser user) {
-    //Do something with this information
-    logger.d('setup step 3 is complete');
-
-    if (encryptionForm.valid) {
-      var privateKey = encryptionForm.findControl('privateKey')?.value;
-      var publicKey = encryptionForm.findControl('publicKey')?.value;
-
-      user.publicKey = publicKey;
-      user.privateKey = privateKey;
-      //callback with updated properties
-      //ref.watch(setupAppUserProvider.notifier).state = appUser;
-
-      widget.onSubmit(user);
-    }
+    widget.onSubmit(user);
   }
 
   @override
   Widget build(BuildContext context) {
     if (widget.appUser == null) {
-      return Container();
+      return const SizedBox.shrink();
     }
+
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     var appUserClone = widget.appUser!;
-    //handle async setup for validators
     if (appUserClone.publicKey == null || appUserClone.privateKey == null) {
-      appUserClone = initForm(appUserClone);
-      //set form values
-      encryptionForm.updateValue({
-        'publicKey': appUserClone.publicKey,
-        'privateKey': appUserClone.privateKey,
-      });
+      appUserClone = _ensureKeys(appUserClone);
     }
 
-    if (widget.appUser!.publicKey == null) {
-      return Container();
-    }
-
-    return ReactiveForm(
-      formGroup: encryptionForm,
-      child: Column(
-        children: <Widget>[
-          ReactiveTextField(
-            formControlName: 'publicKey',
-            minLines: 5,
-            maxLines: 10,
-            decoration: const InputDecoration(
-              label: Text('Public Key'),
-              prefixIcon: Icon(Icons.key),
-              border: OutlineInputBorder(borderSide: BorderSide(width: 2)),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Encryption keys',
+          style: textTheme.titleLarge?.copyWith(color: colorScheme.onSurface),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'My Data Studio generated a private/public key pair to secure your '
+          'archive. They\'re stored in your archive folder — you can view or '
+          'download a backup copy below.',
+          style: textTheme.bodyMedium?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.check_circle, color: colorScheme.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Encryption keys ready',
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed: () => _viewKeys(appUserClone),
+              icon: const Icon(Icons.visibility_outlined, size: 18),
+              label: const Text('View Keys'),
             ),
-          ),
-          Container(height: 16),
-          ReactiveTextField(
-            formControlName: 'privateKey',
-            minLines: 5,
-            maxLines: 10,
-            decoration: const InputDecoration(
-              label: Text('Private Key'),
-              prefixIcon: Icon(Icons.key),
-              border: OutlineInputBorder(borderSide: BorderSide(width: 2)),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: () => _downloadKeys(appUserClone),
+              icon: const Icon(Icons.download_outlined, size: 18),
+              label: const Text('Download Keys'),
             ),
-          ),
-          Container(height: 16),
-          ReactiveFormConsumer(
-            builder: (context, form, child) {
-              return Row(
-                children: <Widget>[
-                  TextButton(
-                    onPressed: () => onResetKeysHandler(),
-                    child: const Text('regenerate keys'),
-                  ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => widget.onCancel(),
-                    child: const Text('Back'),
-                  ),
-                  OutlinedButton(
-                    onPressed:
-                        (encryptionForm.valid && !_isSubmitting)
-                            ? () {
-                              setState(() {
-                                _isSubmitting = true;
-                              });
-                              onStepContinueHandler(context, appUserClone);
-                            }
-                            : null,
-                    style: ButtonStyle(
-                      backgroundColor:
-                          (encryptionForm.valid && !_isSubmitting)
-                              ? WidgetStateProperty.all<Color>(Colors.green)
-                              : WidgetStateProperty.all<Color>(Colors.grey),
-                      foregroundColor: WidgetStateProperty.all<Color>(
-                        Colors.white,
-                      ),
-                    ),
-                    child:
-                        _isSubmitting
-                            ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                            : const Text('Complete Setup'),
-                  ),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: () => _confirmRegenerateKeys(appUserClone),
+          child: const Text('Regenerate keys'),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: <Widget>[
+            TextButton(
+              onPressed: () => widget.onCancel(),
+              child: const Text('Back'),
+            ),
+            const Spacer(),
+            FilledButton(
+              onPressed:
+                  _isSubmitting
+                      ? null
+                      : () {
+                        setState(() {
+                          _isSubmitting = true;
+                        });
+                        onStepContinueHandler(context, appUserClone);
+                      },
+              child:
+                  _isSubmitting
+                      ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                      : const Text('Continue'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

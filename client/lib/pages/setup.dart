@@ -6,36 +6,63 @@ class SetupPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scaffoldKey = GlobalKey<ScaffoldState>();
-    //final textTheme = Theme.of(context).textTheme;
-    //final colorScheme = Theme.of(context).colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      key: scaffoldKey,
-      backgroundColor: Colors.white,
-      body: Row(
-        children: [
-          Expanded(
-            flex: 4,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 48),
-              child: Column(
-                children: [
-                  const Text('MyData Studio', style: TextStyle(fontSize: 48)),
-                  Container(height: 16),
-                  const Text(
-                    'Keep a local copy of your digital life. \n\n\n',
-                    style: TextStyle(fontSize: 16),
+      backgroundColor: colorScheme.surfaceContainerLowest,
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        colorScheme.primary,
+                        colorScheme.primaryContainer,
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                ],
-              ),
+                  child: Icon(
+                    Icons.storage_rounded,
+                    color: colorScheme.onPrimary,
+                    size: 36,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text('My Data Studio', style: textTheme.headlineMedium),
+                const SizedBox(height: 8),
+                Text(
+                  'Keep a local copy of your digital life.',
+                  style: textTheme.bodyLarge?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: colorScheme.outlineVariant),
+                  ),
+                  child: const SetupStepperForm(),
+                ),
+              ],
             ),
           ),
-          const Expanded(
-            flex: 6,
-            child: Dialog(child: SizedBox.expand(child: SetupStepperForm())),
-          ),
-        ],
+        ),
       ),
     );
   }
