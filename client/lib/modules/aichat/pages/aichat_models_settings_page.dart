@@ -483,7 +483,7 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Built-in model. Always available.',
+              'Downloaded automatically on first launch. Progress shows on the AI Chat screen.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),

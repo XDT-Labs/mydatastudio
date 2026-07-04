@@ -476,7 +476,9 @@ class AppDatabase {
     final now = DateTime.now().millisecondsSinceEpoch;
     final models = [
       // ── Local GGUF models ──────────────────────────────────────────────────
-      // gemma4:12b is bundled with the app; always enabled
+      // gemma4:12b is the default chat model — no longer bundled with the app;
+      // ModelDownloadManager downloads it automatically on first startup and
+      // enables this row once the download completes.
       {
         'id': const Uuid().v4(),
         'alias': 'gemma4:12b',
@@ -487,7 +489,22 @@ class AppDatabase {
         'mmproj': 'mmproj-gemma-4-12B-it-Q8_0.gguf',
         'hf_repo': 'ggml-org/gemma-4-12B-it-GGUF',
         'chat_handler': 'Gemma4ChatHandler',
-        'enabled': 1,
+        'enabled': 0,
+      },
+      // Default embedding model (text + image) used for file/photo search.
+      // Not chat-selectable (group isn't in AichatPage's dropdown groups) —
+      // ModelDownloadManager downloads and enables it automatically at startup.
+      {
+        'id': const Uuid().v4(),
+        'alias': 'qwen3-vl-embedding:2b',
+        'group': 'embedding',
+        'name': 'Qwen 3 VL Embedding 2B',
+        'type': 'transformers',
+        'file': null,
+        'mmproj': null,
+        'hf_repo': 'Qwen/Qwen3-VL-Embedding-2B',
+        'chat_handler': null,
+        'enabled': 0,
       },
       // Downloadable local models — disabled until the user downloads them
       {

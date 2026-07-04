@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
@@ -6,6 +7,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/family_dam_app.dart';
 import 'package:mydatastudio/pages/splash.dart';
 import 'package:mydatastudio/python_manager.dart';
+import 'package:mydatastudio/services/model_download_manager.dart';
 
 import 'package:mydatastudio/repositories/watchers/database_change_watcher.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
@@ -171,6 +173,9 @@ class MainAppState extends State<MainApp>
         final pythonMgr = await PythonManager.forAppSupport();
         await pythonMgr.startAiServerService();
         MainApp.pythonManager = pythonMgr;
+        // Fire-and-forget: download default AI Chat models in the background
+        // rather than blocking app startup on multi-gigabyte downloads.
+        unawaited(ModelDownloadManager.instance.start());
       } catch (e) {
         if (mounted) {
           setState(() {

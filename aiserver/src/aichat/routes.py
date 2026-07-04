@@ -6,7 +6,7 @@ import os
 import json
 import time
 import uuid
-from typing import Dict, Any, Generator
+from typing import Dict, Any, Generator, Optional
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -26,7 +26,10 @@ from .model_manager import (
     generate_embedding as gen_emb_fn,
     load_gemini_model,
 )
-from .utils import get_local_path, find_local_model, download_gguf_model, stream_download_gguf, _resolve_models_base
+from .utils import (
+    get_local_path, find_local_model, download_gguf_model, stream_download_gguf,
+    stream_download_snapshot, is_snapshot_downloaded, _resolve_models_base,
+)
 from .state import (
     get_llm_instance, set_llm_instance,
     get_current_model_id, set_current_model_id,
@@ -46,6 +49,23 @@ def _resolve_embedding_model(alias: str) -> tuple:
         return row['hf_repo'], row['file']
     # Fall back to treating the alias as a raw HF repo ID (existing behaviour)
     return alias, alias.split('/')[-1] if '/' in alias else alias
+
+
+def _embedding_model_downloaded(model_id: str, filename: Optional[str]) -> bool:
+    """Local-disk-only check mirroring load_embedding_model()'s own routing
+    (Transformers snapshot for VL models, single GGUF file otherwise).
+
+    Callers must check this before invoking load_embedding_model() — without
+    it, an embedding request for a model that isn't downloaded yet falls
+    through to Transformers' from_pretrained(model_id), which silently
+    triggers its own blocking HuggingFace download from inside the request
+    path instead of failing fast and pointing the caller at
+    /util/download-model (which the client already drives with progress UI).
+    """
+    local_path = get_local_path(model_id)
+    if "VL" in model_id:
+        return is_snapshot_downloaded(model_id, local_path)
+    return find_local_model(filename, local_path) is not None
 
 
 def _gemini_user_error(exc: Exception) -> str:
@@ -422,8 +442,13 @@ async def generate_embedding_v1(request: EmbeddingV1Request) -> Dict[str, Any]:
         embedding_model, _ = get_embedding_model()
         target_alias = request.model
         if embedding_model is None or get_embedding_model_id() != target_alias:
+            model_name, filename = _resolve_embedding_model(target_alias)
+            if not _embedding_model_downloaded(model_name, filename):
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Embedding model '{target_alias}' is not downloaded yet. Download it via /util/download-model first.",
+                )
             try:
-                model_name, filename = _resolve_embedding_model(target_alias)
                 local_path = get_local_path(model_name)
                 model, processor = load_embedding_model(model_name, filename, local_path)
                 set_embedding_model(model, processor)
@@ -464,9 +489,14 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
     async with embedding_lock:
         embedding_model, embedding_processor = get_embedding_model()
         if embedding_model is None or embedding_processor is None:
+            model_id = request.model_name
+            filename = request.filename
+            if not _embedding_model_downloaded(model_id, filename):
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Embedding model '{model_id}' is not downloaded yet. Download it via /util/download-model first.",
+                )
             try:
-                model_id = request.model_name
-                filename = request.filename
                 local_path = get_local_path(model_id)
                 model, processor = load_embedding_model(model_id, filename, local_path)
                 set_embedding_model(model, processor)
@@ -505,11 +535,22 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
 
 
 async def download_model(request: DownloadModelRequest):
-    """Download a GGUF model from HuggingFace, streaming SSE progress events."""
+    """Download a model from HuggingFace, streaming SSE progress events.
+
+    Downloads a single GGUF file when `filename` is set, or the entire repo
+    snapshot when it's null (multi-file Transformers models e.g. embedding models).
+    """
     import json
     model_id = request.model_name
     filename = request.filename
     local_path = get_local_path(model_id)
+
+    if filename is None:
+        print(f"[DOWNLOAD] Request to download snapshot {model_id}")
+        return StreamingResponse(
+            stream_download_snapshot(model_id, local_path, hf_token=request.hf_token),
+            media_type="text/event-stream",
+        )
 
     print(f"[DOWNLOAD] Request to download {model_id}/{filename}")
 
@@ -523,6 +564,23 @@ async def download_model(request: DownloadModelRequest):
         stream_download_gguf(model_id, filename, local_path, hf_token=request.hf_token),
         media_type="text/event-stream",
     )
+
+
+async def check_model_status(request: DownloadModelRequest) -> Dict[str, Any]:
+    """Local-only check for whether a model (GGUF file or full snapshot) is
+    already downloaded. Never hits the network — used to decide whether a
+    download needs to run without re-verifying against HuggingFace on every launch.
+    """
+    model_id = request.model_name
+    filename = request.filename
+    local_path = get_local_path(model_id)
+
+    if filename is None:
+        exists = is_snapshot_downloaded(model_id, local_path)
+        return {"exists": exists, "model_path": local_path if exists else None}
+
+    existing = find_local_model(filename, local_path)
+    return {"exists": existing is not None, "model_path": existing}
 
 
 def _assert_within_models_dir(path: str, models_dir: str, label: str = "Path") -> None:

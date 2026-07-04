@@ -4,12 +4,14 @@ Unit tests for the utils module, specifically path generation, downloading, and 
 import pytest
 import os
 import sys
-from unittest.mock import patch, mock_open
+from unittest.mock import patch, mock_open, MagicMock
 
 from aichat.utils import (
     get_local_path,
     get_local_zip_path,
-    download_gguf_model_if_needed
+    download_gguf_model_if_needed,
+    stream_download_snapshot,
+    is_snapshot_downloaded,
 )
 
 class TestUtils:
@@ -87,6 +89,88 @@ class TestUtils:
         mock_exists.side_effect = exists_side_effect
         
         result = download_gguf_model_if_needed("repo", "file.gguf", "/tmp")
-        
+
         assert result == "/tmp/file.gguf"
         mock_hf_download.assert_not_called()
+
+
+class TestStreamDownloadSnapshot:
+    """Covers the multi-file repo download path used for Transformers models
+    like Qwen3-VL-Embedding-2B, which can't be fetched as a single GGUF file."""
+
+    def test_skips_download_when_all_files_already_present(self, tmp_path):
+        (tmp_path / "config.json").write_text("{}")
+
+        with patch('huggingface_hub.HfApi') as mock_api_cls, \
+             patch('requests.head') as mock_head, \
+             patch('requests.get') as mock_get:
+            mock_api_cls.return_value.list_repo_files.return_value = ["config.json"]
+
+            events = list(stream_download_snapshot("org/model", str(tmp_path)))
+
+        assert len(events) == 1
+        assert '"status": "complete"' in events[0]
+        mock_head.assert_not_called()
+        mock_get.assert_not_called()
+
+    def test_downloads_missing_files_and_writes_them_to_disk(self, tmp_path):
+        with patch('huggingface_hub.HfApi') as mock_api_cls, \
+             patch('huggingface_hub.hf_hub_url', side_effect=lambda repo_id, filename: f"https://hf/{filename}"), \
+             patch('requests.head') as mock_head, \
+             patch('requests.get') as mock_get:
+            mock_api_cls.return_value.list_repo_files.return_value = ["config.json", "sub/tokenizer.json"]
+            mock_head.return_value.headers = {'content-length': '10'}
+
+            mock_response = MagicMock()
+            mock_response.__enter__.return_value = mock_response
+            mock_response.iter_content.return_value = [b'0123456789']
+            mock_get.return_value = mock_response
+
+            events = list(stream_download_snapshot("org/model", str(tmp_path)))
+
+        assert any('"status": "complete"' in e for e in events)
+        assert (tmp_path / "config.json").exists()
+        assert (tmp_path / "sub" / "tokenizer.json").exists()
+
+    def test_yields_error_event_on_failure_instead_of_raising(self, tmp_path):
+        with patch('huggingface_hub.HfApi') as mock_api_cls:
+            mock_api_cls.return_value.list_repo_files.side_effect = Exception("network down")
+
+            events = list(stream_download_snapshot("org/model", str(tmp_path)))
+
+        assert len(events) == 1
+        assert '"status": "error"' in events[0]
+        assert "network down" in events[0]
+
+    def test_rejects_path_traversal_in_repo_filename(self, tmp_path):
+        """model_id is caller-controlled, so a malicious/compromised repo
+        returning a '../'-laden filename must not write outside local_path."""
+        outside_file = tmp_path.parent / "escaped.txt"
+
+        with patch('huggingface_hub.HfApi') as mock_api_cls:
+            mock_api_cls.return_value.list_repo_files.return_value = ["../escaped.txt"]
+
+            events = list(stream_download_snapshot("org/model", str(tmp_path)))
+
+        assert len(events) == 1
+        assert '"status": "error"' in events[0]
+        assert not outside_file.exists()
+
+
+class TestIsSnapshotDownloaded:
+    """Local-only readiness check used to avoid re-downloading (or re-hitting
+    HuggingFace) on every app launch once a snapshot is complete."""
+
+    def test_false_when_directory_missing(self, tmp_path):
+        assert is_snapshot_downloaded("org/model", str(tmp_path / "missing")) is False
+
+    def test_false_when_directory_empty(self, tmp_path):
+        assert is_snapshot_downloaded("org/model", str(tmp_path)) is False
+
+    def test_true_once_a_real_file_exists(self, tmp_path):
+        (tmp_path / "config.json").write_text("{}")
+        assert is_snapshot_downloaded("org/model", str(tmp_path)) is True
+
+    def test_ignores_hidden_files_like_ds_store(self, tmp_path):
+        (tmp_path / ".DS_Store").write_text("")
+        assert is_snapshot_downloaded("org/model", str(tmp_path)) is False

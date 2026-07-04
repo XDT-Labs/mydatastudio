@@ -6,7 +6,8 @@ Endpoints:
   GET  /skills                    List built-in skills for client autocomplete
   POST /v1/chat/completions       OpenAI-compatible chat (auto-loads model)
   POST /v1/embeddings             OpenAI-compatible text embeddings
-  POST /util/download-model       Download a GGUF model from Hugging Face
+  POST /util/download-model       Download a GGUF file or full repo snapshot from Hugging Face
+  POST /util/model-status         Check (local disk only) whether a model is already downloaded
   POST /util/embedding            Multimodal embeddings (text or image)
   POST /util/thumbnail            Generate image thumbnails (incl. RAW formats)
   POST /util/import/pst           Stream-parse an Outlook PST file
@@ -125,7 +126,8 @@ app.post("/v1/chat/stop", summary="Stop the active streaming generation")(routes
 app.post("/v1/embeddings", summary="OpenAI-compatible text embeddings")(routes.generate_embedding_v1)
 
 # Util
-app.post("/util/download-model", summary="Download a GGUF model from Hugging Face")(routes.download_model)
+app.post("/util/download-model", summary="Download a GGUF model or full repo snapshot from Hugging Face")(routes.download_model)
+app.post("/util/model-status", summary="Check whether a model is already downloaded (local disk only)")(routes.check_model_status)
 app.post("/util/delete-model", summary="Delete a downloaded GGUF model file")(routes.delete_model)
 app.post("/util/embedding", summary="Multimodal embeddings (text or image)")(routes.generate_embedding)
 app.post("/util/thumbnail", summary="Generate image thumbnail (incl. RAW formats)")(routes.generate_thumbnail)

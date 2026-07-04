@@ -143,7 +143,7 @@ jobs:
       # 2. Download AI Models via Makefile
       # ------------------------------------------
       - name: Download Models
-        # if: false  # TODO: re-enable before shipping — disabled to speed up debug builds
+        if: false  # Models are no longer bundled — the app downloads them at runtime (see ModelDownloadManager)
         run: make models
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}

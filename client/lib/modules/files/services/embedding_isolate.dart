@@ -134,6 +134,15 @@ class EmbeddingIsolate {
           continue;
         }
 
+        // Skip the batch entirely (no point reading/resizing/base64-encoding
+        // files) while the embedding model is still downloading — the server
+        // rejects these requests until it's ready anyway.
+        if (!await _isEmbeddingModelReady(serviceUrl!, logger)) {
+          logger.d("Embedding model not downloaded yet. Sleeping...");
+          await Future.delayed(const Duration(seconds: 30));
+          continue;
+        }
+
         // Query for 10 files with missing embeddings
         final files = await repo.getFilesWithMissingEmbeddings(limit: 10);
 
@@ -183,6 +192,32 @@ class EmbeddingIsolate {
 
       // Heartbeat sleep
       await Future.delayed(const Duration(seconds: 5));
+    }
+  }
+
+  /// Local-disk-only check via the aiserver — never triggers a download,
+  /// just reports whether the embedding model snapshot is already present.
+  static Future<bool> _isEmbeddingModelReady(
+    String serviceUrl,
+    AppLogger logger,
+  ) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$serviceUrl/util/model-status'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+              'filename': null,
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) return false;
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data['exists'] == true;
+    } catch (e) {
+      logger.d("Could not check embedding model status: $e");
+      return false;
     }
   }
 

@@ -30,6 +30,15 @@ class AichatModelRepository {
     return rows.map((r) => AichatModel.fromDbMap(r.cast<String, dynamic>())).toList();
   }
 
+  Future<AichatModel?> getByAlias(String alias) async {
+    final rows = await db.select(
+      'SELECT * FROM aichat_models WHERE alias = ? LIMIT 1',
+      [alias],
+    );
+    if (rows.isEmpty) return null;
+    return AichatModel.fromDbMap(rows.first.cast<String, dynamic>());
+  }
+
   Future<AichatModel?> getById(String id) async {
     final rows = await db.select(
       'SELECT * FROM aichat_models WHERE id = ?',

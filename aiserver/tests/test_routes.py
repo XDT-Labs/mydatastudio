@@ -5,8 +5,13 @@ import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from fastapi import HTTPException
 
-from aichat.routes import health_check, generate_chat_completion, generate_embedding, delete_model
-from aichat.models import ChatCompletionRequest, ChatMessage, EmbeddingRequest, DeleteModelRequest
+from aichat.routes import (
+    health_check, generate_chat_completion, generate_embedding, generate_embedding_v1, delete_model,
+    download_model, check_model_status,
+)
+from aichat.models import (
+    ChatCompletionRequest, ChatMessage, EmbeddingRequest, EmbeddingV1Request, DeleteModelRequest, DownloadModelRequest,
+)
 
 
 class TestHealthCheck:
@@ -226,6 +231,72 @@ class TestMultimodalEmbedding:
             assert exc_info.value.status_code == 400
             assert "LlamaCpp does not support image embeddings" in str(exc_info.value.detail)
 
+    @pytest.mark.asyncio
+    async def test_generate_embedding_rejects_when_model_not_downloaded(self):
+        """Without this guard, an unloaded model falls through to
+        load_embedding_model() -> Transformers' from_pretrained(model_id),
+        which silently kicks off its own blocking HF download from inside
+        the request instead of failing fast."""
+        with patch('aichat.routes.get_locks') as mock_locks, \
+             patch('aichat.routes.get_embedding_model') as mock_get_embed, \
+             patch('aichat.routes.load_embedding_model') as mock_load, \
+             patch('aichat.routes._embedding_model_downloaded', return_value=False) as mock_downloaded:
+
+            mock_locks.return_value = (AsyncMock(), AsyncMock())
+            mock_get_embed.return_value = (None, None)
+
+            with pytest.raises(HTTPException) as exc_info:
+                await generate_embedding(EmbeddingRequest(text="hi", model_name="Qwen/Qwen3-VL-Embedding-2B"))
+
+            assert exc_info.value.status_code == 503
+            mock_downloaded.assert_called_once()
+            mock_load.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_generate_embedding_v1_rejects_when_model_not_downloaded(self):
+        with patch('aichat.routes.get_locks') as mock_locks, \
+             patch('aichat.routes.get_embedding_model') as mock_get_embed, \
+             patch('aichat.routes.load_embedding_model') as mock_load, \
+             patch('aichat.routes._embedding_model_downloaded', return_value=False) as mock_downloaded:
+
+            mock_locks.return_value = (AsyncMock(), AsyncMock())
+            mock_get_embed.return_value = (None, None)
+
+            with pytest.raises(HTTPException) as exc_info:
+                await generate_embedding_v1(EmbeddingV1Request(input="hi", model="bartowski/gemma-3-4b-it-GGUF"))
+
+            assert exc_info.value.status_code == 503
+            mock_downloaded.assert_called_once()
+            mock_load.assert_not_called()
+
+
+class TestEmbeddingModelDownloaded:
+    """_embedding_model_downloaded() mirrors load_embedding_model()'s own
+    routing: VL models are Transformers snapshots, everything else is a
+    single GGUF file."""
+
+    def test_vl_model_checks_snapshot(self):
+        from aichat.routes import _embedding_model_downloaded
+
+        with patch('aichat.routes.get_local_path', return_value="/tmp/qwen-local"), \
+             patch('aichat.routes.is_snapshot_downloaded', return_value=True) as mock_snapshot, \
+             patch('aichat.routes.find_local_model') as mock_find:
+            assert _embedding_model_downloaded("Qwen/Qwen3-VL-Embedding-2B", None) is True
+
+        mock_snapshot.assert_called_once_with("Qwen/Qwen3-VL-Embedding-2B", "/tmp/qwen-local")
+        mock_find.assert_not_called()
+
+    def test_gguf_model_checks_single_file(self):
+        from aichat.routes import _embedding_model_downloaded
+
+        with patch('aichat.routes.get_local_path', return_value="/tmp/gguf-local"), \
+             patch('aichat.routes.find_local_model', return_value="/tmp/gguf-local/model.gguf") as mock_find, \
+             patch('aichat.routes.is_snapshot_downloaded') as mock_snapshot:
+            assert _embedding_model_downloaded("bartowski/gemma-3-4b-it-GGUF", "model.gguf") is True
+
+        mock_find.assert_called_once_with("model.gguf", "/tmp/gguf-local")
+        mock_snapshot.assert_not_called()
+
 
 class TestDeleteModel:
 
@@ -274,4 +345,74 @@ class TestDeleteModel:
         assert not subdir.exists()
         # The root models directory MUST NOT be deleted
         assert os.path.exists(models_dir)
+
+
+class TestDownloadModel:
+    """A null `filename` means "download the whole repo snapshot" (used for
+    multi-file Transformers models like Qwen3-VL-Embedding-2B) instead of a
+    single GGUF file."""
+
+    @pytest.mark.asyncio
+    async def test_null_filename_routes_to_snapshot_download(self):
+        request = DownloadModelRequest(model_name="Qwen/Qwen3-VL-Embedding-2B", filename=None)
+
+        with patch('aichat.routes.get_local_path', return_value="/tmp/qwen-local"), \
+             patch('aichat.routes.stream_download_snapshot') as mock_stream_snapshot, \
+             patch('aichat.routes.stream_download_gguf') as mock_stream_gguf:
+            mock_stream_snapshot.return_value = iter([])
+
+            await download_model(request)
+
+        mock_stream_snapshot.assert_called_once_with("Qwen/Qwen3-VL-Embedding-2B", "/tmp/qwen-local", hf_token=None)
+        mock_stream_gguf.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_filename_set_still_routes_to_single_file_download(self):
+        request = DownloadModelRequest(model_name="ggml-org/gemma-4-12B-it-GGUF", filename="gemma-4-12B-it-Q4_K_M.gguf")
+
+        with patch('aichat.routes.get_local_path', return_value="/tmp/gemma-local"), \
+             patch('aichat.routes.find_local_model', return_value=None), \
+             patch('aichat.routes.stream_download_snapshot') as mock_stream_snapshot, \
+             patch('aichat.routes.stream_download_gguf') as mock_stream_gguf:
+            mock_stream_gguf.return_value = iter([])
+
+            await download_model(request)
+
+        mock_stream_gguf.assert_called_once()
+        mock_stream_snapshot.assert_not_called()
+
+
+class TestCheckModelStatus:
+    """Local-disk-only readiness check the client polls at startup before
+    deciding whether to kick off a download."""
+
+    @pytest.mark.asyncio
+    async def test_snapshot_mode_reports_downloaded(self):
+        request = DownloadModelRequest(model_name="Qwen/Qwen3-VL-Embedding-2B", filename=None)
+
+        with patch('aichat.routes.get_local_path', return_value="/tmp/qwen-local"), \
+             patch('aichat.routes.is_snapshot_downloaded', return_value=True):
+            result = await check_model_status(request)
+
+        assert result == {"exists": True, "model_path": "/tmp/qwen-local"}
+
+    @pytest.mark.asyncio
+    async def test_snapshot_mode_reports_not_downloaded(self):
+        request = DownloadModelRequest(model_name="Qwen/Qwen3-VL-Embedding-2B", filename=None)
+
+        with patch('aichat.routes.get_local_path', return_value="/tmp/qwen-local"), \
+             patch('aichat.routes.is_snapshot_downloaded', return_value=False):
+            result = await check_model_status(request)
+
+        assert result == {"exists": False, "model_path": None}
+
+    @pytest.mark.asyncio
+    async def test_single_file_mode_delegates_to_find_local_model(self):
+        request = DownloadModelRequest(model_name="ggml-org/gemma-4-12B-it-GGUF", filename="gemma-4-12B-it-Q4_K_M.gguf")
+
+        with patch('aichat.routes.get_local_path', return_value="/tmp/gemma-local"), \
+             patch('aichat.routes.find_local_model', return_value="/tmp/gemma-local/gemma-4-12B-it-Q4_K_M.gguf"):
+            result = await check_model_status(request)
+
+        assert result == {"exists": True, "model_path": "/tmp/gemma-local/gemma-4-12B-it-Q4_K_M.gguf"}
 
