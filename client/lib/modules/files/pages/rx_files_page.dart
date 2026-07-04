@@ -524,7 +524,12 @@ class _RxFilesPage extends State<RxFilesPage> {
           return true;
         }
         if (n is SelectionChangedNotification) {
-          setState(() => selectedItems = n.selectedItems);
+          setState(() {
+            selectedItems = n.selectedItems;
+            if (selectedItems.length > 1) {
+              selectedAsset = null;
+            }
+          });
           return true;
         }
         if (n is FileSelectedNotification) {
