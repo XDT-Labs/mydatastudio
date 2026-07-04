@@ -29,6 +29,15 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Free Disk Space (macOS)
+        run: |
+          echo "Disk space before reclaiming:"
+          df -h
+          sudo rm -rf /usr/local/share/dotnet
+          rm -rf ~/Library/Android/sdk
+          echo "Disk space after reclaiming:"
+          df -h
+
       # ------------------------------------------
       # 0. Install Apple Certificate (Required early so we can sign Python binaries during build-python)
       # ------------------------------------------
@@ -156,6 +165,17 @@ jobs:
         env:
           FORCE_CMAKE: "1"
           CMAKE_ARGS: "-DGGML_METAL=on -DGGML_NATIVE=off"
+
+      - name: Clean up Python build and HuggingFace cache to free space
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+          rm -rf ~/.cache/huggingface
+          rm -rf aiserver/models
+          rm -rf aiserver/build
+          rm -rf aiserver/dist
+          echo "Disk space after cleanup:"
+          df -h
 
       # ------------------------------------------
       # 4. Set up Flutter and prepare the Xcode project first
