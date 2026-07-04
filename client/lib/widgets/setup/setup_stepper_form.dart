@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,6 +10,7 @@ import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/repositories/user_repository.dart';
 import 'package:mydatastudio/services/get_user_service.dart';
+import 'package:mydatastudio/services/model_download_manager.dart';
 
 import 'package:mydatastudio/widgets/setup/setup_step1.dart';
 import 'package:mydatastudio/widgets/setup/setup_step2.dart';
@@ -147,6 +149,9 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
         final pythonMgr = await PythonManager.forAppSupport();
         await pythonMgr.startAiServerService();
         MainApp.pythonManager = pythonMgr;
+        // Fire-and-forget: download default AI Chat models in the background,
+        // same as MainAppState._initStartup does on normal launches.
+        unawaited(ModelDownloadManager.instance.start());
       } catch (e) {
         logger.e('Failed to start aiserver after setup: $e');
       }
