@@ -7,11 +7,13 @@ class SetupStep4 extends StatelessWidget {
     required this.appUser,
     required this.onCancel,
     required this.onSubmit,
+    this.isSubmitting = false,
   });
 
   final AppUser? appUser;
   final VoidCallback onCancel;
   final void Function(AppUser) onSubmit;
+  final bool isSubmitting;
 
   @override
   Widget build(BuildContext context) {
@@ -55,13 +57,26 @@ class SetupStep4 extends StatelessWidget {
         Row(
           children: <Widget>[
             TextButton(
-              onPressed: () => onCancel(),
+              onPressed: isSubmitting ? null : () => onCancel(),
               child: const Text('Back'),
             ),
             const Spacer(),
             FilledButton(
-              onPressed: appUser != null ? () => onSubmit(appUser!) : null,
-              child: const Text('Complete Setup'),
+              onPressed:
+                  (appUser != null && !isSubmitting)
+                      ? () => onSubmit(appUser!)
+                      : null,
+              child:
+                  isSubmitting
+                      ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: colorScheme.onPrimary,
+                        ),
+                      )
+                      : const Text('Complete Setup'),
             ),
           ],
         ),

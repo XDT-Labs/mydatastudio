@@ -41,6 +41,7 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
   final encHelper = EncryptionHelper();
   AppUser? appUser;
   int currentStep = 0;
+  bool isSubmitting = false;
 
   static const _stepInfo = <_StepInfo>[
     _StepInfo('Account', Icons.person_outline),
@@ -127,66 +128,79 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
         return;
       }
 
-      //Write storage location to local lookup file.
-      var config = await createConfigFile(appUser);
-      var jsonConfig = jsonEncode(config);
+      setState(() {
+        isSubmitting = true;
+      });
 
-      File(
-        p.join(supportDir, AppConstants.configFileName),
-      ).writeAsStringSync(jsonConfig);
-
-      //initialize empty database in the user defined directory
-      MainApp.appDataDirectory.add(appUser!.localStoragePath);
-
-      // Initialize database
-      await DatabaseManager.instance.initializeDatabase();
-      MainApp.databaseManager = DatabaseManager.instance;
-
-      // Start the embedded aiserver process (normally done on the next app
-      // launch by MainAppState._initStartup, but the setup wizard completes
-      // within the same running process so it must start it here too).
       try {
-        final pythonMgr = await PythonManager.forAppSupport();
-        await pythonMgr.startAiServerService();
-        MainApp.pythonManager = pythonMgr;
-        // Fire-and-forget: download default AI Chat models in the background,
-        // same as MainAppState._initStartup does on normal launches.
-        unawaited(ModelDownloadManager.instance.start());
-      } catch (e) {
-        logger.e('Failed to start aiserver after setup: $e');
-      }
+        //Write storage location to local lookup file.
+        var config = await createConfigFile(appUser);
+        var jsonConfig = jsonEncode(config);
 
-      //Create new instance of User
-      AppUser u = AppUser(
-        id: appUser!.id,
-        name: appUser!.name,
-        email: appUser!.email,
-        password: appUser!.password,
-        localStoragePath: appUser!.localStoragePath,
-      );
-      u.privateKey = appUser!.privateKey;
-      u.publicKey = appUser!.publicKey;
+        File(
+          p.join(supportDir, AppConstants.configFileName),
+        ).writeAsStringSync(jsonConfig);
 
-      //save user to database
-      final savedUser = await UserRepository(
-        DatabaseManager.instance.database!,
-      ).saveUser(u);
-      if (savedUser == null) {
-        throw Exception('Failed to save user');
-      }
+        //initialize empty database in the user defined directory
+        MainApp.appDataDirectory.add(appUser!.localStoragePath);
 
-      //do full login to check everything is ok
-      AppUser? newUser = await GetUserService.instance.invoke(
-        GetUserServiceCommand(appUser!.password),
-      );
-      if (newUser != null) {
-        if (context.mounted) {
-          GoRouter.of(context).go("/");
+        // Initialize database
+        await DatabaseManager.instance.initializeDatabase();
+        MainApp.databaseManager = DatabaseManager.instance;
+
+        // Start the embedded aiserver process (normally done on the next app
+        // launch by MainAppState._initStartup, but the setup wizard completes
+        // within the same running process so it must start it here too).
+        try {
+          final pythonMgr = await PythonManager.forAppSupport();
+          await pythonMgr.startAiServerService();
+          MainApp.pythonManager = pythonMgr;
+          // Fire-and-forget: download default AI Chat models in the background,
+          // same as MainAppState._initStartup does on normal launches.
+          unawaited(ModelDownloadManager.instance.start());
+        } catch (e) {
+          logger.e('Failed to start aiserver after setup: $e');
         }
-      }
 
-      if (context.mounted) {
-        context.go("/");
+        //Create new instance of User
+        AppUser u = AppUser(
+          id: appUser!.id,
+          name: appUser!.name,
+          email: appUser!.email,
+          password: appUser!.password,
+          localStoragePath: appUser!.localStoragePath,
+        );
+        u.privateKey = appUser!.privateKey;
+        u.publicKey = appUser!.publicKey;
+
+        //save user to database
+        final savedUser = await UserRepository(
+          DatabaseManager.instance.database!,
+        ).saveUser(u);
+        if (savedUser == null) {
+          throw Exception('Failed to save user');
+        }
+
+        //do full login to check everything is ok
+        AppUser? newUser = await GetUserService.instance.invoke(
+          GetUserServiceCommand(appUser!.password),
+        );
+        if (newUser != null) {
+          if (context.mounted) {
+            GoRouter.of(context).go("/");
+          }
+        }
+
+        if (context.mounted) {
+          context.go("/");
+        }
+      } catch (e) {
+        logger.e('Setup failed to complete: $e');
+        if (mounted) {
+          setState(() {
+            isSubmitting = false;
+          });
+        }
       }
     } else if (appUser != null) {
       setState(() {
@@ -227,6 +241,7 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
         appUser: appUser,
         onCancel: () => onStepCancelHandler(),
         onSubmit: (user) => onStepContinueHandler(context, user, 3),
+        isSubmitting: isSubmitting,
       ),
     ];
   }
