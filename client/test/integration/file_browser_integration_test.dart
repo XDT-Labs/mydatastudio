@@ -44,6 +44,7 @@ void main() {
     GetFileAndFoldersService.instance.reset();
     RxFilesPage.selectedCollection = PublishSubject();
     RxFilesPage.selectedPath = PublishSubject();
+    ScannerManager.getInstance().scannerFactory = null;
 
     // 1. Create a clean temporary directory for each test
     tempDir = await io.Directory.systemTemp.createTemp(

@@ -111,6 +111,60 @@ class TestChatCompletion:
         assert result["choices"][0]["message"]["content"] == "Gemini response"
 
     @pytest.mark.asyncio
+    @patch('aichat.routes.model_registry.lookup')
+    @patch('aichat.routes._handle_claude_request')
+    async def test_chat_completion_claude_via_db_group(self, mock_handle_claude, mock_lookup):
+        """A model registered with group='claude' is routed to the Claude handler."""
+        mock_lookup.return_value = {"group": "claude"}
+        mock_handle_claude.return_value = {"choices": [{"message": {"content": "Claude response"}}]}
+
+        request = ChatCompletionRequest(
+            model="claude-sonnet-4-5",
+            messages=[ChatMessage(role="user", content="Hi")]
+        )
+
+        result = await generate_chat_completion(request)
+
+        mock_handle_claude.assert_called_once_with(request)
+        assert result["choices"][0]["message"]["content"] == "Claude response"
+
+    @pytest.mark.asyncio
+    @patch('aichat.routes.model_registry.lookup')
+    @patch('aichat.routes._handle_openai_request')
+    async def test_chat_completion_openai_fallback(self, mock_handle_openai, mock_lookup):
+        """If model is not found in the DB (None) but starts with 'gpt', it treats it as OpenAI."""
+        mock_lookup.return_value = None
+        mock_handle_openai.return_value = {"choices": [{"message": {"content": "OpenAI response"}}]}
+
+        request = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role="user", content="Hi")]
+        )
+
+        result = await generate_chat_completion(request)
+
+        mock_handle_openai.assert_called_once_with(request)
+        assert result["choices"][0]["message"]["content"] == "OpenAI response"
+
+    @pytest.mark.asyncio
+    @patch('aichat.routes.model_registry.lookup')
+    @patch('aichat.routes._handle_grok_request')
+    async def test_chat_completion_grok_fallback(self, mock_handle_grok, mock_lookup):
+        """If model is not found in the DB (None) but starts with 'grok', it treats it as Grok."""
+        mock_lookup.return_value = None
+        mock_handle_grok.return_value = {"choices": [{"message": {"content": "Grok response"}}]}
+
+        request = ChatCompletionRequest(
+            model="grok-3",
+            messages=[ChatMessage(role="user", content="Hi")]
+        )
+
+        result = await generate_chat_completion(request)
+
+        mock_handle_grok.assert_called_once_with(request)
+        assert result["choices"][0]["message"]["content"] == "Grok response"
+
+    @pytest.mark.asyncio
     async def test_chat_completion_llama_cpp_path(self):
         """Uses llama_cpp's create_chat_completion when available."""
         mock_llm = Mock()

@@ -8,6 +8,9 @@ from PIL import Image
 
 from aichat.model_manager import (
     load_gemini_model,
+    load_claude_model,
+    load_openai_model,
+    load_grok_model,
     load_local_model,
     load_embedding_model,
     generate_text_embedding,
@@ -40,6 +43,91 @@ class TestModelManager:
             temperature=0.7
         )
         
+    @patch.dict(os.environ, clear=True)
+    def test_load_claude_model_no_key(self):
+        """Test Claude model loading failure when ANTHROPIC_API_KEY is missing."""
+        with pytest.raises(ValueError) as exc_info:
+            load_claude_model()
+
+        assert "ANTHROPIC_API_KEY" in str(exc_info.value)
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake_key"})
+    @patch('aichat.model_manager.ChatAnthropic')
+    def test_load_claude_model_success(self, mock_anthropic):
+        """Test successful Claude model loading."""
+        mock_instance = Mock()
+        mock_anthropic.return_value = mock_instance
+
+        result = load_claude_model()
+
+        assert result == mock_instance
+        mock_anthropic.assert_called_once_with(
+            model="claude-sonnet-4-5",
+            api_key="fake_key",
+            temperature=0.7
+        )
+
+    @patch.dict(os.environ, clear=True)
+    def test_load_openai_model_no_key(self):
+        """Test OpenAI model loading failure when OPENAI_API_KEY is missing."""
+        with pytest.raises(ValueError) as exc_info:
+            load_openai_model()
+
+        assert "OPENAI_API_KEY" in str(exc_info.value)
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "fake_key"})
+    @patch('aichat.model_manager.ChatOpenAI')
+    def test_load_openai_model_success(self, mock_openai):
+        """Test successful OpenAI model loading, with temperature applied for standard models."""
+        mock_instance = Mock()
+        mock_openai.return_value = mock_instance
+
+        result = load_openai_model()
+
+        assert result == mock_instance
+        mock_openai.assert_called_once_with(
+            model="gpt-4o",
+            api_key="fake_key",
+            temperature=0.7
+        )
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "fake_key"})
+    @patch('aichat.model_manager.ChatOpenAI')
+    def test_load_openai_model_reasoning_model_omits_temperature(self, mock_openai):
+        """o-series reasoning models reject any non-default temperature."""
+        mock_instance = Mock()
+        mock_openai.return_value = mock_instance
+
+        result = load_openai_model(model_id="o3")
+
+        assert result == mock_instance
+        mock_openai.assert_called_once_with(model="o3", api_key="fake_key")
+
+    @patch.dict(os.environ, clear=True)
+    def test_load_grok_model_no_key(self):
+        """Test Grok model loading failure when XAI_API_KEY is missing."""
+        with pytest.raises(ValueError) as exc_info:
+            load_grok_model()
+
+        assert "XAI_API_KEY" in str(exc_info.value)
+
+    @patch.dict(os.environ, {"XAI_API_KEY": "fake_key"})
+    @patch('aichat.model_manager.ChatOpenAI')
+    def test_load_grok_model_success(self, mock_openai):
+        """Test successful Grok model loading, using OpenAI-compatible client against x.ai's base_url."""
+        mock_instance = Mock()
+        mock_openai.return_value = mock_instance
+
+        result = load_grok_model()
+
+        assert result == mock_instance
+        mock_openai.assert_called_once_with(
+            model="grok-3",
+            api_key="fake_key",
+            base_url="https://api.x.ai/v1",
+            temperature=0.7
+        )
+
     @patch('aichat.model_manager.LlamaCpp')
     def test_load_local_model_success(self, mock_llamacpp):
         """Test successful local LlamaCpp model loading."""

@@ -15,6 +15,8 @@ from transformers import AutoModel, AutoProcessor
 from qwen_vl_utils import process_vision_info
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from langchain_community.llms import LlamaCpp
 
 from .config import MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE
@@ -42,6 +44,85 @@ def load_gemini_model(model_id: str = "gemini-2.0-flash", api_key: Optional[str]
     return ChatGoogleGenerativeAI(
         model=model_id,
         google_api_key=resolved_key,
+        temperature=TEMPERATURE,
+    )
+
+
+def load_claude_model(model_id: str = "claude-sonnet-4-5", api_key: Optional[str] = None) -> ChatAnthropic:
+    """
+    Initializes a connection to the Anthropic Claude API.
+
+    Args:
+        model_id: The Claude model ID (e.g. "claude-sonnet-4-5", "claude-opus-4-8").
+        api_key: Anthropic API key. Falls back to ANTHROPIC_API_KEY env var if not provided.
+
+    Raises:
+        ValueError: If no API key is available.
+    """
+    resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not resolved_key:
+        raise ValueError(
+            "Claude API key required. Pass 'api_key' in the request or set the ANTHROPIC_API_KEY environment variable."
+        )
+
+    print(f"[LOADER] Initializing Anthropic Claude client for model: {model_id}")
+    return ChatAnthropic(
+        model=model_id,
+        api_key=resolved_key,
+        temperature=TEMPERATURE,
+    )
+
+
+# o1/o3/o4 reasoning models reject any temperature other than the API default.
+_OPENAI_REASONING_PREFIXES = ("o1", "o3", "o4")
+
+
+def load_openai_model(model_id: str = "gpt-4o", api_key: Optional[str] = None) -> ChatOpenAI:
+    """
+    Initializes a connection to the OpenAI API.
+
+    Args:
+        model_id: The OpenAI model ID (e.g. "gpt-4o", "o3").
+        api_key: OpenAI API key. Falls back to OPENAI_API_KEY env var if not provided.
+
+    Raises:
+        ValueError: If no API key is available.
+    """
+    resolved_key = api_key or os.environ.get("OPENAI_API_KEY")
+    if not resolved_key:
+        raise ValueError(
+            "OpenAI API key required. Pass 'api_key' in the request or set the OPENAI_API_KEY environment variable."
+        )
+
+    print(f"[LOADER] Initializing OpenAI client for model: {model_id}")
+    kwargs: dict = {"model": model_id, "api_key": resolved_key}
+    if not model_id.lower().startswith(_OPENAI_REASONING_PREFIXES):
+        kwargs["temperature"] = TEMPERATURE
+    return ChatOpenAI(**kwargs)
+
+
+def load_grok_model(model_id: str = "grok-3", api_key: Optional[str] = None) -> ChatOpenAI:
+    """
+    Initializes a connection to xAI's Grok API via its OpenAI-compatible endpoint.
+
+    Args:
+        model_id: The Grok model ID (e.g. "grok-3").
+        api_key: xAI API key. Falls back to XAI_API_KEY env var if not provided.
+
+    Raises:
+        ValueError: If no API key is available.
+    """
+    resolved_key = api_key or os.environ.get("XAI_API_KEY")
+    if not resolved_key:
+        raise ValueError(
+            "Grok API key required. Pass 'api_key' in the request or set the XAI_API_KEY environment variable."
+        )
+
+    print(f"[LOADER] Initializing xAI Grok client for model: {model_id}")
+    return ChatOpenAI(
+        model=model_id,
+        api_key=resolved_key,
+        base_url="https://api.x.ai/v1",
         temperature=TEMPERATURE,
     )
 

@@ -25,6 +25,9 @@ from .model_manager import (
     load_embedding_model,
     generate_embedding as gen_emb_fn,
     load_gemini_model,
+    load_claude_model,
+    load_openai_model,
+    load_grok_model,
 )
 from .utils import (
     get_local_path, find_local_model, download_gguf_model, stream_download_gguf,
@@ -68,23 +71,41 @@ def _embedding_model_downloaded(model_id: str, filename: Optional[str]) -> bool:
     return find_local_model(filename, local_path) is not None
 
 
-def _gemini_user_error(exc: Exception) -> str:
-    """Extract a short, human-readable error message from a Gemini API exception."""
+# Cloud chat providers, all wrapped as LangChain chat models with the same
+# .stream() / .invoke() / .usage_metadata interface — one generic handler
+# (_handle_cloud_request) drives all of them; these maps just parameterize it.
+_CLOUD_LOADERS = {
+    "gemini": load_gemini_model,
+    "claude": load_claude_model,
+    "openai": load_openai_model,
+    "grok": load_grok_model,
+}
+_CLOUD_LABELS = {
+    "gemini": "Gemini",
+    "claude": "Claude",
+    "openai": "OpenAI",
+    "grok": "Grok",
+}
+
+
+def _cloud_user_error(provider: str, exc: Exception) -> str:
+    """Extract a short, human-readable error message from a cloud provider API exception."""
+    import re
+    label = _CLOUD_LABELS.get(provider, provider)
     msg = str(exc)
-    # Google API core exceptions carry a readable description after the status code
-    for marker in ("API key not valid", "API_KEY_INVALID", "INVALID_ARGUMENT",
-                   "PERMISSION_DENIED", "RESOURCE_EXHAUSTED", "quota", "model not found"):
-        if marker.lower() in msg.lower():
-            # Pull the first sentence / bracketed description when available
-            import re
-            clean = re.search(r'message:\s*"([^"]+)"', msg)
-            if clean:
-                return f"Gemini error: {clean.group(1)}"
-            # Fall through to trimmed raw message
-            break
+    # Most provider SDKs (Google/OpenAI/Anthropic) embed a readable description
+    # in a message: "..." or 'message': '...' field within a longer exception repr.
+    clean = re.search(r'''message['"]?\s*[:=]\s*['"]([^'"]+)['"]''', msg)
+    if clean:
+        return f"{label} error: {clean.group(1)}"
     # Generic fallback: first line of the exception, capped at 200 chars
     first_line = msg.splitlines()[0][:200]
-    return f"Gemini error: {first_line}"
+    return f"{label} error: {first_line}"
+
+
+def _gemini_user_error(exc: Exception) -> str:
+    """Extract a short, human-readable error message from a Gemini API exception."""
+    return _cloud_user_error("gemini", exc)
 
 
 def _sse_error_chunk(completion_id: str, created_at: int, model: str, message: str) -> str:
@@ -111,17 +132,18 @@ def _error_chat_response(completion_id: str, created_at: int, model: str, messag
     }
 
 
-async def _handle_gemini_request(request: "ChatCompletionRequest"):
-    """Create a per-request Gemini client and generate a response with token usage."""
+async def _handle_cloud_request(provider: str, request: "ChatCompletionRequest"):
+    """Create a per-request cloud LLM client (gemini/claude/openai/grok) and generate a response with token usage."""
     from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
     created_at = int(time.time())
     current_model = request.model
+    label = _CLOUD_LABELS[provider]
+    load_model = _CLOUD_LOADERS[provider]
 
-    gemini_model_id = request.model  # alias == gemini model ID in the DB
     try:
-        llm = load_gemini_model(model_id=gemini_model_id, api_key=request.api_key)
+        llm = load_model(model_id=request.model, api_key=request.api_key)
     except ValueError as e:
         error_msg = str(e)
         if request.stream:
@@ -141,7 +163,7 @@ async def _handle_gemini_request(request: "ChatCompletionRequest"):
             lc_messages.append(AIMessage(content=m.content))
 
     if request.stream:
-        def _gemini_sse_stream() -> Generator[str, None, None]:
+        def _cloud_sse_stream() -> Generator[str, None, None]:
             reset_stop()
             accumulated = None
             try:
@@ -161,8 +183,8 @@ async def _handle_gemini_request(request: "ChatCompletionRequest"):
                         }
                         yield f"data: {json.dumps(payload)}\n\n"
             except Exception as e:
-                print(f"[ERROR] Gemini stream failed: {e}")
-                yield _sse_error_chunk(completion_id, created_at, current_model, _gemini_user_error(e))
+                print(f"[ERROR] {label} stream failed: {e}")
+                yield _sse_error_chunk(completion_id, created_at, current_model, _cloud_user_error(provider, e))
                 yield "data: [DONE]\n\n"
                 return
 
@@ -188,14 +210,14 @@ async def _handle_gemini_request(request: "ChatCompletionRequest"):
             yield f"data: {json.dumps(final)}\n\n"
             yield "data: [DONE]\n\n"
 
-        return StreamingResponse(_gemini_sse_stream(), media_type="text/event-stream")
+        return StreamingResponse(_cloud_sse_stream(), media_type="text/event-stream")
 
     # Non-streaming
     try:
         response = llm.invoke(lc_messages)
     except Exception as e:
-        print(f"[ERROR] Gemini invoke failed: {e}")
-        return _error_chat_response(completion_id, created_at, current_model, _gemini_user_error(e))
+        print(f"[ERROR] {label} invoke failed: {e}")
+        return _error_chat_response(completion_id, created_at, current_model, _cloud_user_error(provider, e))
 
     content = response.content if hasattr(response, 'content') else str(response)
     usage: dict = {"prompt_tokens": -1, "completion_tokens": -1, "total_tokens": -1}
@@ -214,6 +236,22 @@ async def _handle_gemini_request(request: "ChatCompletionRequest"):
         "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
         "usage": usage,
     }
+
+
+async def _handle_gemini_request(request: "ChatCompletionRequest"):
+    return await _handle_cloud_request("gemini", request)
+
+
+async def _handle_claude_request(request: "ChatCompletionRequest"):
+    return await _handle_cloud_request("claude", request)
+
+
+async def _handle_openai_request(request: "ChatCompletionRequest"):
+    return await _handle_cloud_request("openai", request)
+
+
+async def _handle_grok_request(request: "ChatCompletionRequest"):
+    return await _handle_cloud_request("grok", request)
 
 
 async def health_check() -> Dict[str, Any]:
@@ -251,16 +289,31 @@ async def generate_chat_completion(request: ChatCompletionRequest):
 
     db_row = model_registry.lookup(target_alias)
 
-    # Cloud models (Gemini) are stateless API calls — no local loading needed.
-    is_gemini = False
+    # Cloud models (Gemini/Claude/OpenAI/Grok) are stateless API calls — no local loading needed.
     if db_row:
-        is_gemini = db_row.get('group') == 'gemini'
+        provider = db_row.get('group') if db_row.get('group') in _CLOUD_LOADERS else None
     else:
         # Fallback for when the DB is inaccessible (e.g. remote server)
-        is_gemini = target_alias.lower().startswith('gemini')
+        alias_lower = target_alias.lower()
+        if alias_lower.startswith('gemini'):
+            provider = 'gemini'
+        elif alias_lower.startswith('claude'):
+            provider = 'claude'
+        elif alias_lower.startswith(('gpt', 'o1', 'o3')):
+            provider = 'openai'
+        elif alias_lower.startswith('grok'):
+            provider = 'grok'
+        else:
+            provider = None
 
-    if is_gemini:
+    if provider == 'gemini':
         return await _handle_gemini_request(request)
+    if provider == 'claude':
+        return await _handle_claude_request(request)
+    if provider == 'openai':
+        return await _handle_openai_request(request)
+    if provider == 'grok':
+        return await _handle_grok_request(request)
 
     # Load or switch local GGUF model if needed (compare by alias)
     if get_llm_instance() is None or target_alias != get_current_model_id():
