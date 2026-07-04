@@ -129,7 +129,10 @@ class _SetupStep3State extends State<SetupStep3> {
         Row(
           children: [
             Expanded(
-              child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
+              child: Text(
+                label,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
             IconButton(
               icon: const Icon(Icons.copy, size: 18),
@@ -173,9 +176,9 @@ class _SetupStep3State extends State<SetupStep3> {
         '$result${Platform.pathSeparator}private.pem',
       ).writeAsStringSync(appUser.privateKey ?? '');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Keys saved to $result')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Keys saved to $result')));
       }
     } catch (e) {
       logger.e('Failed to save keys: $e');
@@ -214,9 +217,8 @@ class _SetupStep3State extends State<SetupStep3> {
         ),
         const SizedBox(height: 4),
         Text(
-          'My Data Studio generated a private/public key pair to secure your '
-          'archive. They\'re stored in your archive folder — you can view or '
-          'download a backup copy below.',
+          'My Data Studio generates a private/public key pair for future data sharing features and online backups'
+          ' — you can view or download a backup copy below.',
           style: textTheme.bodyMedium?.copyWith(
             color: colorScheme.onSurfaceVariant,
           ),

@@ -146,7 +146,7 @@ class _SetupStep2State extends State<SetupStep2> {
           const SizedBox(height: 4),
           Text(
             'This is where My Data Studio stores everything it downloads from your '
-            'other online services — files, emails, social media posts, and more. '
+            'different online services — files, emails, social media posts, and more. '
             'Choose your largest hard drive. If you have an external NAS or drive, use that.',
             style: textTheme.bodyMedium?.copyWith(
               color: colorScheme.onSurfaceVariant,
@@ -161,7 +161,10 @@ class _SetupStep2State extends State<SetupStep2> {
             ),
             child: Row(
               children: [
-                Icon(Icons.folder_outlined, color: colorScheme.onSurfaceVariant),
+                Icon(
+                  Icons.folder_outlined,
+                  color: colorScheme.onSurfaceVariant,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: ReactiveTextField(
@@ -197,10 +200,7 @@ class _SetupStep2State extends State<SetupStep2> {
           ),
           const SizedBox(height: 12),
           if (errorMessage != null)
-            Text(
-              errorMessage!,
-              style: TextStyle(color: colorScheme.error),
-            ),
+            Text(errorMessage!, style: TextStyle(color: colorScheme.error)),
           if (isNetworkShare)
             Padding(
               padding: const EdgeInsets.only(top: 8.0),
@@ -214,7 +214,11 @@ class _SetupStep2State extends State<SetupStep2> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.info_outline, color: colorScheme.tertiary, size: 18),
+                    Icon(
+                      Icons.info_outline,
+                      color: colorScheme.tertiary,
+                      size: 18,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
