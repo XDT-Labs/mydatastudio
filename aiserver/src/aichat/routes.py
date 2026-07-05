@@ -66,7 +66,7 @@ def _embedding_model_downloaded(model_id: str, filename: Optional[str]) -> bool:
     /util/download-model (which the client already drives with progress UI).
     """
     local_path = get_local_path(model_id)
-    if "VL" in model_id:
+    if filename is None or "vl" in model_id.lower():
         return is_snapshot_downloaded(model_id, local_path)
     return find_local_model(filename, local_path) is not None
 

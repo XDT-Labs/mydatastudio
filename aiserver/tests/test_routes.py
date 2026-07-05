@@ -332,13 +332,29 @@ class TestEmbeddingModelDownloaded:
     def test_vl_model_checks_snapshot(self):
         from aichat.routes import _embedding_model_downloaded
 
+        # 1. Uppercase 'VL', filename is None
         with patch('aichat.routes.get_local_path', return_value="/tmp/qwen-local"), \
              patch('aichat.routes.is_snapshot_downloaded', return_value=True) as mock_snapshot, \
              patch('aichat.routes.find_local_model') as mock_find:
             assert _embedding_model_downloaded("Qwen/Qwen3-VL-Embedding-2B", None) is True
+            mock_snapshot.assert_called_once_with("Qwen/Qwen3-VL-Embedding-2B", "/tmp/qwen-local")
+            mock_find.assert_not_called()
 
-        mock_snapshot.assert_called_once_with("Qwen/Qwen3-VL-Embedding-2B", "/tmp/qwen-local")
-        mock_find.assert_not_called()
+        # 2. Lowercase 'vl', filename is provided
+        with patch('aichat.routes.get_local_path', return_value="/tmp/qwen-local"), \
+             patch('aichat.routes.is_snapshot_downloaded', return_value=True) as mock_snapshot, \
+             patch('aichat.routes.find_local_model') as mock_find:
+            assert _embedding_model_downloaded("qwen/qwen3-vl-embedding-2b", "dummy.gguf") is True
+            mock_snapshot.assert_called_once_with("qwen/qwen3-vl-embedding-2b", "/tmp/qwen-local")
+            mock_find.assert_not_called()
+
+        # 3. No 'vl', but filename is None (Transformers model check)
+        with patch('aichat.routes.get_local_path', return_value="/tmp/some-local"), \
+             patch('aichat.routes.is_snapshot_downloaded', return_value=True) as mock_snapshot, \
+             patch('aichat.routes.find_local_model') as mock_find:
+            assert _embedding_model_downloaded("some-transformers-model", None) is True
+            mock_snapshot.assert_called_once_with("some-transformers-model", "/tmp/some-local")
+            mock_find.assert_not_called()
 
     def test_gguf_model_checks_single_file(self):
         from aichat.routes import _embedding_model_downloaded
