@@ -9,6 +9,12 @@ import tarfile
 import urllib.request
 from typing import Optional
 
+# Written into a snapshot's local_path only once every file has downloaded
+# successfully. Its presence — not "directory is non-empty" — is what
+# is_snapshot_downloaded() checks, so a snapshot interrupted partway through
+# is correctly treated as incomplete and resumed rather than skipped.
+_SNAPSHOT_COMPLETE_MARKER = '.mydatastudio_download_complete'
+
 
 def _resolve_models_base() -> str:
     """
@@ -321,8 +327,9 @@ def stream_download_snapshot(model_id: str, local_path: str, hf_token: Optional[
 
     Used for multi-file Transformers models (e.g. Qwen3-VL-Embedding-2B) that
     can't be downloaded as a single GGUF file via stream_download_gguf(). Files
-    already present locally (matching a prior partial/complete download) are
-    skipped, so this is safe to call on every startup.
+    already present locally with the correct size are skipped; anything
+    missing or truncated (e.g. from a prior interrupted download) is
+    (re)downloaded, so this is safe to call on every startup.
 
     Events:
         {"status": "downloading", "progress": 0.0-1.0, "downloaded_mb": float, "total_mb": float, "current_file": str}
@@ -354,10 +361,17 @@ def stream_download_snapshot(model_id: str, local_path: str, hf_token: Optional[
         # before touching disk or the network.
         dest_paths = {f: _safe_repo_path(local_path, f) for f in all_files}
 
-        # Only download files that aren't already on disk.
-        pending = [f for f in all_files if not os.path.exists(dest_paths[f])]
+        # A file only counts as already-downloaded if its size matches the repo's
+        # reported size — otherwise a prior download interrupted mid-file would be
+        # silently treated as complete and never get its missing bytes filled in.
+        def _is_complete(f: str) -> bool:
+            dest = dest_paths[f]
+            return os.path.exists(dest) and os.path.getsize(dest) == sizes[f]
+
+        pending = [f for f in all_files if not _is_complete(f)]
 
         if not pending:
+            _mark_snapshot_complete(local_path)
             yield f'data: {json.dumps({"status": "complete", "progress": 1.0, "model_path": local_path})}\n\n'
             return
 
@@ -387,6 +401,7 @@ def stream_download_snapshot(model_id: str, local_path: str, hf_token: Optional[
                             yield f'data: {json.dumps({"status": "downloading", "progress": round(progress, 4), "downloaded_mb": downloaded_mb, "total_mb": total_mb, "current_file": f})}\n\n'
                             last_reported = progress
 
+        _mark_snapshot_complete(local_path)
         print(f"[LOADER] Snapshot download complete: {local_path}")
         yield f'data: {json.dumps({"status": "complete", "progress": 1.0, "model_path": local_path})}\n\n'
 
@@ -395,16 +410,22 @@ def stream_download_snapshot(model_id: str, local_path: str, hf_token: Optional[
         yield f'data: {json.dumps({"status": "error", "message": str(e)})}\n\n'
 
 
+def _mark_snapshot_complete(local_path: str) -> None:
+    """Write the completion marker checked by is_snapshot_downloaded()."""
+    with open(os.path.join(local_path, _SNAPSHOT_COMPLETE_MARKER), 'w'):
+        pass
+
+
 def is_snapshot_downloaded(model_id: str, local_path: str) -> bool:
     """
     Cheap, local-only check for whether a full repo snapshot (see
     stream_download_snapshot) has already been downloaded. Does not hit the
-    network — treats a non-empty local_path as "downloaded" since
-    stream_download_snapshot only ever writes real repo files there.
+    network — relies on the completion marker stream_download_snapshot writes
+    once every file in the snapshot has downloaded, rather than merely
+    checking for the directory's existence, so a download interrupted
+    partway through is correctly treated as incomplete rather than skipped.
     """
-    return os.path.isdir(local_path) and any(
-        not entry.name.startswith('.') for entry in os.scandir(local_path)
-    )
+    return os.path.isfile(os.path.join(local_path, _SNAPSHOT_COMPLETE_MARKER))
 
 
 def download_gguf_model_if_needed(model_id: str, filename: str, local_path: str) -> str:

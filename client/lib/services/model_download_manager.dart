@@ -344,33 +344,42 @@ class ModelDownloadManager {
 
     String? resultPath;
     final buffer = StringBuffer();
-    await streamed.stream.transform(const Utf8Decoder()).forEach((chunk) {
-      buffer.write(chunk);
-      final lines = buffer.toString().split('\n');
-      buffer
-        ..clear()
-        ..write(lines.last);
+    try {
+      await streamed.stream.transform(const Utf8Decoder()).forEach((chunk) {
+        buffer.write(chunk);
+        final lines = buffer.toString().split('\n');
+        buffer
+          ..clear()
+          ..write(lines.last);
 
-      for (final line in lines.sublist(0, lines.length - 1)) {
-        if (!line.startsWith('data: ')) continue;
-        final event = jsonDecode(line.substring(6)) as Map<String, dynamic>;
-        final status = event['status'] as String;
+        for (final line in lines.sublist(0, lines.length - 1)) {
+          if (!line.startsWith('data: ')) continue;
+          final event = jsonDecode(line.substring(6)) as Map<String, dynamic>;
+          final status = event['status'] as String;
 
-        if (status == 'downloading') {
-          item.progress = (event['progress'] as num).toDouble();
-          item.downloadedMb = (event['downloaded_mb'] as num).toDouble();
-          item.totalMb = (event['total_mb'] as num).toDouble();
-          _notifyItemsChanged();
-        } else if (status == 'complete') {
-          resultPath = event['model_path'] as String? ?? '';
-          if (resultPath!.isEmpty) resultPath = null;
-          _logger.i('[ModelDownload] Completed $hfRepo/$filename -> $resultPath');
-        } else if (status == 'error') {
-          item.error = event['message'] as String? ?? 'Download failed';
-          _logger.e('[ModelDownload] Server reported error for $hfRepo/$filename: ${item.error}');
+          if (status == 'downloading') {
+            item.progress = (event['progress'] as num).toDouble();
+            item.downloadedMb = (event['downloaded_mb'] as num).toDouble();
+            item.totalMb = (event['total_mb'] as num).toDouble();
+            _notifyItemsChanged();
+          } else if (status == 'complete') {
+            resultPath = event['model_path'] as String? ?? '';
+            if (resultPath!.isEmpty) resultPath = null;
+            _logger.i('[ModelDownload] Completed $hfRepo/$filename -> $resultPath');
+          } else if (status == 'error') {
+            item.error = event['message'] as String? ?? 'Download failed';
+            _logger.e('[ModelDownload] Server reported error for $hfRepo/$filename: ${item.error}');
+          }
         }
-      }
-    });
+      });
+    } catch (e) {
+      // A network interruption mid-stream must only fail this item — letting
+      // it escape would bubble up to start()'s catch-all, which marks every
+      // other pending/downloading item as errored too.
+      _logger.e('[ModelDownload] Stream interrupted for $hfRepo/$filename: $e');
+      item.error = 'Connection interrupted: $e';
+      return null;
+    }
     return resultPath;
   }
 }
