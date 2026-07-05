@@ -332,6 +332,7 @@ def stream_download_snapshot(model_id: str, local_path: str, hf_token: Optional[
     import json
     import requests as req_lib
     from huggingface_hub import HfApi, hf_hub_url
+    from huggingface_hub.hf_api import RepoFile
 
     req_headers = {'User-Agent': 'mydatastudio/1.0'}
     if hf_token:
@@ -342,7 +343,12 @@ def stream_download_snapshot(model_id: str, local_path: str, hf_token: Optional[
 
         api = HfApi()
         skip = {'.gitattributes', 'README.md'}
-        all_files = [f for f in api.list_repo_files(model_id, token=hf_token or None) if f not in skip]
+        # recursive=True yields both RepoFile and RepoFolder entries; only
+        # files carry a `size`, so filter to RepoFile before reading it.
+        repo_files = [f for f in api.list_repo_tree(model_id, recursive=True, token=hf_token or None)
+                      if isinstance(f, RepoFile) and f.path not in skip]
+        all_files = [f.path for f in repo_files]
+        sizes = {f.path: f.size for f in repo_files}
 
         # Validate every filename up front (raises on path traversal attempts)
         # before touching disk or the network.
@@ -355,12 +361,7 @@ def stream_download_snapshot(model_id: str, local_path: str, hf_token: Optional[
             yield f'data: {json.dumps({"status": "complete", "progress": 1.0, "model_path": local_path})}\n\n'
             return
 
-        # HEAD each pending file up front so progress reflects the whole snapshot.
-        sizes = {}
-        for f in pending:
-            url = hf_hub_url(repo_id=model_id, filename=f)
-            head = req_lib.head(url, headers=req_headers, allow_redirects=True, timeout=30)
-            sizes[f] = int(head.headers.get('content-length', 0))
+        sizes = {f: sizes[f] for f in pending}
 
         total_bytes = sum(sizes.values())
         total_mb = round(total_bytes / (1024 * 1024), 1)
