@@ -483,7 +483,7 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Built-in model. Always available.',
+              'Downloaded automatically on first launch. Progress shows on the AI Chat screen.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -712,13 +712,17 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(model.name),
-      subtitle:
-          model.group == 'local'
+      subtitle: (model.description != null && model.description!.isNotEmpty)
+          ? Text(
+              model.description!,
+              style: Theme.of(context).textTheme.bodySmall,
+            )
+          : (model.group == 'local'
               ? Text(
-                model.file ?? model.name,
-                style: Theme.of(context).textTheme.bodySmall,
-              )
-              : null,
+                  model.file ?? model.name,
+                  style: Theme.of(context).textTheme.bodySmall,
+                )
+              : null),
       trailing:
           isDefault
               ? null

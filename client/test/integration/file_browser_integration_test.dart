@@ -25,6 +25,8 @@ import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:mydatastudio/modules/files/widgets/file_drawer.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/files/notifications/path_changed_notification.dart';
+import 'package:mydatastudio/modules/files/notifications/file_notification.dart';
+import 'package:mydatastudio/models/tables/file_asset.dart';
 import 'package:mydatastudio/modules/files/widgets/file_table.dart';
 import 'package:mocktail/mocktail.dart';
 
@@ -42,6 +44,7 @@ void main() {
     GetFileAndFoldersService.instance.reset();
     RxFilesPage.selectedCollection = PublishSubject();
     RxFilesPage.selectedPath = PublishSubject();
+    ScannerManager.getInstance().scannerFactory = null;
 
     // 1. Create a clean temporary directory for each test
     tempDir = await io.Directory.systemTemp.createTemp(
@@ -559,6 +562,126 @@ void main() {
         expect(syncCall['force'], isTrue);
         expect(syncCall['path'], isNull); // Full sync has path == null
       });
+    },
+  );
+
+  testWidgets(
+    'Details drawer closes when more than 1 file is selected',
+    (WidgetTester tester) async {
+      final colId = 'integration-test-col';
+      final collectionPath = p.join(tempDir.path, 'test_files');
+      io.Directory(collectionPath).createSync();
+
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      final user = AppUser(
+        id: const Uuid().v4(),
+        name: 'Integration Test User',
+        email: 'test@example.com',
+        password: 'password',
+        localStoragePath: tempDir.path,
+      );
+
+      await tester.runAsync(() async {
+        final dbMgr = DatabaseManager.instance;
+        final userRepo = UserRepository(dbMgr.database!);
+        await userRepo.saveUser(user);
+      });
+
+      GetUserService.instance.sink.add(user);
+      DatabaseManager.isInitializedNotifier.value = true;
+
+      final colRepo = CollectionRepository(DatabaseManager.instance.database!);
+      await tester.runAsync(() async {
+        await colRepo.addCollection(
+          Collection(
+            id: colId,
+            name: 'Integration Collection',
+            path: collectionPath,
+            type: 'local',
+            scanner: AppConstants.scannerFileLocal,
+            scanStatus: 'idle',
+            needsReAuth: false,
+          ),
+        );
+      });
+
+      // Seed test files
+      io.File(p.join(collectionPath, 'image1.png')).createSync();
+      io.File(p.join(collectionPath, 'image2.png')).createSync();
+
+      final scannerManager = ScannerManager(db);
+      late Collection collection;
+
+      await tester.runAsync(() async {
+        final fetchedCollection = await colRepo.collectionById(colId);
+        collection = fetchedCollection!;
+        await scannerManager.startScanner(collection);
+      });
+
+      // Wait for database persistence
+      final fileRepo = FileDesktopRepository(
+        DatabaseManager.instance.database!,
+      );
+      await tester.runAsync(() async {
+        int retries = 0;
+        int count = 0;
+        while (retries < 40) {
+          final files = await fileRepo.getByParentPath(colId, '');
+          count = files.length;
+          if (count >= 2) break;
+          await Future.delayed(const Duration(milliseconds: 500));
+          retries++;
+        }
+        expect(count, greaterThanOrEqualTo(2));
+      });
+
+      late List<FileAsset> dbFiles;
+      await tester.runAsync(() async {
+        dbFiles = await fileRepo.getByParentPath(colId, '');
+      });
+
+      await tester.runAsync(() async {
+        final collectionsInDb = await colRepo.collections();
+        GetCollectionsService.instance.sink.add(collectionsInDb);
+
+        await tester.pumpWidget(
+          const MaterialApp(home: Scaffold(body: RxFilesPage())),
+        );
+
+        RxFilesPage.selectedCollection.add(collection);
+
+        // Wait for files to load in UI
+        int pumpRetries = 0;
+        while (pumpRetries < 40) {
+          await tester.pump(const Duration(milliseconds: 100));
+          if (find.text('image1.png').evaluate().isNotEmpty) {
+            break;
+          }
+          await Future.delayed(const Duration(milliseconds: 100));
+          pumpRetries++;
+        }
+      });
+
+      // 1. Verify drawer starts closed
+      expect(find.text('File Details'), findsNothing);
+
+      // 2. Select file (image1.png) to open details drawer
+      await tester.tap(find.text('image1.png'));
+      await tester.pumpAndSettle();
+
+      // Details drawer should now be open
+      expect(find.text('File Details'), findsOneWidget);
+
+      // 3. Dispatch SelectionChangedNotification with 2 items (more than 1 item)
+      final element = tester.element(find.byType(FileTable));
+      SelectionChangedNotification(dbFiles).dispatch(element);
+      await tester.pumpAndSettle();
+
+      // Verify details drawer is closed because more than 1 file is selected
+      expect(find.text('File Details'), findsNothing);
     },
   );
 }

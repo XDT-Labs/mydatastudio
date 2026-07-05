@@ -259,5 +259,109 @@ void main() {
       expect(updatedOllama.baseUrl, equals('http://localhost:11434'));
       expect(updatedOllama.enabled, isTrue);
     });
+
+    test('AichatModelRepository OpenAI models description verification', () async {
+      final db = databaseManager.database!;
+      final repo = AichatModelRepository(db);
+
+      // Fetch all models
+      final models = await repo.getAll();
+      final openaiModels = models.where((m) => m.group == 'openai').toList();
+
+      expect(openaiModels.length, equals(4));
+
+      final gpt55 = openaiModels.firstWhere((m) => m.alias == 'gpt-5.5');
+      expect(gpt55.name, equals('GPT-5.5'));
+      expect(gpt55.description, equals('A new class of intelligence for coding and professional work.'));
+
+      final gpt54 = openaiModels.firstWhere((m) => m.alias == 'gpt-5.4');
+      expect(gpt54.name, equals('GPT-5.4'));
+      expect(gpt54.description, equals('A more affordable model for coding and professional work.'));
+
+      final gptMini = openaiModels.firstWhere((m) => m.alias == 'gpt-5.4-mini');
+      expect(gptMini.name, equals('GPT-5.4 mini'));
+      expect(gptMini.description, equals('Our strongest mini model yet for coding, computer use, and subagents'));
+
+      final gptImage = openaiModels.firstWhere((m) => m.alias == 'gpt-image-2');
+      expect(gptImage.name, equals('GPT Image 2'));
+      expect(gptImage.description, equals('State-of-the-art image generation model'));
+    });
+
+    test('AichatModelRepository Claude models description verification', () async {
+      final db = databaseManager.database!;
+      final repo = AichatModelRepository(db);
+
+      // Fetch all models
+      final models = await repo.getAll();
+      final claudeModels = models.where((m) => m.group == 'claude').toList();
+
+      expect(claudeModels.length, equals(4));
+
+      final fabel5 = claudeModels.firstWhere((m) => m.alias == 'claude-fabel-5');
+      expect(fabel5.name, equals('Fabel 5'));
+      expect(fabel5.description, equals('Next-generation intelligence for long-running agents'));
+
+      final opus48 = claudeModels.firstWhere((m) => m.alias == 'claude-opus-4-8');
+      expect(opus48.name, equals('Opus 4.8'));
+      expect(opus48.description, equals('For complex agentic coding and enterprise work'));
+
+      final sonnet5 = claudeModels.firstWhere((m) => m.alias == 'claude-sonnet-5');
+      expect(sonnet5.name, equals('Sonnet 5'));
+      expect(sonnet5.description, equals('The best combination of speed and intelligence'));
+
+      final haiku45 = claudeModels.firstWhere((m) => m.alias == 'claude-haiku-4-5');
+      expect(haiku45.name, equals('Haiku 4.5'));
+      expect(haiku45.description, equals('The fastest model with near-frontier intelligence'));
+    });
+
+    test('AichatModelRepository Grok models description verification', () async {
+      final db = databaseManager.database!;
+      final repo = AichatModelRepository(db);
+
+      // Fetch all models
+      final models = await repo.getAll();
+      final grokModels = models.where((m) => m.group == 'grok').toList();
+
+      expect(grokModels.length, equals(4));
+
+      final grok43 = grokModels.firstWhere((m) => m.alias == 'grok-4.3');
+      expect(grok43.name, equals('Grok 4.3'));
+      expect(grok43.description, equals('For everything except code, audio, image, and video. The most intelligent and fastest model we’ve built.'));
+
+      final grokImgGen = grokModels.firstWhere((m) => m.alias == 'grok-imagine-image-quality');
+      expect(grokImgGen.name, equals('Imaging Generation'));
+      expect(grokImgGen.description, equals('Generate images from text prompts with configurable aspect ratio, resolution, and count.'));
+
+      final grokVideo = grokModels.firstWhere((m) => m.alias == 'grok-imagine-video-1.5');
+      expect(grokVideo.name, equals('Image-to-Video'));
+      expect(grokVideo.description, equals('Animate a still image with a text prompt. The source image becomes the first frame.'));
+
+      final grokImgEdit = grokModels.firstWhere((m) => m.alias == 'grok-imagine-image-editing');
+      expect(grokImgEdit.name, equals('Image Editing'));
+      expect(grokImgEdit.description, equals('Edit images with natural language. Supports up to 3 reference images per request.'));
+    });
+
+    test('AichatModelRepository Gemini models description verification', () async {
+      final db = databaseManager.database!;
+      final repo = AichatModelRepository(db);
+
+      // Fetch all models
+      final models = await repo.getAll();
+      final geminiModels = models.where((m) => m.group == 'gemini').toList();
+
+      expect(geminiModels.length, equals(3));
+
+      final gemini35 = geminiModels.firstWhere((m) => m.alias == 'gemini-3.5-flash');
+      expect(gemini35.name, equals('Gemini 3.5 Flash'));
+      expect(gemini35.description, equals('Frontier-level intelligence optimized for real-world tasks at a higher speed and lower cost.'));
+
+      final gemini31 = geminiModels.firstWhere((m) => m.alias == 'gemini-3.1-pro-preview');
+      expect(gemini31.name, equals('Gemini 3.1 Pro'));
+      expect(gemini31.description, equals('Provides better thinking, improved token efficiency, and a more grounded, factually consistent experience.'));
+
+      final geminiBanana = geminiModels.firstWhere((m) => m.alias == 'gemini-3.1-flash-image');
+      expect(geminiBanana.name, equals('Nano Banana 2'));
+      expect(geminiBanana.description, equals('Provides high-quality image generation and conversational editing'));
+    });
   });
 }

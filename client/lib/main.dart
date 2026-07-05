@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
@@ -6,6 +7,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/family_dam_app.dart';
 import 'package:mydatastudio/pages/splash.dart';
 import 'package:mydatastudio/python_manager.dart';
+import 'package:mydatastudio/services/model_download_manager.dart';
 
 import 'package:mydatastudio/repositories/watchers/database_change_watcher.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
@@ -171,6 +173,9 @@ class MainAppState extends State<MainApp>
         final pythonMgr = await PythonManager.forAppSupport();
         await pythonMgr.startAiServerService();
         MainApp.pythonManager = pythonMgr;
+        // Fire-and-forget: download default AI Chat models in the background
+        // rather than blocking app startup on multi-gigabyte downloads.
+        unawaited(ModelDownloadManager.instance.start());
       } catch (e) {
         if (mounted) {
           setState(() {
@@ -218,7 +223,7 @@ class MainAppState extends State<MainApp>
     () async {
       await windowManager.setSize(const Size(900, 700));
       await windowManager.center();
-      await windowManager.setTitle('MyData Studio - Loading...');
+      await windowManager.setTitle('MyData Studio');
     }();
     return const MaterialApp(
       home: SplashPage(),
@@ -250,103 +255,109 @@ class MainAppState extends State<MainApp>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                  const Icon(
-                    Icons.error_outline,
-                    color: Colors.redAccent,
-                    size: 64,
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Storage Location Not Found',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'The configured storage location could not be accessed. If the storage is on a network drive, please make sure the drive is mounted and connected. If you have moved the files, click "Pick New Location" below to select the new folder.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-                  ),
-                  const SizedBox(height: 16),
-                   Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                    const Icon(
+                      Icons.error_outline,
+                      color: Colors.redAccent,
+                      size: 64,
                     ),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 180),
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SelectableText(
-                              "Configured Location:\n${DatabaseManager.instance.storagePath ?? 'Unknown'}",
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.bold,
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Storage Location Not Found',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'The configured storage location could not be accessed. If the storage is on a network drive, please make sure the drive is mounted and connected. If you have moved the files, click "Pick New Location" below to select the new folder.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 180),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SelectableText(
+                                "Configured Location:\n${DatabaseManager.instance.storagePath ?? 'Unknown'}",
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 12),
-                            SelectableText(
-                              "Error Details:\n$_dbErrorPath",
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                color: Colors.red,
+                              const SizedBox(height: 12),
+                              SelectableText(
+                                "Error Details:\n$_dbErrorPath",
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  color: Colors.red,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Retry Existing'),
-                        onPressed: () {
-                          setState(() {
-                            _dbAccessError = false;
-                            _dbErrorPath = null;
-                          });
-                          _initStartup();
-                        },
-                      ),
-                      const SizedBox(width: 16),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.folder_open),
-                        label: const Text('Pick New Location'),
-                        onPressed: () async {
-                          String? newPath =
-                              await FilePicker.platform.getDirectoryPath();
-                          if (newPath != null) {
-                            await DatabaseManager.instance.updateConfigPath(
-                              newPath,
-                            );
-                            if (mounted) {
-                              setState(() {
-                                _dbAccessError = false;
-                                _dbErrorPath = null;
-                              });
-                              _initStartup();
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry Existing'),
+                          onPressed: () {
+                            setState(() {
+                              _dbAccessError = false;
+                              _dbErrorPath = null;
+                            });
+                            _initStartup();
+                          },
+                        ),
+                        const SizedBox(width: 16),
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.folder_open),
+                          label: const Text('Pick New Location'),
+                          onPressed: () async {
+                            String? newPath =
+                                await FilePicker.platform.getDirectoryPath();
+                            if (newPath != null) {
+                              await DatabaseManager.instance.updateConfigPath(
+                                newPath,
+                              );
+                              if (mounted) {
+                                setState(() {
+                                  _dbAccessError = false;
+                                  _dbErrorPath = null;
+                                });
+                                _initStartup();
+                              }
                             }
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                ],
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _initSetupScreen() {
     // Handle case where database initialization fails but we want to show the main app anyway
@@ -396,74 +407,80 @@ class MainAppState extends State<MainApp>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                  const Icon(
-                    Icons.error_outline,
-                    color: Colors.redAccent,
-                    size: 64,
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'AI Chat Service Failed to Start',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'The embedded AI Chat service could not be prepared or started. This may happen if the bundled zip file is missing or corrupted.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                    const Icon(
+                      Icons.error_outline,
+                      color: Colors.redAccent,
+                      size: 64,
                     ),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 180),
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SelectableText(
-                              "Error Details:\n$_pythonErrorMsg",
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                color: Colors.red,
+                    const SizedBox(height: 24),
+                    const Text(
+                      'AI Chat Service Failed to Start',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'The embedded AI Chat service could not be prepared or started. This may happen if the bundled zip file is missing or corrupted.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 180),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SelectableText(
+                                "Error Details:\n$_pythonErrorMsg",
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  color: Colors.red,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Retry Startup'),
-                        onPressed: () {
-                          setState(() {
-                            _pythonStartError = false;
-                            _pythonErrorMsg = null;
-                          });
-                          _initStartup();
-                        },
-                      ),
-                    ],
-                  ),
-                ],
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry Startup'),
+                          onPressed: () {
+                            setState(() {
+                              _pythonStartError = false;
+                              _pythonErrorMsg = null;
+                            });
+                            _initStartup();
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

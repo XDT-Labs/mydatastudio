@@ -476,7 +476,9 @@ class AppDatabase {
     final now = DateTime.now().millisecondsSinceEpoch;
     final models = [
       // ── Local GGUF models ──────────────────────────────────────────────────
-      // gemma4:12b is bundled with the app; always enabled
+      // gemma4:12b is the default chat model — no longer bundled with the app;
+      // ModelDownloadManager downloads it automatically on first startup and
+      // enables this row once the download completes.
       {
         'id': const Uuid().v4(),
         'alias': 'gemma4:12b',
@@ -487,7 +489,22 @@ class AppDatabase {
         'mmproj': 'mmproj-gemma-4-12B-it-Q8_0.gguf',
         'hf_repo': 'ggml-org/gemma-4-12B-it-GGUF',
         'chat_handler': 'Gemma4ChatHandler',
-        'enabled': 1,
+        'enabled': 0,
+      },
+      // Default embedding model (text + image) used for file/photo search.
+      // Not chat-selectable (group isn't in AichatPage's dropdown groups) —
+      // ModelDownloadManager downloads and enables it automatically at startup.
+      {
+        'id': const Uuid().v4(),
+        'alias': 'qwen3-vl-embedding:2b',
+        'group': 'embedding',
+        'name': 'Qwen 3 VL Embedding 2B',
+        'type': 'transformers',
+        'file': null,
+        'mmproj': null,
+        'hf_repo': 'Qwen/Qwen3-VL-Embedding-2B',
+        'chat_handler': null,
+        'enabled': 0,
       },
       // Downloadable local models — disabled until the user downloads them
       {
@@ -496,6 +513,8 @@ class AppDatabase {
         'group': 'local',
         'name': 'Qwen 3 4B',
         'type': 'gguf',
+        'description':
+            'Designed for strong reasoning and coding capabilities, by Alibaba Clouds Qwen team.',
         'file': 'Qwen_Qwen3.5-4B-Q3_K_L.gguf',
         'mmproj': 'mmproj-Qwen_Qwen3.5-4B-f16.gguf',
         'hf_repo': 'bartowski/Qwen_Qwen3.5-4B-GGUF',
@@ -507,6 +526,8 @@ class AppDatabase {
         'group': 'local',
         'name': 'Meta Llama 3.2 3B',
         'type': 'gguf',
+        'description':
+            'a lightweight, text-in/text-out language model released by Meta',
         'file': 'Llama-3.2-3B-Instruct-Q4_K_M.gguf',
         'mmproj': null,
         'hf_repo': 'bartowski/Llama-3.2-3B-Instruct-GGUF',
@@ -518,6 +539,8 @@ class AppDatabase {
         'group': 'local',
         'name': 'Microsoft Phi-4',
         'type': 'gguf',
+        'description':
+            'designed by Microsoft to excel at complex reasoning—particularly in math, science, and coding',
         'file': 'phi4-mm-Q4_K_M.gguf',
         'mmproj': 'mmproj-phi4-mm-f16.gguf',
         'hf_repo': 'Swicked86/phi4-mm-gguf',
@@ -529,6 +552,8 @@ class AppDatabase {
         'alias': 'gemini-3.5-flash',
         'group': 'gemini',
         'name': 'Gemini 3.5 Flash',
+        'description':
+            'Frontier-level intelligence optimized for real-world tasks at a higher speed and lower cost.',
         'type': 'api',
       },
       {
@@ -536,44 +561,123 @@ class AppDatabase {
         'alias': 'gemini-3.1-pro-preview',
         'group': 'gemini',
         'name': 'Gemini 3.1 Pro',
+        'description':
+            'Provides better thinking, improved token efficiency, and a more grounded, factually consistent experience.',
+        'type': 'api',
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'gemini-3.1-flash-image',
+        'group': 'gemini',
+        'name': 'Nano Banana 2',
+        'description':
+            'Provides high-quality image generation and conversational editing',
         'type': 'api',
       },
       // ── Claude ────────────────────────────────────────────────────────────
       {
         'id': const Uuid().v4(),
-        'alias': 'claude-sonnet-4-5',
+        'alias': 'claude-fabel-5',
         'group': 'claude',
-        'name': 'Claude Sonnet 4.5',
+        'name': 'Fabel 5',
+        'description': 'Next-generation intelligence for long-running agents',
         'type': 'api',
       },
       {
         'id': const Uuid().v4(),
         'alias': 'claude-opus-4-8',
         'group': 'claude',
-        'name': 'Claude Opus 4.8',
+        'name': 'Opus 4.8',
+        'description': 'For complex agentic coding and enterprise work',
+        'type': 'api',
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'claude-sonnet-5',
+        'group': 'claude',
+        'name': 'Sonnet 5',
+        'description': 'The best combination of speed and intelligence',
+        'type': 'api',
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'claude-haiku-4-5',
+        'group': 'claude',
+        'name': 'Haiku 4.5',
+        'description': 'The fastest model with near-frontier intelligence',
         'type': 'api',
       },
       // ── OpenAI ────────────────────────────────────────────────────────────
       {
         'id': const Uuid().v4(),
-        'alias': 'gpt-4o',
+        'alias': 'gpt-5.5',
         'group': 'openai',
-        'name': 'GPT-4o',
+        'name': 'GPT-5.5',
+        'description':
+            'A new class of intelligence for coding and professional work.',
         'type': 'api',
       },
       {
         'id': const Uuid().v4(),
-        'alias': 'o3',
+        'alias': 'gpt-5.4',
         'group': 'openai',
-        'name': 'OpenAI o3',
+        'name': 'GPT-5.4',
+        'description':
+            'A more affordable model for coding and professional work.',
+        'type': 'api',
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'gpt-5.4-mini',
+        'group': 'openai',
+        'name': 'GPT-5.4 mini',
+        'description':
+            'Our strongest mini model yet for coding, computer use, and subagents',
+        'type': 'api',
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'gpt-image-2',
+        'group': 'openai',
+        'name': 'GPT Image 2',
+        'description': 'State-of-the-art image generation model',
         'type': 'api',
       },
       // ── Grok ──────────────────────────────────────────────────────────────
       {
         'id': const Uuid().v4(),
-        'alias': 'grok-3',
+        'alias': 'grok-4.3',
         'group': 'grok',
-        'name': 'Grok 3',
+        'name': 'Grok 4.3',
+        'description':
+            'For everything except code, audio, image, and video. The most intelligent and fastest model we’ve built.',
+        'type': 'api',
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'grok-imagine-image-quality',
+        'group': 'grok',
+        'name': 'Imaging Generation',
+        'description':
+            'Generate images from text prompts with configurable aspect ratio, resolution, and count.',
+        'type': 'api',
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'grok-imagine-video-1.5',
+        'group': 'grok',
+        'name': 'Image-to-Video',
+        'description':
+            'Animate a still image with a text prompt. The source image becomes the first frame.',
+        'type': 'api',
+      },
+      {
+        'id': const Uuid().v4(),
+        'alias': 'grok-imagine-image-editing',
+        'group': 'grok',
+        'name': 'Image Editing',
+        'description':
+            'Edit images with natural language. Supports up to 3 reference images per request.',
         'type': 'api',
       },
       // ── Ollama placeholder ────────────────────────────────────────────────
@@ -589,13 +693,14 @@ class AppDatabase {
     for (final m in models) {
       final enabled = (m['enabled'] as int?) ?? 0;
       await db.execute(
-        'INSERT OR IGNORE INTO aichat_models (id, alias, "group", name, file, mmproj, hf_repo, chat_handler, type, base_url, enabled, created_at, updated_at) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT OR IGNORE INTO aichat_models (id, alias, "group", name, description, file, mmproj, hf_repo, chat_handler, type, base_url, enabled, created_at, updated_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           m['id'],
           m['alias'],
           m['group'],
           m['name'],
+          m['description'],
           m['file'],
           m['mmproj'],
           m['hf_repo'],
@@ -878,6 +983,7 @@ class AppDatabase {
       alias TEXT NOT NULL,
       "group" TEXT NOT NULL,
       name TEXT NOT NULL,
+      description TEXT,
       file TEXT,
       mmproj TEXT,
       hf_repo TEXT,

@@ -235,7 +235,7 @@ class PythonManager {
 
       if (destDir.existsSync()) {
         _stdoutController.add(
-          'aiserver directory already exists at ${destDir.path}; skipping unzip.',
+          'aiserver directory already exists; skipping unzip.',
         );
         PythonManager.startupProgress.value = 'Starting AI service...';
         return;

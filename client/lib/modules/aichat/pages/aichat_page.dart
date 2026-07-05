@@ -8,6 +8,7 @@ import 'package:mydatastudio/app_router.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/aichat/services/local_llm_content_generator.dart';
 import 'package:mydatastudio/python_manager.dart';
+import 'package:mydatastudio/services/model_download_manager.dart';
 import 'package:mydatastudio/models/tables/aichat_model.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 import 'package:mydatastudio/repositories/aichat_repository.dart';
@@ -59,6 +60,8 @@ class GenUiSurfaceItem extends ChatItem {
 class _AichatPage extends State<AichatPage> with RouteAware {
   AppLogger logger = AppLogger(null);
   bool _isLLMServiceRunning = PythonManager.isLLMServiceRunning.value;
+  bool _modelsReady = ModelDownloadManager.isReady.value;
+  List<ModelDownloadItem> _downloadItems = ModelDownloadManager.items.value;
   String _selectedModel = 'gemma4:12b';
   List<AichatModel> _dbModels = [];
   StreamSubscription<List<AichatModel>>? _modelsSub;
@@ -117,6 +120,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
         });
       }
     });
+
+    ModelDownloadManager.isReady.addListener(_onModelsReadyChanged);
+    ModelDownloadManager.items.addListener(_onDownloadItemsChanged);
 
     AichatPage.selectConversationId.addListener(_onConversationSelected);
     _loadDbModels();
@@ -191,6 +197,16 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     _reloadModels();
   }
 
+  void _onModelsReadyChanged() {
+    if (!mounted) return;
+    setState(() => _modelsReady = ModelDownloadManager.isReady.value);
+  }
+
+  void _onDownloadItemsChanged() {
+    if (!mounted) return;
+    setState(() => _downloadItems = ModelDownloadManager.items.value);
+  }
+
   Future<void> _reloadModels() async {
     final db = DatabaseManager.instance.database;
     if (db == null || !mounted) return;
@@ -202,6 +218,8 @@ class _AichatPage extends State<AichatPage> with RouteAware {
   void dispose() {
     AppRouter.routeObserver.unsubscribe(this);
     _modelsSub?.cancel();
+    ModelDownloadManager.isReady.removeListener(_onModelsReadyChanged);
+    ModelDownloadManager.items.removeListener(_onDownloadItemsChanged);
     AichatPage.selectConversationId.removeListener(_onConversationSelected);
     _textController.dispose();
     _titleController.dispose();
@@ -259,13 +277,19 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       );
 
       for (final m in groupModels) {
+        final Widget textWidget = Text(
+          m.name,
+          style: const TextStyle(color: _mutedColor, fontSize: 13),
+        );
         items.add(
           DropdownMenuItem<String>(
             value: m.alias,
-            child: Text(
-              m.name,
-              style: const TextStyle(color: _mutedColor, fontSize: 13),
-            ),
+            child: (m.description != null && m.description!.isNotEmpty)
+                ? Tooltip(
+                    message: m.description!,
+                    child: textWidget,
+                  )
+                : textWidget,
           ),
         );
       }
@@ -687,6 +711,129 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     await repo.updateConversation(id, name: trimmed);
   }
 
+  Widget _buildModelDownloadGate() {
+    final hasError =
+        _downloadItems.any((i) => i.status == ModelDownloadStatus.error);
+
+    return ColoredBox(
+      color: _bgColor,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Setting up AI Chat',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Downloading models for the first time. This only happens once.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: _mutedColor, fontSize: 13),
+              ),
+              const SizedBox(height: 24),
+              ..._downloadItems.map(_buildDownloadItemTile),
+              if (hasError) ...[
+                const SizedBox(height: 12),
+                ElevatedButton.icon(
+                  onPressed: () => ModelDownloadManager.instance.retry(),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDownloadItemTile(ModelDownloadItem item) {
+    String statusText;
+    switch (item.status) {
+      case ModelDownloadStatus.pending:
+        statusText = 'Waiting…';
+        break;
+      case ModelDownloadStatus.checking:
+        statusText = 'Checking…';
+        break;
+      case ModelDownloadStatus.downloading:
+        statusText = item.totalMb > 0
+            ? '${item.downloadedMb.toStringAsFixed(0)} MB / ${item.totalMb.toStringAsFixed(0)} MB'
+            : 'Starting download…';
+        break;
+      case ModelDownloadStatus.complete:
+        statusText = 'Ready';
+        break;
+      case ModelDownloadStatus.error:
+        statusText = item.error ?? 'Download failed';
+        break;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _buildDownloadStatusIcon(item.status),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  item.label,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (item.status == ModelDownloadStatus.downloading)
+            LinearProgressIndicator(
+              value: item.progress > 0 ? item.progress : null,
+              backgroundColor: _inputBorderColor,
+            ),
+          const SizedBox(height: 4),
+          Text(
+            statusText,
+            style: TextStyle(
+              color: item.status == ModelDownloadStatus.error
+                  ? Colors.redAccent
+                  : _mutedColor,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDownloadStatusIcon(ModelDownloadStatus status) {
+    switch (status) {
+      case ModelDownloadStatus.complete:
+        return const Icon(Icons.check_circle, color: Colors.greenAccent, size: 18);
+      case ModelDownloadStatus.error:
+        return const Icon(Icons.error_outline, color: Colors.redAccent, size: 18);
+      case ModelDownloadStatus.downloading:
+      case ModelDownloadStatus.checking:
+        return const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2, color: _mutedColor),
+        );
+      case ModelDownloadStatus.pending:
+        return const Icon(Icons.schedule, color: _mutedColor, size: 18);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_isLLMServiceRunning) {
@@ -699,6 +846,10 @@ class _AichatPage extends State<AichatPage> with RouteAware {
           ),
         ),
       );
+    }
+
+    if (!_modelsReady) {
+      return _buildModelDownloadGate();
     }
 
     final itemCount = _chatItems.length + (_streamingText != null ? 1 : 0);

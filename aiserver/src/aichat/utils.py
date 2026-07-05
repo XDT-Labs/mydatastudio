@@ -9,6 +9,12 @@ import tarfile
 import urllib.request
 from typing import Optional
 
+# Written into a snapshot's local_path only once every file has downloaded
+# successfully. Its presence — not "directory is non-empty" — is what
+# is_snapshot_downloaded() checks, so a snapshot interrupted partway through
+# is correctly treated as incomplete and resumed rather than skipped.
+_SNAPSHOT_COMPLETE_MARKER = '.mydatastudio_download_complete'
+
 
 def _resolve_models_base() -> str:
     """
@@ -292,6 +298,134 @@ def stream_download_gguf(model_id: str, filename: str, local_path: str, hf_token
     except Exception as e:
         print(f"[ERROR] Stream download failed for {model_id}/{filename}: {e}")
         yield f'data: {json.dumps({"status": "error", "message": str(e)})}\n\n'
+
+
+def _safe_repo_path(local_path: str, filename: str) -> str:
+    """
+    Resolve `filename` (as returned by HfApi.list_repo_files) against
+    `local_path`, raising ValueError if it would escape that directory.
+
+    `model_id` — and therefore which repo's file listing we trust — is
+    caller-controlled via the download-model request, so a malicious or
+    compromised repo could otherwise return a filename containing '..'
+    segments to write outside the intended models directory.
+    """
+    if os.path.isabs(filename) or '..' in filename.replace('\\', '/').split('/'):
+        raise ValueError(f"Unsafe path in repo listing: {filename!r}")
+
+    base = os.path.realpath(local_path)
+    dest = os.path.realpath(os.path.join(base, filename))
+    if dest != base and not dest.startswith(base + os.sep):
+        raise ValueError(f"Unsafe path in repo listing: {filename!r}")
+    return dest
+
+
+def stream_download_snapshot(model_id: str, local_path: str, hf_token: Optional[str] = None):
+    """
+    Generator that streams an entire HuggingFace repo snapshot (all files) into
+    `local_path`, yielding SSE-formatted aggregate progress events.
+
+    Used for multi-file Transformers models (e.g. Qwen3-VL-Embedding-2B) that
+    can't be downloaded as a single GGUF file via stream_download_gguf(). Files
+    already present locally with the correct size are skipped; anything
+    missing or truncated (e.g. from a prior interrupted download) is
+    (re)downloaded, so this is safe to call on every startup.
+
+    Events:
+        {"status": "downloading", "progress": 0.0-1.0, "downloaded_mb": float, "total_mb": float, "current_file": str}
+        {"status": "complete",    "progress": 1.0, "model_path": str}
+        {"status": "error",       "message": str}
+    """
+    import json
+    import requests as req_lib
+    from huggingface_hub import HfApi, hf_hub_url
+    from huggingface_hub.hf_api import RepoFile
+
+    req_headers = {'User-Agent': 'mydatastudio/1.0'}
+    if hf_token:
+        req_headers['Authorization'] = f'Bearer {hf_token}'
+
+    try:
+        os.makedirs(local_path, exist_ok=True)
+
+        api = HfApi()
+        skip = {'.gitattributes', 'README.md'}
+        # recursive=True yields both RepoFile and RepoFolder entries; only
+        # files carry a `size`, so filter to RepoFile before reading it.
+        repo_files = [f for f in api.list_repo_tree(model_id, recursive=True, token=hf_token or None)
+                      if isinstance(f, RepoFile) and f.path not in skip]
+        all_files = [f.path for f in repo_files]
+        sizes = {f.path: f.size for f in repo_files}
+
+        # Validate every filename up front (raises on path traversal attempts)
+        # before touching disk or the network.
+        dest_paths = {f: _safe_repo_path(local_path, f) for f in all_files}
+
+        # A file only counts as already-downloaded if its size matches the repo's
+        # reported size — otherwise a prior download interrupted mid-file would be
+        # silently treated as complete and never get its missing bytes filled in.
+        def _is_complete(f: str) -> bool:
+            dest = dest_paths[f]
+            return os.path.exists(dest) and os.path.getsize(dest) == sizes[f]
+
+        pending = [f for f in all_files if not _is_complete(f)]
+
+        if not pending:
+            _mark_snapshot_complete(local_path)
+            yield f'data: {json.dumps({"status": "complete", "progress": 1.0, "model_path": local_path})}\n\n'
+            return
+
+        sizes = {f: sizes[f] for f in pending}
+
+        total_bytes = sum(sizes.values())
+        total_mb = round(total_bytes / (1024 * 1024), 1)
+        downloaded_bytes = 0
+        last_reported = -1.0
+
+        yield f'data: {json.dumps({"status": "downloading", "progress": 0.0, "downloaded_mb": 0.0, "total_mb": total_mb, "current_file": pending[0]})}\n\n'
+
+        for f in pending:
+            dest_path = dest_paths[f]
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            url = hf_hub_url(repo_id=model_id, filename=f)
+
+            with req_lib.get(url, headers=req_headers, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(dest_path, 'wb') as out:
+                    for chunk in r.iter_content(chunk_size=524288):  # 512 KB
+                        out.write(chunk)
+                        downloaded_bytes += len(chunk)
+                        progress = downloaded_bytes / total_bytes if total_bytes > 0 else 0.0
+                        if progress - last_reported >= 0.01 or progress >= 1.0:
+                            downloaded_mb = round(downloaded_bytes / (1024 * 1024), 1)
+                            yield f'data: {json.dumps({"status": "downloading", "progress": round(progress, 4), "downloaded_mb": downloaded_mb, "total_mb": total_mb, "current_file": f})}\n\n'
+                            last_reported = progress
+
+        _mark_snapshot_complete(local_path)
+        print(f"[LOADER] Snapshot download complete: {local_path}")
+        yield f'data: {json.dumps({"status": "complete", "progress": 1.0, "model_path": local_path})}\n\n'
+
+    except Exception as e:
+        print(f"[ERROR] Snapshot download failed for {model_id}: {e}")
+        yield f'data: {json.dumps({"status": "error", "message": str(e)})}\n\n'
+
+
+def _mark_snapshot_complete(local_path: str) -> None:
+    """Write the completion marker checked by is_snapshot_downloaded()."""
+    with open(os.path.join(local_path, _SNAPSHOT_COMPLETE_MARKER), 'w'):
+        pass
+
+
+def is_snapshot_downloaded(model_id: str, local_path: str) -> bool:
+    """
+    Cheap, local-only check for whether a full repo snapshot (see
+    stream_download_snapshot) has already been downloaded. Does not hit the
+    network — relies on the completion marker stream_download_snapshot writes
+    once every file in the snapshot has downloaded, rather than merely
+    checking for the directory's existence, so a download interrupted
+    partway through is correctly treated as incomplete rather than skipped.
+    """
+    return os.path.isfile(os.path.join(local_path, _SNAPSHOT_COMPLETE_MARKER))
 
 
 def download_gguf_model_if_needed(model_id: str, filename: str, local_path: str) -> str:

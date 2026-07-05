@@ -12,20 +12,11 @@ class SetupStep1 extends StatelessWidget {
 
   final infoForm = FormGroup(
     {
-      'firstName': FormControl<String>(
-        value: 'mike',
-        validators: [Validators.required],
-      ),
-      'email': FormControl<String>(
-        value: 'mnimer@gmail.com',
-        validators: [Validators.required, Validators.email],
-      ),
+      'name': FormControl<String>(validators: [Validators.required]),
       'password': FormControl<String>(
-        value: 'admin',
         validators: [Validators.required, Validators.minLength(4)],
       ),
       'confirmPassword': FormControl<String>(
-        value: 'admin',
         validators: [Validators.required, Validators.minLength(4)],
       ),
     },
@@ -35,8 +26,7 @@ class SetupStep1 extends StatelessWidget {
   void onStepContinueHandler(BuildContext context) {
     if (infoForm.valid) {
       //Create User
-      var name = infoForm.findControl('firstName')?.value;
-      var email = infoForm.findControl('email')?.value;
+      var name = infoForm.findControl('name')?.value;
       var password = infoForm.findControl('password')?.value;
       if (password != null) {
         var algorithm = PBKDF2(
@@ -51,15 +41,11 @@ class SetupStep1 extends StatelessWidget {
           throw Exception('Password hash failed');
         }
 
-        // TODO verify this can be used on server (node & java services)
-        //for server side (java) version
-        //see https://howtodoinjava.com/java/java-security/how-to-generate-secure-password-hash-md5-sha-pbkdf2-bcrypt-examples/
-
         //password is a must have required field
         AppUser appUser = AppUser(
           id: const Uuid().v4().toString(),
           name: name,
-          email: email,
+          email: '',
           password: hash,
           localStoragePath: '',
         );
@@ -70,78 +56,85 @@ class SetupStep1 extends StatelessWidget {
     }
   }
 
+  InputDecoration _decoration(
+    BuildContext context, {
+    required String label,
+    required IconData icon,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return InputDecoration(
+      label: Text(label),
+      prefixIcon: Icon(icon),
+      filled: true,
+      fillColor: colorScheme.surfaceContainerHigh,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide.none,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
     return ReactiveForm(
       formGroup: infoForm,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          ReactiveTextField(
-            formControlName: 'firstName',
-            decoration: const InputDecoration(
-              label: Text('First Name'),
-              prefixIcon: Icon(Icons.person),
+          Text(
+            'Create your account',
+            style: textTheme.titleLarge?.copyWith(color: colorScheme.onSurface),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'This account stays on this device and protects access to your archive.',
+            style: textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
             ),
           ),
-          Container(height: 16),
+          const SizedBox(height: 24),
           ReactiveTextField(
-            formControlName: 'email',
-            /**
-                  validationMessages: {
-                    ValidationMessage.required: 'The email must not be empty',
-                    ValidationMessage.email: 'The email must be a valid email',
-                  },  */
-            decoration: const InputDecoration(
-              label: Text('Email'),
-              prefixIcon: Icon(Icons.email),
+            formControlName: 'name',
+            decoration: _decoration(
+              context,
+              label: 'Name',
+              icon: Icons.person_outline,
             ),
           ),
-          Container(height: 16),
+          const SizedBox(height: 16),
           ReactiveTextField(
             formControlName: 'password',
             obscureText: true,
-            decoration: const InputDecoration(
-              label: Text('Password'),
-              prefixIcon: Icon(Icons.password),
+            decoration: _decoration(
+              context,
+              label: 'Password',
+              icon: Icons.lock_outline,
             ),
           ),
-          Container(height: 16),
+          const SizedBox(height: 16),
           ReactiveTextField(
             formControlName: 'confirmPassword',
             obscureText: true,
-            decoration: const InputDecoration(
-              label: Text('Confirm Password'),
-              prefixIcon: Icon(Icons.password),
+            decoration: _decoration(
+              context,
+              label: 'Confirm Password',
+              icon: Icons.lock_outline,
             ),
           ),
+          const SizedBox(height: 24),
           ReactiveFormConsumer(
             builder: (context, form, child) {
               return Align(
                 alignment: Alignment.centerRight,
-                child: SizedBox(
-                  width: 200,
-                  height: 54,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: <Widget>[
-                      OutlinedButton(
-                        onPressed:
-                            infoForm.valid
-                                ? () => onStepContinueHandler(context)
-                                : null,
-                        style: ButtonStyle(
-                          backgroundColor:
-                              infoForm.valid
-                                  ? WidgetStateProperty.all<Color>(Colors.green)
-                                  : WidgetStateProperty.all<Color>(Colors.grey),
-                          foregroundColor: WidgetStateProperty.all<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                        child: const Text('Continue'),
-                      ),
-                    ],
-                  ),
+                child: FilledButton(
+                  onPressed:
+                      infoForm.valid
+                          ? () => onStepContinueHandler(context)
+                          : null,
+                  child: const Text('Continue'),
                 ),
               );
             },

@@ -28,7 +28,7 @@ hiddenimports = [
 ]
 
 # Collect all for complex packages
-for pkg in ['llama_cpp', 'uvicorn', 'fastapi', 'langchain', 'langchain_community', 'langchain_core', 'langchain_google_genai', 'rawpy']:
+for pkg in ['llama_cpp', 'uvicorn', 'fastapi', 'langchain', 'langchain_community', 'langchain_core', 'langchain_google_genai', 'langchain_openai', 'langchain_anthropic', 'rawpy']:
     try:
         print(f"Collecting {pkg}...")
         tmp_ret = collect_all(pkg)
@@ -39,10 +39,11 @@ for pkg in ['llama_cpp', 'uvicorn', 'fastapi', 'langchain', 'langchain_community
     except Exception as e:
         print(f"Warning: Failed to collect all from {pkg}: {e}")
 
-try:
-    datas += copy_metadata('langchain_google_genai')
-except Exception as e:
-    print(f"Warning: Failed to copy metadata for langchain_google_genai: {e}")
+for pkg in ['langchain_google_genai', 'langchain_openai', 'langchain_anthropic']:
+    try:
+        datas += copy_metadata(pkg)
+    except Exception as e:
+        print(f"Warning: Failed to copy metadata for {pkg}: {e}")
 
 # Include the pre-downloaded GGUF models directory mapping to the bundle root
 datas.append(('models/*', 'models'))

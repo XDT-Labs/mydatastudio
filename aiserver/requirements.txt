@@ -5,6 +5,8 @@ langchain-core>=1.0.0
 langchain>=1.0.0
 protobuf==6.33.1
 langchain-google-genai>=3.0.0
+langchain-openai>=0.3.35
+langchain-anthropic>=0.3.22
 
 # NEW: Dedicated package for Hugging Face integrations
 

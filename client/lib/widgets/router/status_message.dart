@@ -10,7 +10,7 @@ class StatusMessage extends StatelessWidget {
       stream: AppLogger.statusSubject,
       builder: (BuildContext context, AsyncSnapshot<String> msg) {
         print('[StatusMessage] ${msg.data}');
-        final text = msg.data ?? 'ONLINE | ENCRYPTION ACTIVE';
+        final text = msg.data ?? '';
         return Text(
           text.toUpperCase(),
           key: UniqueKey(),

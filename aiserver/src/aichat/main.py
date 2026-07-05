@@ -6,7 +6,8 @@ Endpoints:
   GET  /skills                    List built-in skills for client autocomplete
   POST /v1/chat/completions       OpenAI-compatible chat (auto-loads model)
   POST /v1/embeddings             OpenAI-compatible text embeddings
-  POST /util/download-model       Download a GGUF model from Hugging Face
+  POST /util/download-model       Download a GGUF file or full repo snapshot from Hugging Face
+  POST /util/model-status         Check (local disk only) whether a model is already downloaded
   POST /util/embedding            Multimodal embeddings (text or image)
   POST /util/thumbnail            Generate image thumbnails (incl. RAW formats)
   POST /util/import/pst           Stream-parse an Outlook PST file
@@ -15,7 +16,9 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from typing import Optional
 
 from fastapi import FastAPI
@@ -68,8 +71,25 @@ def _get_log_dir() -> Optional[str]:
     return os.path.join(support_dir, 'logs')
 
 
+def _cleanup_old_logs(log_dir: str, max_age_days: int = 7) -> None:
+    """Delete app_*/aiserver_* log files older than max_age_days, run once on startup."""
+    cutoff = time.time() - max_age_days * 86400
+    try:
+        for name in os.listdir(log_dir):
+            if not (name.startswith('app_') or name.startswith('aiserver_')):
+                continue
+            path = os.path.join(log_dir, name)
+            try:
+                if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
 def setup_logging(log_level: str = 'info') -> None:
-    """Configure root logger with console + timestamped file handler."""
+    """Configure root logger with console + timestamped, size-capped file handler."""
     level = getattr(logging, log_level.upper(), logging.INFO)
     fmt = logging.Formatter(
         '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
@@ -85,13 +105,18 @@ def setup_logging(log_level: str = 'info') -> None:
     ch.setFormatter(fmt)
     root.addHandler(ch)
 
-    # File handler — new timestamped file each startup
+    # File handler — new timestamped file each startup, capped at 10MB with
+    # up to 3 rotated backups so a single long-running session can't grow
+    # unbounded; anything older than 7 days is swept on startup.
     log_dir = _get_log_dir()
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
+        _cleanup_old_logs(log_dir)
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         log_file = os.path.join(log_dir, f'aiserver_{timestamp}.log')
-        fh = logging.FileHandler(log_file, encoding='utf-8')
+        fh = RotatingFileHandler(
+            log_file, maxBytes=10 * 1024 * 1024, backupCount=3, encoding='utf-8'
+        )
         fh.setLevel(level)
         fh.setFormatter(fmt)
         root.addHandler(fh)
@@ -125,7 +150,8 @@ app.post("/v1/chat/stop", summary="Stop the active streaming generation")(routes
 app.post("/v1/embeddings", summary="OpenAI-compatible text embeddings")(routes.generate_embedding_v1)
 
 # Util
-app.post("/util/download-model", summary="Download a GGUF model from Hugging Face")(routes.download_model)
+app.post("/util/download-model", summary="Download a GGUF model or full repo snapshot from Hugging Face")(routes.download_model)
+app.post("/util/model-status", summary="Check whether a model is already downloaded (local disk only)")(routes.check_model_status)
 app.post("/util/delete-model", summary="Delete a downloaded GGUF model file")(routes.delete_model)
 app.post("/util/embedding", summary="Multimodal embeddings (text or image)")(routes.generate_embedding)
 app.post("/util/thumbnail", summary="Generate image thumbnail (incl. RAW formats)")(routes.generate_thumbnail)

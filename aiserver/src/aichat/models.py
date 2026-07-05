@@ -79,14 +79,19 @@ class EmbeddingRequest(BaseModel):
 
 
 class DownloadModelRequest(BaseModel):
-    """Request to download a GGUF model from Hugging Face."""
+    """Request to download a model from Hugging Face.
+
+    When `filename` is omitted or explicitly null, the entire repo snapshot is
+    downloaded instead of a single GGUF file — used for multi-file Transformers
+    models like Qwen3-VL-Embedding-2B.
+    """
     model_name: str = Field(
         default=DEFAULT_LOCAL_MODEL,
         description="Hugging Face model identifier (e.g., 'bartowski/gemma-3-4b-it-GGUF')"
     )
     filename: Optional[str] = Field(
         default=DEFAULT_GGUF_FILE,
-        description="GGUF filename to download"
+        description="GGUF filename to download. Pass null to download the full repo snapshot instead."
     )
     hf_token: Optional[str] = Field(
         default=None,
