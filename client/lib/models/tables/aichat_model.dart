@@ -3,6 +3,7 @@ class AichatModel {
   final String alias;
   final String group;
   final String name;
+  final String? description;
   final String? file;
   final String? mmproj;
   final String? hfRepo;
@@ -18,6 +19,7 @@ class AichatModel {
     required this.alias,
     required this.group,
     required this.name,
+    this.description,
     this.file,
     this.mmproj,
     this.hfRepo,
@@ -35,6 +37,7 @@ class AichatModel {
       alias: map['alias'] as String,
       group: map['group'] as String,
       name: map['name'] as String,
+      description: map['description'] as String?,
       file: map['file'] as String?,
       mmproj: map['mmproj'] as String?,
       hfRepo: map['hf_repo'] as String?,
@@ -53,6 +56,7 @@ class AichatModel {
       'alias': alias,
       'group': group,
       'name': name,
+      'description': description,
       'file': file,
       'mmproj': mmproj,
       'hf_repo': hfRepo,
@@ -69,6 +73,7 @@ class AichatModel {
     String? alias,
     String? group,
     String? name,
+    String? description,
     String? file,
     String? mmproj,
     String? hfRepo,
@@ -83,6 +88,7 @@ class AichatModel {
       alias: alias ?? this.alias,
       group: group ?? this.group,
       name: name ?? this.name,
+      description: description ?? this.description,
       file: file ?? this.file,
       mmproj: mmproj ?? this.mmproj,
       hfRepo: hfRepo ?? this.hfRepo,

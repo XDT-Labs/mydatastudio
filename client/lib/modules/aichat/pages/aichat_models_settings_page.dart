@@ -712,13 +712,17 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(model.name),
-      subtitle:
-          model.group == 'local'
+      subtitle: (model.description != null && model.description!.isNotEmpty)
+          ? Text(
+              model.description!,
+              style: Theme.of(context).textTheme.bodySmall,
+            )
+          : (model.group == 'local'
               ? Text(
-                model.file ?? model.name,
-                style: Theme.of(context).textTheme.bodySmall,
-              )
-              : null,
+                  model.file ?? model.name,
+                  style: Theme.of(context).textTheme.bodySmall,
+                )
+              : null),
       trailing:
           isDefault
               ? null

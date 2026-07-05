@@ -50,12 +50,13 @@ class AichatModelRepository {
 
   Future<AichatModel> upsert(AichatModel model) async {
     await db.execute(
-      'INSERT INTO aichat_models (id, alias, "group", name, file, mmproj, hf_repo, chat_handler, type, base_url, enabled, created_at, updated_at) '
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
+      'INSERT INTO aichat_models (id, alias, "group", name, description, file, mmproj, hf_repo, chat_handler, type, base_url, enabled, created_at, updated_at) '
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
       'ON CONFLICT(id) DO UPDATE SET '
       'alias = excluded.alias, '
       '"group" = excluded."group", '
       'name = excluded.name, '
+      'description = excluded.description, '
       'file = excluded.file, '
       'mmproj = excluded.mmproj, '
       'hf_repo = excluded.hf_repo, '
@@ -69,6 +70,7 @@ class AichatModelRepository {
         model.alias,
         model.group,
         model.name,
+        model.description,
         model.file,
         model.mmproj,
         model.hfRepo,
@@ -87,6 +89,7 @@ class AichatModelRepository {
     required String alias,
     required String group,
     required String name,
+    String? description,
     String? file,
     String? mmproj,
     String? hfRepo,
@@ -101,6 +104,7 @@ class AichatModelRepository {
       alias: alias,
       group: group,
       name: name,
+      description: description,
       file: file,
       mmproj: mmproj,
       hfRepo: hfRepo,

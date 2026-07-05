@@ -277,13 +277,19 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       );
 
       for (final m in groupModels) {
+        final Widget textWidget = Text(
+          m.name,
+          style: const TextStyle(color: _mutedColor, fontSize: 13),
+        );
         items.add(
           DropdownMenuItem<String>(
             value: m.alias,
-            child: Text(
-              m.name,
-              style: const TextStyle(color: _mutedColor, fontSize: 13),
-            ),
+            child: (m.description != null && m.description!.isNotEmpty)
+                ? Tooltip(
+                    message: m.description!,
+                    child: textWidget,
+                  )
+                : textWidget,
           ),
         );
       }
