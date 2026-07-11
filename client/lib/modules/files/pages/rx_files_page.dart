@@ -1127,6 +1127,7 @@ class _RxFilesPage extends State<RxFilesPage> {
         content = ImagePreviewWidget(
           file: asset,
           resolvedPath: _resolvedPath(asset),
+          showOriginal: true,
         );
       } else if (_isText(asset)) {
         content = Container(
@@ -1234,9 +1235,8 @@ class _RxFilesPage extends State<RxFilesPage> {
         // Content Area
         Center(
           child: Padding(
-            padding: const EdgeInsets.all(48.0),
+            padding: const EdgeInsets.all(24.0),
             child: Container(
-              constraints: const BoxConstraints(maxWidth: 1200, maxHeight: 900),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 color: Colors.transparent,

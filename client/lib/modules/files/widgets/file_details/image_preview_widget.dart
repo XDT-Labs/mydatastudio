@@ -10,20 +10,25 @@ class ImagePreviewWidget extends StatelessWidget {
     super.key,
     required this.file,
     required this.resolvedPath,
+    this.showOriginal = false,
   });
 
   final File file;
   final String resolvedPath;
+  final bool showOriginal;
 
   @override
   Widget build(BuildContext context) {
     try {
-      if (file.thumbnail != null) {
+      if (!showOriginal && file.thumbnail != null) {
         return ThumbnailWidget(thumbnail: file.thumbnail!);
       }
       final ioFile = io.File(resolvedPath);
       if (ioFile.existsSync()) {
         return Image.file(ioFile, fit: BoxFit.contain);
+      }
+      if (file.thumbnail != null) {
+        return ThumbnailWidget(thumbnail: file.thumbnail!);
       }
     } catch (_) {}
     return FileTypeIconWidget(

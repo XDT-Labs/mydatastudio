@@ -34,5 +34,27 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('https://example.com/file.pdf'), findsOneWidget);
     });
+
+    testWidgets('renders resolution when provided', (tester) async {
+      final file = makeTestFile(
+        name: 'photo.jpg',
+        path: '/tmp/photo.jpg',
+        contentType: 'image/jpeg',
+        size: 2048,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: FileMetadataSection(
+              file: file,
+              resolution: '1024x768',
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Resolution'), findsOneWidget);
+      expect(find.text('1024x768'), findsOneWidget);
+    });
   });
 }

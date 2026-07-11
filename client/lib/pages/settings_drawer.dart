@@ -9,18 +9,31 @@ class SettingsDrawer extends StatefulWidget {
 }
 
 class _SettingsDrawerState extends State<SettingsDrawer> {
+  bool _collectionsExpanded = false;
   bool _aiChatExpanded = false;
+  bool _initialized = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_initialized) {
+      final currentRoute = GoRouterState.of(context).uri.toString();
+      _collectionsExpanded = currentRoute == '/settings';
+      _aiChatExpanded = currentRoute.startsWith('/settings/aichat');
+      _initialized = true;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final currentRoute = GoRouterState.of(context).uri.toString();
 
     return SizedBox.expand(
-      child: Container(
-        height: double.infinity,
+      child: Material(
         color: Theme.of(context).colorScheme.surface,
-        padding: const EdgeInsets.all(8),
-        child: ListView(
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: ListView(
           children: [
             Padding(
               padding: const EdgeInsets.all(16.0),
@@ -29,12 +42,25 @@ class _SettingsDrawerState extends State<SettingsDrawer> {
                 style: Theme.of(context).textTheme.titleLarge,
               ),
             ),
+            // Collections section
             ListTile(
-              leading: const Icon(Icons.vpn_key),
-              title: const Text('Providers'),
-              selected: currentRoute == '/settings',
-              onTap: () => GoRouter.of(context).go('/settings'),
+              leading: const Icon(Icons.folder_open),
+              title: const Text('Collections'),
+              trailing: Icon(
+                _collectionsExpanded ? Icons.expand_less : Icons.expand_more,
+                size: 20,
+              ),
+              onTap: () => setState(() => _collectionsExpanded = !_collectionsExpanded),
             ),
+            if (_collectionsExpanded) ...[
+              ListTile(
+                contentPadding: const EdgeInsets.only(left: 40, right: 16),
+                leading: const Icon(Icons.vpn_key, size: 20),
+                title: const Text('Providers'),
+                selected: currentRoute == '/settings',
+                onTap: () => GoRouter.of(context).go('/settings'),
+              ),
+            ],
             // AI Chat section
             ListTile(
               leading: const Icon(Icons.chat_bubble_outline),
@@ -64,6 +90,7 @@ class _SettingsDrawerState extends State<SettingsDrawer> {
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 }

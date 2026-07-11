@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/provider.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -14,6 +16,7 @@ class _SettingsPageState extends State<SettingsPage> {
   final Map<String, TextEditingController> _clientIdControllers = {};
   final Map<String, TextEditingController> _clientSecretControllers = {};
   final Map<String, TextEditingController> _apiKeyControllers = {};
+  final Map<String, Timer?> _debounceTimers = {};
   bool _isLoading = true;
 
   final List<String> _supportedProviders = [
@@ -38,6 +41,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
+    for (final timer in _debounceTimers.values) {
+      timer?.cancel();
+    }
     for (final controller in _clientIdControllers.values) {
       controller.dispose();
     }
@@ -72,6 +78,14 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
+  void _onFieldChanged(String service) {
+    _debounceTimers[service]?.cancel();
+    _debounceTimers[service] = Timer(
+      const Duration(milliseconds: 600),
+      () => _saveProvider(service),
+    );
+  }
+
   Future<void> _saveProvider(String service) async {
     final clientId = _clientIdControllers[service]?.text.trim() ?? '';
     final clientSecret = _clientSecretControllers[service]?.text.trim() ?? '';
@@ -86,12 +100,6 @@ class _SettingsPageState extends State<SettingsPage> {
       'api_key = excluded.api_key',
       [service, clientId, clientSecret, apiKey],
     );
-
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Saved $service configuration')));
-    }
   }
 
   @override
@@ -148,8 +156,36 @@ class _SettingsPageState extends State<SettingsPage> {
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
+            if (service == 'google') ...[
+              const Text(
+                'To connect to Google services, you must provide your own OAuth Client ID and Client Secret. Ensure your OAuth consent screen is configured with the following scopes:\n'
+                '• https://www.googleapis.com/auth/userinfo.email\n'
+                '• https://www.googleapis.com/auth/userinfo.profile\n'
+                '• https://www.googleapis.com/auth/drive\n'
+                '• https://www.googleapis.com/auth/user.emails.read\n'
+                '• https://www.googleapis.com/auth/gmail.readonly\n\n'
+                'Note: Ensure that the Google People API, Google Drive API, and Gmail API are enabled in your Google Cloud Console project.',
+                style: TextStyle(fontSize: 14, height: 1.4),
+              ),
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: () => launchUrl(
+                  Uri.parse('https://console.cloud.google.com/apis/credentials'),
+                ),
+                child: const Text(
+                  'Get Credentials from Google Cloud Console',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.blue,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             TextField(
               controller: _clientIdControllers[service],
+              onChanged: (val) => _onFieldChanged(service),
               decoration: const InputDecoration(
                 labelText: 'Client ID',
                 border: OutlineInputBorder(),
@@ -158,29 +194,25 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 12),
             TextField(
               controller: _clientSecretControllers[service],
+              onChanged: (val) => _onFieldChanged(service),
               decoration: const InputDecoration(
                 labelText: 'Client Secret',
                 border: OutlineInputBorder(),
               ),
               obscureText: true,
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _apiKeyControllers[service],
-              decoration: const InputDecoration(
-                labelText: 'API Key (Optional)',
-                border: OutlineInputBorder(),
+            if (service != 'google') ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _apiKeyControllers[service],
+                onChanged: (val) => _onFieldChanged(service),
+                decoration: const InputDecoration(
+                  labelText: 'API Key (Optional)',
+                  border: OutlineInputBorder(),
+                ),
+                obscureText: true,
               ),
-              obscureText: true,
-            ),
-            const SizedBox(height: 16),
-            Align(
-              alignment: Alignment.centerRight,
-              child: ElevatedButton(
-                onPressed: () => _saveProvider(service),
-                child: const Text('Save'),
-              ),
-            ),
+            ],
           ],
         ),
       ),
