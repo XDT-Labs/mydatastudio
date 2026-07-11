@@ -219,10 +219,20 @@ class _RxFilesPage extends State<RxFilesPage> {
     ScannerManager.getInstance()
         .getScannerAsync(col)
         .then((scanner) {
-          if (scanner.isScanning.value) {
+          if (scanner.isScanning.value && col.scanner != AppConstants.scannerFileGDrive) {
             return;
           }
-          scanner.start(col, absPath, false, true);
+          scanner.start(col, absPath, false, true).then((_) {
+            if (mounted && collection?.id == col.id && path == targetPath) {
+              _filesAndFoldersService?.invoke(
+                GetFileAndFoldersServiceCommand(
+                  col,
+                  targetPath,
+                  refreshOnly: true,
+                ),
+              );
+            }
+          });
         })
         .catchError((e) {
           logger.e("Error triggering shallow scan: $e");

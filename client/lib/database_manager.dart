@@ -366,6 +366,8 @@ class AppDatabase {
       dbFile.path,
       extensions: [SqliteVectorExtension()],
     );
+    await db.execute('PRAGMA busy_timeout = 5000;');
+    
     final bootstrapDb = AppDatabase(db);
     bootstrapDb.path = finalDbDir;
     bootstrapDb.name = dbName;
@@ -374,6 +376,7 @@ class AppDatabase {
 
     // Step 2: Reopen with vector indexes now that files_embeddings is migrated.
     db = await Database.open(dbFile.path, extensions: [vectorExtension]);
+    await db.execute('PRAGMA busy_timeout = 5000;');
 
     final appDb = AppDatabase(db);
     appDb.path = finalDbDir;

@@ -1,3 +1,8 @@
+---
+name: audit-application
+description: Perform a detailed audit of the application 
+---
+
 Perform a comprehensive audit of the application, covering security, reliability, concurrency, accessibility, and UI consistency.
 
 

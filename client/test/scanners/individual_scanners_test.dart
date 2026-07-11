@@ -32,6 +32,8 @@ class TestCloudFileIsolate extends CloudFileIsolate {
     : super(loggerPort, storagePath: '/tmp', dbName: 'test.db');
 
   Map<String, dynamic>? lastSpawnArgs;
+  Isolate? mockIsolateToReturn;
+  bool stopCalled = false;
 
   @override
   Future<Isolate?> spawnIsolate(
@@ -43,7 +45,13 @@ class TestCloudFileIsolate extends CloudFileIsolate {
     final SendPort port = args['port'] as SendPort;
     port.send({'type': 'scan_complete'});
     port.send(null); // Signal exit
-    return null;
+    return mockIsolateToReturn;
+  }
+
+  @override
+  void stop() {
+    stopCalled = true;
+    super.stop();
   }
 }
 
@@ -216,5 +224,32 @@ void main() {
         expect(scanner.lastSpawnArgs?['force'], isTrue);
       },
     );
+
+    test('CloudFileIsolate concurrent shallow scan does not stop recursive scan', () async {
+      final scanner = TestCloudFileIsolate(null);
+
+      // Start recursive scan
+      await scanner.start(collection, null, true, true);
+      // stop() is called on the first recursive start due to force=true
+      expect(scanner.stopCalled, isTrue);
+      
+      // Reset stopCalled flag
+      scanner.stopCalled = false;
+
+      // Start concurrent shallow scan
+      scanner.lastSpawnArgs = null;
+      await scanner.start(collection, 'folder-123', false, true);
+
+      // Verify stop was NOT called on shallow scan
+      expect(scanner.stopCalled, isFalse);
+      expect(scanner.lastSpawnArgs?['recursive'], isFalse);
+      expect(scanner.lastSpawnArgs?['rootFolderId'], equals('folder-123'));
+
+      // Start another recursive scan
+      await scanner.start(collection, null, true, true);
+
+      // Verify stop WAS called now because it's a recursive scan
+      expect(scanner.stopCalled, isTrue);
+    });
   });
 }

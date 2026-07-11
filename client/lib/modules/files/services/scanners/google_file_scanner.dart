@@ -18,6 +18,7 @@ import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
+import 'package:resqlite/resqlite.dart' show ResqliteQueryException;
 
 /// Scanner lifecycle manager for cloud-based file sources (Google Drive, etc.).
 ///
@@ -48,6 +49,7 @@ class CloudFileIsolate extends CollectionScanner {
   final String? dbName;
   Isolate? _isolate;
   AppLogger? _logger;
+  int _activeScanningCount = 0;
 
   CloudFileIsolate(this.loggerIsolatePort, {this.storagePath, this.dbName})
     : super() {
@@ -77,11 +79,14 @@ class CloudFileIsolate extends CollectionScanner {
       return 0;
     }
 
-    if (force) {
+    if (force && recursive) {
       stop();
     }
 
+    _activeScanningCount++;
     isScanning.add(true);
+    bool hasDecremented = false;
+
     final String debugName = 'CloudFileIsolate_${collection.id}';
 
     final ReceivePort p = ReceivePort(debugName);
@@ -114,12 +119,15 @@ class CloudFileIsolate extends CollectionScanner {
       'accessTokenExpiry': collection.expiration?.toIso8601String(),
     };
 
-    _isolate = await spawnIsolate(
+    final spawned = await spawnIsolate(
       CloudFileIsolateWorker._entry,
       args,
       debugName: debugName,
     );
-    _isolate?.addOnExitListener(p.sendPort);
+    if (recursive) {
+      _isolate = spawned;
+    }
+    spawned?.addOnExitListener(p.sendPort);
 
     // Listen for heartbeats, logs, and the exit signal
     await for (final message in p) {
@@ -164,12 +172,26 @@ class CloudFileIsolate extends CollectionScanner {
           // The initial scan is done, but the isolate might stay alive for downloads.
           // For now, we allow start() to return so ScannerManager is unblocked.
           // But we don't break the loop if we want to keep listening for logs from the worker.
-          isScanning.add(false);
+          if (!hasDecremented) {
+            hasDecremented = true;
+            _activeScanningCount--;
+            if (_activeScanningCount <= 0) {
+              _activeScanningCount = 0;
+              isScanning.add(false);
+            }
+          }
         }
       }
     }
 
-    isScanning.add(false);
+    if (!hasDecremented) {
+      hasDecremented = true;
+      _activeScanningCount--;
+      if (_activeScanningCount <= 0) {
+        _activeScanningCount = 0;
+        isScanning.add(false);
+      }
+    }
     p.close();
     return 0;
   }
@@ -177,6 +199,7 @@ class CloudFileIsolate extends CollectionScanner {
   @override
   void stop() {
     _isolate?.kill(priority: Isolate.beforeNextEvent);
+    _isolate = null;
     _logger?.i('CloudFileIsolate stopped');
   }
 
@@ -439,13 +462,13 @@ class CloudFileIsolateWorker {
     // For now, we trust the DB upsert logic to handle items correctly.
 
     do {
-      final response = await driveApi.files.list(
+      final response = await _retryNetworkOp(() => driveApi.files.list(
         q: query,
         $fields:
             'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, parents, thumbnailLink, webContentLink)',
         pageToken: pageToken,
         pageSize: 100,
-      );
+      ));
 
       final files = response.files ?? [];
       for (final f in files) {
@@ -512,6 +535,7 @@ class CloudFileIsolateWorker {
   ///
   /// Files are batched in groups of 100 before being sent to the DB writer
   /// (same batch size as [LocalFileIsolateWorker]).
+  /// Recursively scans a Drive folder (BFS) or performs a shallow/targeted scan.
   Future<int> _scanFolder({
     required drive.DriveApi driveApi,
     required String collectionId,
@@ -520,10 +544,67 @@ class CloudFileIsolateWorker {
     required bool recursive,
     required DateTime scanStartTime,
     bool downloadLocalCopy = false,
-    List<File>? currentBatch,
   }) async {
     int count = 0;
-    final fileBatch = currentBatch ?? <File>[];
+    final fileBatch = <File>[];
+
+    if (!recursive) {
+      // Shallow scan: just scan this single folder
+      count += await _scanSingleFolder(
+        driveApi: driveApi,
+        collectionId: collectionId,
+        collectionPath: collectionPath,
+        parentId: parentId,
+        scanStartTime: scanStartTime,
+        fileBatch: fileBatch,
+      );
+    } else {
+      // Recursive scan: Breadth-First Search (BFS) using a queue
+      final List<String> queue = [parentId];
+
+      while (queue.isNotEmpty) {
+        final currentFolderId = queue.removeAt(0);
+        logger.i('CloudFileIsolate: BFS scanning folder ID: $currentFolderId');
+
+        final discoveredFolders = <String>[];
+        count += await _scanSingleFolder(
+          driveApi: driveApi,
+          collectionId: collectionId,
+          collectionPath: collectionPath,
+          parentId: currentFolderId,
+          scanStartTime: scanStartTime,
+          fileBatch: fileBatch,
+          discoveredFolders: discoveredFolders,
+        );
+
+        queue.addAll(discoveredFolders);
+      }
+    }
+
+    // Flush any remaining files
+    if (fileBatch.isNotEmpty) {
+      logger.d(
+        'CloudFileIsolate: Sending final batch of ${fileBatch.length} files to DB writer',
+      );
+      await BatchFileUpsertService.instance.invoke(
+        BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+      );
+    }
+
+    return count;
+  }
+
+  /// Lists and writes items for a single Google Drive folder.
+  Future<int> _scanSingleFolder({
+    required drive.DriveApi driveApi,
+    required String collectionId,
+    required String collectionPath,
+    required String parentId,
+    required DateTime scanStartTime,
+    required List<File> fileBatch,
+    List<String>? discoveredFolders,
+  }) async {
+    int count = 0;
     String? pageToken;
 
     do {
@@ -531,14 +612,14 @@ class CloudFileIsolateWorker {
         'CloudFileIsolate: Fetching page of files for parent "$parentId" (pageToken: $pageToken)',
       );
 
-      final response = await driveApi.files.list(
+      final response = await _retryNetworkOp(() => driveApi.files.list(
         q: "'$parentId' in parents and trashed = false",
         $fields:
             'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, parents, thumbnailLink, webContentLink)',
         pageToken: pageToken,
         pageSize: 200,
         orderBy: 'folder, name',
-      );
+      ));
 
       final files = response.files ?? [];
       logger.d(
@@ -567,18 +648,8 @@ class CloudFileIsolateWorker {
             );
             logger.i('Found Drive folder: ${f.name} (${f.id})');
 
-            if (recursive) {
-              logger.s('Google Drive: $folder.name');
-              count += await _scanFolder(
-                driveApi: driveApi,
-                collectionId: collectionId,
-                collectionPath: collectionPath,
-                parentId: f.id!,
-                recursive: recursive,
-                scanStartTime: scanStartTime,
-                downloadLocalCopy: downloadLocalCopy,
-                currentBatch: fileBatch,
-              );
+            if (discoveredFolders != null) {
+              discoveredFolders.add(f.id!);
             }
           }
         } else {
@@ -612,17 +683,6 @@ class CloudFileIsolateWorker {
 
       pageToken = response.nextPageToken;
     } while (pageToken != null);
-
-    // Flush any remaining files when returning from the top-level call
-    if (currentBatch == null && fileBatch.isNotEmpty) {
-      logger.d(
-        'CloudFileIsolate: Sending final batch of ${fileBatch.length} files to DB writer',
-      );
-      await BatchFileUpsertService.instance.invoke(
-        BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
-      );
-      fileBatch.clear();
-    }
 
     return count;
   }
@@ -668,6 +728,53 @@ class CloudFileIsolateWorker {
     }
   }
 
+  Future<void> _executeWithRetry(String sql, List<Object?> params) async {
+    int attempt = 0;
+    const int maxRetries = 5;
+    while (true) {
+      attempt++;
+      try {
+        await appDb.execute(sql, params);
+        return;
+      } on ResqliteQueryException catch (e) {
+        if (e.sqliteCode == 5 && attempt < maxRetries) {
+          final backoffMs = 100 * attempt * attempt;
+          logger.w(
+            'CloudFileIsolateWorker: SQLITE_BUSY (attempt $attempt/$maxRetries) on update, retrying in ${backoffMs}ms...',
+          );
+          await Future.delayed(Duration(milliseconds: backoffMs));
+          continue;
+        }
+        rethrow;
+      }
+    }
+  }
+
+  Future<T> _retryNetworkOp<T>(Future<T> Function() operation) async {
+    int attempt = 0;
+    const int maxRetries = 3;
+    while (true) {
+      attempt++;
+      try {
+        return await operation();
+      } catch (e) {
+        final isTransient =
+            e is io.IOException ||
+            e is TimeoutException ||
+            e.toString().contains('HandshakeException');
+        if (isTransient && attempt < maxRetries) {
+          final backoffMs = 1000 * attempt * attempt;
+          logger.w(
+            'CloudFileIsolateWorker: Transient network error ($e). Attempt $attempt/$maxRetries. Retrying in ${backoffMs}ms...',
+          );
+          await Future.delayed(Duration(milliseconds: backoffMs));
+          continue;
+        }
+        rethrow;
+      }
+    }
+  }
+
   Future<void> _downloadFile(
     drive.DriveApi driveApi,
     File file,
@@ -675,52 +782,71 @@ class CloudFileIsolateWorker {
     String collectionName,
     String collectionPath,
   ) async {
-    try {
-      final driveId = file.path.replaceFirst('gdrive://', '');
-      final relativePath = _reconstructPath(file.parent, collectionPath);
-      final destDir = p.join(
-        storagePath,
-        'files',
-        'gdrive',
-        collectionName,
-        relativePath,
-      );
-      final destPath = p.join(destDir, file.name);
+    int attempt = 0;
+    const int maxRetries = 3;
 
-      final destFile = io.File(destPath);
-      if (await destFile.exists()) {
-        logger.d('File already exists on disk: $destPath');
-        await appDb.execute('UPDATE files SET local_path = ? WHERE id = ?', [
-          destPath,
-          file.id,
-        ]);
-        return;
-      }
-
-      await destFile.parent.create(recursive: true);
-      logger.i('Downloading: ${file.name} to $destPath');
-
-      final drive.Media media =
-          await driveApi.files.get(
-                driveId,
-                downloadOptions: drive.DownloadOptions.fullMedia,
-              )
-              as drive.Media;
-
-      final sink = destFile.openWrite();
+    while (true) {
+      attempt++;
       try {
-        await media.stream.pipe(sink);
-        logger.i('Downloaded: ${file.name}');
-        await appDb.execute('UPDATE files SET local_path = ? WHERE id = ?', [
-          destPath,
-          file.id,
-        ]);
-      } finally {
-        await sink.flush();
-        await sink.close();
+        final driveId = file.path.replaceFirst('gdrive://', '');
+        final relativePath = _reconstructPath(file.parent, collectionPath);
+        final destDir = p.join(
+          storagePath,
+          'files',
+          'gdrive',
+          collectionName,
+          relativePath,
+        );
+        final destPath = p.join(destDir, file.name);
+
+        final destFile = io.File(destPath);
+        if (await destFile.exists()) {
+          logger.d('File already exists on disk: $destPath');
+          await _executeWithRetry('UPDATE files SET local_path = ? WHERE id = ?', [
+            destPath,
+            file.id,
+          ]);
+          return;
+        }
+
+        await destFile.parent.create(recursive: true);
+        logger.i('Downloading: ${file.name} to $destPath (attempt $attempt/$maxRetries)');
+
+        final drive.Media media = await _retryNetworkOp(() => driveApi.files.get(
+              driveId,
+              downloadOptions: drive.DownloadOptions.fullMedia,
+            )) as drive.Media;
+
+        final sink = destFile.openWrite();
+        try {
+          await media.stream.pipe(sink);
+          logger.i('Downloaded: ${file.name}');
+          await _executeWithRetry('UPDATE files SET local_path = ? WHERE id = ?', [
+            destPath,
+            file.id,
+          ]);
+          return; // Success!
+        } finally {
+          await sink.flush();
+          await sink.close();
+        }
+      } catch (e) {
+        final isTransient =
+            e is io.IOException ||
+            e is TimeoutException ||
+            e.toString().contains('HandshakeException');
+        if (isTransient && attempt < maxRetries) {
+          final backoffMs = 1000 * attempt * attempt;
+          logger.w(
+            'Failed to download ${file.name} due to transient network error ($e). '
+            'Retrying in ${backoffMs}ms...',
+          );
+          await Future.delayed(Duration(milliseconds: backoffMs));
+          continue;
+        }
+        logger.e('Failed to download ${file.name} after $attempt attempts: $e');
+        break; // Stop retrying on non-transient or exhausted retries
       }
-    } catch (e) {
-      logger.e('Failed to download ${file.name}: $e');
     }
   }
 
