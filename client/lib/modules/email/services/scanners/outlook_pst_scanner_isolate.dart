@@ -164,7 +164,10 @@ class OutlookPstScannerIsolateWorker {
         final data = jsonDecode(line);
 
         if (data['type'] == 'folder') {
-          final folderId = const Uuid().v4();
+          final folderId = const Uuid().v5(
+            Namespace.url.value,
+            'folder:pst:${collection.id}:${data['path']}',
+          );
           folderPathToId[data['path']] = folderId;
 
           logger.d(
@@ -186,7 +189,11 @@ class OutlookPstScannerIsolateWorker {
             EmailFolderUpsertServiceCommand(folder, appDb),
           );
         } else if (data['type'] == 'email') {
-          final emailId = const Uuid().v4();
+          final rawId = data['id'] as String? ?? 'unknown';
+          final emailId = const Uuid().v5(
+            Namespace.url.value,
+            'email:pst:${collection.id}:$rawId',
+          );
           final folderId = folderPathToId[data['folder']] ?? 'INBOX';
 
           final email = Email(
@@ -212,7 +219,10 @@ class OutlookPstScannerIsolateWorker {
           // Process attachments — also emit Folder records so the file module
           // can navigate the directory tree (e.g., INBOX → 2010 → files).
           for (var att in data['attachments']) {
-            final fileId = const Uuid().v4();
+            final fileId = const Uuid().v5(
+              Namespace.url.value,
+              'file:pst:${collection.id}:$emailId:${att['name']}',
+            );
             final attPath = att['path'] as String? ?? '';
 
             // Validate path stays within extraction root

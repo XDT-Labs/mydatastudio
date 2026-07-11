@@ -22,7 +22,8 @@ class GmailScanner extends CollectionScanner {
   final String dbPath;
   final Collection collection;
   final String appDir;
-  GmailScannerIsolate? isolate;
+  GmailScannerIsolate? _fullScanIsolateManager;
+  int _activeScanningCount = 0;
   bool isStopped = false;
 
   final AppLogger logger = AppLogger(null);
@@ -33,12 +34,6 @@ class GmailScanner extends CollectionScanner {
     required this.appDir,
   });
 
-  /// Starts the Gmail scanning process.
-  ///
-  /// [collection] The Google/Gmail collection to scan.
-  /// [path] Optional label ID (e.g., 'INBOX') to restrict the scan.
-  /// [recursive] Not currently used for Gmail (labels are flat).
-  /// [force] If false, returns 0 immediately (Rule 2). If true, triggers sync.
   /// Starts the Gmail scanning process.
   ///
   /// [collection] The Gmail collection to scan.
@@ -55,31 +50,11 @@ class GmailScanner extends CollectionScanner {
     bool recursive,
     bool force,
   ) async {
-    // We no longer skip scanning if lastScanDate is not null.
-    // The underlying isolate will handle incremental sync logic based on the date.
-
     // If scanning already, don't restart.
     if (!force) {
       logger.i("Registration-only mode: skipping scan for ${collection.name}");
       return 0;
     }
-
-    if (isScanning.value) return 0;
-
-    isScanning.add(true);
-    logger.i("Gmail sync started for ${collection.name}");
-
-    //start full scan in isolate
-    ReceivePort receivePort = ReceivePort();
-    receivePort.listen((message) {
-      //listen for logger status messages
-      if (message is String && message.isNotEmpty) {
-        logger.s(message);
-      }
-      if (message is Map && message['status'] == 'done') {
-        isScanning.add(false);
-      }
-    });
 
     // If the path looks like a local file path (e.g., from the Files module),
     // we don't want to pass it to Gmail as a label ID.
@@ -88,14 +63,54 @@ class GmailScanner extends CollectionScanner {
       labelId = path;
     }
 
+    // Only skip if the scanner is already busy AND it's a full scan
+    if (isScanning.value && labelId == null) {
+      return 0;
+    }
+
+    if (labelId == null && force) {
+      // Force recursive full scan: stop existing background scan first
+      _fullScanIsolateManager?.stop();
+      _fullScanIsolateManager = null;
+    }
+
+    _activeScanningCount++;
+    isScanning.add(true);
+    bool hasDecremented = false;
+    logger.i("Gmail sync started for ${collection.name} (label: $labelId)");
+
+    //start scan in isolate
+    ReceivePort receivePort = ReceivePort();
+    receivePort.listen((message) {
+      //listen for logger status messages
+      if (message is String && message.isNotEmpty) {
+        logger.s(message);
+      }
+      if (message is Map && message['status'] == 'done') {
+        if (!hasDecremented) {
+          hasDecremented = true;
+          _activeScanningCount--;
+          if (_activeScanningCount <= 0) {
+            _activeScanningCount = 0;
+            isScanning.add(false);
+          }
+        }
+        receivePort.close();
+      }
+    });
+
     //start isolate
     RootIsolateToken? token = RootIsolateToken.instance;
-    isolate = GmailScannerIsolate(
+    final scannerIsolate = GmailScannerIsolate(
       token: token,
       appDir: appDir,
       dbDir: p.dirname(p.dirname(dbPath)),
     );
-    await isolate!.start(
+    if (labelId == null) {
+      _fullScanIsolateManager = scannerIsolate;
+    }
+
+    await scannerIsolate.start(
       collection,
       folderId: labelId,
       force: force,
@@ -108,7 +123,9 @@ class GmailScanner extends CollectionScanner {
   @override
   void stop() async {
     isStopped = true;
-    isolate?.stop();
+    _fullScanIsolateManager?.stop();
+    _fullScanIsolateManager = null;
+    _activeScanningCount = 0;
     isScanning.add(false);
   }
 }

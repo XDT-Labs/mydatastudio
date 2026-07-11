@@ -37,8 +37,9 @@ class EmailRepository {
     List<dynamic> args = [collectionId];
 
     if (folderId != null) {
-      query += "AND folder_id = ? ";
+      query += "AND (folder_id = ? OR ',' || labels || ',' LIKE ?) ";
       args.add(folderId);
+      args.add('%,$folderId,%');
     }
 
     if (search != null && search.isNotEmpty) {

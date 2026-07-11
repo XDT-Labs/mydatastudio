@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:isolate';
@@ -178,7 +179,10 @@ class GmailScannerIsolateWorker {
     try {
       // 1. Sync Labels (Folders)
       logger.s("Syncing Gmail labels...");
-      final labelsResponse = await gmailApi.users.labels.list('me');
+      final labelsResponse = await _retryNetworkOp(
+        () => gmailApi.users.labels.list('me'),
+        logger,
+      );
       final labels = labelsResponse.labels ?? [];
 
       for (var label in labels) {
@@ -279,12 +283,15 @@ class GmailScannerIsolateWorker {
       logger.i("Gmail: Performing incremental sync ($query)");
     }
 
-    final response = await gmailApi.users.messages.list(
-      'me',
-      q: query,
-      labelIds: labelId != null ? [labelId] : null,
-      pageToken: pageToken,
-      maxResults: 50, // Small batch for responsiveness
+    final response = await _retryNetworkOp(
+      () => gmailApi.users.messages.list(
+        'me',
+        q: query,
+        labelIds: labelId != null ? [labelId] : null,
+        pageToken: pageToken,
+        maxResults: 50, // Small batch for responsiveness
+      ),
+      logger,
     );
 
     final messages = response.messages ?? [];
@@ -294,17 +301,23 @@ class GmailScannerIsolateWorker {
 
     List<Email> emailBatch = [];
 
-    final labelsResponse = await gmailApi.users.labels.list('me');
+    final labelsResponse = await _retryNetworkOp(
+      () => gmailApi.users.labels.list('me'),
+      logger,
+    );
     final labelMap = {
       for (var l in labelsResponse.labels ?? []) l.id!: l.name ?? 'unknown',
     };
 
     for (var msgRef in messages) {
       try {
-        final m = await gmailApi.users.messages.get(
-          'me',
-          msgRef.id!,
-          format: 'full',
+        final m = await _retryNetworkOp(
+          () => gmailApi.users.messages.get(
+            'me',
+            msgRef.id!,
+            format: 'full',
+          ),
+          logger,
         );
 
         DateTime msgDate = DateTime.fromMillisecondsSinceEpoch(
@@ -496,10 +509,13 @@ class GmailScannerIsolateWorker {
     for (var part in parts) {
       if (part.body?.attachmentId != null) {
         try {
-          final attachment = await gmailApi.users.messages.attachments.get(
-            'me',
-            messageId,
-            part.body!.attachmentId!,
+          final attachment = await _retryNetworkOp(
+            () => gmailApi.users.messages.attachments.get(
+              'me',
+              messageId,
+              part.body!.attachmentId!,
+            ),
+            logger ?? AppLogger(null),
           );
 
           final originalFileName = part.filename ?? 'unnamed_attachment';
@@ -617,5 +633,33 @@ class GmailScannerIsolateWorker {
       messagesTotal: label.messagesTotal,
       messagesUnread: label.messagesUnread,
     );
+  }
+
+  static Future<T> _retryNetworkOp<T>(
+    Future<T> Function() operation,
+    AppLogger logger,
+  ) async {
+    int attempt = 0;
+    const int maxRetries = 3;
+    while (true) {
+      attempt++;
+      try {
+        return await operation();
+      } catch (e) {
+        final isTransient =
+            e is io.IOException ||
+            e is TimeoutException ||
+            e.toString().contains('HandshakeException');
+        if (isTransient && attempt < maxRetries) {
+          final backoffMs = 1000 * attempt * attempt;
+          logger.w(
+            'GmailScannerIsolateWorker: Transient network error ($e). Attempt $attempt/$maxRetries. Retrying in ${backoffMs}ms...',
+          );
+          await Future.delayed(Duration(milliseconds: backoffMs));
+          continue;
+        }
+        rethrow;
+      }
+    }
   }
 }
