@@ -60,14 +60,14 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
 
 ## HIGH
 
-### - [ ] H1 — Local AI server exposes file read/write with no authentication
+### - [x] H1 — Local AI server exposes file read/write with no authentication
 - **Category:** Security · **Confidence:** Confirmed
 - **Location:** `aiserver/src/aichat/main.py:126-158` (no auth dependency on any route); binds `127.0.0.1:0` at `main.py:202`
 - **Issue:** The server accepts any request to `127.0.0.1:<port>` with no token, API key, or origin enforcement for non-browser clients. CORS (`allow_origins` localhost) only constrains browsers; any other local process that discovers the port has full access.
 - **Impact:** Combined with H2/M1, any local process (or malware running as the user) can read arbitrary image files and write files to arbitrary directories through this server. The port is discoverable (printed to stderr; any process can scan localhost).
 - **Evidence:** No `Depends(...)` auth guard anywhere in `main.py`; `HF_TOKEN`/`GOOGLE_API_KEY` are passed empty and the server trusts request bodies fully.
 - **Recommended fix:** Generate a random bearer token at spawn time, pass it to the subprocess via env (e.g. `AISERVER_TOKEN`), require it on every route via a FastAPI dependency, and have the Flutter client attach it (`python_manager.dart` env map + `local_llm_content_generator.dart` headers). Single highest-leverage fix — closes H2/M1's exploitability.
-- **Notes:**
+- **Notes:** DONE 2026-07-10. Server: new `aiserver/src/aichat/auth.py` (`require_token` dependency, constant-time compare, disabled when `AISERVER_TOKEN` unset for dev/tests), applied app-wide via `dependencies=[Depends(require_token)]` in `main.py`. Client: `PythonManager` generates 32-byte CSPRNG hex token, passes it via `AISERVER_TOKEN` env, and broadcasts it on `MainApp.llmServiceToken`; a shared `aiServerAuthHeaders(token)` helper (main.dart) attaches `Authorization: Bearer` at every call site — chat completions/stop, embeddings, model status/download/delete, thumbnail, and PST import. Worker isolates (embedding, local-file scan, PST) receive the token through their spawn args / control messages the same way they already receive the URL. Added `tests/test_auth.py` (6 passing). `flutter analyze` clean on all touched Dart files (only pre-existing lints remain). This shrinks H2/M1 exposure from "any local process" to "only the paired client" — but does **not** by itself fix the path-traversal primitives (H2/M1 still open).
 
 ### - [ ] H2 — Arbitrary local file read via `/util/thumbnail`
 - **Category:** Security · **Confidence:** Confirmed
@@ -214,7 +214,7 @@ Add album/dedup/search; resolve the two `TODO: disable if no files are checked` 
 
 ## Prioritized remediation plan
 
-1. **H1 — Add a bearer token to the local server** (unlocks the value of every other server-side fix). Env-passed secret + FastAPI dependency + client header.
+1. ~~**H1 — Add a bearer token to the local server**~~ ✅ DONE 2026-07-10 (env-passed per-spawn secret + FastAPI dependency + client headers). See H1 notes.
 2. **H2 / M1 — Confine `/util/thumbnail` and `/util/import/pst` paths** to allowed roots using the existing `_assert_within_models_dir` / `_safe_repo_path` helpers; move the containment check before `makedirs`.
 3. **M2 — Move tokens + API keys to Keychain** (`flutter_secure_storage`) or SQLCipher, with migration.
 4. **M3 — Guard chat re-entrancy** (Enter-key + `sendRequest` early return).
@@ -234,7 +234,7 @@ All five verified: `flutter analyze` clean on the four touched Dart files; `rout
 The chat page uses a fixed hardcoded-dark palette (`_sendEnabledBg`, `_mutedColor`, `Color(0xFF2C2C2E)`, `Colors.black` icons). Converting it to theme tokens so it honors light/dark mode is a page-wide refactor with real regression surface — do it deliberately, not as a quick win.
 
 ## Requires deeper work / architectural change
-- **H1 token scheme** (touches spawn, all routes, and every client call site).
+- ~~**H1 token scheme**~~ ✅ DONE 2026-07-10 (touched spawn, all routes, and every client call site + worker isolates).
 - **M2 credential storage** (migration of existing plaintext tokens + key management).
 - **M4 accessibility** (systematic, every module).
 - **L2/L3 server concurrency** (per-request stop signaling + serialize or pool model access) — only if multi-stream usage becomes real.
@@ -246,6 +246,6 @@ The chat page uses a fixed hardcoded-dark palette (`_sendEnabledBg`, `_mutedColo
 
 **Ship with known risks — for the current single-user, local-only, trusted-machine deployment.**
 
-The exploit paths (H1/H2/M1) require local code execution as the same user — a lower bar than remote attack, but still a real threat model for a privacy-focused product handling email and cloud tokens. Before any wider or less-trusted distribution, **H1, H2, M1, and M2 should be treated as blockers**: an unauthenticated local server with file-read/write primitives plus plaintext long-lived credentials can turn one compromised process into full account takeover. **M3 (double-submit) should be fixed before release regardless** — it's trivially triggerable in normal use and corrupts user data.
+The exploit paths (H2/M1) require local code execution as the same user — a lower bar than remote attack, but still a real threat model for a privacy-focused product handling email and cloud tokens. **H1 is now fixed** (2026-07-10): the local server requires a per-spawn bearer token, so H2/M1 are no longer reachable by an arbitrary co-resident process — only by the paired client (or malware that reads the process env). Before any wider or less-trusted distribution, **H2, M1, and M2 should still be treated as blockers**: the path-traversal primitives and plaintext long-lived credentials remain, so a compromise of the client (or its env) can still turn into file exfiltration / account takeover. **M3 (double-submit) is fixed.**
 
-The most impactful single next action is **H1** — a random per-spawn bearer token — because it alone converts H2 and M1 from "any local process" into "only the paired Flutter client," dramatically shrinking exposure while the deeper fixes land.
+With H1 landed, the next most impactful actions are **H2 and M1** — confining the thumbnail-read and PST-import paths to allowed roots — which remove the file-read/write primitives entirely rather than just gating access to them.

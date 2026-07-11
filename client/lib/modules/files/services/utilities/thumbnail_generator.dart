@@ -1,17 +1,23 @@
 import 'dart:convert';
 import 'dart:io' as io;
 import 'package:http/http.dart' as http;
+import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 
 class ThumbnailGenerator {
-  Future<String?> imageToBase64(File file, {String? llmServiceUrl}) async {
+  Future<String?> imageToBase64(
+    File file, {
+    String? llmServiceUrl,
+    String? llmServiceToken,
+  }) async {
     return pathImageToBase64(
       file.path,
       file.contentType,
       llmServiceUrl: llmServiceUrl,
+      llmServiceToken: llmServiceToken,
     );
   }
 
@@ -19,6 +25,7 @@ class ThumbnailGenerator {
     String filePath,
     String? contentType, {
     String? llmServiceUrl,
+    String? llmServiceToken,
   }) async {
     final ext = p.extension(filePath).toLowerCase();
     final isRaw = [
@@ -35,7 +42,10 @@ class ThumbnailGenerator {
       try {
         final response = await http.post(
           Uri.parse("$llmServiceUrl/util/thumbnail"),
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            ...aiServerAuthHeaders(llmServiceToken),
+          },
           body: jsonEncode({
             'file_path': filePath,
             'width': 320,

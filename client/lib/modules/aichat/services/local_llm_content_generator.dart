@@ -78,7 +78,10 @@ class LocalLlmContentGenerator implements ContentGenerator {
       final url = MainApp.llmServiceUrl.valueOrNull;
       if (url != null) {
         await http
-            .post(Uri.parse('$url/v1/chat/stop'))
+            .post(
+              Uri.parse('$url/v1/chat/stop'),
+              headers: aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+            )
             .timeout(const Duration(seconds: 2));
       }
     } catch (_) {}
@@ -150,6 +153,9 @@ class LocalLlmContentGenerator implements ContentGenerator {
         Uri.parse('$llmServiceUrl/v1/chat/completions'),
       );
       request.headers['Content-Type'] = 'application/json; charset=UTF-8';
+      request.headers.addAll(
+        aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+      );
       request.body = jsonEncode({
         'model': model ?? '',
         if (modelPath != null && modelPath!.isNotEmpty) 'model_path': modelPath,

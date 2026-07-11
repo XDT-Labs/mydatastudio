@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:mydatastudio/app_logger.dart';
@@ -68,6 +69,13 @@ class PythonManager {
     return mgr;
   }
 
+  /// 32 bytes of CSPRNG output, hex-encoded — the per-spawn AISERVER_TOKEN.
+  static String _generateToken() {
+    final rand = Random.secure();
+    final bytes = List<int>.generate(32, (_) => rand.nextInt(256));
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
   Stream<String> get stdoutLines => _stdoutController.stream;
   Stream<String> get stderrLines => _stderrController.stream;
 
@@ -120,6 +128,13 @@ class PythonManager {
 
     logger.d('[python] Starting AI Chat service in `$_pythonDir`');
 
+    // Generate a fresh bearer token for this spawn and publish it before the
+    // process starts, so every client call (and worker isolate) can attach it
+    // as soon as the service URL is broadcast. Closes the unauthenticated-server
+    // exposure (AUDIT.md H1).
+    final token = _generateToken();
+    MainApp.llmServiceToken.add(token);
+
     String executableName = 'aiserver';
     if (Platform.isWindows) {
       executableName = 'aiserver.exe';
@@ -159,6 +174,7 @@ class PythonManager {
           'APP_SUPPORT_DIR': supportPath,
           'AICHAT_MODELS_DIR': p.join(_pythonDir!, 'models'),
           'AISERVER_LOG_LEVEL': MainApp.logLevel,
+          'AISERVER_TOKEN': token,
         },
       );
 
