@@ -152,8 +152,8 @@ class PythonManager {
         workingDirectory: _pythonDir,
         environment: {
           'PYTHONUNBUFFERED': '1',
-          'HF_TOKEN': '', //todo pass from client
-          'GOOGLE_API_KEY': '', //todo pass from client
+          // Cloud provider keys (HF, Google, etc.) are sent per-request from the
+          // client, not via env — see LocalLlmContentGenerator / providers table.
           'MODEL_DOWNLOAD_URL':
               'https://gcs-file-downloader-10805446439.us-central1.run.app', // todo get from remote config
           'APP_SUPPORT_DIR': supportPath,

@@ -101,14 +101,14 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
 - **Recommended fix:** Store tokens and API keys via `flutter_secure_storage` (macOS Keychain), or encrypt the DB with SQLCipher keyed from a Keychain-held key. At minimum, move `providers.api_key` and `collections.*_token` to Keychain. Include a migration for existing plaintext values.
 - **Notes:**
 
-### - [ ] M3 — Chat double-submit race via the Enter key
+### - [x] M3 — Chat double-submit race via the Enter key  ✅ FIXED (quick-win pass)
 - **Category:** Race Condition / Reliability · **Confidence:** Confirmed
 - **Location:** `client/lib/modules/aichat/pages/aichat_page.dart:528-535` (`_handleKeyEvent`); guard `_canSend` at `aichat_page.dart:94-95`; no re-entrancy guard in `client/lib/modules/aichat/services/local_llm_content_generator.dart:96-104`.
 - **Issue:** The on-screen button correctly swaps to a Stop button while streaming, but the Enter key handler calls `_sendMessage` unconditionally. `_canSend` checks only that text/attachments exist — **not** whether a response is already streaming. `sendRequest` has no guard: a second call overwrites `_activeClient`, appends a second user message to `_messages` mid-stream, and both streams write to the same controllers.
 - **Impact:** Pressing Enter (or holding it) during generation corrupts conversation history, orphans the first HTTP connection, and produces interleaved/garbled output. The persisted conversation and in-memory `_messages` diverge.
 - **Reproduction:** Send a prompt that yields a long response; while it streams, type in the field and press Enter.
 - **Recommended fix:** Gate `_handleKeyEvent` on `!_contentGenerator.isProcessing.value && _canSend`, and add an early-return guard at the top of `sendRequest` (`if (_isProcessing.value) return;`).
-- **Notes:**
+- **Notes:** Fixed — `_handleKeyEvent` now checks `_canSend && !_contentGenerator.isProcessing.value` (`aichat_page.dart`), and `sendRequest` returns early if already processing (`local_llm_content_generator.dart`). `flutter analyze` clean.
 
 ### - [ ] M4 — No screen-reader / semantic layer
 - **Category:** Accessibility · **Confidence:** Confirmed
@@ -122,12 +122,12 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
 
 ## LOW
 
-### - [ ] L1 — Exception text leaked to client (thumbnail)
+### - [x] L1 — Exception text leaked to client (thumbnail)  ✅ FIXED (quick-win pass)
 - **Category:** Security · **Confidence:** Confirmed
 - **Location:** `aiserver/src/aichat/routes.py:709`
 - **Issue:** Returns `detail=f"Failed to generate thumbnail: {e}"`, leaking filesystem paths / library internals. Other handlers correctly return generic messages.
 - **Recommended fix:** Return a generic message; log the detail server-side only. Make consistent with the other route handlers.
-- **Notes:**
+- **Notes:** Fixed — `detail` is now `"Failed to generate thumbnail."`; the exception is still logged via `print(...)` server-side (`routes.py`).
 
 ### - [ ] L2 — Global stop flag is process-wide
 - **Category:** Race Condition · **Confidence:** Confirmed
@@ -152,23 +152,26 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
 - **Recommended fix:** Validate process identity before killing (e.g. check the process name/command), or only SIGKILL after a liveness + identity check.
 - **Notes:**
 
-### - [ ] L5 — `dispose()` doesn't cancel in-flight request
+### - [x] L5 — `dispose()` doesn't cancel in-flight request  ✅ FIXED (quick-win pass)
 - **Category:** Reliability · **Confidence:** Confirmed
 - **Location:** `client/lib/modules/aichat/services/local_llm_content_generator.dart:88-94`
 - **Issue:** Closes controllers but not `_activeClient`; navigating away mid-stream leaks the connection until the server finishes.
 - **Recommended fix:** Close `_activeClient` and optionally POST `/v1/chat/stop` in `dispose()`.
-- **Notes:**
+- **Notes:** Fixed — `dispose()` now sets `_cancelled = true` and closes/nulls `_activeClient` before closing controllers (`local_llm_content_generator.dart`).
 
 ---
 
 ## INFORMATIONAL / VISUAL CONSISTENCY
 
-### - [ ] I1 — Hardcoded colors bypass the theme
+### - [x] I1 — Hardcoded colors bypass the theme  ✅ FIXED where it was a real bug (quick-win pass)
 - **Category:** Visual Consistency
 - **Location:** `client/lib/modules/aichat/pages/aichat_page.dart:1049,1068`; `client/lib/modules/files/widgets/file_collection_setup/coming_soon_tab_view.dart`; `client/lib/modules/photos/widgets/photo_card.dart`.
 - **Issue:** `Colors.black`, `Colors.grey.shade300` used directly instead of `Theme.of(context).colorScheme` tokens — render poorly / illegibly in dark mode.
 - **Recommended fix:** Swap literal colors for `colorScheme` tokens.
-- **Notes:**
+- **Notes / scope correction after closer review:**
+  - **`coming_soon_tab_view.dart` — FIXED.** This renders on a normal themed surface; grey-on-dark was genuinely low-contrast. Now uses `colorScheme.onSurfaceVariant` (with 0.4 alpha for the icon).
+  - **`photo_card.dart` — NOT a bug, left as-is.** The `Colors.black` letterbox and white-on-`Colors.black26` caption are intentional image-presentation colors that must stay fixed regardless of app theme (they sit over arbitrary photo content). Swapping to theme tokens would *reduce* legibility.
+  - **`aichat_page.dart` send button — deliberately hardcoded-dark component, left as-is.** The whole page uses a fixed dark palette (`_sendEnabledBg`, `_mutedColor`, `Color(0xFF2C2C2E)`, etc.). The `Colors.black` icon is black-on-light-button by design; an isolated token swap risks an invisible icon. Retheming this page is a **separate, non-quick-win task** — tracked below.
 
 ### - [ ] I2 — CORS `allow_headers=["*"]` broader than needed
 - **Category:** Security
@@ -176,12 +179,12 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
 - **Recommended fix:** Tighten allowed headers once auth (H1) lands.
 - **Notes:**
 
-### - [ ] I3 — Stale `//todo` env wiring in PythonManager
+### - [x] I3 — Stale `//todo` env wiring in PythonManager  ✅ FIXED (quick-win pass)
 - **Category:** Reliability
 - **Location:** `client/lib/python_manager.dart:155-158`
 - **Issue:** `HF_TOKEN`/`GOOGLE_API_KEY` are passed empty; keys actually flow per-request. Dead env vars are misleading.
 - **Recommended fix:** Remove the unused env entries.
-- **Notes:**
+- **Notes:** Fixed — removed both empty env entries, replaced with a comment pointing at the per-request key flow. Verified safe: the server reads `GOOGLE_API_KEY` only via `os.environ.get(...)` with an `or` fallback (`model_manager.py:37`), so empty-string vs absent is behaviorally identical.
 
 ---
 
@@ -218,12 +221,17 @@ Add album/dedup/search; resolve the two `TODO: disable if no files are checked` 
 5. **M4 — Accessibility pass** on interactive controls (semantic buttons, labels, target sizes).
 6. **L1–L5, I1–I3** — cleanup.
 
-## Quick wins (low regression risk)
-- **M3** guard: two-line change (`_handleKeyEvent` condition + `sendRequest` early return).
-- **L1**: generic thumbnail error message.
-- **I1**: swap literal colors for `colorScheme` tokens in the three widgets.
-- **L5**: close `_activeClient` in `dispose()`.
-- **I3**: delete the dead `HF_TOKEN`/`GOOGLE_API_KEY` env entries.
+## Quick wins (low regression risk) — ✅ DONE 2026-07-10
+- [x] **M3** guard: `_handleKeyEvent` condition + `sendRequest` early return.
+- [x] **L1**: generic thumbnail error message.
+- [x] **I1**: `colorScheme` tokens in `coming_soon_tab_view.dart`. (photo_card & aichat send button intentionally left — see I1 notes.)
+- [x] **L5**: close `_activeClient` in `dispose()`.
+- [x] **I3**: delete the dead `HF_TOKEN`/`GOOGLE_API_KEY` env entries.
+
+All five verified: `flutter analyze` clean on the four touched Dart files; `routes.py` passes an `ast.parse` syntax check. No tests were run beyond static analysis — a manual smoke test of the chat send/stop flow is worth doing before shipping.
+
+### - [ ] Follow-up (not a quick win): retheme `aichat_page.dart` to `colorScheme` tokens
+The chat page uses a fixed hardcoded-dark palette (`_sendEnabledBg`, `_mutedColor`, `Color(0xFF2C2C2E)`, `Colors.black` icons). Converting it to theme tokens so it honors light/dark mode is a page-wide refactor with real regression surface — do it deliberately, not as a quick win.
 
 ## Requires deeper work / architectural change
 - **H1 token scheme** (touches spawn, all routes, and every client call site).

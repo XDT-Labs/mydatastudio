@@ -706,7 +706,7 @@ def generate_thumbnail(request: ThumbnailRequest) -> Dict[str, Any]:
         }
     except Exception as e:
         print(f"[ERROR] Thumbnail generation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate thumbnail: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate thumbnail.")
 
 
 async def import_pst(request: PstImportRequest):

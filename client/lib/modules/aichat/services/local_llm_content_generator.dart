@@ -86,6 +86,10 @@ class LocalLlmContentGenerator implements ContentGenerator {
 
   @override
   void dispose() {
+    // Close any in-flight streaming connection so it doesn't leak past disposal.
+    _cancelled = true;
+    _activeClient?.close();
+    _activeClient = null;
     _a2uiMessageController.close();
     _textResponseController.close();
     _errorController.close();
@@ -99,6 +103,9 @@ class LocalLlmContentGenerator implements ContentGenerator {
     A2UiClientCapabilities? clientCapabilities,
     Iterable<ChatMessage>? history,
   }) async {
+    // Guard against re-entrancy: a second send while one is already streaming
+    // would overwrite _activeClient and interleave writes into _messages.
+    if (_isProcessing.value) return;
     _isProcessing.value = true;
     _cancelled = false;
     try {
