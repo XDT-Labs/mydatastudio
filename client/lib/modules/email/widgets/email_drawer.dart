@@ -521,6 +521,9 @@ class _EmailFolderListState extends State<_EmailFolderList> {
 
     EmailFolder? inbox;
     EmailFolder? sent;
+    EmailFolder? drafts;
+    EmailFolder? trash;
+    EmailFolder? spam;
     final List<EmailFolder> otherFolders = [];
 
     for (var f in folders) {
@@ -531,7 +534,21 @@ class _EmailFolderListState extends State<_EmailFolderList> {
         inbox = f;
       } else if (normalizedId == 'SENT' || normalizedName == 'SENT') {
         sent = f;
+      } else if (normalizedId == 'DRAFT' || normalizedId == 'DRAFTS' || normalizedName == 'DRAFT' || normalizedName == 'DRAFTS') {
+        drafts = f;
+      } else if (normalizedId == 'TRASH' || normalizedId == 'DELETED' || normalizedName == 'TRASH' || normalizedName == 'DELETED' || normalizedName == 'DELETED ITEMS') {
+        trash = f;
+      } else if (normalizedId == 'SPAM' || normalizedId == 'JUNK' || normalizedName == 'SPAM' || normalizedName == 'JUNK') {
+        spam = f;
       } else {
+        // Filter out internal Gmail system categories/labels that shouldn't show up as folders
+        if (normalizedId == 'UNREAD' ||
+            normalizedId == 'STARRED' ||
+            normalizedId == 'IMPORTANT' ||
+            normalizedId == 'CHAT' ||
+            normalizedId.startsWith('CATEGORY_')) {
+          continue;
+        }
         otherFolders.add(f);
       }
     }
@@ -558,6 +575,30 @@ class _EmailFolderListState extends State<_EmailFolderList> {
             icon: Icons.send,
             isSelected: widget.selectedFolderId == sent.id,
             onTap: () => widget.onFolderTap(sent!.id),
+          ),
+        if (drafts != null)
+          EmailFolderTileWidget(
+            folder: drafts,
+            label: 'Drafts',
+            icon: Icons.drafts_outlined,
+            isSelected: widget.selectedFolderId == drafts.id,
+            onTap: () => widget.onFolderTap(drafts!.id),
+          ),
+        if (trash != null)
+          EmailFolderTileWidget(
+            folder: trash,
+            label: 'Trash',
+            icon: Icons.delete_outline,
+            isSelected: widget.selectedFolderId == trash.id,
+            onTap: () => widget.onFolderTap(trash!.id),
+          ),
+        if (spam != null)
+          EmailFolderTileWidget(
+            folder: spam,
+            label: 'Spam',
+            icon: Icons.report_outlined,
+            isSelected: widget.selectedFolderId == spam.id,
+            onTap: () => widget.onFolderTap(spam!.id),
           ),
         if (otherFolders.isNotEmpty) ...[
           InkWell(
