@@ -1,4 +1,3 @@
-import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/extensions/widget_extension.dart';
 import 'package:mydatastudio/main.dart';
@@ -7,7 +6,6 @@ import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:form_builder_validators/form_builder_validators.dart';
 import 'package:password_dart/password_dart.dart';
 import 'package:path/path.dart' as p;
@@ -23,52 +21,14 @@ class LoginForm extends StatefulWidget {
 class _LoginFormState extends State<LoginForm> {
   final _formKey = GlobalKey<FormBuilderState>();
   AppLogger logger = AppLogger(null);
-  String savedPassword = '';
-  //get access to local Secure Storage to save data
-  FlutterSecureStorage? secureStorage;
   bool isSubmitting = false;
 
   @override
   void initState() {
     super.initState();
-
+    // No "remember me": the password is never persisted. It is entered on every
+    // launch and used to unlock the credential vault (AUDIT M2).
     ServicesBinding.instance.keyboard.addHandler(onKey);
-
-    (() async {
-      secureStorage = const FlutterSecureStorage(
-        iOptions: IOSOptions(
-          groupId: AppConstants.appName,
-          synchronizable: true,
-          accessibility: KeychainAccessibility.first_unlock,
-        ),
-        mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-      );
-
-      if (secureStorage != null) {
-        // Check remember me preference
-        String? rememberMe = await secureStorage?.read(
-          key: AppConstants.secureRememberMe,
-        );
-        bool remember = rememberMe == 'true';
-
-        //Pull saved password out of OS secure storage
-        if (remember &&
-            (await secureStorage?.containsKey(
-                  key: AppConstants.securePassword,
-                ) ??
-                false)) {
-          String pwd =
-              await secureStorage?.read(key: AppConstants.securePassword) ?? '';
-          if (mounted) {
-            setState(() {
-              savedPassword = pwd;
-            });
-          }
-        } else {
-          logger.i("saved password not found or remember me is false");
-        }
-      }
-    }).call();
   }
 
   @override
@@ -97,25 +57,12 @@ class _LoginFormState extends State<LoginForm> {
                   children: [
                     FormBuilderTextField(
                       name: 'password',
-                      initialValue: savedPassword,
                       autofocus: true,
                       decoration: const InputDecoration(labelText: 'Password'),
                       obscureText: true,
                       validator: FormBuilderValidators.compose([
                         FormBuilderValidators.required(),
                       ]),
-                    ),
-                    Row(
-                      children: [
-                        SizedBox(
-                          width: 200,
-                          child: FormBuilderCheckbox(
-                            name: 'remember',
-                            title: const Text('Remember Me'),
-                            initialValue: true,
-                          ),
-                        ),
-                      ],
                     ),
                     const SizedBox(height: 16),
                     MaterialButton(
@@ -128,7 +75,7 @@ class _LoginFormState extends State<LoginForm> {
                                   formSubmitHandler(
                                     context,
                                     _formKey.currentState?.instantValue ??
-                                        {'password': null, 'remember': false},
+                                        {'password': null},
                                   );
                                 }
                               }
@@ -155,7 +102,7 @@ class _LoginFormState extends State<LoginForm> {
         formSubmitHandler(
           null,
           _formKey.currentState?.instantValue ??
-              {'password': null, 'remember': false},
+              {'password': null},
         );
       }
     }
@@ -199,7 +146,6 @@ class _LoginFormState extends State<LoginForm> {
 
     try {
       String? pwd = values['password'];
-      bool remember = values['remember'] ?? false;
       if (pwd != null) {
         var algorithm = PBKDF2(
           blockLength: 64,
@@ -212,34 +158,12 @@ class _LoginFormState extends State<LoginForm> {
           GetUserServiceCommand(hash),
         );
         if (dbUser != null) {
-          // Unlock (or first-time create) the credential vault from the plaintext
-          // password before entering the app, so decrypted tokens/keys are
-          // available (AUDIT M2). Never blocks login if it fails.
+          // Unlock the credential vault from the plaintext password before
+          // entering the app, so decrypted tokens/keys are available (AUDIT M2).
+          // The password itself is never persisted. Never blocks login if it fails.
           await _unlockVault(pwd);
 
           widget.onLoginSuccessful!();
-
-          // Save remember me preference
-          FlutterSecureStorage storage = const FlutterSecureStorage(
-            iOptions: IOSOptions(
-              groupId: AppConstants.appName,
-              synchronizable: true,
-              accessibility: KeychainAccessibility.first_unlock,
-            ),
-            mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-          );
-          await storage.write(
-            key: AppConstants.secureRememberMe,
-            value: remember.toString(),
-          );
-
-          if (remember) {
-            //save password to secure storage
-            await storage.write(key: AppConstants.securePassword, value: pwd);
-          } else {
-            //remove password from secure storage
-            await storage.delete(key: AppConstants.securePassword);
-          }
         } else {
           if (context != null && context.mounted) {
             context.showToast("Wrong password");

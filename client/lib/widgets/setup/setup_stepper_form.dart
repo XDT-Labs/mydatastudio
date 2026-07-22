@@ -11,6 +11,7 @@ import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/repositories/user_repository.dart';
 import 'package:mydatastudio/services/get_user_service.dart';
 import 'package:mydatastudio/services/model_download_manager.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 
 import 'package:mydatastudio/widgets/setup/setup_step1.dart';
 import 'package:mydatastudio/widgets/setup/setup_step2.dart';
@@ -179,6 +180,23 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
         ).saveUser(u);
         if (savedUser == null) {
           throw Exception('Failed to save user');
+        }
+
+        // Create the credential vault from the chosen password so a fresh
+        // install is fully set up (AUDIT M2). There is no migration — secrets
+        // are encrypted from their first write onward. The plaintext is used
+        // once here and then dropped.
+        final plaintextPassword = appUser!.plaintextPassword;
+        if (plaintextPassword != null && plaintextPassword.isNotEmpty) {
+          try {
+            await VaultManager.instance.createAndUnlock(
+              p.join(appUser!.localStoragePath, 'keys'),
+              plaintextPassword,
+            );
+          } catch (e) {
+            logger.e('Failed to create credential vault during setup: $e');
+          }
+          appUser!.plaintextPassword = null;
         }
 
         //do full login to check everything is ok
