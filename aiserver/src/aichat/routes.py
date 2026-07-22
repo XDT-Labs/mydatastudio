@@ -32,6 +32,7 @@ from .model_manager import (
 from .utils import (
     get_local_path, find_local_model, download_gguf_model, stream_download_gguf,
     stream_download_snapshot, is_snapshot_downloaded, _resolve_models_base,
+    resolve_data_roots,
 )
 from .state import (
     get_llm_instance, set_llm_instance,
@@ -636,6 +637,23 @@ async def check_model_status(request: DownloadModelRequest) -> Dict[str, Any]:
     return {"exists": existing is not None, "model_path": existing}
 
 
+def _assert_within_roots(path: str, roots: list, label: str = "Path") -> str:
+    """Return realpath(path) if it lives inside one of `roots`, else raise 403.
+
+    `roots` are treated as trusted prefixes; the check resolves symlinks (via
+    realpath) so a symlink inside an allowed root that points elsewhere is caught.
+    A trailing os.sep is required on the prefix so `/a/b` does not match `/a/bc`.
+    """
+    real = os.path.realpath(path)
+    for root in roots:
+        if not root:
+            continue
+        real_root = os.path.realpath(root)
+        if real == real_root or real.startswith(real_root + os.sep):
+            return real
+    raise HTTPException(status_code=403, detail=f"{label} is outside the allowed directories")
+
+
 def _assert_within_models_dir(path: str, models_dir: str, label: str = "Path") -> None:
     """Raise 400 if `path` is not strictly inside `models_dir`."""
     try:
@@ -682,17 +700,25 @@ async def delete_model(request: DeleteModelRequest) -> Dict[str, Any]:
 
 def generate_thumbnail(request: ThumbnailRequest) -> Dict[str, Any]:
     """Generate a thumbnail for an image file, including RAW formats."""
-    if not os.path.exists(request.file_path):
+    # Confine reads to the app's own data dirs plus the collection root the client
+    # declared, so this endpoint can't be used to render arbitrary images off disk
+    # (AUDIT H2). realpath resolves symlinks before the containment check.
+    allowed_roots = resolve_data_roots()
+    if request.allowed_root:
+        allowed_roots.append(request.allowed_root)
+    file_path = _assert_within_roots(request.file_path, allowed_roots, "file_path")
+
+    if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="File not found")
     try:
-        ext = os.path.splitext(request.file_path)[1].lower()
+        ext = os.path.splitext(file_path)[1].lower()
         if ext in ['.nef', '.cr2', '.arw', '.dng', '.orf', '.sr2']:
             import rawpy
-            with rawpy.imread(request.file_path) as raw:
+            with rawpy.imread(file_path) as raw:
                 rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True, bright=1.0)
                 img = Image.fromarray(rgb)
         else:
-            img = Image.open(request.file_path)
+            img = Image.open(file_path)
         img.thumbnail((request.width, request.height))
         import io
         import base64
@@ -716,7 +742,10 @@ async def import_pst(request: PstImportRequest):
         raise HTTPException(status_code=400, detail="file_path must point to a .pst file")
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=400, detail="file_path does not exist")
-    output_dir = os.path.realpath(request.output_dir)
+    # Confine attachment extraction to the app's own data dirs so a caller can't
+    # redirect writes to an arbitrary location (AUDIT M1). The parser additionally
+    # keeps every write inside this output_dir.
+    output_dir = _assert_within_roots(request.output_dir, resolve_data_roots(), "output_dir")
 
     def event_stream() -> Generator[str, None, None]:
         parser = PstParser(file_path, output_dir)

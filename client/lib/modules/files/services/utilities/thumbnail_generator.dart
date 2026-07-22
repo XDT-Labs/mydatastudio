@@ -12,12 +12,14 @@ class ThumbnailGenerator {
     File file, {
     String? llmServiceUrl,
     String? llmServiceToken,
+    String? allowedRoot,
   }) async {
     return pathImageToBase64(
       file.path,
       file.contentType,
       llmServiceUrl: llmServiceUrl,
       llmServiceToken: llmServiceToken,
+      allowedRoot: allowedRoot,
     );
   }
 
@@ -26,6 +28,10 @@ class ThumbnailGenerator {
     String? contentType, {
     String? llmServiceUrl,
     String? llmServiceToken,
+    // Collection root this file belongs to; the server confines the read to it
+    // (plus the app's own data dirs) so /util/thumbnail isn't an arbitrary-file
+    // oracle (AUDIT H2).
+    String? allowedRoot,
   }) async {
     final ext = p.extension(filePath).toLowerCase();
     final isRaw = [
@@ -50,6 +56,7 @@ class ThumbnailGenerator {
             'file_path': filePath,
             'width': 320,
             'height': 240,
+            if (allowedRoot != null) 'allowed_root': allowedRoot,
           }),
         );
 

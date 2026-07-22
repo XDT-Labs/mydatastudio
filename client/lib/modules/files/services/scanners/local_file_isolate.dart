@@ -201,6 +201,7 @@ class LocalFileIsolateWorker {
     String mimeType,
     String? llmServiceUrl,
     String? llmServiceToken,
+    String? allowedRoot,
   ) {
     _thumbnailQueue.add(() async {
       try {
@@ -209,6 +210,7 @@ class LocalFileIsolateWorker {
           mimeType,
           llmServiceUrl: llmServiceUrl,
           llmServiceToken: llmServiceToken,
+          allowedRoot: allowedRoot,
         );
         if (thumbnail != null) {
           await appDb.execute(
@@ -411,6 +413,7 @@ class LocalFileIsolateWorker {
               file.contentType,
               llmServiceUrl,
               llmServiceToken,
+              rootPath,
             );
             generatedThumbnails++;
           }
@@ -661,6 +664,7 @@ class LocalFileIsolateWorker {
     String mimeType,
     String? llmServiceUrl, {
     String? llmServiceToken,
+    String? allowedRoot,
   }) {
     _enqueueThumbnailJob(
       appDb,
@@ -669,6 +673,7 @@ class LocalFileIsolateWorker {
       mimeType,
       llmServiceUrl,
       llmServiceToken,
+      allowedRoot,
     );
   }
 
