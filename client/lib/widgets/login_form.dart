@@ -1,13 +1,16 @@
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/extensions/widget_extension.dart';
+import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/services/get_user_service.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:form_builder_validators/form_builder_validators.dart';
 import 'package:password_dart/password_dart.dart';
+import 'package:path/path.dart' as p;
 
 class LoginForm extends StatefulWidget {
   const LoginForm({super.key, this.onLoginSuccessful});
@@ -160,6 +163,25 @@ class _LoginFormState extends State<LoginForm> {
     return false;
   }
 
+  /// Unlock the credential vault (or create it on first login after this feature
+  /// ships) from the just-entered plaintext password. Best-effort: a failure is
+  /// logged but never blocks login — features needing secrets degrade until the
+  /// vault is unlocked. See AUDIT.md M2.
+  Future<void> _unlockVault(String password) async {
+    final storagePath = MainApp.appDataDirectory.valueOrNull;
+    if (storagePath == null || storagePath.isEmpty) return;
+    final keysDir = p.join(storagePath, 'keys');
+    try {
+      if (await VaultManager.instance.vaultExists(keysDir)) {
+        await VaultManager.instance.unlock(keysDir, password);
+      } else {
+        await VaultManager.instance.createAndUnlock(keysDir, password);
+      }
+    } catch (e) {
+      logger.e('Vault unlock failed: $e');
+    }
+  }
+
   /// The formSubmitHandler function is used to handle form submissions
   ///
   /// Args:
@@ -190,6 +212,11 @@ class _LoginFormState extends State<LoginForm> {
           GetUserServiceCommand(hash),
         );
         if (dbUser != null) {
+          // Unlock (or first-time create) the credential vault from the plaintext
+          // password before entering the app, so decrypted tokens/keys are
+          // available (AUDIT M2). Never blocks login if it fails.
+          await _unlockVault(pwd);
+
           widget.onLoginSuccessful!();
 
           // Save remember me preference
