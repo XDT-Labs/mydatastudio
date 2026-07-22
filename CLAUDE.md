@@ -86,12 +86,11 @@ make clean            # Remove all build artifacts
 ```bash
 cd client
 flutter pub get                      # Install dependencies
-dart run build_runner build          # Regenerate Drift DB code and JSON serializers (required after schema changes)
 flutter build macos --release --no-tree-shake-icons
 flutter test                         # Run Flutter tests
 ```
 
-> `dart run build_runner build` must be re-run whenever you modify Drift table definitions or classes annotated with `@JsonSerializable`.
+> The database uses **resqlite** (+ **resqlite_vector**), not Drift. Tables are declared as raw `CREATE TABLE` DDL in `database_manager.dart`, and models under `models/tables/` are plain Dart classes with hand-written `fromMap`/`toMap`. There is **no code generation** for the schema or models — a schema change means editing the DDL and the corresponding model by hand (bump the DB version / migration in `database_manager.dart` as needed).
 
 ## Python Service (`aiserver/`)
 
@@ -125,12 +124,12 @@ On app close, `windowManager.onWindowClose` triggers `pythonManager.stopAiServer
 ### Flutter State & Data Flow
 
 - **Global singletons**: `MainApp.supportDirectory`, `MainApp.appDataDirectory`, `MainApp.llmServiceUrl` — all `BehaviorSubject` from RxDart
-- **Database**: `DatabaseManager` is a Drift singleton; write-heavy operations run in `DbIsolateWriter` (a separate `Isolate`) to avoid blocking the UI thread
+- **Database**: `DatabaseManager` is a resqlite singleton; write-heavy operations run in `DbIsolateWriter` (a separate `Isolate`) to avoid blocking the UI thread
 - **Embeddings**: Generated in `EmbeddingIsolate` — another separate isolate
 - **Background sync**: `ScannerManager` creates `CollectionScanner` instances per collection; scanners run as isolates watching for new/changed files, emails, photos
 - **Auth**: `DesktopOAuthManager` handles OAuth2 flows for Google Drive, Gmail, Yahoo
 
-Data flow: UI → Repository (Drift query) → SQLite + sqlite_vector → Scanner/Service (background) → Python HTTP for AI tasks → response back to UI
+Data flow: UI → Repository (resqlite query) → SQLite + resqlite_vector → Scanner/Service (background) → Python HTTP for AI tasks → response back to UI
 
 ### Flutter Module Structure
 
@@ -143,11 +142,11 @@ modules/<feature>/
 ```
 
 Other key directories:
-- `repositories/` — Drift query layer
+- `repositories/` — resqlite query layer
 - `services/` — cross-feature services
 - `scanners/` — background isolate workers
 - `file_sources/` — OAuth provider integrations (Google Drive, local FS)
-- `models/` — Drift table definitions and JSON-serializable models
+- `models/` — plain Dart model classes (`models/tables/`) with hand-written `fromMap`/`toMap`; the SQL schema is declared in `database_manager.dart`
 
 ### Python Service Structure
 
@@ -165,7 +164,7 @@ utils.py          # HuggingFace downloads, file I/O
 
 ### Database Schema
 
-Drift tables: `App`, `AppUser`, `Collection`, `File`, `Folder`, `Email`, `EmailFolder`, `Album`, `FileEmbedding`. Collections own Files/Folders/Emails. `FileEmbedding` stores float vectors via sqlite_vector for semantic search.
+Tables (raw `CREATE TABLE` DDL in `database_manager.dart`): `App`, `AppUser`, `Collection`, `File`, `Folder`, `Email`, `EmailFolder`, `Album`, `FileEmbedding`. Collections own Files/Folders/Emails. `FileEmbedding` stores float vectors via resqlite_vector for semantic search.
 
 ### macOS Bundle IDs
 

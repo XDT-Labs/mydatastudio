@@ -98,8 +98,8 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
   - DB opened with no SQLCipher/encryption: `client/lib/database_manager.dart:234-267`.
 - **Issue:** Long-lived Gmail/Drive/Outlook/Yahoo **refresh tokens**, cloud LLM **API keys** (Claude/OpenAI/Gemini/Grok/HuggingFace), and OAuth **client secrets** are all persisted in cleartext. `flutter_secure_storage` (Keychain) is used only for the app's own login secret (`client/lib/widgets/login_form.dart:35`), not for these.
 - **Impact:** Any process running as the user, a Time Machine/backup, or a synced folder exposes credentials that grant standing access to the user's email and cloud accounts. Directly undercuts the app's "local-first / private" positioning.
-- **Recommended fix:** Store tokens and API keys via `flutter_secure_storage` (macOS Keychain), or encrypt the DB with SQLCipher keyed from a Keychain-held key. At minimum, move `providers.api_key` and `collections.*_token` to Keychain. Include a migration for existing plaintext values.
-- **Notes:**
+- **Recommended fix:** Also affects the RSA `private.pem` at `<storage>/keys/private.pem`, which is stored in cleartext with the same exposure. Chosen approach: **app-level envelope encryption** (single master key encrypts the credentials + the private key at rest) rather than SQLCipher or plain Keychain-per-secret — see the **"Planned: credential encryption (M2)"** section below for the full plan and rationale.
+- **Notes:** Design settled 2026-07-22 (not yet implemented). SQLCipher rejected: the DB layer is **resqlite** (`resqlite`/`resqlite_vector`), which has no SQLCipher support, and the Python server reads the DB (`model_registry.py`) so it would also need to decrypt; full-DB crypto would also encrypt GBs of non-secret embeddings to protect KBs of secrets. See plan below.
 
 ### - [x] M3 — Chat double-submit race via the Enter key  ✅ FIXED (quick-win pass)
 - **Category:** Race Condition / Reliability · **Confidence:** Confirmed
@@ -263,7 +263,39 @@ The chat page uses a fixed hardcoded-dark palette (`_sendEnabledBg`, `_mutedColo
 - **Network / removable storage:** the storage dir can be a network volume (see the WAL-probe logic in `database_manager.dart`); thousands of tiny files on a network mount are slow — consider a local fast-path or batching.
 - **Migration:** simplest is lazy — ignore existing base64 rows and regenerate to disk on the next scan/view, rather than a one-time bulk convert.
 
-**Scope (touches):** `models/tables/file.dart` + Drift schema/migration; `thumbnail_generator.dart`; `local_file_isolate.dart`; the render widgets (`file_table.dart`, `thumbnail_widget.dart`, `photo_card.dart`); the aiserver `/util/thumbnail` handler (bytes in, bytes out) and `models.py`. Bigger than the surgical H2/M1 patches — plan and test deliberately.
+**Scope (touches):** `models/tables/file.dart` + the `files` table DDL/migration in `database_manager.dart`; `thumbnail_generator.dart`; `local_file_isolate.dart`; the render widgets (`file_table.dart`, `thumbnail_widget.dart`, `photo_card.dart`); the aiserver `/util/thumbnail` handler (bytes in, bytes out) and `models.py`. Bigger than the surgical H2/M1 patches — plan and test deliberately.
+
+---
+
+## Planned: credential encryption (M2) — envelope encryption (deferred)
+
+**Goal.** Get long-lived secrets out of cleartext at rest: OAuth **access/refresh tokens** (`collections`), cloud LLM **API keys** + OAuth **client secrets** (`providers`), and the RSA **`private.pem`** in `<storage>/keys/` — which today has the exact same plaintext exposure and must be fixed in the same pass.
+
+**Approach chosen: app-level envelope encryption.** One symmetric **master key** encrypts everything sensitive; only the master key needs OS-level protection.
+
+**Why not the alternatives (decided 2026-07-22):**
+- **SQLCipher (full-DB):** the DB layer is **resqlite**/`resqlite_vector` with no SQLCipher support (would mean forking/replacing the DB stack); the **Python** server reads the DB (`model_registry.py`) so it would also need to decrypt; and it would encrypt gigabytes of non-secret embeddings to protect kilobytes of secrets. Rejected.
+- **Keychain per-secret (`flutter_secure_storage` for each value):** viable for `providers.*` (main-isolate only), but `collections.*_token` are read/refreshed **inside background isolates** (`embedding_isolate`, scanners) → needs Keychain access from isolates (feasibility risk on macOS) or a token-refresh restructure. Also can't protect `private.pem`, and gives no backup/migration story. Rejected as the primary mechanism (envelope encryption subsumes it).
+
+**Design.**
+- **`SecureVault` service** (new, `client/lib/services/secure_vault.dart` or `helpers/`): holds the in-memory master key for the session; exposes `encrypt(bytes)`/`decrypt(bytes)` using **AES-256-GCM** (random 12-byte nonce per value, authenticated; via the existing `encrypt`/`pointycastle` deps). Never logs key or plaintext.
+- **Master key — one decision to make (see below):**
+  - **(A) Keychain-held:** generate a random 32-byte key, store only it via `flutter_secure_storage` (the app already uses it for the login secret). Strongest at-rest; **no** folder-copy migration (re-auth on a new machine — same as today's login secret).
+  - **(B) Password-derived:** derive the master key from the user's app password via **PBKDF2** (the login flow already runs PBKDF2 — use a **separate salt**, never reuse the auth hash as the encryption key). Enables true "copy the storage folder + know your password" portability; **forgotten password = unrecoverable secrets** (user re-auths / re-enters keys).
+  - A hybrid is possible later (Keychain master key + optional password-wrapped export for migration).
+- **What gets encrypted:** the credential columns (`collections.access_token/refresh_token/id_token`, `providers.api_key/client_secret`) stored as GCM ciphertext blobs, decrypted only in memory; and `private.pem` re-written encrypted (fixes the plaintext-private-key bug). Public key stays cleartext.
+- **Isolate plumbing:** the master key is read once in the **main isolate** and passed into worker isolates via their existing spawn args / control messages — exactly the pattern used for the aiserver token (H1). **No `flutter_secure_storage` calls inside isolates.** Token *refresh* writes (embedding_isolate/scanners) encrypt with the passed-in key before persisting.
+- **Migration (one-time, on first launch after the change):** for each row with a non-empty plaintext secret, encrypt-in-place and rewrite; decrypt `keys/private.pem` from disk and rewrite encrypted. Guard with a `schema/vault` version flag so it runs once. Keep a read fallback that treats a value as plaintext if it fails GCM auth (so a half-migrated DB still works), removed after the migration window.
+
+**Edge cases / risks.**
+- **Python side:** `model_registry.py` only reads `aichat_models` (no secrets) — unaffected, stays on the plaintext-readable DB. Confirm no future Python reader needs an encrypted column.
+- **Key loss:** option (B) makes password loss fatal to secrets — surface this in the UI; offer re-auth paths for OAuth and re-entry for API keys.
+- **Crypto correctness:** unique nonce per encryption, authenticated mode (GCM), constant-time compares, no secrets in logs/error messages (ties back to L1). Add unit tests for round-trip + tamper-detection.
+- **Backup feature synergy:** this also protects the RSA key used by the future backup-server upload flow, so the private key is no longer plaintext on disk.
+
+**Scope (touches):** new `SecureVault`; `collection_repository.dart` (encrypt on upsert / decrypt on read); `aichat_models_settings_page.dart` (provider key save/load); `user_repository.dart` + `keys/` handling for `private.pem`; every isolate spawn that carries a collection/token (`embedding_isolate.dart`, `google_file_scanner.dart`, `gmail_scanner_isolate.dart`, `outlook_pst_scanner_isolate.dart`, `new_email_page.dart`, `email_drawer.dart`); one-time migration in `database_manager.dart`. Substantial — implement behind the version flag and test the migration on a populated DB before shipping.
+
+**Open decision before implementation:** master key **(A) Keychain-held** vs **(B) password-derived** (portability vs. recoverability). Everything else follows from that.
 
 ---
 
