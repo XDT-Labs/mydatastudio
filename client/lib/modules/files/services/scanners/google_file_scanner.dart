@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -112,6 +114,9 @@ class CloudFileIsolate extends CollectionScanner {
       'accessToken': collection.accessToken,
       'refreshToken': collection.refreshToken,
       'accessTokenExpiry': collection.expiration?.toIso8601String(),
+      // DEK so the worker can decrypt/encrypt collection tokens and read the
+      // provider client_secret during token refresh (AUDIT M2 phase 4).
+      'vaultDek': VaultManager.instance.dek,
     };
 
     _isolate = await spawnIsolate(
@@ -227,6 +232,9 @@ class CloudFileIsolateWorker {
 
       final token = args['token'] as RootIsolateToken;
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
+
+      // DEK-backed vault for in-isolate credential access (AUDIT M2 phase 4).
+      CredentialCodec.installIsolateVault(args['vaultDek'] as Uint8List?);
 
       final appDb = await AppDatabase.create(
         null,

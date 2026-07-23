@@ -11,11 +11,14 @@ import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart'
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 
 class EmbeddingIsolate {
   Isolate? _isolate;
   ReceivePort? _receivePort;
   SendPort? _controlPort;
+  VoidCallback? _vaultListener;
 
   Future<void> start(
     String storagePath,
@@ -48,6 +51,13 @@ class EmbeddingIsolate {
             MainApp.llmServiceUrl.valueOrNull != null) {
           updateUrl(MainApp.llmServiceUrl.valueOrNull!);
         }
+        // Push the vault DEK now (if already unlocked) and on every later unlock.
+        // The isolate spawns at app boot, before login unlocks the vault, so the
+        // DEK arrives over the control port — the same channel as the aiserver
+        // token (AUDIT M2 phase 4).
+        _sendVaultDek();
+        _vaultListener = _sendVaultDek;
+        VaultManager.instance.unlocked.addListener(_vaultListener!);
       } else if (data is Map) {
         final type = data['type'];
         final msg = data['message'];
@@ -102,6 +112,15 @@ class EmbeddingIsolate {
     });
   }
 
+  /// Send the unwrapped DEK to the worker so it can decrypt collection tokens
+  /// when embedding Google Drive files. A null DEK (vault still locked) is not
+  /// sent — the worker keeps failing loudly on secret access until it arrives.
+  void _sendVaultDek() {
+    final dek = VaultManager.instance.dek;
+    if (dek == null) return;
+    _controlPort?.send({'type': 'vaultDek', 'dek': dek});
+  }
+
   static Future<void> _isolateEntry(Map<String, dynamic> cfg) async {
     // Initialize platform channel for background isolate
     BackgroundIsolateBinaryMessenger.ensureInitialized(
@@ -123,6 +142,11 @@ class EmbeddingIsolate {
         serviceUrl = message['url'];
         serviceToken = message['token'];
         logger.d("Python service URL updated: $serviceUrl");
+      } else if (message is Map && message['type'] == 'vaultDek') {
+        // Install the credential vault so _processGDriveFile can decrypt the
+        // collection's tokens (AUDIT M2 phase 4).
+        CredentialCodec.installIsolateVault(message['dek'] as Uint8List?);
+        logger.d("Credential vault DEK installed in embedding isolate");
       }
     });
 
@@ -369,6 +393,10 @@ class EmbeddingIsolate {
   }
 
   void stop() {
+    if (_vaultListener != null) {
+      VaultManager.instance.unlocked.removeListener(_vaultListener!);
+      _vaultListener = null;
+    }
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
     _receivePort?.close();
