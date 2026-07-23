@@ -6,6 +6,7 @@ import 'package:genui/genui.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/app_router.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/modules/aichat/services/local_llm_content_generator.dart';
 import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/services/model_download_manager.dart';
@@ -514,7 +515,11 @@ class _AichatPage extends State<AichatPage> with RouteAware {
           'SELECT api_key FROM providers WHERE service = ? LIMIT 1',
           [group],
         );
-        if (rows.isNotEmpty) apiKey = rows.first['api_key'] as String?;
+        if (rows.isNotEmpty) {
+          // Decrypt the cloud provider key (AUDIT M2 phase 3/4). A locked vault
+          // throws rather than sending ciphertext as the API key.
+          apiKey = CredentialCodec.decrypt(rows.first['api_key'] as String?);
+        }
       }
     }
     _contentGenerator.apiKey = apiKey;

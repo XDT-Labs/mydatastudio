@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/provider.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -13,6 +15,7 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  final AppLogger logger = AppLogger(null);
   final Map<String, TextEditingController> _clientIdControllers = {};
   final Map<String, TextEditingController> _clientSecretControllers = {};
   final Map<String, TextEditingController> _apiKeyControllers = {};
@@ -68,8 +71,17 @@ class _SettingsPageState extends State<SettingsPage> {
       if (rows.isNotEmpty) {
         final provider = Provider.fromDbMap(rows.first);
         _clientIdControllers[service]?.text = provider.clientId ?? '';
-        _clientSecretControllers[service]?.text = provider.clientSecret ?? '';
-        _apiKeyControllers[service]?.text = provider.apiKey ?? '';
+        // Decrypt the stored secrets for display (AUDIT M2 phase 3/4). If the
+        // vault is locked, leave the fields blank rather than crash the settings
+        // page — this is a display load, not a secret being emitted anywhere.
+        try {
+          _clientSecretControllers[service]?.text =
+              CredentialCodec.decrypt(provider.clientSecret) ?? '';
+          _apiKeyControllers[service]?.text =
+              CredentialCodec.decrypt(provider.apiKey) ?? '';
+        } catch (e) {
+          logger.e('Could not decrypt stored provider secret for $service: $e');
+        }
       }
     }
 
@@ -98,7 +110,12 @@ class _SettingsPageState extends State<SettingsPage> {
       'client_id = excluded.client_id, '
       'client_secret = excluded.client_secret, '
       'api_key = excluded.api_key',
-      [service, clientId, clientSecret, apiKey],
+      [
+        service,
+        clientId,
+        CredentialCodec.encrypt(clientSecret),
+        CredentialCodec.encrypt(apiKey),
+      ],
     );
   }
 

@@ -7,6 +7,7 @@ import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/provider.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/oauth/desktop_oauth_manager.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
@@ -120,7 +121,10 @@ extension LoginProviderExtension on LoginProviders {
         final provider = Provider.fromDbMap(rows.first);
         if (provider.clientSecret != null &&
             provider.clientSecret!.isNotEmpty) {
-          return provider.clientSecret!;
+          // Stored encrypted (AUDIT M2 phase 3/4). Decrypt to plaintext for the
+          // token endpoint. In worker isolates the DEK must be installed first;
+          // a locked codec throws rather than sending ciphertext to Google.
+          return CredentialCodec.decrypt(provider.clientSecret!)!;
         }
       }
     }

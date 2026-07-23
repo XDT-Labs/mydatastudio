@@ -5,6 +5,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/helpers/file_path_resolver.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 
 class DatabaseRepository {
   AppDatabase db;
@@ -207,6 +208,14 @@ class DatabaseRepository {
       [id],
     );
     if (rows.isEmpty) return null;
-    return Collection.fromDbMap(rows.first);
+    // Decrypt OAuth tokens so the returned model holds plaintext. This runs
+    // inside worker isolates, where the DEK must have been installed at isolate
+    // entry (AUDIT M2 phase 3/4); a locked codec fails loudly rather than
+    // handing back ciphertext.
+    final c = Collection.fromDbMap(rows.first);
+    c.accessToken = CredentialCodec.decrypt(c.accessToken);
+    c.refreshToken = CredentialCodec.decrypt(c.refreshToken);
+    c.idToken = CredentialCodec.decrypt(c.idToken);
+    return c;
   }
 }
