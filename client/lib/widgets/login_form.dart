@@ -154,15 +154,18 @@ class _LoginFormState extends State<LoginForm> {
         );
         var hash = Password.hash(pwd, algorithm);
 
+        // Unlock the credential vault from the plaintext password BEFORE loading
+        // the user: user() now reads keys/private.pem encrypted with the vault
+        // DEK, so the vault must be unlocked first (AUDIT M2 phase 4). The
+        // password itself is never persisted. A unlock failure is logged but not
+        // fatal here — an actually-wrong password still fails the user lookup
+        // below and shows "Wrong password".
+        await _unlockVault(pwd);
+
         var dbUser = await GetUserService.instance.invoke(
           GetUserServiceCommand(hash),
         );
         if (dbUser != null) {
-          // Unlock the credential vault from the plaintext password before
-          // entering the app, so decrypted tokens/keys are available (AUDIT M2).
-          // The password itself is never persisted. Never blocks login if it fails.
-          await _unlockVault(pwd);
-
           widget.onLoginSuccessful!();
         } else {
           if (context != null && context.mounted) {
