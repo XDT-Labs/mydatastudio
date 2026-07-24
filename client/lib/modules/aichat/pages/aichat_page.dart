@@ -529,7 +529,11 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.enter &&
         !HardwareKeyboard.instance.isShiftPressed) {
-      _sendMessage(_textController.text);
+      // Only send when there's something to send and no response is in flight —
+      // matches the on-screen button, which swaps to Stop while streaming.
+      if (_canSend && !_contentGenerator.isProcessing.value) {
+        _sendMessage(_textController.text);
+      }
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;

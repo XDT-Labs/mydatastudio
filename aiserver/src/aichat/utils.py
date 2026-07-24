@@ -4,10 +4,11 @@ Utility functions for file operations, path management, and archive handling.
 This module provides helper functions for managing model files, including
 path generation, archive extraction, and model downloading from Hugging Face Hub.
 """
+import json
 import os
 import tarfile
 import urllib.request
-from typing import Optional
+from typing import List, Optional
 
 # Written into a snapshot's local_path only once every file has downloaded
 # successfully. Its presence — not "directory is non-empty" — is what
@@ -52,6 +53,52 @@ def _resolve_models_base() -> str:
                     return sandbox_dir
 
     return os.path.join(os.getcwd(), 'models')
+
+
+def resolve_data_roots() -> List[str]:
+    """Absolute, realpath'd directories the server is allowed to touch on behalf
+    of caller-supplied paths (thumbnail reads, PST attachment writes).
+
+    These are the app's own data locations: the macOS Application Support dir
+    (APP_SUPPORT_DIR, always set by PythonManager), the user-selected storage and
+    database dirs read from config.json (which may live on a different/external
+    volume), and the models dir. Used by the thumbnail and PST endpoints to reject
+    paths that point outside the app's data — see AUDIT.md H2/M1.
+    """
+    roots: List[str] = []
+
+    support_dir = os.environ.get('APP_SUPPORT_DIR')
+    if support_dir:
+        roots.append(support_dir)
+        config_path = os.path.join(support_dir, 'config.json')
+        if os.path.exists(config_path):
+            try:
+                with open(config_path) as f:
+                    config = json.load(f)
+                for key in ('storage', 'database', 'path'):
+                    val = config.get(key)
+                    if val:
+                        roots.append(val)
+            except Exception:
+                pass
+
+    try:
+        roots.append(_resolve_models_base())
+    except Exception:
+        pass
+
+    # Normalize and de-duplicate.
+    out: List[str] = []
+    seen = set()
+    for r in roots:
+        try:
+            rp = os.path.realpath(r)
+        except Exception:
+            continue
+        if rp not in seen:
+            seen.add(rp)
+            out.append(rp)
+    return out
 
 
 def get_local_path(model_id: str) -> str:

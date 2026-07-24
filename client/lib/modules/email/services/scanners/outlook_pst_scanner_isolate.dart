@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
@@ -38,6 +39,7 @@ class OutlookPstScannerIsolate {
   final RootIsolateToken? token;
   final String appDir;
   final String serverUrl;
+  final String? serverToken;
   Isolate? _isolate;
   final AppLogger logger = AppLogger(null);
 
@@ -48,6 +50,7 @@ class OutlookPstScannerIsolate {
     required this.appDir,
     required this.dbDir,
     required this.serverUrl,
+    this.serverToken,
   });
 
   /// Spawns the PST background worker isolate.
@@ -72,6 +75,7 @@ class OutlookPstScannerIsolate {
       'appDir': appDir,
       'dbDir': dbDir,
       'serverUrl': serverUrl,
+      'serverToken': serverToken,
     };
 
     _isolate = await Isolate.spawn(OutlookPstScannerIsolateWorker.worker, args);
@@ -107,6 +111,7 @@ class OutlookPstScannerIsolateWorker {
     final String appDir = workerArgs['appDir'];
     final String dbDir = workerArgs['dbDir'] ?? appDir;
     final String? serverUrl = workerArgs['serverUrl'];
+    final String? serverToken = workerArgs['serverToken'];
 
     if (token != null) {
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
@@ -135,6 +140,7 @@ class OutlookPstScannerIsolateWorker {
     final client = http.Client();
     final request = http.Request('POST', Uri.parse("$serverUrl/util/import/pst"));
     request.headers['Content-Type'] = 'application/json';
+    request.headers.addAll(aiServerAuthHeaders(serverToken));
     request.body = jsonEncode({
       'file_path': collection.path,
       'output_dir': extractionRoot,

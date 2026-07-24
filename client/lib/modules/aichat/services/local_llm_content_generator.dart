@@ -78,7 +78,10 @@ class LocalLlmContentGenerator implements ContentGenerator {
       final url = MainApp.llmServiceUrl.valueOrNull;
       if (url != null) {
         await http
-            .post(Uri.parse('$url/v1/chat/stop'))
+            .post(
+              Uri.parse('$url/v1/chat/stop'),
+              headers: aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+            )
             .timeout(const Duration(seconds: 2));
       }
     } catch (_) {}
@@ -86,6 +89,10 @@ class LocalLlmContentGenerator implements ContentGenerator {
 
   @override
   void dispose() {
+    // Close any in-flight streaming connection so it doesn't leak past disposal.
+    _cancelled = true;
+    _activeClient?.close();
+    _activeClient = null;
     _a2uiMessageController.close();
     _textResponseController.close();
     _errorController.close();
@@ -99,6 +106,9 @@ class LocalLlmContentGenerator implements ContentGenerator {
     A2UiClientCapabilities? clientCapabilities,
     Iterable<ChatMessage>? history,
   }) async {
+    // Guard against re-entrancy: a second send while one is already streaming
+    // would overwrite _activeClient and interleave writes into _messages.
+    if (_isProcessing.value) return;
     _isProcessing.value = true;
     _cancelled = false;
     try {
@@ -143,6 +153,9 @@ class LocalLlmContentGenerator implements ContentGenerator {
         Uri.parse('$llmServiceUrl/v1/chat/completions'),
       );
       request.headers['Content-Type'] = 'application/json; charset=UTF-8';
+      request.headers.addAll(
+        aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+      );
       request.body = jsonEncode({
         'model': model ?? '',
         if (modelPath != null && modelPath!.isNotEmpty) 'model_path': modelPath,

@@ -81,6 +81,7 @@ class LocalFileIsolate extends CollectionScanner {
       'collectionId': collection.id,
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'llmServiceUrl': MainApp.llmServiceUrl.valueOrNull,
+      'llmServiceToken': MainApp.llmServiceToken.valueOrNull,
       'port': p.sendPort,
     };
 
@@ -199,6 +200,8 @@ class LocalFileIsolateWorker {
     String absPath,
     String mimeType,
     String? llmServiceUrl,
+    String? llmServiceToken,
+    String? allowedRoot,
   ) {
     _thumbnailQueue.add(() async {
       try {
@@ -206,6 +209,8 @@ class LocalFileIsolateWorker {
           absPath,
           mimeType,
           llmServiceUrl: llmServiceUrl,
+          llmServiceToken: llmServiceToken,
+          allowedRoot: allowedRoot,
         );
         if (thumbnail != null) {
           await appDb.execute(
@@ -268,6 +273,7 @@ class LocalFileIsolateWorker {
     bool force = args['force'] ?? false;
     String collectionId = args['collectionId'];
     String? llmServiceUrl = args['llmServiceUrl'];
+    String? llmServiceToken = args['llmServiceToken'];
 
     // Stats for logging
     int cacheHits = 0;
@@ -305,6 +311,7 @@ class LocalFileIsolateWorker {
       scanStartTime,
       metadataCache: metadataCache,
       llmServiceUrl: llmServiceUrl,
+      llmServiceToken: llmServiceToken,
     );
     int fileCount = results['count'] ?? 0;
     cacheHits = results['cacheHits'] ?? 0;
@@ -358,6 +365,7 @@ class LocalFileIsolateWorker {
     Map<String, File>? metadataCache,
     List<File>? currentBatch,
     String? llmServiceUrl,
+    String? llmServiceToken,
   }) async {
     int count = 0;
     int cacheHits = 0;
@@ -404,6 +412,8 @@ class LocalFileIsolateWorker {
               asset.path,
               file.contentType,
               llmServiceUrl,
+              llmServiceToken,
+              rootPath,
             );
             generatedThumbnails++;
           }
@@ -444,6 +454,7 @@ class LocalFileIsolateWorker {
                 metadataCache: metadataCache,
                 currentBatch: fileBatch,
                 llmServiceUrl: llmServiceUrl,
+                llmServiceToken: llmServiceToken,
               );
               count += subResults['count'] ?? 0;
               cacheHits += subResults['cacheHits'] ?? 0;
@@ -651,9 +662,19 @@ class LocalFileIsolateWorker {
     String fileId,
     String absPath,
     String mimeType,
-    String? llmServiceUrl,
-  ) {
-    _enqueueThumbnailJob(appDb, fileId, absPath, mimeType, llmServiceUrl);
+    String? llmServiceUrl, {
+    String? llmServiceToken,
+    String? allowedRoot,
+  }) {
+    _enqueueThumbnailJob(
+      appDb,
+      fileId,
+      absPath,
+      mimeType,
+      llmServiceUrl,
+      llmServiceToken,
+      allowedRoot,
+    );
   }
 
   Completer<void>? get thumbnailCompleterForTesting => _thumbnailCompleter;

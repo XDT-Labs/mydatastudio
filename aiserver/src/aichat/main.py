@@ -21,9 +21,10 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .auth import require_token
 from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, DEFAULT_MODEL_ALIAS, API_TITLE, API_DESCRIPTION
 from .utils import get_local_path, find_local_model, _resolve_models_base
 from . import routes, model_registry
@@ -129,6 +130,8 @@ app = FastAPI(
     version="2.0.0",
     docs_url=None,
     redoc_url=None,
+    # Require a bearer token on every route when AISERVER_TOKEN is set (see auth.py).
+    dependencies=[Depends(require_token)],
 )
 
 app.add_middleware(

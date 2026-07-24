@@ -307,8 +307,17 @@ class PstParser:
             try:
                 num_attachments = message.get_number_of_attachments()
                 if num_attachments > 0:
+                    real_output = os.path.realpath(self.output_dir)
                     attachment_folder = os.path.join(self.output_dir, folder_path, str(year))
-                    os.makedirs(attachment_folder, exist_ok=True)
+                    # folder_path derives from attacker-controllable PST folder names,
+                    # so confirm the target stays inside output_dir BEFORE creating it
+                    # (AUDIT M1: the check must precede makedirs, and use a trailing
+                    # separator so '/a/b' can't be escaped via a sibling like '/a/bc').
+                    real_folder = os.path.realpath(attachment_folder)
+                    if real_folder != real_output and not real_folder.startswith(real_output + os.sep):
+                        num_attachments = 0
+                    else:
+                        os.makedirs(attachment_folder, exist_ok=True)
 
                     for i in range(num_attachments):
                         try:
@@ -323,9 +332,9 @@ class PstParser:
                             file_path = os.path.join(attachment_folder, safe_filename)
 
                             # Verify resolved path stays within output directory
+                            # (trailing separator prevents a sibling-dir escape).
                             real_path = os.path.realpath(file_path)
-                            real_output = os.path.realpath(self.output_dir)
-                            if not real_path.startswith(real_output):
+                            if not real_path.startswith(real_output + os.sep):
                                 continue
 
                             att.seek_offset(0, 0)

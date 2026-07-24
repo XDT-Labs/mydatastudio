@@ -48,6 +48,9 @@ class SetupStep1 extends StatelessWidget {
           email: '',
           password: hash,
           localStoragePath: '',
+          // Carried in memory only so setup completion can create the credential
+          // vault from it (AUDIT M2); never written to the DB.
+          plaintextPassword: password,
         );
 
         //call callback and proceed to next step
