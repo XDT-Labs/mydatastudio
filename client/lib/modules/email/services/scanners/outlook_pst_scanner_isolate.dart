@@ -7,6 +7,8 @@ import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
@@ -76,6 +78,8 @@ class OutlookPstScannerIsolate {
       'dbDir': dbDir,
       'serverUrl': serverUrl,
       'serverToken': serverToken,
+      // DEK so the worker can decrypt/encrypt collection tokens (AUDIT M2 ph4).
+      'vaultDek': VaultManager.instance.dek,
     };
 
     _isolate = await Isolate.spawn(OutlookPstScannerIsolateWorker.worker, args);
@@ -116,6 +120,9 @@ class OutlookPstScannerIsolateWorker {
     if (token != null) {
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
     }
+
+    // DEK-backed vault for in-isolate credential access (AUDIT M2 phase 4).
+    CredentialCodec.installIsolateVault(workerArgs['vaultDek'] as Uint8List?);
 
     final AppLogger logger = AppLogger(clientPort);
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
@@ -53,7 +54,7 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
         'client_id = excluded.client_id, '
         'client_secret = excluded.client_secret, '
         'api_key = excluded.api_key',
-        ['google', clientId, clientSecret, ''],
+        ['google', clientId, CredentialCodec.encrypt(clientSecret), ''],
       );
 
       widget.onConfigured();
