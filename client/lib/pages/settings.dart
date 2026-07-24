@@ -185,16 +185,21 @@ class _SettingsPageState extends State<SettingsPage> {
                 style: TextStyle(fontSize: 14, height: 1.4),
               ),
               const SizedBox(height: 8),
-              InkWell(
-                onTap: () => launchUrl(
-                  Uri.parse('https://console.cloud.google.com/apis/credentials'),
-                ),
-                child: const Text(
-                  'Get Credentials from Google Cloud Console',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.blue,
-                    decoration: TextDecoration.underline,
+              Semantics(
+                link: true,
+                child: InkWell(
+                  onTap: () => launchUrl(
+                    Uri.parse(
+                      'https://console.cloud.google.com/apis/credentials',
+                    ),
+                  ),
+                  child: const Text(
+                    'Get Credentials from Google Cloud Console',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.blue,
+                      decoration: TextDecoration.underline,
+                    ),
                   ),
                 ),
               ),

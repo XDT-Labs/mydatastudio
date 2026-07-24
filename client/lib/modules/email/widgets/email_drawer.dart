@@ -602,7 +602,11 @@ class _EmailFolderListState extends State<_EmailFolderList> {
             onTap: () => widget.onFolderTap(spam!.id),
           ),
         if (otherFolders.isNotEmpty) ...[
-          InkWell(
+          Semantics(
+            button: true,
+            expanded: _showAllFolders,
+            label: 'All Folders',
+            child: InkWell(
             onTap: () => setState(() => _showAllFolders = !_showAllFolders),
             borderRadius: BorderRadius.circular(8),
             child: Padding(
@@ -627,6 +631,7 @@ class _EmailFolderListState extends State<_EmailFolderList> {
                 ],
               ),
             ),
+          ),
           ),
           if (_showAllFolders)
             Padding(

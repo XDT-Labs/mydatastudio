@@ -100,7 +100,11 @@ class _SocialDrawerState extends State<SocialDrawer> {
             ? theme.colorScheme.primaryContainer.withValues(alpha: 0.15)
             : Colors.transparent;
 
-    return Padding(
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: name,
+      child: Padding(
       padding: const EdgeInsets.symmetric(vertical: 2.0),
       child: GestureDetector(
         onTap: onTap,
@@ -154,6 +158,7 @@ class _SocialDrawerState extends State<SocialDrawer> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

@@ -17,7 +17,11 @@ class AccordionHeaderWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      expanded: isExpanded,
+      label: title,
+      child: GestureDetector(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -58,6 +62,7 @@ class AccordionHeaderWidget extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
   }
 }

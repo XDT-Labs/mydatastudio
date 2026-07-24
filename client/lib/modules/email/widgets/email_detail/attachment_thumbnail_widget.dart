@@ -13,7 +13,10 @@ class AttachmentThumbnailWidget extends StatelessWidget {
     final theme = Theme.of(context);
     final isImage = file.contentType.startsWith('image/');
 
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      label: 'Open attachment ${file.name}',
+      child: GestureDetector(
       onTap: () async {
         if (await io.File(file.path).exists()) {
           await OpenFilex.open(file.path);
@@ -72,6 +75,7 @@ class AttachmentThumbnailWidget extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
   }
 

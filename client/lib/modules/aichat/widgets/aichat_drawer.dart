@@ -114,7 +114,11 @@ class _AiChatDrawerState extends State<AiChatDrawer> {
           // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
-            child: GestureDetector(
+            child: Semantics(
+              button: true,
+              enabled: !streaming,
+              label: 'New conversation',
+              child: GestureDetector(
               onTap: streaming ? null : _newConversation,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -139,6 +143,7 @@ class _AiChatDrawerState extends State<AiChatDrawer> {
                 ),
               ),
             ),
+          ),
           ),
 
           // Divider
@@ -244,12 +249,16 @@ class _ConversationTileState extends State<_ConversationTile> {
                 ),
               ),
               if ((_hovering || widget.isActive) && !widget.disabled)
-                GestureDetector(
+                Semantics(
+                  button: true,
+                  label: 'Delete conversation',
+                  child: GestureDetector(
                   onTap: widget.onDelete,
                   child: const Padding(
                     padding: EdgeInsets.only(left: 6),
                     child: Icon(Icons.close, size: 14, color: _accentColor),
                   ),
+                ),
                 ),
             ],
           ),

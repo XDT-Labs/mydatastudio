@@ -997,6 +997,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
+                          tooltip: 'Attach files',
                           icon: const Icon(
                             Icons.add,
                             color: _mutedColor,
@@ -1044,9 +1045,17 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                         ),
                         const Spacer(),
                         if (_streamingText != null)
-                          GestureDetector(
+                          Semantics(
+                            button: true,
+                            label: 'Stop generating',
+                            child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
                             onTap: () => _contentGenerator.cancelStream(),
-                            child: Container(
+                            child: SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: Center(
+                                child: Container(
                               width: 30,
                               height: 30,
                               decoration: const BoxDecoration(
@@ -1059,13 +1068,25 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                                 size: 18,
                               ),
                             ),
+                              ),
+                            ),
+                          ),
                           )
                         else
-                          GestureDetector(
+                          Semantics(
+                            button: true,
+                            enabled: _canSend,
+                            label: 'Send message',
+                            child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
                             onTap: _canSend
                                 ? () => _sendMessage(_textController.text)
                                 : null,
-                            child: Container(
+                            child: SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: Center(
+                                child: Container(
                               width: 30,
                               height: 30,
                               decoration: BoxDecoration(
@@ -1078,6 +1099,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                                 size: 18,
                               ),
                             ),
+                              ),
+                            ),
+                          ),
                           ),
                       ],
                     ),

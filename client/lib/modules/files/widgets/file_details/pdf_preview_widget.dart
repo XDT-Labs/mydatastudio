@@ -146,6 +146,7 @@ class _PdfPreviewWidgetState extends State<PdfPreviewWidget> {
         children: [
           IconButton(
             icon: const Icon(Icons.chevron_left),
+            tooltip: 'Previous page',
             iconSize: 20,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -165,6 +166,7 @@ class _PdfPreviewWidgetState extends State<PdfPreviewWidget> {
           const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.chevron_right),
+            tooltip: 'Next page',
             iconSize: 20,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),

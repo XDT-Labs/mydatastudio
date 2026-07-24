@@ -412,6 +412,7 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
                       border: const OutlineInputBorder(),
                       suffixIcon: IconButton(
                         icon: const Icon(Icons.folder_open),
+                        tooltip: 'Browse for file',
                         onPressed: _isImporting ? null : _browse,
                       ),
                     ),

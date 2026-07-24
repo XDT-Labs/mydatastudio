@@ -123,7 +123,15 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
 - **Issue:** Icon-only `IconButton`s (14) rely on tooltips (18) that VoiceOver reads inconsistently; the primary send/stop control is a `GestureDetector` with no accessible name, no focus semantics, and a 30×30 hit target (below the 44×44 WCAG 2.2 target-size minimum). Custom controls are invisible to macOS VoiceOver.
 - **Impact:** Not operable via assistive technology; fails WCAG 2.2 AA — 4.1.2 (Name/Role/Value), 2.5.8 (Target Size), 2.4.7 (Focus Visible).
 - **Recommended fix:** Replace custom tap targets with `IconButton`/`InkWell` wrapped in `Semantics(button: true, label: ...)`, enforce ≥44px targets, and add `Semantics` labels to icon-only actions.
-- **Notes:**
+- **Notes:** **Pass 1 (2026-07-23) — interactive controls, not yet complete.** Focused on the headline gaps: named/roled the custom tap targets and closed the icon-only-button label holes.
+  - **aichat send/stop control** (`aichat_page.dart`) — the audit's headline `GestureDetector`: now wrapped in `Semantics(button: true, enabled: _canSend, label: 'Send message' / 'Stop generating')` and given a **44×44** hit target (`HitTestBehavior.opaque` + a centered 30px visual circle, so appearance is unchanged). The bottom input row grows to 44px tall.
+  - **Icon-only `IconButton`s lacking any accessible name** — added `tooltip:` (which VoiceOver reads as the name): `aichat_page.dart` attach-files (+), `similar_files_tab.dart` close-preview, `new_email_page.dart` browse, `pdf_preview_widget.dart` prev/next page. (Audit-wide sweep found most IconButtons already had tooltips — these four were the only gaps.)
+  - **Custom `GestureDetector` controls given button role/label** via `Semantics`: delete-conversation `X` (`aichat_drawer.dart`, icon-only → `label: 'Delete conversation'`), new-conversation button (`aichat_drawer.dart`, `enabled: !streaming`), social nav tile (`social_drawer.dart`, `selected: isSelected`), accordion header (`accordion_header_widget.dart`, `expanded: isExpanded`), email attachment thumbnail (`attachment_thumbnail_widget.dart`, `label: 'Open attachment <name>'`).
+  - **`similar_files_tab.dart`** — the three custom `GestureDetector`s: preview thumbnail (`label: 'Preview <name>'`) and the icon-only go-to-folder / delete actions (`button: true` + labels, `Tooltip` kept for pointer users). Plus the close-preview `IconButton` got a `tooltip`.
+  - **Expand toggles + external links.** `email_drawer.dart` "All Folders" `InkWell` → `Semantics(button: true, expanded: _showAllFolders)` (consistent with the accordion). The four "Get Credentials from …" `InkWell` text links (`google_drive_configure_view`, `gmail_configure_view`, `outlook_configure_view`, `settings.dart`) → `Semantics(link: true)`.
+  - **Verification:** `dart format` + `flutter analyze lib` — 19 issues before and after (all pre-existing; **zero** new). `flutter test` — 320 passing, 1 pre-existing unrelated failure (`widget_test` SetupPage, confirmed failing on the base branch with these changes stashed). No VoiceOver run yet.
+  - **Left as framework-managed (intentional):** `file_table.dart` / `email_table.dart` rows use `DataTable`/`DataCell` and their icon actions are real `IconButton`s with tooltips — Flutter supplies row/cell/button semantics, so no manual `Semantics` was added. `login.dart`'s background `GestureDetector` is a keyboard-dismiss gesture, not a control — left unwrapped.
+  - **Still open (M4 stays unchecked):** (1) the `_ConversationTile` body in `aichat_drawer.dart` — deliberately *not* wrapped, because it nests the delete button and a naive `Semantics(button:true)` would swallow the child's semantics; needs `explicitChildNodes`/`MergeSemantics` care. (2) `photo_card.dart` has no tap handler of its own — confirm the photos grid's selection/open interaction (in `photos_app.dart`) is reachable/announced. (3) **Focus-visible (2.4.7)** audit and keyboard-traversal order. (4) A real macOS **VoiceOver** pass to validate announcements. (5) Confirm remaining custom tap targets meet the target-size minimum (only the aichat send/stop control was enlarged to 44×44 so far).
 
 ---
 
@@ -223,7 +231,7 @@ Add album/dedup/search; resolve the two `TODO: disable if no files are checked` 
 
 1. ~~**H1 — Add a bearer token to the local server**~~ ✅ DONE 2026-07-10 (env-passed per-spawn secret + FastAPI dependency + client headers). See H1 notes.
 2. ~~**H2 / M1 — Confine `/util/thumbnail` and `/util/import/pst` paths**~~ ✅ DONE 2026-07-22 (`_assert_within_roots` + `resolve_data_roots`; PST containment moved before `makedirs`; client passes collection root as `allowed_root`). See H2/M1 notes.
-3. **M2 — Move tokens + API keys to Keychain** (`flutter_secure_storage`) or SQLCipher, with migration.
+3. ~~**M2 — Encrypt tokens + API keys + `private.pem` at rest**~~ ✅ DONE 2026-07-22/23 (password-derived `SecureVault` envelope encryption, DEK threaded into worker isolates; fresh installs only, no migration). See M2 notes.
 4. **M3 — Guard chat re-entrancy** (Enter-key + `sendRequest` early return).
 5. **M4 — Accessibility pass** on interactive controls (semantic buttons, labels, target sizes).
 6. **L1–L5, I1–I3** — cleanup.
@@ -243,7 +251,7 @@ The chat page uses a fixed hardcoded-dark palette (`_sendEnabledBg`, `_mutedColo
 ## Requires deeper work / architectural change
 - ~~**H1 token scheme**~~ ✅ DONE 2026-07-10 (touched spawn, all routes, and every client call site + worker isolates).
 - ~~**H2/M1 path confinement**~~ ✅ DONE 2026-07-22. Interim for H2: the thumbnail read is confined to server-derived data roots + a client-declared collection root. Full structural elimination is folded into the **thumbnail-cache refactor** below (client sends bytes → server never opens a path).
-- **M2 credential storage** (migration of existing plaintext tokens + key management).
+- ~~**M2 credential storage**~~ ✅ DONE 2026-07-22/23 (file-based `SecureVault`; fresh installs only, no migration). See M2 notes.
 - **M4 accessibility** (systematic, every module).
 - **L2/L3 server concurrency** (per-request stop signaling + serialize or pool model access) — only if multi-stream usage becomes real.
 - **social/photos modules** — net-new feature work on a shared scanner base.
@@ -317,6 +325,6 @@ The chat page uses a fixed hardcoded-dark palette (`_sendEnabledBg`, `_mutedColo
 
 **Ship with known risks — for the current single-user, local-only, trusted-machine deployment.**
 
-**H1 is fixed** (2026-07-10): the local server requires a per-spawn bearer token, so the file endpoints aren't reachable by an arbitrary co-resident process — only by the paired client (or malware that reads the process env). **H2 and M1 are now fixed** (2026-07-22): `/util/thumbnail` reads and `/util/import/pst` writes are confined to the app's own data roots (plus, for thumbnails, the client-declared collection root), and the PST containment check now precedes `makedirs` with a correct separator. The remaining path-read exposure for thumbnails is only the *interim* client-declared-root model, whose full elimination is scheduled with the thumbnail-cache refactor (bytes in, no server-side path). **M3 (double-submit) is fixed.**
+**H1 is fixed** (2026-07-10): the local server requires a per-spawn bearer token, so the file endpoints aren't reachable by an arbitrary co-resident process — only by the paired client (or malware that reads the process env). **H2 and M1 are now fixed** (2026-07-22): `/util/thumbnail` reads and `/util/import/pst` writes are confined to the app's own data roots (plus, for thumbnails, the client-declared collection root), and the PST containment check now precedes `makedirs` with a correct separator. The remaining path-read exposure for thumbnails is only the *interim* client-declared-root model, whose full elimination is scheduled with the thumbnail-cache refactor (bytes in, no server-side path). **M3 (double-submit) is fixed.** **M2 (credential encryption) is fixed** (phases 1–4 landed 2026-07-22/23): OAuth access/refresh/id tokens, provider API keys + client secrets, and the RSA `private.pem` are now envelope-encrypted at rest via the password-derived `SecureVault`, with the DEK threaded into every worker isolate.
 
-The main outstanding blocker before wider/less-trusted distribution is **M2** — third-party OAuth tokens and API keys are still in plaintext SQLite, so a compromise of the DB file (or the client) can still yield account takeover. **M4 accessibility** remains for compliance.
+The main outstanding item before wider/less-trusted distribution is **M4 accessibility**, which remains for WCAG compliance.

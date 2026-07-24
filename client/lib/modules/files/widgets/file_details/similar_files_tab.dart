@@ -110,6 +110,7 @@ class _SimilarFilesTabState extends State<SimilarFilesTab> {
                   padding: const EdgeInsets.all(8),
                   child: IconButton(
                     icon: const Icon(Icons.close, color: Colors.white),
+                    tooltip: 'Close preview',
                     style: IconButton.styleFrom(
                       backgroundColor: Colors.black54,
                     ),
@@ -310,7 +311,10 @@ class _SimilarImageCell extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: GestureDetector(
+          child: Semantics(
+            button: true,
+            label: 'Preview ${file.name}',
+            child: GestureDetector(
             onTap: onTap,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(4),
@@ -344,6 +348,7 @@ class _SimilarImageCell extends StatelessWidget {
               ),
             ),
           ),
+          ),
         ),
         const SizedBox(height: 2),
         Text(
@@ -357,20 +362,28 @@ class _SimilarImageCell extends StatelessWidget {
           children: [
             Tooltip(
               message: 'Go to folder',
-              child: GestureDetector(
+              child: Semantics(
+                button: true,
+                label: 'Go to folder',
+                child: GestureDetector(
                 onTap: onNavigate,
                 child: const Icon(Icons.folder_open_outlined, size: 14),
+              ),
               ),
             ),
             Tooltip(
               message: 'Delete',
-              child: GestureDetector(
+              child: Semantics(
+                button: true,
+                label: 'Delete',
+                child: GestureDetector(
                 onTap: onDelete,
                 child: const Icon(
                   Icons.delete_outline,
                   size: 14,
                   color: Colors.redAccent,
                 ),
+              ),
               ),
             ),
           ],
