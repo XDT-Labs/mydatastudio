@@ -93,7 +93,13 @@ class EmbeddingIsolate {
   }
 
   void updateUrl(String url) {
-    _controlPort?.send({'type': 'url', 'url': url});
+    // Ship the bearer token alongside the URL — it's fixed per server spawn and
+    // the worker isolate can't read MainApp statics directly.
+    _controlPort?.send({
+      'type': 'url',
+      'url': url,
+      'token': MainApp.llmServiceToken.valueOrNull,
+    });
   }
 
   static Future<void> _isolateEntry(Map<String, dynamic> cfg) async {
@@ -111,9 +117,11 @@ class EmbeddingIsolate {
     cfg['replyTo'].send(controlPort.sendPort);
 
     String? serviceUrl;
+    String? serviceToken;
     controlPort.listen((message) {
       if (message is Map && message['type'] == 'url') {
         serviceUrl = message['url'];
+        serviceToken = message['token'];
         logger.d("Python service URL updated: $serviceUrl");
       }
     });
@@ -137,7 +145,7 @@ class EmbeddingIsolate {
         // Skip the batch entirely (no point reading/resizing/base64-encoding
         // files) while the embedding model is still downloading — the server
         // rejects these requests until it's ready anyway.
-        if (!await _isEmbeddingModelReady(serviceUrl!, logger)) {
+        if (!await _isEmbeddingModelReady(serviceUrl!, serviceToken, logger)) {
           logger.d("Embedding model not downloaded yet. Sleeping...");
           await Future.delayed(const Duration(seconds: 30));
           continue;
@@ -163,10 +171,16 @@ class EmbeddingIsolate {
                 file,
                 repo,
                 serviceUrl!,
+                serviceToken,
                 logger,
               );
             } else {
-              embedding = await _processLocalFile(file, serviceUrl!, logger);
+              embedding = await _processLocalFile(
+                file,
+                serviceUrl!,
+                serviceToken,
+                logger,
+              );
             }
             final duration = DateTime.now().difference(start);
             logger.d("Processed file ${file.path} in $duration");
@@ -199,13 +213,17 @@ class EmbeddingIsolate {
   /// just reports whether the embedding model snapshot is already present.
   static Future<bool> _isEmbeddingModelReady(
     String serviceUrl,
+    String? serviceToken,
     AppLogger logger,
   ) async {
     try {
       final response = await http
           .post(
             Uri.parse('$serviceUrl/util/model-status'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(serviceToken),
+            },
             body: jsonEncode({
               'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
               'filename': null,
@@ -224,6 +242,7 @@ class EmbeddingIsolate {
   static Future<List<double>?> _processLocalFile(
     File file,
     String serviceUrl,
+    String? serviceToken,
     AppLogger logger,
   ) async {
     final ioFile = io.File(file.path);
@@ -233,13 +252,20 @@ class EmbeddingIsolate {
     }
 
     final bytes = await ioFile.readAsBytes();
-    return await _generateEmbedding(bytes, file.name, serviceUrl, logger);
+    return await _generateEmbedding(
+      bytes,
+      file.name,
+      serviceUrl,
+      serviceToken,
+      logger,
+    );
   }
 
   static Future<List<double>?> _processGDriveFile(
     File file,
     DatabaseRepository repo,
     String serviceUrl,
+    String? serviceToken,
     AppLogger logger,
   ) async {
     final collection = await repo.getCollection(file.collectionId);
@@ -290,7 +316,13 @@ class EmbeddingIsolate {
               )
               as drive.Media;
       final bytes = await http.ByteStream(media.stream).toBytes();
-      return await _generateEmbedding(bytes, file.name, serviceUrl, logger);
+      return await _generateEmbedding(
+        bytes,
+        file.name,
+        serviceUrl,
+        serviceToken,
+        logger,
+      );
     } catch (e) {
       logger.e("Error downloading GDrive file: $e");
       return null;
@@ -301,6 +333,7 @@ class EmbeddingIsolate {
     List<int> bytes,
     String filename,
     String serviceUrl,
+    String? serviceToken,
     AppLogger logger,
   ) async {
     final base64Image = base64Encode(bytes);
@@ -308,7 +341,10 @@ class EmbeddingIsolate {
     try {
       final response = await http.post(
         Uri.parse("$serviceUrl/util/embedding"),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          ...aiServerAuthHeaders(serviceToken),
+        },
         body: jsonEncode({
           'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
           'filename': filename,

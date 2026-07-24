@@ -1,17 +1,25 @@
 import 'dart:convert';
 import 'dart:io' as io;
 import 'package:http/http.dart' as http;
+import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 
 class ThumbnailGenerator {
-  Future<String?> imageToBase64(File file, {String? llmServiceUrl}) async {
+  Future<String?> imageToBase64(
+    File file, {
+    String? llmServiceUrl,
+    String? llmServiceToken,
+    String? allowedRoot,
+  }) async {
     return pathImageToBase64(
       file.path,
       file.contentType,
       llmServiceUrl: llmServiceUrl,
+      llmServiceToken: llmServiceToken,
+      allowedRoot: allowedRoot,
     );
   }
 
@@ -19,6 +27,11 @@ class ThumbnailGenerator {
     String filePath,
     String? contentType, {
     String? llmServiceUrl,
+    String? llmServiceToken,
+    // Collection root this file belongs to; the server confines the read to it
+    // (plus the app's own data dirs) so /util/thumbnail isn't an arbitrary-file
+    // oracle (AUDIT H2).
+    String? allowedRoot,
   }) async {
     final ext = p.extension(filePath).toLowerCase();
     final isRaw = [
@@ -35,11 +48,15 @@ class ThumbnailGenerator {
       try {
         final response = await http.post(
           Uri.parse("$llmServiceUrl/util/thumbnail"),
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            ...aiServerAuthHeaders(llmServiceToken),
+          },
           body: jsonEncode({
             'file_path': filePath,
             'width': 320,
             'height': 240,
+            if (allowedRoot != null) 'allowed_root': allowedRoot,
           }),
         );
 

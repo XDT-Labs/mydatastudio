@@ -287,7 +287,10 @@ class ModelDownloadManager {
       final response = await client
           .post(
             Uri.parse('$serviceUrl/util/model-status'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+            },
             body: jsonEncode({'model_name': hfRepo, 'filename': filename}),
           )
           .timeout(_statusCheckTimeout);
@@ -320,6 +323,9 @@ class ModelDownloadManager {
       Uri.parse('$serviceUrl/util/download-model'),
     );
     request.headers['Content-Type'] = 'application/json';
+    request.headers.addAll(
+      aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+    );
     request.body = jsonEncode({
       'model_name': hfRepo,
       'filename': filename,

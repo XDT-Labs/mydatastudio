@@ -237,6 +237,9 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
       Uri.parse('$serviceUrl/util/download-model'),
     );
     request.headers['Content-Type'] = 'application/json';
+    request.headers.addAll(
+      aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+    );
     request.body = jsonEncode({
       'model_name': hfRepo,
       'filename': filename,
@@ -398,7 +401,10 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
       try {
         await http.post(
           Uri.parse('$serviceUrl/util/delete-model'),
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            ...aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+          },
           body: jsonEncode({'model_path': model.file}),
         );
       } catch (e) {

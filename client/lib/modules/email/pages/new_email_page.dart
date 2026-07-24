@@ -335,6 +335,7 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
         appDir: appDataDir,
         dbDir: DatabaseManager.instance.databaseDirectoryPath!,
         serverUrl: serverUrl,
+        serverToken: MainApp.llmServiceToken.valueOrNull,
       );
       await pstIsolate.start(collection);
 

@@ -1,11 +1,10 @@
 import 'dart:async';
 
-import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/models/tables/app.dart' as m;
 import 'package:mydatastudio/services/get_apps_service.dart';
 import 'package:mydatastudio/services/get_user_service.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 
 class CollapsingDrawer extends StatefulWidget {
@@ -151,17 +150,10 @@ class _CollapsingDrawerState extends State<CollapsingDrawer> {
               icon: const Icon(Icons.lock),
               tooltip: 'Logout',
               onPressed: () async {
-                // Logout logic
+                // Logout: clear the session user and forget the in-memory vault
+                // DEK so secrets require the password again (AUDIT M2).
                 GetUserService.instance.invoke(GetUserServiceCommand(null));
-                FlutterSecureStorage storage = const FlutterSecureStorage(
-                  mOptions: MacOsOptions(
-                    useDataProtectionKeyChain: false,
-                  ),
-                );
-                await storage.write(
-                  key: AppConstants.securePassword,
-                  value: null,
-                );
+                VaultManager.instance.lock();
                 if (context.mounted) {
                   GoRouter.of(context).go('/?action=logout');
                 }

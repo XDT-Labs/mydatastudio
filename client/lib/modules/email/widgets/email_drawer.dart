@@ -392,6 +392,7 @@ class _EmailDrawer extends State<EmailDrawer> {
           appDir: appDataDir,
           dbDir: DatabaseManager.instance.databaseDirectoryPath!,
           serverUrl: serverUrl,
+          serverToken: MainApp.llmServiceToken.valueOrNull,
         );
         ScannerManager.getInstance().pstScanners[col.id] = pstIsolate;
         await pstIsolate.start(col, force: true);

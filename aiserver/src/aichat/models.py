@@ -109,6 +109,11 @@ class ThumbnailRequest(BaseModel):
     file_path: str = Field(..., description="Absolute path to the image file")
     width: int = Field(default=320, description="Target width")
     height: int = Field(default=240, description="Target height")
+    allowed_root: Optional[str] = Field(
+        default=None,
+        description="Collection root the file must live under; enforced server-side "
+                    "in addition to the app's own data dirs (AUDIT H2)",
+    )
 
 
 class PstImportRequest(BaseModel):
