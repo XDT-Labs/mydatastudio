@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 
 /// Local-only checks (`/util/model-status`) should return near-instantly —
@@ -271,8 +272,17 @@ class ModelDownloadManager {
         .select("SELECT api_key FROM providers WHERE service = 'huggingface' LIMIT 1")
         .timeout(_statusCheckTimeout);
     if (rows.isEmpty) return null;
-    final key = (rows.first['api_key'] as String? ?? '').trim();
-    return key.isEmpty ? null : key;
+    // The HF token is stored encrypted (AUDIT M2 phase 3/4). Model downloads
+    // are fire-and-forget from app startup, before the user logs in and the
+    // vault unlocks, so a locked vault degrades to an anonymous download (the
+    // token is optional) rather than blocking — but we never send ciphertext.
+    String? key;
+    try {
+      key = CredentialCodec.decrypt(rows.first['api_key'] as String?)?.trim();
+    } on VaultLockedException {
+      return null;
+    }
+    return (key == null || key.isEmpty) ? null : key;
   }
 
   /// Returns the resolved local path if already downloaded, else null.

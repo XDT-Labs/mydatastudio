@@ -174,18 +174,11 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
         u.privateKey = appUser!.privateKey;
         u.publicKey = appUser!.publicKey;
 
-        //save user to database
-        final savedUser = await UserRepository(
-          DatabaseManager.instance.database!,
-        ).saveUser(u);
-        if (savedUser == null) {
-          throw Exception('Failed to save user');
-        }
-
-        // Create the credential vault from the chosen password so a fresh
-        // install is fully set up (AUDIT M2). There is no migration — secrets
-        // are encrypted from their first write onward. The plaintext is used
-        // once here and then dropped.
+        // Create the credential vault from the chosen password FIRST, so a fresh
+        // install is fully set up and every secret is encrypted from its first
+        // write (AUDIT M2 — no migration). This must precede saveUser, which now
+        // writes keys/private.pem encrypted with the vault DEK. The plaintext
+        // password is used once here and then dropped.
         final plaintextPassword = appUser!.plaintextPassword;
         if (plaintextPassword != null && plaintextPassword.isNotEmpty) {
           try {
@@ -197,6 +190,14 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
             logger.e('Failed to create credential vault during setup: $e');
           }
           appUser!.plaintextPassword = null;
+        }
+
+        //save user to database (writes private.pem encrypted via the vault)
+        final savedUser = await UserRepository(
+          DatabaseManager.instance.database!,
+        ).saveUser(u);
+        if (savedUser == null) {
+          throw Exception('Failed to save user');
         }
 
         //do full login to check everything is ok

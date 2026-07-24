@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/app_user.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 
 class UserRepository {
   AppLogger logger = AppLogger(null);
@@ -43,7 +44,11 @@ class UserRepository {
     }
 
     user.publicKey = File(publicFilePath).readAsStringSync();
-    user.privateKey = File(privateFilePath).readAsStringSync();
+    // The private key is stored encrypted at rest (AUDIT M2 phase 4). The login
+    // flow unlocks the vault before this read; a locked/wrong vault fails loudly
+    // rather than handing back ciphertext. Public key stays cleartext.
+    user.privateKey =
+        CredentialCodec.decrypt(File(privateFilePath).readAsStringSync());
     return user;
   }
 
@@ -62,7 +67,11 @@ class UserRepository {
         File(publicFilePath).writeAsStringSync(user.publicKey!);
       }
       if (user.privateKey != null) {
-        File(privateFilePath).writeAsStringSync(user.privateKey!);
+        // Encrypt the private key at rest with the vault DEK (AUDIT M2 phase 4).
+        // At setup the vault is created just before saveUser; a locked vault
+        // fails loudly instead of writing the key in cleartext.
+        File(privateFilePath)
+            .writeAsStringSync(CredentialCodec.encrypt(user.privateKey!)!);
       }
     }
 

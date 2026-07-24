@@ -5,6 +5,8 @@ import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
@@ -75,6 +77,8 @@ class YahooScannerIsolate {
       'force': force,
       'appDir': appDir,
       'dbDir': dbDir,
+      // DEK so the worker can decrypt/encrypt collection tokens (AUDIT M2 ph4).
+      'vaultDek': VaultManager.instance.dek,
     };
 
     _isolate = await spawnIsolate(YahooScannerIsolateWorker.worker, args);
@@ -146,6 +150,7 @@ class YahooScannerIsolate {
       'type': 'move_to_trash',
       'appDir': appDir,
       'dbDir': dbDir,
+      'vaultDek': VaultManager.instance.dek,
     };
 
     // We use a fresh isolate for the move operation to avoid blocking or being blocked by long-running scans
@@ -189,6 +194,9 @@ class YahooScannerIsolateWorker {
     if (token != null) {
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
     }
+
+    // DEK-backed vault for in-isolate credential access (AUDIT M2 phase 4).
+    CredentialCodec.installIsolateVault(args['vaultDek'] as Uint8List?);
 
     final AppLogger logger = AppLogger(clientPort);
     final emailAddress = collection.userId!;

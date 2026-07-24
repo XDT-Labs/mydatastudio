@@ -9,6 +9,8 @@ import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
@@ -74,6 +76,9 @@ class GmailScannerIsolate {
       'force': force,
       'appDir': appDir,
       'dbDir': dbDir,
+      // DEK for the credential vault so in-isolate collection reads/writes and
+      // token refresh can decrypt/encrypt secrets (AUDIT M2 phase 4).
+      'vaultDek': VaultManager.instance.dek,
     };
 
     _isolate = await spawnIsolate(GmailScannerIsolateWorker.worker, args);
@@ -139,6 +144,11 @@ class GmailScannerIsolateWorker {
     if (token != null) {
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
     }
+
+    // Install the credential vault from the DEK handed in via spawn args, so
+    // in-isolate collection reads/writes and token refresh can use secrets
+    // (AUDIT M2 phase 4). Without it, decrypting the collection tokens fails.
+    CredentialCodec.installIsolateVault(args['vaultDek'] as Uint8List?);
 
     final AppLogger logger = AppLogger(clientPort);
 
