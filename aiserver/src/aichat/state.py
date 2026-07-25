@@ -25,6 +25,18 @@ embedding_model_id: Optional[str] = None
 model_lock = asyncio.Lock()
 embedding_lock = asyncio.Lock()
 
+# Serializes text generation on the shared llm_instance. A local
+# llama_cpp.Llama is not safe for concurrent create_chat_completion calls
+# (streaming runs in a worker thread, so two chats can overlap and corrupt the
+# decoder state). A threading.Lock — not the asyncio locks above — because the
+# streaming generator that holds it runs off the event loop in a threadpool.
+generation_lock = threading.Lock()
+
+
+def get_generation_lock() -> threading.Lock:
+    """Return the lock that serializes text generation on the shared model."""
+    return generation_lock
+
 
 def get_llm_instance() -> Optional[LlamaCpp | ChatGoogleGenerativeAI]:
     """

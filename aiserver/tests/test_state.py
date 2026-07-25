@@ -19,6 +19,7 @@ from aichat.state import (
     unregister_stream,
     is_stop_requested,
     request_stop,
+    get_generation_lock,
 )
 
 class TestState:
@@ -125,3 +126,37 @@ class TestStopRegistry:
         request_stop("gen-a")
         unregister_stream("gen-a")
         assert is_stop_requested("gen-a") is False
+
+
+class TestGenerationLock:
+    """Serialized generation (L3) — the shared model must not run two chats at once."""
+
+    def test_generation_lock_is_singleton(self):
+        assert get_generation_lock() is get_generation_lock()
+
+    def test_generation_lock_serializes(self):
+        """Two threads holding the generation lock must never overlap."""
+        import threading
+        import time
+
+        lock = get_generation_lock()
+        state = {"current": 0, "max": 0}
+        guard = threading.Lock()
+
+        def worker():
+            with lock:
+                with guard:
+                    state["current"] += 1
+                    state["max"] = max(state["max"], state["current"])
+                time.sleep(0.02)
+                with guard:
+                    state["current"] -= 1
+
+        threads = [threading.Thread(target=worker) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # If generation were not serialized, max concurrency would exceed 1.
+        assert state["max"] == 1

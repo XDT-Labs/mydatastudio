@@ -1,6 +1,7 @@
 """
 API route handlers.
 """
+import asyncio
 import gc
 import os
 import json
@@ -39,7 +40,7 @@ from .state import (
     get_current_model_id, set_current_model_id,
     get_embedding_model, set_embedding_model,
     get_embedding_model_id, set_embedding_model_id,
-    get_locks,
+    get_locks, get_generation_lock,
     is_stop_requested, request_stop, register_stream, unregister_stream,
 )
 
@@ -455,22 +456,31 @@ async def generate_chat_completion(request: ChatCompletionRequest):
             def _sse_stream() -> Generator[str, None, None]:
                 register_stream(stop_id)
                 try:
-                    for chunk in llm_instance.create_chat_completion(
-                        stream=True, **kwargs
-                    ):
-                        if is_stop_requested(stop_id):
-                            break
-                        # Stable id the client echoes back to target /v1/chat/stop.
-                        chunk["id"] = stop_id
-                        chunk["model"] = current_model
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                    # Serialize generation: a concurrent stream on the same
+                    # llama_cpp instance would corrupt its decoder state.
+                    with get_generation_lock():
+                        for chunk in llm_instance.create_chat_completion(
+                            stream=True, **kwargs
+                        ):
+                            if is_stop_requested(stop_id):
+                                break
+                            # Stable id the client echoes back to target /v1/chat/stop.
+                            chunk["id"] = stop_id
+                            chunk["model"] = current_model
+                            yield f"data: {json.dumps(chunk)}\n\n"
                     yield "data: [DONE]\n\n"
                 finally:
                     unregister_stream(stop_id)
 
             return StreamingResponse(_sse_stream(), media_type="text/event-stream")
 
-        result = llm_instance.create_chat_completion(**kwargs)
+        # Serialize with any active stream (same generation_lock) and run the
+        # blocking call off the event loop.
+        def _locked_completion():
+            with get_generation_lock():
+                return llm_instance.create_chat_completion(**kwargs)
+
+        result = await asyncio.to_thread(_locked_completion)
         result["model"] = get_current_model_id() or result.get("model", "unknown")
         return result
 
