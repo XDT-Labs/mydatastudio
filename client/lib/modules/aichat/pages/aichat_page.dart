@@ -996,7 +996,10 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
+                          constraints: const BoxConstraints(
+                            minWidth: 24,
+                            minHeight: 24,
+                          ),
                           tooltip: 'Attach files',
                           icon: const Icon(
                             Icons.add,

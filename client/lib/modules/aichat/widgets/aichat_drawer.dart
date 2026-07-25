@@ -259,10 +259,20 @@ class _ConversationTileState extends State<_ConversationTile> {
                   button: true,
                   label: 'Delete conversation',
                   child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
                   onTap: widget.onDelete,
-                  child: const Padding(
-                    padding: EdgeInsets.only(left: 6),
-                    child: Icon(Icons.close, size: 14, color: _accentColor),
+                  child: Container(
+                    constraints: const BoxConstraints(
+                      minWidth: 24,
+                      minHeight: 24,
+                    ),
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.only(left: 6),
+                    child: const Icon(
+                      Icons.close,
+                      size: 14,
+                      color: _accentColor,
+                    ),
                   ),
                 ),
                 ),

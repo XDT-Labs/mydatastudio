@@ -366,8 +366,15 @@ class _SimilarImageCell extends StatelessWidget {
                 button: true,
                 label: 'Go to folder',
                 child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: onNavigate,
-                child: const Icon(Icons.folder_open_outlined, size: 14),
+                child: const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Center(
+                    child: Icon(Icons.folder_open_outlined, size: 14),
+                  ),
+                ),
               ),
               ),
             ),
@@ -377,11 +384,18 @@ class _SimilarImageCell extends StatelessWidget {
                 button: true,
                 label: 'Delete',
                 child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: onDelete,
-                child: const Icon(
-                  Icons.delete_outline,
-                  size: 14,
-                  color: Colors.redAccent,
+                child: const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Center(
+                    child: Icon(
+                      Icons.delete_outline,
+                      size: 14,
+                      color: Colors.redAccent,
+                    ),
+                  ),
                 ),
               ),
               ),

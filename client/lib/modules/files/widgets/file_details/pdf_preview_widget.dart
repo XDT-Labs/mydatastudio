@@ -149,7 +149,7 @@ class _PdfPreviewWidgetState extends State<PdfPreviewWidget> {
             tooltip: 'Previous page',
             iconSize: 20,
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
+            constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
             onPressed:
                 _currentPage > 1
                     ? () => _pdfController?.previousPage(
@@ -169,7 +169,7 @@ class _PdfPreviewWidgetState extends State<PdfPreviewWidget> {
             tooltip: 'Next page',
             iconSize: 20,
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
+            constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
             onPressed:
                 _currentPage < _totalPages
                     ? () => _pdfController?.nextPage(
