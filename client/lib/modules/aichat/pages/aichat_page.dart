@@ -17,16 +17,6 @@ import 'package:mydatastudio/repositories/aichat_skills_repository.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:async';
 
-// Dark theme colors
-const _bgColor = Color(0xFF000000);
-const _inputBgColor = Color(0xFF1C1C1E);
-const _inputBorderColor = Color(0xFF3A3A3C);
-const _userBubbleColor = Color(0xFF2C2C2E);
-const _hintColor = Color(0xFF636366);
-const _mutedColor = Color(0xFF8E8E93);
-const _sendEnabledBg = Color(0xFFFFFFFF);
-const _sendDisabledBg = Color(0xFF3A3A3C);
-
 class AichatPage extends StatefulWidget {
   const AichatPage({super.key});
 
@@ -59,6 +49,24 @@ class GenUiSurfaceItem extends ChatItem {
 }
 
 class _AichatPage extends State<AichatPage> with RouteAware {
+  // Theme-derived palette (AUDIT I1 follow-up). The chat page previously used a
+  // fixed iOS-style dark palette; each role now maps to a ColorScheme token so
+  // the page follows the app theme (and light mode, if it is ever enabled)
+  // instead of hardcoding a look that only reads correctly on black.
+  ColorScheme get _cs => Theme.of(context).colorScheme;
+  Color get _bgColor => _cs.surface;
+  Color get _inputBgColor => _cs.surfaceContainerHigh;
+  Color get _inputBorderColor => _cs.outlineVariant;
+  Color get _userBubbleColor => _cs.surfaceContainerHighest;
+  Color get _hintColor => _cs.outline;
+  Color get _mutedColor => _cs.onSurfaceVariant;
+  Color get _sendEnabledBg => _cs.primary;
+  Color get _sendDisabledBg => _cs.surfaceContainerHighest;
+  Color get _textColor => _cs.onSurface;
+  Color get _sendIconColor => _cs.onPrimary;
+  Color get _codeBgColor => _cs.surfaceContainerHighest;
+  Color get _codeBlockBgColor => _cs.surfaceContainer;
+
   AppLogger logger = AppLogger(null);
   bool _isLLMServiceRunning = PythonManager.isLLMServiceRunning.value;
   bool _modelsReady = ModelDownloadManager.isReady.value;
@@ -267,7 +275,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
           value: '__header_$group',
           child: Text(
             label.toUpperCase(),
-            style: const TextStyle(
+            style: TextStyle(
               color: _hintColor,
               fontSize: 11,
               fontWeight: FontWeight.w600,
@@ -280,7 +288,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       for (final m in groupModels) {
         final Widget textWidget = Text(
           m.name,
-          style: const TextStyle(color: _mutedColor, fontSize: 13),
+          style: TextStyle(color: _mutedColor, fontSize: 13),
         );
         items.add(
           DropdownMenuItem<String>(
@@ -587,7 +595,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
               if (text.isNotEmpty)
                 Text(
                   text,
-                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                  style: TextStyle(color: _textColor, fontSize: 15),
                 ),
             ],
           ),
@@ -609,7 +617,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
                   model,
-                  style: const TextStyle(color: _hintColor, fontSize: 11),
+                  style: TextStyle(color: _hintColor, fontSize: 11),
                 ),
               ),
             ConstrainedBox(
@@ -619,48 +627,48 @@ class _AichatPage extends State<AichatPage> with RouteAware {
               child: MarkdownBody(
                 data: streaming ? '$text▋' : text,
                 styleSheet: MarkdownStyleSheet(
-                  p: const TextStyle(
-                    color: Colors.white,
+                  p: TextStyle(
+                    color: _textColor,
                     fontSize: 15,
                     height: 1.5,
                   ),
                   code: TextStyle(
-                    backgroundColor: const Color(0xFF2C2C2E),
-                    color: const Color(0xFFE5E5EA),
+                    backgroundColor: _codeBgColor,
+                    color: _textColor,
                     fontFamily: 'monospace',
                     fontSize: 13,
                   ),
                   codeblockDecoration: BoxDecoration(
-                    color: const Color(0xFF1C1C1E),
+                    color: _codeBlockBgColor,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: _inputBorderColor),
                   ),
                   blockquoteDecoration: BoxDecoration(
-                    color: const Color(0xFF1C1C1E),
+                    color: _codeBlockBgColor,
                     border: Border(left: BorderSide(color: _mutedColor, width: 3)),
                   ),
-                  h1: const TextStyle(
-                    color: Colors.white,
+                  h1: TextStyle(
+                    color: _textColor,
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                   ),
-                  h2: const TextStyle(
-                    color: Colors.white,
+                  h2: TextStyle(
+                    color: _textColor,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
-                  h3: const TextStyle(
-                    color: Colors.white,
+                  h3: TextStyle(
+                    color: _textColor,
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                   ),
-                  listBullet: const TextStyle(color: Colors.white),
-                  strong: const TextStyle(
-                    color: Colors.white,
+                  listBullet: TextStyle(color: _textColor),
+                  strong: TextStyle(
+                    color: _textColor,
                     fontWeight: FontWeight.bold,
                   ),
-                  em: const TextStyle(
-                    color: Color(0xFFE5E5EA),
+                  em: TextStyle(
+                    color: _textColor,
                     fontStyle: FontStyle.italic,
                   ),
                 ),
@@ -682,7 +690,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
   Widget _buildTitleBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: _bgColor,
         border: Border(
           bottom: BorderSide(color: _inputBorderColor, width: 0.5),
@@ -690,12 +698,12 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       ),
       child: TextField(
         controller: _titleController,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: _textColor,
           fontSize: 16,
           fontWeight: FontWeight.w500,
         ),
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           hintText: 'New conversation',
           hintStyle: TextStyle(
             color: _hintColor,
@@ -733,17 +741,17 @@ class _AichatPage extends State<AichatPage> with RouteAware {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
+              Text(
                 'Setting up AI Chat',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.white,
+                  color: _textColor,
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 'Downloading models for the first time. This only happens once.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: _mutedColor, fontSize: 13),
@@ -799,7 +807,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
               Expanded(
                 child: Text(
                   item.label,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  style: TextStyle(color: _textColor, fontSize: 14),
                 ),
               ),
             ],
@@ -815,7 +823,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
             statusText,
             style: TextStyle(
               color: item.status == ModelDownloadStatus.error
-                  ? Colors.redAccent
+                  ? _cs.error
                   : _mutedColor,
               fontSize: 12,
             ),
@@ -830,23 +838,23 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       case ModelDownloadStatus.complete:
         return const Icon(Icons.check_circle, color: Colors.greenAccent, size: 18);
       case ModelDownloadStatus.error:
-        return const Icon(Icons.error_outline, color: Colors.redAccent, size: 18);
+        return Icon(Icons.error_outline, color: _cs.error, size: 18);
       case ModelDownloadStatus.downloading:
       case ModelDownloadStatus.checking:
-        return const SizedBox(
+        return SizedBox(
           width: 16,
           height: 16,
           child: CircularProgressIndicator(strokeWidth: 2, color: _mutedColor),
         );
       case ModelDownloadStatus.pending:
-        return const Icon(Icons.schedule, color: _mutedColor, size: 18);
+        return Icon(Icons.schedule, color: _mutedColor, size: 18);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     if (!_isLLMServiceRunning) {
-      return const ColoredBox(
+      return ColoredBox(
         color: _bgColor,
         child: Center(
           child: Text(
@@ -921,7 +929,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                     padding: const EdgeInsets.fromLTRB(0, 6, 4, 4),
                     child: Text(
                       '${_formatTokens(_sessionTotalTokens)} total tokens',
-                      style: const TextStyle(color: _mutedColor, fontSize: 11),
+                      style: TextStyle(color: _mutedColor, fontSize: 11),
                     ),
                   )
                 else
@@ -943,11 +951,11 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                       keyboardType: TextInputType.multiline,
                       minLines: 1,
                       maxLines: 10,
-                      style: const TextStyle(fontSize: 15, color: Colors.white),
-                      decoration: const InputDecoration(
+                      style: TextStyle(fontSize: 15, color: _textColor),
+                      decoration: InputDecoration(
                         hintText: "Ask a question",
                         hintStyle: TextStyle(color: _hintColor, fontSize: 15),
-                        contentPadding: EdgeInsets.symmetric(
+                        contentPadding: const EdgeInsets.symmetric(
                           horizontal: 14.0,
                           vertical: 14.0,
                         ),
@@ -966,13 +974,13 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                               return Chip(
                                 label: Text(
                                   f.name,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.white,
+                                    color: _textColor,
                                   ),
                                 ),
-                                backgroundColor: const Color(0xFF3A3A3C),
-                                deleteIcon: const Icon(
+                                backgroundColor: _cs.surfaceContainerHighest,
+                                deleteIcon: Icon(
                                   Icons.close,
                                   size: 14,
                                   color: _mutedColor,
@@ -1001,7 +1009,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                             minHeight: 24,
                           ),
                           tooltip: 'Attach files',
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.add,
                             color: _mutedColor,
                             size: 20,
@@ -1025,9 +1033,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<String>(
                               value: _buildModelItems().any((i) => i.value == _selectedModel) ? _selectedModel : null,
-                              dropdownColor: const Color(0xFF2C2C2E),
-                              icon: const Padding(
-                                padding: EdgeInsets.only(left: 4.0),
+                              dropdownColor: _cs.surfaceContainerHigh,
+                              icon: Padding(
+                                padding: const EdgeInsets.only(left: 4.0),
                                 child: Icon(
                                   Icons.keyboard_arrow_up,
                                   size: 16,
@@ -1061,13 +1069,13 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                                 child: Container(
                               width: 30,
                               height: 30,
-                              decoration: const BoxDecoration(
+                              decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: _sendEnabledBg,
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 Icons.stop_rounded,
-                                color: Colors.black,
+                                color: _sendIconColor,
                                 size: 18,
                               ),
                             ),
@@ -1098,7 +1106,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                               ),
                               child: Icon(
                                 Icons.arrow_upward_rounded,
-                                color: _canSend ? Colors.black : _mutedColor,
+                                color: _canSend ? _sendIconColor : _mutedColor,
                                 size: 18,
                               ),
                             ),
