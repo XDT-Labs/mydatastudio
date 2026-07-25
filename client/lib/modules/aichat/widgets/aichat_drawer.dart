@@ -210,7 +210,11 @@ class _ConversationTileState extends State<_ConversationTile> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
-      child: GestureDetector(
+      child: Semantics(
+        button: true,
+        selected: widget.isActive,
+        label: '${widget.conversation.name}, ${widget.formattedDate}',
+        child: GestureDetector(
         onTap: widget.disabled ? null : widget.onTap,
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
@@ -226,6 +230,7 @@ class _ConversationTileState extends State<_ConversationTile> {
           child: Row(
             children: [
               Expanded(
+                child: ExcludeSemantics(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
@@ -247,6 +252,7 @@ class _ConversationTileState extends State<_ConversationTile> {
                     ),
                   ],
                 ),
+                ),
               ),
               if ((_hovering || widget.isActive) && !widget.disabled)
                 Semantics(
@@ -263,6 +269,7 @@ class _ConversationTileState extends State<_ConversationTile> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
