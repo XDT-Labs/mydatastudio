@@ -53,6 +53,10 @@ class LocalLlmContentGenerator implements ContentGenerator {
   http.Client? _activeClient;
   bool _cancelled = false;
 
+  // Completion id of the active stream (from the SSE chunks). Sent to
+  // /v1/chat/stop so the server cancels only this generation.
+  String? _activeCompletionId;
+
   @override
   Stream<A2uiMessage> get a2uiMessageStream => _a2uiMessageController.stream;
 
@@ -77,10 +81,17 @@ class LocalLlmContentGenerator implements ContentGenerator {
     try {
       final url = MainApp.llmServiceUrl.valueOrNull;
       if (url != null) {
+        final headers = aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull);
+        final completionId = _activeCompletionId;
         await http
             .post(
               Uri.parse('$url/v1/chat/stop'),
-              headers: aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+              headers: completionId != null
+                  ? {...headers, 'Content-Type': 'application/json'}
+                  : headers,
+              body: completionId != null
+                  ? jsonEncode({'id': completionId})
+                  : null,
             )
             .timeout(const Duration(seconds: 2));
       }
@@ -111,6 +122,7 @@ class LocalLlmContentGenerator implements ContentGenerator {
     if (_isProcessing.value) return;
     _isProcessing.value = true;
     _cancelled = false;
+    _activeCompletionId = null;
     try {
       final String? llmServiceUrl = MainApp.llmServiceUrl.valueOrNull;
       if (llmServiceUrl == null || llmServiceUrl.isEmpty) {
@@ -195,6 +207,7 @@ class LocalLlmContentGenerator implements ContentGenerator {
             try {
               final parsed = jsonDecode(data) as Map<String, dynamic>;
               lastResponseModel ??= parsed['model'] as String?;
+              _activeCompletionId ??= parsed['id'] as String?;
               final choices = parsed['choices'] as List?;
               if (choices != null && choices.isNotEmpty) {
                 final delta =

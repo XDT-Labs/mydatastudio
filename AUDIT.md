@@ -147,13 +147,13 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
 - **Recommended fix:** Return a generic message; log the detail server-side only. Make consistent with the other route handlers.
 - **Notes:** Fixed — `detail` is now `"Failed to generate thumbnail."`; the exception is still logged via `print(...)` server-side (`routes.py`).
 
-### - [ ] L2 — Global stop flag is process-wide
+### - [x] L2 — Global stop flag is process-wide
 - **Category:** Race Condition · **Confidence:** Confirmed
 - **Location:** `aiserver/src/aichat/state.py:150-160`; used at `aiserver/src/aichat/routes.py:167` and `routes.py:452`.
 - **Issue:** A single `threading.Event`. `reset_stop()` fires at each stream start, and `request_stop()` sets it globally. A stop from one request halts all active streams; a new stream clears another's pending stop.
 - **Impact:** Low for a single-user desktop app, but latent if concurrent streams ever happen.
 - **Recommended fix:** Track stop state per request/generation id rather than a single global event.
-- **Notes:**
+- **Notes:** DONE 2026-07-25. Replaced the single `_stop_event` with a per-generation registry in `state.py` (`_stop_events: dict[str, threading.Event]` under a `_stop_lock`): `register_stream(id)` / `unregister_stream(id)` / `is_stop_requested(id)` / `request_stop(id=None)`. Both stream paths in `routes.py` now register their completion id, check `is_stop_requested(id)`, and unregister in a `finally`; the local path stamps `chunk["id"] = stop_id` so the id the client sees matches the registry (the cloud path already used `completion_id`). `stop_generation` now reads an optional `{"id": ...}` from the body — a specific id stops just that stream, **no id stops all active streams** (backward-compatible with the old no-arg call, and with `reset_stop` gone a new stream can no longer clear another's pending stop). Client (`local_llm_content_generator.dart`) captures `parsed['id']` from the SSE chunks and sends it on `cancelStream()` so the stop is targeted. Tests: `tests/test_state.py::TestStopRegistry` (6 — isolation, no-cross-clear, stop-all, unregister). Verified: `pytest tests/` 12 pre-existing failures unchanged (byte-for-byte identical set before/after) + 6 new passing; `flutter analyze` clean on the touched Dart file.
 
 ### - [ ] L3 — Single global `llm_instance`, not concurrency-safe
 - **Category:** Reliability · **Confidence:** High Confidence
