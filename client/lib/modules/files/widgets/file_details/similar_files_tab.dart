@@ -7,6 +7,7 @@ import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 
 class SimilarFilesTab extends StatefulWidget {
   const SimilarFilesTab({
@@ -311,11 +312,10 @@ class _SimilarImageCell extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: Semantics(
-            button: true,
+          child: AccessibleTap(
             label: 'Preview ${file.name}',
-            child: GestureDetector(
-            onTap: onTap,
+            borderRadius: BorderRadius.circular(4),
+            onPressed: onTap,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: Stack(
@@ -348,7 +348,6 @@ class _SimilarImageCell extends StatelessWidget {
               ),
             ),
           ),
-          ),
         ),
         const SizedBox(height: 2),
         Text(
@@ -360,44 +359,34 @@ class _SimilarImageCell extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            Tooltip(
-              message: 'Go to folder',
-              child: Semantics(
-                button: true,
-                label: 'Go to folder',
-                child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onNavigate,
-                child: const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: Center(
-                    child: Icon(Icons.folder_open_outlined, size: 14),
-                  ),
+            AccessibleTap(
+              tooltip: 'Go to folder',
+              label: 'Go to folder',
+              borderRadius: BorderRadius.circular(6),
+              onPressed: onNavigate,
+              child: const SizedBox(
+                width: 24,
+                height: 24,
+                child: Center(
+                  child: Icon(Icons.folder_open_outlined, size: 14),
                 ),
-              ),
               ),
             ),
-            Tooltip(
-              message: 'Delete',
-              child: Semantics(
-                button: true,
-                label: 'Delete',
-                child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onDelete,
-                child: const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: Center(
-                    child: Icon(
-                      Icons.delete_outline,
-                      size: 14,
-                      color: Colors.redAccent,
-                    ),
+            AccessibleTap(
+              tooltip: 'Delete',
+              label: 'Delete',
+              borderRadius: BorderRadius.circular(6),
+              onPressed: onDelete,
+              child: const SizedBox(
+                width: 24,
+                height: 24,
+                child: Center(
+                  child: Icon(
+                    Icons.delete_outline,
+                    size: 14,
+                    color: Colors.redAccent,
                   ),
                 ),
-              ),
               ),
             ),
           ],

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 
 class AccordionHeaderWidget extends StatelessWidget {
   const AccordionHeaderWidget({
@@ -17,14 +18,14 @@ class AccordionHeaderWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Semantics(
-      button: true,
-      expanded: isExpanded,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: AccessibleTap(
+      onPressed: onTap,
       label: title,
-      child: GestureDetector(
-      onTap: onTap,
+      expanded: isExpanded,
+      borderRadius: BorderRadius.circular(8),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
           color: Colors.transparent,
           borderRadius: BorderRadius.circular(8),

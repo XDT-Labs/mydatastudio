@@ -14,6 +14,7 @@ import 'package:mydatastudio/models/tables/aichat_model.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 import 'package:mydatastudio/repositories/aichat_repository.dart';
 import 'package:mydatastudio/repositories/aichat_skills_repository.dart';
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:async';
 
@@ -1056,12 +1057,10 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                         ),
                         const Spacer(),
                         if (_streamingText != null)
-                          Semantics(
-                            button: true,
+                          AccessibleTap(
                             label: 'Stop generating',
-                            child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () => _contentGenerator.cancelStream(),
+                            borderRadius: BorderRadius.circular(22),
+                            onPressed: () => _contentGenerator.cancelStream(),
                             child: SizedBox(
                               width: 44,
                               height: 44,
@@ -1081,16 +1080,13 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                             ),
                               ),
                             ),
-                          ),
                           )
                         else
-                          Semantics(
-                            button: true,
+                          AccessibleTap(
                             enabled: _canSend,
                             label: 'Send message',
-                            child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: _canSend
+                            borderRadius: BorderRadius.circular(22),
+                            onPressed: _canSend
                                 ? () => _sendMessage(_textController.text)
                                 : null,
                             child: SizedBox(
@@ -1112,7 +1108,6 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                             ),
                               ),
                             ),
-                          ),
                           ),
                       ],
                     ),

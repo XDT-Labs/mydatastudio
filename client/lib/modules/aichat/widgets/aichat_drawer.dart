@@ -4,6 +4,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/aichat_conversation.dart';
 import 'package:mydatastudio/modules/aichat/pages/aichat_page.dart';
 import 'package:mydatastudio/repositories/aichat_repository.dart';
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 
 const _drawerBg = Color(0xFF0A0A0A);
 const _drawerBorder = Color(0xFF2C2C2E);
@@ -114,12 +115,11 @@ class _AiChatDrawerState extends State<AiChatDrawer> {
           // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
-            child: Semantics(
-              button: true,
+            child: AccessibleTap(
               enabled: !streaming,
               label: 'New conversation',
-              child: GestureDetector(
-              onTap: streaming ? null : _newConversation,
+              borderRadius: BorderRadius.circular(10),
+              onPressed: streaming ? null : _newConversation,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
@@ -143,7 +143,6 @@ class _AiChatDrawerState extends State<AiChatDrawer> {
                 ),
               ),
             ),
-          ),
           ),
 
           // Divider
@@ -210,14 +209,16 @@ class _ConversationTileState extends State<_ConversationTile> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
-      child: Semantics(
-        button: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+        child: AccessibleTap(
+        enabled: !widget.disabled,
         selected: widget.isActive,
         label: '${widget.conversation.name}, ${widget.formattedDate}',
-        child: GestureDetector(
-        onTap: widget.disabled ? null : widget.onTap,
+        mergeSemantics: false,
+        borderRadius: BorderRadius.circular(8),
+        onPressed: widget.disabled ? null : widget.onTap,
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
             color: widget.isActive
@@ -255,12 +256,10 @@ class _ConversationTileState extends State<_ConversationTile> {
                 ),
               ),
               if ((_hovering || widget.isActive) && !widget.disabled)
-                Semantics(
-                  button: true,
+                AccessibleTap(
                   label: 'Delete conversation',
-                  child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: widget.onDelete,
+                  borderRadius: BorderRadius.circular(6),
+                  onPressed: widget.onDelete,
                   child: Container(
                     constraints: const BoxConstraints(
                       minWidth: 24,
@@ -274,7 +273,6 @@ class _ConversationTileState extends State<_ConversationTile> {
                       color: _accentColor,
                     ),
                   ),
-                ),
                 ),
             ],
           ),
