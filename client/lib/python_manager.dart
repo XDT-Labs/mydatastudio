@@ -81,6 +81,41 @@ class PythonManager {
 
   bool get isRunning => _pythonProc != null;
 
+  /// Whether the OS process [pid] is still one of our aiserver processes.
+  ///
+  /// Guards against killing a recycled PID: after a crash/restart the OS may
+  /// have reassigned a stale PID-file PID to an unrelated process. Matches the
+  /// stored executable path when available (strong identity), otherwise falls
+  /// back to the `aiserver` basename so a legacy PID-only file still works.
+  /// Fails closed — if identity can't be established, returns false (no kill).
+  Future<bool> _isAiserverProcess(int pid, String? expectedPath) async {
+    try {
+      if (Platform.isWindows) {
+        final result = await Process.run('tasklist', [
+          '/FI',
+          'PID eq $pid',
+          '/NH',
+          '/FO',
+          'CSV',
+        ]);
+        if (result.exitCode != 0) return false;
+        return (result.stdout as String).toLowerCase().contains('aiserver');
+      }
+      // macOS / Linux: inspect the process's full command line.
+      final result = await Process.run('ps', ['-p', '$pid', '-o', 'command=']);
+      if (result.exitCode != 0) return false; // no such process
+      final cmd = (result.stdout as String).trim();
+      if (cmd.isEmpty) return false;
+      if (expectedPath != null && expectedPath.isNotEmpty) {
+        return cmd.contains(expectedPath);
+      }
+      return cmd.contains('aiserver');
+    } catch (e) {
+      logger.d('[python] Could not verify identity of PID $pid: $e');
+      return false;
+    }
+  }
+
   Future<void> startAiServerService() async {
     const remoteUrl = String.fromEnvironment('PYTHON_SERVER_URL');
     if (remoteUrl.isNotEmpty) {
@@ -108,17 +143,29 @@ class PythonManager {
     var supportPath = await DatabaseManager.getRealApplicationSupportPath();
     _pythonDir = p.join(supportPath, "aiserver");
 
-    // Check for existing PID file and kill previous process if it exists
+    // Check for existing PID file and kill previous process if it exists.
+    // The PID file stores "<pid>\n<executablePath>"; older files hold only the
+    // PID. Validate that the PID still belongs to an aiserver process before
+    // killing — the OS may have recycled a stale PID onto an unrelated process
+    // (AUDIT.md L4).
     final pidFile = File(p.join(_pythonDir!, 'aiserver.pid'));
     if (pidFile.existsSync()) {
       try {
-        final oldPid = int.parse(pidFile.readAsStringSync().trim());
+        final lines = pidFile.readAsStringSync().trim().split('\n');
+        final oldPid = int.parse(lines.first.trim());
+        final storedPath = lines.length > 1 ? lines[1].trim() : null;
         logger.d('[python] Found existing PID file with PID: $oldPid');
-        if (Process.killPid(oldPid, ProcessSignal.sigkill)) {
-          logger.d('[python] Successfully killed old process $oldPid');
+        if (await _isAiserverProcess(oldPid, storedPath)) {
+          if (Process.killPid(oldPid, ProcessSignal.sigkill)) {
+            logger.d('[python] Successfully killed old process $oldPid');
+          } else {
+            logger.d(
+              '[python] Failed to kill old process $oldPid (might not be running)',
+            );
+          }
         } else {
           logger.d(
-            '[python] Failed to kill old process $oldPid (might not be running)',
+            '[python] PID $oldPid is not an aiserver process (stale/reused) — not killing',
           );
         }
       } catch (e) {
@@ -179,7 +226,9 @@ class PythonManager {
       );
 
       try {
-        pidFile.writeAsStringSync('${_pythonProc!.pid}');
+        // Record the executable path alongside the PID so a later launch can
+        // confirm the PID still belongs to this aiserver before killing it.
+        pidFile.writeAsStringSync('${_pythonProc!.pid}\n$executablePath');
         logger.d('[python] Wrote PID ${_pythonProc!.pid} to ${pidFile.path}');
       } catch (e) {
         logger.d('[python] Failed to write PID file: $e');

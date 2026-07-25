@@ -163,12 +163,12 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
 - **Recommended fix:** Serialize generation (per-model lock/queue) or pool instances if concurrency is desired.
 - **Notes:** DONE 2026-07-25. Added `generation_lock` (a `threading.Lock`, not the asyncio load locks — the streaming generator holds it off the event loop in a threadpool) + `get_generation_lock()` in `state.py`. The local streaming path now wraps the whole `create_chat_completion(stream=True)` loop in `with get_generation_lock():`, so only one stream runs on the shared model at a time; on client disconnect `StreamingResponse` closes the generator and the `with` releases the lock. The local non-streaming path now runs under the same lock via `asyncio.to_thread(_locked_completion)` — serializing it with any active stream **and** moving the previously event-loop-blocking call off the loop. Cloud (langchain) paths are stateless per call and are left unlocked. Lock ordering is safe: `generation_lock` is only ever acquired before the brief `_stop_lock`, never the reverse, so no deadlock with the L2 registry. Tests: `tests/test_state.py::TestGenerationLock` (singleton + a 3-thread mutual-exclusion test asserting max concurrency stays 1). Verified: `pytest tests/` failing set byte-for-byte identical to baseline (12 pre-existing) + 2 new passing; the pre-existing `test_chat_completion_llama_cpp_path` still fails for the same `Mock`-item-assignment reason (unchanged code path), confirming the `to_thread` change introduced no behavior regression.
 
-### - [ ] L4 — PID-file kill can target a reused PID
+### - [x] L4 — PID-file kill can target a reused PID
 - **Category:** Reliability · **Confidence:** Needs Verification
 - **Location:** `client/lib/python_manager.dart:104-119`
 - **Issue:** `Process.killPid(oldPid, sigkill)` trusts a stale PID file; the OS may have recycled that PID to an unrelated process.
 - **Recommended fix:** Validate process identity before killing (e.g. check the process name/command), or only SIGKILL after a liveness + identity check.
-- **Notes:**
+- **Notes:** DONE 2026-07-25. The PID file now stores `"<pid>\n<executablePath>"` (was PID-only); on the next launch, before `Process.killPid`, a new `_isAiserverProcess(pid, storedPath)` verifies identity via `ps -p <pid> -o command=` (macOS/Linux) or `tasklist /FI "PID eq <pid>"` (Windows) and only kills when the running command matches the **stored executable path** (strong identity), falling back to the `aiserver` basename so a legacy PID-only file still works. **Fails closed** — if identity can't be established (process gone, `ps`/`tasklist` error), it does **not** kill. Reader handles both the new two-line and legacy one-line formats; the writer and the shutdown-delete path are updated/unaffected. No unit test (the path spawns/inspects real OS processes and `python_manager_test.dart` only covers `urlRegex`); verified via `flutter analyze` (clean) and `flutter test` (320 passing, 1 pre-existing failure).
 
 ### - [x] L5 — `dispose()` doesn't cancel in-flight request  ✅ FIXED (quick-win pass)
 - **Category:** Reliability · **Confidence:** Confirmed
@@ -256,7 +256,7 @@ The chat page uses a fixed hardcoded-dark palette (`_sendEnabledBg`, `_mutedColo
 - ~~**H2/M1 path confinement**~~ ✅ DONE 2026-07-22. Interim for H2: the thumbnail read is confined to server-derived data roots + a client-declared collection root. Full structural elimination is folded into the **thumbnail-cache refactor** below (client sends bytes → server never opens a path).
 - ~~**M2 credential storage**~~ ✅ DONE 2026-07-22/23 (file-based `SecureVault`; fresh installs only, no migration). See M2 notes.
 - **M4 accessibility** (systematic, every module).
-- **L2/L3 server concurrency** (per-request stop signaling + serialize or pool model access) — only if multi-stream usage becomes real.
+- ~~**L2/L3 server concurrency**~~ ✅ DONE 2026-07-25 (per-generation stop registry + `generation_lock` serializing local generation). See L2/L3 notes.
 - **social/photos modules** — net-new feature work on a shared scanner base.
 
 ---
