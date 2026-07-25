@@ -191,11 +191,11 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
   - **`photo_card.dart` — NOT a bug, left as-is.** The `Colors.black` letterbox and white-on-`Colors.black26` caption are intentional image-presentation colors that must stay fixed regardless of app theme (they sit over arbitrary photo content). Swapping to theme tokens would *reduce* legibility.
   - **`aichat_page.dart` send button — deliberately hardcoded-dark component, left as-is.** The whole page uses a fixed dark palette (`_sendEnabledBg`, `_mutedColor`, `Color(0xFF2C2C2E)`, etc.). The `Colors.black` icon is black-on-light-button by design; an isolated token swap risks an invisible icon. Retheming this page is a **separate, non-quick-win task** — tracked below.
 
-### - [ ] I2 — CORS `allow_headers=["*"]` broader than needed
+### - [x] I2 — CORS `allow_headers=["*"]` broader than needed
 - **Category:** Security
 - **Location:** `aiserver/src/aichat/main.py:138`
 - **Recommended fix:** Tighten allowed headers once auth (H1) lands.
-- **Notes:**
+- **Notes:** DONE 2026-07-25. `allow_headers=["*"]` → `["Authorization", "Content-Type"]` — the only two headers the client sends to the aiserver (`Authorization: Bearer` from `aiServerAuthHeaders`, `Content-Type: application/json`). `allow_methods=["POST", "GET"]` left as-is (matches usage). **Context / scope note:** CORS is a *browser-only* mechanism, and our sole client is the native Flutter **desktop** app (no `Origin` header, no preflight), so `CORSMiddleware` never governs the real client — the actual gate is the H1 bearer token on a loopback-bound server (`uvicorn ... host="127.0.0.1"`). This change is therefore pure defense-in-depth with **zero regression risk** (no browser client exists; `docs_url`/`redoc_url` are disabled). Left `allow_origins` unchanged — note it is effectively vestigial (the entries lack a port, so they wouldn't match a real browser origin `scheme://host:PORT` on the random port); tightening/removing it is a separate, non-I2 decision. Verified: `pytest tests/` failing set byte-for-byte identical to baseline (12 pre-existing), no CORS tests exist to update.
 
 ### - [x] I3 — Stale `//todo` env wiring in PythonManager  ✅ FIXED (quick-win pass)
 - **Category:** Reliability

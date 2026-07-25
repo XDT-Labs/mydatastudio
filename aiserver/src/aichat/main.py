@@ -138,7 +138,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost", "http://127.0.0.1"],
     allow_methods=["POST", "GET"],
-    allow_headers=["*"],
+    # Only the headers the client actually sends. CORS is browser-only defense
+    # in depth here — the real client is the native desktop app gated by the
+    # bearer token (AUDIT.md H1/I2), not a browser.
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Health
