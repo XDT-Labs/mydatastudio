@@ -533,7 +533,7 @@ class TestDownloadModel:
 
     @pytest.mark.asyncio
     async def test_filename_set_still_routes_to_single_file_download(self):
-        request = DownloadModelRequest(model_name="ggml-org/gemma-4-12B-it-GGUF", filename="gemma-4-12B-it-Q4_K_M.gguf")
+        request = DownloadModelRequest(model_name="ggml-org/gemma-4-12B-it-GGUF", filename="gemma-4-12B-it-Q4_0.gguf")
 
         with patch('aichat.routes.get_local_path', return_value="/tmp/gemma-local"), \
              patch('aichat.routes.find_local_model', return_value=None), \
@@ -573,11 +573,11 @@ class TestCheckModelStatus:
 
     @pytest.mark.asyncio
     async def test_single_file_mode_delegates_to_find_local_model(self):
-        request = DownloadModelRequest(model_name="ggml-org/gemma-4-12B-it-GGUF", filename="gemma-4-12B-it-Q4_K_M.gguf")
+        request = DownloadModelRequest(model_name="ggml-org/gemma-4-12B-it-GGUF", filename="gemma-4-12B-it-Q4_0.gguf")
 
         with patch('aichat.routes.get_local_path', return_value="/tmp/gemma-local"), \
-             patch('aichat.routes.find_local_model', return_value="/tmp/gemma-local/gemma-4-12B-it-Q4_K_M.gguf"):
+             patch('aichat.routes.find_local_model', return_value="/tmp/gemma-local/gemma-4-12B-it-Q4_0.gguf"):
             result = await check_model_status(request)
 
-        assert result == {"exists": True, "model_path": "/tmp/gemma-local/gemma-4-12B-it-Q4_K_M.gguf"}
+        assert result == {"exists": True, "model_path": "/tmp/gemma-local/gemma-4-12B-it-Q4_0.gguf"}
 

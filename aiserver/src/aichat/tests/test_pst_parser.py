@@ -1,5 +1,5 @@
 """
-TDD tests for PstParser email field quality.
+Tests for PstParser email field quality.
 
 These tests validate that the parser correctly extracts:
   - FROM: must contain a valid email address, never just a display name
@@ -8,13 +8,21 @@ These tests validate that the parser correctly extracts:
            but should be populated for real emails)
   - CC:   must be a list (can be empty when there are no CC recipients)
 
-Run from the project root:
-  pdm run pytest src/aichat/tests/test_pst_parser.py -v
+They run against the small PST files committed under `fixtures/` (see
+fixtures/README.md), so the suite is self-contained — no local archive needed.
+Point TEST_PST_FILE at your own .pst to run the same quality checks against a
+bigger, messier archive:
 
-Or with plain pytest (if pypff is on sys.path / installed):
-  pytest src/aichat/tests/test_pst_parser.py -v
+  pdm run pytest src/aichat/tests/test_pst_parser.py -v
+  TEST_PST_FILE=~/archive.pst pdm run pytest src/aichat/tests/test_pst_parser.py -v
+
+TestBundledFixtures asserts exact, hand-verified expectations for both fixture
+files. Those numbers are the regression lock: the fixtures never change, so any
+drift in the parser shows up there as a precise diff rather than a vague
+quality-percentage wobble.
 """
 
+import hashlib
 import re
 import sys
 import os
@@ -32,9 +40,19 @@ from pst_parser import (  # noqa: E402
 )
 
 # ---------------------------------------------------------------------------
-# Path to the test PST file – override via env var if needed
+# PST files under test. The bundled fixtures keep the suite runnable anywhere;
+# TEST_PST_FILE swaps in a larger local archive for the quality checks.
 # ---------------------------------------------------------------------------
-PST_FILE = os.environ.get("TEST_PST_FILE", "")
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
+# Outlook-authored: nested folders, Sent Items, HTML bodies, 34 attachments,
+# populated Calendar/Contacts, plus a free/busy system item. The richer of the
+# two, so it is what the general quality tests run against by default.
+OUTLOOK_FIXTURE = os.path.join(FIXTURES_DIR, "outlook_sample.pst")
+# Aspose-authored: a minimal, differently-written PST — guards against tying the
+# parser to Outlook's own layout.
+ASPOSE_FIXTURE = os.path.join(FIXTURES_DIR, "aspose_sample.pst")
+
+PST_FILE = os.environ.get("TEST_PST_FILE") or OUTLOOK_FIXTURE
 
 # Regex that matches a bare email address anywhere in a string,
 # e.g. "Joe Smith <joe@example.com>" or "joe@example.com"
@@ -77,8 +95,18 @@ def _is_non_email_folder(folder_path: str) -> bool:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+def _walk_pst(pst_path, output_dir):
+    """Parse `pst_path` end to end, returning every record the walk yielded."""
+    parser = PstParser(pst_path, output_dir=str(output_dir))
+    parser.open()
+    try:
+        return list(parser.walk())
+    finally:
+        parser.close()
+
+
 @pytest.fixture(scope="module")
-def all_raw_records():
+def all_raw_records(tmp_path_factory):
     """
     Parse the PST file once and return ALL non-folder records (emails, errors)
     as-is, with NO folder filtering applied.  Used by TestItemTypeFiltering to
@@ -87,15 +115,12 @@ def all_raw_records():
     if not os.path.exists(PST_FILE):
         pytest.skip(f"PST file not found at {PST_FILE!r}. Set TEST_PST_FILE env var.")
 
-    parser = PstParser(PST_FILE, output_dir="/tmp/pst_test_output")
-    parser.open()
-    records = [r for r in parser.walk() if r.get("type") != "folder"]
-    parser.close()
-    return records
+    out = tmp_path_factory.mktemp("pst_raw")
+    return [r for r in _walk_pst(PST_FILE, out) if r.get("type") != "folder"]
 
 
 @pytest.fixture(scope="module")
-def parsed_emails():
+def parsed_emails(tmp_path_factory):
     """
     Parse the PST file once for the entire test module and return only the
     email-type records from genuine mail folders (Inbox, Sent Items, etc.).
@@ -105,17 +130,11 @@ def parsed_emails():
     if not os.path.exists(PST_FILE):
         pytest.skip(f"PST file not found at {PST_FILE!r}. Set TEST_PST_FILE env var.")
 
-    parser = PstParser(PST_FILE, output_dir="/tmp/pst_test_output")
-    parser.open()
-
-    emails = []
-    for record in parser.walk():
-        if record.get("type") == "email":
-            folder = record.get("folder", "")
-            if not _is_non_email_folder(folder):
-                emails.append(record)
-
-    parser.close()
+    out = tmp_path_factory.mktemp("pst_emails")
+    emails = [
+        r for r in _walk_pst(PST_FILE, out)
+        if r.get("type") == "email" and not _is_non_email_folder(r.get("folder", ""))
+    ]
 
     if not emails:
         pytest.skip("No email records found in PST file.")
@@ -693,6 +712,22 @@ class TestPstFileSanity:
         """The PST file must contain at least one parseable email."""
         assert len(parsed_emails) > 0, "No emails were returned by the parser."
 
+    def test_email_ids_are_unique(self, parsed_emails):
+        """No two emails in a real PST may share an id.
+
+        The client keys its Email rows off this value, so duplicates are not a
+        cosmetic problem — they silently collapse the entire import into one
+        row. See test_message_ids_are_unique_across_the_walk for the same
+        guarantee driven over a fake tree.
+        """
+        ids = [e.get("id") for e in parsed_emails]
+        assert all(ids), "some emails have a missing/blank id"
+        duplicates = len(ids) - len(set(ids))
+        assert duplicates == 0, (
+            f"{duplicates} of {len(ids)} emails share an id with another "
+            "message; the client would import them as a single email"
+        )
+
     def test_email_records_have_required_keys(self, parsed_emails):
         """Every email record must have the minimum set of required keys."""
         required_keys = {"type", "subject", "sender", "to", "cc", "date", "folder", "attachments"}
@@ -761,6 +796,231 @@ class TestPstFileSanity:
 
 
 # ---------------------------------------------------------------------------
+# Exact expectations for the two committed fixture files.
+#
+# The tests above measure *quality* and work against any PST. These pin down
+# *behaviour* against two files that will never change, so a regression shows up
+# as "expected 11 emails, got 12" instead of a percentage that drifted a little.
+# Every number below was verified by hand against the fixture contents.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def outlook_records(tmp_path_factory):
+    if not os.path.exists(OUTLOOK_FIXTURE):
+        pytest.skip(f"fixture missing: {OUTLOOK_FIXTURE}")
+    out = tmp_path_factory.mktemp("outlook_fixture")
+    return _walk_pst(OUTLOOK_FIXTURE, out), out
+
+
+@pytest.fixture(scope="module")
+def aspose_records(tmp_path_factory):
+    if not os.path.exists(ASPOSE_FIXTURE):
+        pytest.skip(f"fixture missing: {ASPOSE_FIXTURE}")
+    out = tmp_path_factory.mktemp("aspose_fixture")
+    return _walk_pst(ASPOSE_FIXTURE, out), out
+
+
+def _split(records):
+    """Split a walk into (folders, emails, errors, summary)."""
+    by_type = {"folder": [], "email": [], "error": [], "summary": []}
+    for r in records:
+        by_type.setdefault(r["type"], []).append(r)
+    summary = by_type["summary"][-1] if by_type["summary"] else None
+    return by_type["folder"], by_type["email"], by_type["error"], summary
+
+
+class TestBundledFixtures:
+    """Exact, hand-verified expectations for the committed fixture PSTs."""
+
+    # -- outlook_sample.pst ------------------------------------------------
+
+    def test_outlook_walk_is_clean_and_complete(self, outlook_records):
+        """The walk must finish with a summary and no errors — the client only
+        marks a PST import 'complete' when it sees exactly that."""
+        folders, emails, errors, summary = _split(outlook_records[0])
+        assert errors == [], f"unexpected errors: {[e['message'] for e in errors]}"
+        assert summary == {
+            "type": "summary", "folders": 23, "emails": 11, "errors": 0,
+        }
+        assert len(folders) == 23
+        assert len(emails) == 11
+
+    def test_outlook_email_ids_are_the_pst_descriptor_ids(self, outlook_records):
+        """Ids must come from the message's own PST descriptor id.
+
+        Uniqueness alone is too weak to guard this: the parser has a
+        folder+index fallback for messages whose identifier can't be read, and
+        that fallback is *also* unique — so a regression back to reading a
+        non-existent accessor would slip through a uniqueness-only check while
+        silently changing every id in the archive. Pinning the exact values ties
+        them to the file, which is the property the client depends on.
+
+        These are the descriptor ids stored in the fixture; they never change.
+        """
+        _, emails, _, _ = _split(outlook_records[0])
+        by_folder = {}
+        for e in emails:
+            by_folder.setdefault(e["folder"], []).append(e["id"])
+
+        assert sorted(by_folder["Inbox"]) == [
+            "2097476", "2097508", "2097540", "2097636", "2097668", "2097700",
+        ]
+        assert sorted(by_folder["Sent Items"]) == [
+            "2097252", "2097284", "2097316", "2097412", "2097444",
+        ]
+        ids = [e["id"] for e in emails]
+        assert len(set(ids)) == len(ids) == 11
+        assert all("/" not in i and "\\" not in i for i in ids)
+
+    def test_outlook_folder_tree_including_nesting(self, outlook_records):
+        """Folder paths carry their parent, and the PST root wrapper is hidden.
+        The client rebuilds its folder hierarchy by splitting these paths, so a
+        lost or extra level reparents mail in the UI."""
+        folders, _, _, _ = _split(outlook_records[0])
+        paths = [f["path"] for f in folders]
+        assert "Inbox" in paths
+        assert "Inbox/SubInbox" in paths, "nested folder lost its parent"
+        assert not any(p.startswith("Root") for p in paths), "wrapper leaked into paths"
+
+    def test_outlook_non_mail_folders_are_flagged_and_skipped(self, outlook_records):
+        """Calendar and Contacts each hold one item in this fixture. They must be
+        reported as folders but must not yield email records — a fixture with
+        *populated* Calendar/Contacts is what makes this assertion meaningful."""
+        folders, emails, _, _ = _split(outlook_records[0])
+        non_mail = {f["path"] for f in folders if not f["is_email_folder"]}
+        assert non_mail == {"Calendar", "Contacts", "Journal", "Notes", "Tasks"}
+
+        populated = {f["path"] for f in folders if f["count"] > 0}
+        assert {"Calendar", "Contacts"} <= populated, "fixture no longer exercises this"
+        assert {e["folder"] for e in emails} == {"Inbox", "Sent Items"}
+
+    def test_outlook_freebusy_system_item_is_not_imported(self, outlook_records):
+        """'Freebusy Data' holds an IPM.Microsoft.ScheduleData.FreeBusy item —
+        Outlook bookkeeping, not mail. It has no sender and no date, so
+        importing it produced a phantom email stamped with the import time.
+        Folder-name filtering can't catch it; PR_MESSAGE_CLASS can."""
+        folders, emails, _, _ = _split(outlook_records[0])
+        assert any(f["path"] == "Freebusy Data" and f["count"] == 1 for f in folders), (
+            "fixture no longer contains the free/busy item this test guards"
+        )
+        assert not any(e["folder"] == "Freebusy Data" for e in emails)
+        assert not any(e.get("subject") == "LocalFreebusy" for e in emails)
+
+    def test_outlook_delivery_reports_would_still_import(self):
+        """Guard the message-class predicate itself: NDRs are mail the user
+        received and must survive the filter that drops free/busy items."""
+        assert PstParser._is_mail_message_class("IPM.Note")
+        assert PstParser._is_mail_message_class("IPM.Note.SMIME")
+        assert PstParser._is_mail_message_class("REPORT.IPM.Note.NDR")
+        assert not PstParser._is_mail_message_class("IPM.Microsoft.ScheduleData.FreeBusy")
+        assert not PstParser._is_mail_message_class("IPM.Contact")
+        # Unknown/unreadable class fails open — never drop mail on a guess.
+        assert PstParser._is_mail_message_class(None)
+        assert PstParser._is_mail_message_class("")
+
+    def test_outlook_sender_and_recipients(self, outlook_records):
+        """Every message is between the same Exchange account. Sent Items carry
+        no transport headers, so their recipients come from PR_DISPLAY_TO —
+        which Outlook stores quoted ('addr'). The quotes must be stripped or the
+        same person is two different strings across folders."""
+        _, emails, _, _ = _split(outlook_records[0])
+        assert {e["sender"] for e in emails} == {"Saqib Razzaq <saqib.razzaq@xp.local>"}
+        assert {t for e in emails for t in e["to"]} == {"saqib.razzaq@xp.local"}
+        sent = [e for e in emails if e["folder"] == "Sent Items"]
+        assert len(sent) == 5
+        assert all(e["to"] == ["saqib.razzaq@xp.local"] for e in sent)
+
+    def test_outlook_bodies_are_extracted(self, outlook_records):
+        """All 11 messages have an HTML body; a body that silently comes back
+        empty is invisible in the UI and unsearchable."""
+        _, emails, _, _ = _split(outlook_records[0])
+        assert all(e["html_body"] for e in emails)
+        assert all(e["body"] for e in emails)
+
+    def test_outlook_attachments_are_written_and_typed(self, outlook_records):
+        """Attachments must land on disk at the reported path and size, with a
+        content type derived from the real filename — the client stores that
+        path verbatim and maps the type to its own file-kind constants."""
+        records, out_dir = outlook_records
+        _, emails, _, _ = _split(records)
+        atts = [a for e in emails for a in e["attachments"]]
+        assert len(atts) == 34
+
+        by_name = {a["name"]: a for a in atts}
+        assert by_name["Sunset.jpg"]["contentType"] == "image/jpeg"
+        assert by_name["Sunset.jpg"]["size"] == 71189
+        assert by_name["text file.txt"]["contentType"] == "text/plain"
+        assert by_name["image010.gif"]["contentType"] == "image/gif"
+        assert by_name["image001.png"]["contentType"] == "image/png"
+
+        for a in atts:
+            assert a["size"] > 0, f"{a['name']} written with no content"
+            assert os.path.isfile(a["path"]), f"{a['name']} missing on disk"
+            assert os.path.getsize(a["path"]) == a["size"]
+            # Confined to the requested output dir, and filed by folder + year.
+            assert os.path.realpath(a["path"]).startswith(
+                os.path.realpath(str(out_dir)) + os.sep
+            )
+            assert "2011" in a["path"]
+
+    def test_outlook_attachment_paths_do_not_collide(self, outlook_records):
+        """The same filename appears in several messages (image001.png is in
+        both the Inbox and Sent Items copies). Each must get its own file, or
+        one message's attachment silently overwrites another's."""
+        _, emails, _, _ = _split(outlook_records[0])
+        atts = [a for e in emails for a in e["attachments"]]
+        names = [a["name"] for a in atts]
+        assert len(set(names)) < len(names), "fixture no longer has repeated names"
+        paths = [a["path"] for a in atts]
+        assert len(set(paths)) == len(paths), "two attachments share one path"
+
+    # -- aspose_sample.pst -------------------------------------------------
+
+    def test_aspose_walk_is_clean_and_complete(self, aspose_records):
+        """A PST written by a non-Microsoft library must parse just as cleanly —
+        this fixture is what stops the parser being tuned to Outlook's layout."""
+        folders, emails, errors, summary = _split(aspose_records[0])
+        assert errors == []
+        assert summary == {
+            "type": "summary", "folders": 8, "emails": 1, "errors": 0,
+        }
+        assert len(folders) == 8
+        assert len(emails) == 1
+
+    def test_aspose_nested_folder_is_preserved(self, aspose_records):
+        """Custom folder names (not the standard Outlook set) must still nest."""
+        folders, _, _, _ = _split(aspose_records[0])
+        paths = [f["path"] for f in folders]
+        assert "myInbox" in paths
+        assert "myInbox/subfolder1" in paths
+
+    def test_aspose_multi_recipient_headers(self, aspose_records):
+        """The only fixture with multiple To *and* Cc recipients: it pins down
+        address-list splitting and "Name <addr>" formatting, which a single
+        recipient would never exercise."""
+        _, emails, _, _ = _split(aspose_records[0])
+        email = emails[0]
+        assert email["sender"] == "Sender Name <from@domain.com>"
+        assert email["to"] == [
+            "Recipient 1 <to1@domain.com>",
+            "Recipient 2 <to2@domain.com>",
+        ]
+        assert email["cc"] == [
+            "Recipient 3 <cc1@domain.com>",
+            "Recipient 4 <cc2@domain.com>",
+        ]
+        assert email["folder"] == "myInbox"
+        assert email["attachments"] == []
+        assert email["body"]
+
+    def test_aspose_email_id_is_the_pst_descriptor_id(self, aspose_records):
+        """Same guarantee as the Outlook fixture, on a PST this app didn't
+        write: the id is read from the file, not synthesised."""
+        _, emails, _, _ = _split(aspose_records[0])
+        assert emails[0]["id"] == "2097188"
+
+
+# ---------------------------------------------------------------------------
 # Walk resilience + completion summary — runs WITHOUT a real PST file by
 # driving the walk over an in-memory fake folder tree. PST is a one-shot import
 # with no re-sync, so a single corrupt folder must never abort the whole walk,
@@ -769,11 +1029,19 @@ class TestPstFileSanity:
 # ---------------------------------------------------------------------------
 
 class _FakeMsg:
-    def __init__(self, i):
-        self._i = i
+    # pypff.message exposes the PST descriptor id as get_identifier(); there is
+    # no get_entry_identifier(). `no_identifier=True` drops it to exercise the
+    # parser's per-message fallback id.
+    number_of_record_sets = 0
 
-    def get_entry_identifier(self):
-        return f"id{self._i}".encode()
+    def __init__(self, i, no_identifier=False):
+        self._i = i
+        self._no_identifier = no_identifier
+
+    def get_identifier(self):
+        if self._no_identifier:
+            raise RuntimeError("identifier descriptor error")
+        return 2097152 + self._i
 
     def get_delivery_time(self):
         return None
@@ -802,12 +1070,19 @@ class _FakeFolder:
     get_number_of_sub_messages raise, mimicking a damaged descriptor table."""
 
     def __init__(self, name, msgs=0, subs=None, corrupt_count=False,
-                 corrupt_name=False):
+                 corrupt_name=False, no_identifiers=False):
         self._name = name
         self._msgs = msgs
         self._subs = subs or []
         self._corrupt = corrupt_count
         self._corrupt_name = corrupt_name
+        self._no_identifiers = no_identifiers
+        # Real PST descriptor ids are unique across the whole file, not just
+        # within a folder — offset each folder's ids so the fake tree keeps that
+        # property and uniqueness assertions mean something. Uses a stable
+        # digest rather than hash() so ids don't shift with PYTHONHASHSEED.
+        digest = hashlib.sha1(name.encode()).hexdigest()[:8]
+        self._id_base = int(digest, 16) * 1000
 
     def get_name(self):
         if self._corrupt_name:
@@ -820,7 +1095,7 @@ class _FakeFolder:
         return self._msgs
 
     def get_sub_message(self, i):
-        return _FakeMsg(i)
+        return _FakeMsg(self._id_base + i, no_identifier=self._no_identifiers)
 
     def get_number_of_sub_folders(self):
         return len(self._subs)
@@ -910,6 +1185,42 @@ class TestWalkResilience:
         folder above would be skipped as a wrapper or as non-mail."""
         assert UNREADABLE_FOLDER_NAME.strip().lower() not in WRAPPER_FOLDER_NAMES
         assert UNREADABLE_FOLDER_NAME.strip().lower() not in NON_EMAIL_FOLDER_NAMES
+
+    def test_message_ids_are_unique_across_the_walk(self, tmp_path):
+        """Every email must carry its own id.
+
+        This is not cosmetic. The client derives the Email row's primary key
+        from this id (uuidv5 of 'email:pst:<collection>:<id>'), so any two
+        messages sharing an id upsert onto the same row: a whole archive
+        collapses into a single email and the import looks empty. Regression
+        test for the parser reading a non-existent get_entry_identifier(),
+        which sent every message down the fallback and gave them all the same
+        literal id.
+        """
+        events = _walk_fake_tree(self._tree(), tmp_path)
+        ids = [e["id"] for e in events if e["type"] == "email"]
+        assert ids, "walk produced no emails"
+        assert all(i for i in ids), "some emails have a blank id"
+        assert len(set(ids)) == len(ids), (
+            f"{len(ids) - len(set(ids))} of {len(ids)} emails share an id — "
+            "they would collapse onto one row in the client"
+        )
+
+    def test_messages_without_an_identifier_still_get_unique_ids(self, tmp_path):
+        """When the descriptor id is unreadable the fallback must still be
+        per-message, not one shared sentinel — otherwise a damaged PST silently
+        imports as a single email."""
+        inbox = _FakeFolder("Inbox", msgs=3, no_identifiers=True)
+        deep = _FakeFolder("Archive", msgs=2, no_identifiers=True)
+        root = _FakeFolder("Root", subs=[inbox, deep])
+        events = _walk_fake_tree(root, tmp_path)
+
+        ids = [e["id"] for e in events if e["type"] == "email"]
+        assert len(ids) == 5
+        assert len(set(ids)) == 5, "id-less messages collapsed onto one id"
+        # The id is also used as an on-disk attachment filename prefix, so it
+        # must not carry path separators.
+        assert all("/" not in i and "\\" not in i for i in ids)
 
     def test_clean_tree_reports_zero_errors(self, tmp_path):
         """A healthy tree must end with errors == 0 so the client can mark the

@@ -8,7 +8,7 @@ DEFAULT_MODEL_ALIAS = "gemma4:12b"
 
 # ── Fallback defaults (used as Pydantic field defaults; not a model registry) ─
 DEFAULT_LOCAL_MODEL = "ggml-org/gemma-4-12B-it-GGUF"
-DEFAULT_GGUF_FILE = "gemma-4-12B-it-Q4_K_M.gguf"
+DEFAULT_GGUF_FILE = "gemma-4-12B-it-Q4_0.gguf"
 
 # ── Model loading ─────────────────────────────────────────────────────────────
 MAX_NEW_TOKENS = 512
