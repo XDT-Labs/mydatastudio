@@ -3,6 +3,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:path/path.dart' as p;
 
@@ -199,6 +200,13 @@ class CollectionRepository {
         } catch (e) {
           logger.e("Failed to delete GDrive collection files from disk: $e");
         }
+      }
+
+      // Remove any cached thumbnails for this collection (all types).
+      try {
+        await ThumbnailCache(appDir).deleteCollection(id);
+      } catch (e) {
+        logger.e("Failed to delete cached thumbnails for collection $id: $e");
       }
     }
   }

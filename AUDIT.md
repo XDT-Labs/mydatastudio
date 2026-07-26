@@ -76,7 +76,7 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
 - **Impact:** Any caller (see H1) can exfiltrate the contents of any image file the app user can read (`~/Pictures`, screenshots, other apps' caches).
 - **Reproduction:** `POST /util/thumbnail {"file_path":"/Users/<user>/some/private.png","width":9999,"height":9999}` → response `thumbnail` field is the rendered file.
 - **Recommended fix:** Constrain `file_path` to the configured collection/storage roots via the same `realpath` + `commonpath` pattern already used in `_assert_within_models_dir` (`routes.py:639-646`).
-- **Notes:** DONE 2026-07-22. `generate_thumbnail` now confines `file_path` (via new `_assert_within_roots`, which realpaths first so symlink escapes are caught, and requires a trailing `os.sep` so `/a/b` can't be escaped via `/a/bc`) to the union of `resolve_data_roots()` (app-support + storage/database from `config.json` + models dir — all server-derived) **and** a client-declared `allowed_root`. The local-file scanner now passes the collection `rootPath` as `allowed_root` (threaded `local_file_isolate → ThumbnailGenerator.pathImageToBase64 → request body`), so in-place external collections (e.g. `~/Pictures`) still get RAW thumbnails with **no regression**. Tests: `tests/test_path_confinement.py` (inside/outside/sibling-prefix/symlink/empty-roots). **Interim caveat:** because in-place collections can be any path, the declared root is client-supplied, so this has limited teeth against a *fully compromised* client that forges `allowed_root` — but post-H1 such a caller already runs as the user and can read files directly. The full structural fix (client sends bytes, server never opens a path) lands with the thumbnail-cache refactor below.
+- **Notes:** DONE 2026-07-22. `generate_thumbnail` now confines `file_path` (via new `_assert_within_roots`, which realpaths first so symlink escapes are caught, and requires a trailing `os.sep` so `/a/b` can't be escaped via `/a/bc`) to the union of `resolve_data_roots()` (app-support + storage/database from `config.json` + models dir — all server-derived) **and** a client-declared `allowed_root`. The local-file scanner now passes the collection `rootPath` as `allowed_root` (threaded `local_file_isolate → ThumbnailGenerator.pathImageToBase64 → request body`), so in-place external collections (e.g. `~/Pictures`) still get RAW thumbnails with **no regression**. Tests: `tests/test_path_confinement.py` (inside/outside/sibling-prefix/symlink/empty-roots). **Interim caveat (now moot):** the `allowed_root` confinement was a client-supplied band-aid. **Superseded 2026-07-25** by the thumbnail-cache refactor: `/util/thumbnail` now takes image **bytes** (`image_base64`), not a path, so it can't read arbitrary files at all. The `allowed_root` field and the `_assert_within_roots` call in `generate_thumbnail` are removed. H2 is fully closed.
 
 ---
 
@@ -242,7 +242,7 @@ The chat page uses a fixed hardcoded-dark palette (`_sendEnabledBg`, `_mutedColo
 
 ## Requires deeper work / architectural change
 - ~~**H1 token scheme**~~ ✅ DONE 2026-07-10 (touched spawn, all routes, and every client call site + worker isolates).
-- ~~**H2/M1 path confinement**~~ ✅ DONE 2026-07-22. Interim for H2: the thumbnail read is confined to server-derived data roots + a client-declared collection root. Full structural elimination is folded into the **thumbnail-cache refactor** below (client sends bytes → server never opens a path).
+- ~~**H2/M1 path confinement**~~ ✅ DONE 2026-07-22; **H2 fully closed 2026-07-25** by the thumbnail-cache refactor (client sends bytes → server never opens a path; `allowed_root` and the thumbnail `_assert_within_roots` call removed). M1/PST still uses the confinement helper.
 - **M2 credential storage** (migration of existing plaintext tokens + key management).
 - **M4 accessibility** (systematic, every module).
 - **L2/L3 server concurrency** (per-request stop signaling + serialize or pool model access) — only if multi-stream usage becomes real.
@@ -250,7 +250,40 @@ The chat page uses a fixed hardcoded-dark palette (`_sendEnabledBg`, `_mutedColo
 
 ---
 
-## Planned refactor: on-disk thumbnail cache (deferred)
+## Refactor: on-disk thumbnail cache  ✅ DONE 2026-07-25
+
+**Status.** Implemented. Thumbnails now live on disk under
+`<storagePath>/thumbnails/<collectionId>/<ab>/<sha1(fileId)>.jpg`; the DB
+`files.thumbnail` column holds the relative **key** (or an `http` Drive URL, or
+— transitionally — a legacy base64 blob), never bytes. The RAW server call is
+now **bytes-in/bytes-out** (`image_base64` + `is_raw`), so `/util/thumbnail`
+never opens a filesystem path — **H2 is structurally closed** and the
+`allowed_root` field + the `_assert_within_roots` call inside `generate_thumbnail`
+have been removed (the helper remains, guarding PST/M1 only).
+
+Notes on the delivered design vs. the plan below:
+- **JPEG, not WebP** — the bundled Dart `image` package (4.8.0) can decode WebP
+  but can't encode it; JPEG is what the client already produced and what the
+  server returns.
+- **fileId is hashed (SHA-1)** for the on-disk name — the raw DB id is
+  `<collectionId>:<relPath>`, which isn't filesystem-safe.
+- **Format detection at render** is three-way and unambiguous: `http…` → URL,
+  `…​.jpg` → on-disk key, else → legacy base64 (`ThumbnailResolver`).
+- **Render UX:** `ImageCache` ceiling raised to 300 MB (`main.dart`) so scrolling
+  large grids keeps a bigger working set resident; `photo_card` already used a
+  `ProgressiveImage` placeholder. Deferred (additive, only if network-drive
+  scroll UX proves bad): a two-tier local read-through cache.
+- **New/changed:** `thumbnail_cache.dart`, `thumbnail_resolver.dart` (new);
+  `thumbnail_generator.dart`, `local_file_isolate.dart`,
+  `outlook_scanner_isolate.dart`, `yahoo_scanner_isolate.dart`,
+  `collection_repository.dart` (cache cleanup on delete), the three render
+  widgets, `main.dart`; server `routes.py` + `models.py`. Tests:
+  `thumbnail_generator_test.dart` (cache-key/write/delete), the queue test,
+  and `aiserver/tests/test_thumbnail.py` (bytes contract, H2 regression guard).
+
+---
+
+## Planned refactor: on-disk thumbnail cache (original notes)
 
 **Why.** Thumbnails are currently stored **as base64 text inline in the SQLite `files.thumbnail` column** for local files and email attachments (no on-disk cache), and as a **remote Google URL** for Google Drive (fetched live at render time). Two problems: (1) base64 is ~33% larger than the raw bytes and rides along on every `SELECT` of the `files` table — for a 100k-photo archive that's several GB of blobs bloating the DB and slowing queries; (2) the Google Drive path makes live network calls to Google at render time (against the local-first ethos) and those `thumbnailLink` URLs are auth-scoped and expire.
 
@@ -317,6 +350,6 @@ The chat page uses a fixed hardcoded-dark palette (`_sendEnabledBg`, `_mutedColo
 
 **Ship with known risks — for the current single-user, local-only, trusted-machine deployment.**
 
-**H1 is fixed** (2026-07-10): the local server requires a per-spawn bearer token, so the file endpoints aren't reachable by an arbitrary co-resident process — only by the paired client (or malware that reads the process env). **H2 and M1 are now fixed** (2026-07-22): `/util/thumbnail` reads and `/util/import/pst` writes are confined to the app's own data roots (plus, for thumbnails, the client-declared collection root), and the PST containment check now precedes `makedirs` with a correct separator. The remaining path-read exposure for thumbnails is only the *interim* client-declared-root model, whose full elimination is scheduled with the thumbnail-cache refactor (bytes in, no server-side path). **M3 (double-submit) is fixed.**
+**H1 is fixed** (2026-07-10): the local server requires a per-spawn bearer token, so the file endpoints aren't reachable by an arbitrary co-resident process — only by the paired client (or malware that reads the process env). **H2 and M1 are now fixed** (2026-07-22): `/util/thumbnail` reads and `/util/import/pst` writes are confined to the app's own data roots (plus, for thumbnails, the client-declared collection root), and the PST containment check now precedes `makedirs` with a correct separator. **H2 is now fully closed** (2026-07-25): `/util/thumbnail` takes image bytes, not a path, so it can no longer read arbitrary files; the interim `allowed_root` model and the thumbnail-side `_assert_within_roots` call are removed (the helper still guards PST/M1). **M3 (double-submit) is fixed.**
 
 The main outstanding blocker before wider/less-trusted distribution is **M2** — third-party OAuth tokens and API keys are still in plaintext SQLite, so a compromise of the DB file (or the client) can still yield account takeover. **M4 accessibility** remains for compliance.

@@ -36,6 +36,13 @@ Map<String, String> aiServerAuthHeaders(String? token) =>
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+
+  // Thumbnails now render from on-disk files (Image.file). Raise the in-memory
+  // decoded-image cache from the 100 MB default so scrolling large photo grids
+  // keeps a bigger working set resident and avoids re-reading/decoding from the
+  // storage dir (which may be a network volume).
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 300 << 20; // 300 MB
+
   // Must add this line.
   await windowManager.ensureInitialized();
 

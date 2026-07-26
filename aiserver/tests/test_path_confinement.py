@@ -1,10 +1,13 @@
 """
-Tests for path confinement on the thumbnail (H2) and PST-import (M1) endpoints.
+Tests for path confinement on the PST-import (M1) endpoint.
 
 Intent: caller-supplied paths must stay inside the app's own data directories.
-The thumbnail endpoint must not read images from anywhere on disk, and PST
-attachment extraction must not create dirs or write files outside output_dir —
-even when the PST's folder names are hostile.
+PST attachment extraction must not create dirs or write files outside
+output_dir — even when the PST's folder names are hostile.
+
+(The thumbnail endpoint no longer takes a path at all — it decodes bytes from
+the request body, structurally closing H2 — so `_assert_within_roots` now only
+guards PST. See test_thumbnail.py for the thumbnail bytes contract.)
 """
 import json
 import os
