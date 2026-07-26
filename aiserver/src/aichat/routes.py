@@ -46,6 +46,17 @@ from .state import (
 )
 
 
+# Returned as the 409 detail when the single local-model generation slot is
+# already taken. The shared llama_cpp instance has one decoder state, so
+# generations cannot overlap; this app is single-user and the client serializes
+# its own requests, so a second concurrent generation is a caller bug worth
+# reporting loudly rather than a queue worth building.
+GENERATION_BUSY_DETAIL = (
+    "A generation is already in progress. Wait for it to finish, "
+    "or POST /v1/chat/stop to cancel it."
+)
+
+
 def _resolve_embedding_model(alias: str) -> tuple:
     """Resolve an embedding model alias to (hf_repo, filename).
     Embedding models are identified by their HF repo ID directly, not via aichat_models."""
@@ -454,34 +465,55 @@ async def generate_chat_completion(request: ChatCompletionRequest):
             current_model = get_current_model_id()
             stop_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
 
+            # Claim the generation slot *before* the response starts. Acquiring
+            # non-blocking is what keeps the lock off the yield path: the holder
+            # may sit parked at a yield waiting on a slow client, but nobody is
+            # ever queued behind it — a second caller is refused immediately
+            # instead of hanging on a 200 whose body never arrives.
+            lock = get_generation_lock()
+            if not lock.acquire(blocking=False):
+                raise HTTPException(status_code=409, detail=GENERATION_BUSY_DETAIL)
+
             def _sse_stream() -> Generator[str, None, None]:
+                # Ownership of the lock passes to this generator; its finally is
+                # the sole release point (it also runs on GeneratorExit when the
+                # client disconnects mid-stream).
                 register_stream(stop_id)
                 try:
-                    # Serialize generation: a concurrent stream on the same
-                    # llama_cpp instance would corrupt its decoder state.
-                    with get_generation_lock():
-                        for chunk in llm_instance.create_chat_completion(
-                            stream=True, **kwargs
-                        ):
-                            if is_stop_requested(stop_id):
-                                break
-                            # Stable id the client echoes back to target /v1/chat/stop.
-                            chunk["id"] = stop_id
-                            chunk["model"] = current_model
-                            yield f"data: {json.dumps(chunk)}\n\n"
+                    for chunk in llm_instance.create_chat_completion(
+                        stream=True, **kwargs
+                    ):
+                        if is_stop_requested(stop_id):
+                            break
+                        # Stable id the client echoes back to target /v1/chat/stop.
+                        chunk["id"] = stop_id
+                        chunk["model"] = current_model
+                        yield f"data: {json.dumps(chunk)}\n\n"
                     yield "data: [DONE]\n\n"
                 finally:
                     unregister_stream(stop_id)
+                    lock.release()
 
-            return StreamingResponse(_sse_stream(), media_type="text/event-stream")
+            try:
+                return StreamingResponse(_sse_stream(), media_type="text/event-stream")
+            except BaseException:
+                # Nothing between the acquire and here should raise, but a leaked
+                # generation lock would 409 every later request until restart, so
+                # it is worth the guard.
+                lock.release()
+                raise
 
-        # Serialize with any active stream (same generation_lock) and run the
-        # blocking call off the event loop.
-        def _locked_completion():
-            with get_generation_lock():
-                return llm_instance.create_chat_completion(**kwargs)
-
-        result = await asyncio.to_thread(_locked_completion)
+        # Same slot, same refusal: the non-streaming path shares the lock with
+        # any active stream. Run the blocking call off the event loop.
+        lock = get_generation_lock()
+        if not lock.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail=GENERATION_BUSY_DETAIL)
+        try:
+            result = await asyncio.to_thread(
+                lambda: llm_instance.create_chat_completion(**kwargs)
+            )
+        finally:
+            lock.release()
         result["model"] = get_current_model_id() or result.get("model", "unknown")
         return result
 

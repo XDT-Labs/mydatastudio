@@ -186,8 +186,14 @@ class LocalLlmContentGenerator implements ContentGenerator {
 
         if (streamedResponse.statusCode != 200) {
           final body = await streamedResponse.stream.bytesToString();
+          // 409 means the server's single generation slot is taken. The UI
+          // already guards this via isProcessing, so reaching it means two
+          // senders raced — say so plainly rather than dumping the JSON body.
           _errorController.add(ContentGeneratorError(
-            'Failed to get response: ${streamedResponse.statusCode} — $body',
+            streamedResponse.statusCode == 409
+                ? 'The model is already generating a response. '
+                    'Wait for it to finish, or press stop.'
+                : 'Failed to get response: ${streamedResponse.statusCode} — $body',
             StackTrace.current,
           ));
           return;
