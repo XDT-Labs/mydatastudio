@@ -27,16 +27,29 @@ import 'package:uuid/uuid.dart';
 import 'package:http/http.dart' as http;
 
 /// [OutlookPstScannerIsolate] is the client-side manager for the Outlook PST
-/// scanning background isolate. It handles spawning the worker, which calls
-/// the Python FastAPI service to parse the PST file and stream results back.
+/// scanning background isolate. It spawns the worker, which calls the Python
+/// FastAPI service to parse the PST file and stream results back.
 ///
-/// Synchronization Rules:
-/// 1. [Registration-Only Startup] Scanners MUST only register on startup.
-/// 2. [Force Safety Gate] start() MUST return immediately if force is false.
-/// 3. [Manual Sync] User-initiated syncs MUST call start(force: true).
-/// 4. [Discovery vs Sync] Discover items quickly, sync heavy metadata incrementally.
-/// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
-///    syncs (path == null) and targeted folder scans (path != null).
+/// **PST is the exception to the standard scanner contract.** Unlike the live
+/// email providers (Gmail/Outlook/Yahoo), a `.pst` is an **immutable local
+/// archive**: its contents can't change on a server, so there is nothing to
+/// re-sync and nothing to refresh once a folder is imported. Consequently PST:
+///
+///   * is a **one-shot import**, run exactly once when the collection is added
+///     (see `NewEmailPage._import`), and is **not** registered in
+///     `ScannerManager` (it throws there by design);
+///   * has **no re-sync and no targeted folder scan** — those affordances are
+///     intentionally hidden in the UI (the folder Refresh icon and the account
+///     "Sync" menu item), so the generic `path == null` / `path != null`
+///     contract does not apply here;
+///   * is re-imported only by **deleting the collection and re-selecting the
+///     file** — there is no incremental update path.
+///
+/// Because there is no second chance, the single import pass tracks a
+/// completion summary and marks the collection `complete` only when the
+/// parser's end-of-walk summary arrives with zero errors; otherwise it is left
+/// `incomplete` for the UI to surface (see the worker below). See the
+/// "targeted PST-folder scanning" resolution in AUDIT.md.
 class OutlookPstScannerIsolate {
   final RootIsolateToken? token;
   final String appDir;
@@ -55,13 +68,12 @@ class OutlookPstScannerIsolate {
     this.serverToken,
   });
 
-  /// Spawns the PST background worker isolate.
+  /// Spawns the PST background worker isolate to import [collection] once.
   ///
-  /// [collection] The PST collection to synchronize.
-  /// [force] If false, returns immediately (Rule 2).
-  ///
-  /// Note: PST scanners currently default to a **Full Sync** of the entire
-  /// archive. Targeted scanning of specific PST folders is not yet implemented.
+  /// [force] guards against an accidental no-op call; the sole caller
+  /// (`NewEmailPage._import`) passes `force: true`. There is deliberately no
+  /// folder/path parameter — a PST archive is imported whole, one time, and is
+  /// never re-synced or folder-targeted (see the class doc).
   Future<void> start(Collection collection, {bool force = false}) async {
     if (!force) {
       logger.i("Registration-only mode: skipping scan for ${collection.name}");

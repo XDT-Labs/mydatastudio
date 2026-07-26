@@ -213,7 +213,7 @@ Accessibility is essentially unimplemented (zero `Semantics` widgets). Two modul
 | Module | State | Gap |
 |--------|-------|-----|
 | **files** (52 files, ~8.8k LOC) | Mature | Google Drive + local FS work; other providers show `ComingSoonTabView` (`client/lib/modules/files/widgets/file_collection_setup/coming_soon_tab_view.dart`). |
-| **email** (35 files, ~6.8k LOC) | Mature | Gmail/Yahoo/Outlook/PST scanners present; **targeted PST-folder scanning not implemented** (`client/lib/modules/email/services/scanners/outlook_pst_scanner_isolate.dart:59`). |
+| **email** (35 files, ~6.8k LOC) | Mature | Gmail/Yahoo/Outlook/PST scanners present. Targeted PST-folder scanning **resolved won't-implement (by design)** — a PST is an immutable one-shot import, not re-synced; the effort went into import correctness instead (see the PST module-task entry below). |
 | **aichat** (5 files, ~2.7k LOC) | Functional | Works; carries M3 race and the M4 a11y gaps. |
 | **photos** (5 files, ~413 LOC) | Minimal | Basic list/card only; two `// TODO: disable if no files are checked` (`client/lib/modules/photos/photos_app.dart:68,78`); no album/dedup/search parity with files. |
 | **social** (5 files, ~531 LOC) | **Stub** | Facebook/Twitter/Instagram pages render a literal `Text("Facebook Page")` (`client/lib/modules/social/pages/facebook_page.dart:19-21`) — no ingestion, storage, or display. |
@@ -224,8 +224,16 @@ Currently placeholder pages only. Needs ingestion, storage (Drift tables), and d
 ### - [ ] Module task: bring photos to parity with files
 Add album/dedup/search; resolve the two `TODO: disable if no files are checked` in `photos_app.dart`.
 
-### - [ ] Module task: implement targeted PST-folder scanning
-`outlook_pst_scanner_isolate.dart:59` — currently scans the whole archive only.
+### - [x] Module task: targeted PST-folder scanning — resolved WON'T-IMPLEMENT (by design)
+**Decision (2026-07-25):** not implemented, deliberately. The other scanners support targeted folder re-scans because their source is **live and mutable** (new mail arrives on the server). A `.pst` is an **immutable local archive** — once a folder is imported its contents can't change, so a targeted folder re-scan has nothing to find. Building it would be machinery for a state transition that can't occur.
+
+Instead PST was made a clean **one-shot immutable import** and the work went where it mattered — getting the single pass right (there is no re-sync safety net):
+- **Import actually runs once.** `new_email_page.dart` called `start(collection)` without `force`, and the isolate returns early when `!force` — so the only import path was a no-op. Now passes `force: true` (the sole import site).
+- **Parser hardened.** `pst_parser.py` guards the folder-level reads (`get_name`, `get_number_of_sub_messages`, `get_number_of_sub_folders`) and splits recursion into `_recurse_subfolders`, so one corrupt folder yields an error event and is still descended into instead of discarding its subtree. `walk()` ends with a `{"type":"summary", folders, emails, errors}` event. (`TestWalkResilience`, 5 tests, drives this over an in-memory fake tree — no real PST needed.)
+- **Honest completion.** The isolate counts errors, notes whether the summary arrived, wraps the stream in try/catch, and marks the collection `complete` only when the summary arrived AND nothing failed — otherwise `incomplete` (previously it always wrote `complete`, hiding truncated imports).
+- **Re-scan affordances removed.** The folder Refresh icon (`email_page.dart`) and the account "Sync" menu item (`collection_tile_widget.dart` `showSync` / `email_drawer.dart`) are hidden for PST; the dead PST branch in `_syncAccount` was removed.
+- **File lifecycle confirmed:** no copy, no temp staging, no deletion. The picker returns the user's original path in place; the co-located Python subprocess reads it directly (no upload). The app is **not** App-Sandboxed (entitlements carry no `com.apple.security.app-sandbox`), so background read-in-place is fine.
+- **Re-import path:** delete the collection and re-select the file. There is intentionally no incremental update.
 
 ### - [ ] Convergence: unify the scanner pattern across modules
 `email` and `files` each re-implement the same isolate-scanner + upsert + embedding pattern (`*_scanner_isolate.dart`, `batch_file_upsert_service`, `folder_upsert_service`). `photos` and `social` should be built on a shared `CollectionScanner` base rather than additional variants. Standardize one lifecycle: **discover → dedup by path/hash → upsert → embed**, and have all modules consume it.
