@@ -729,29 +729,37 @@ async def delete_model(request: DeleteModelRequest) -> Dict[str, Any]:
 
 
 def generate_thumbnail(request: ThumbnailRequest) -> Dict[str, Any]:
-    """Generate a thumbnail for an image file, including RAW formats."""
-    # Confine reads to the app's own data dirs plus the collection root the client
-    # declared, so this endpoint can't be used to render arbitrary images off disk
-    # (AUDIT H2). realpath resolves symlinks before the containment check.
-    allowed_roots = resolve_data_roots()
-    if request.allowed_root:
-        allowed_roots.append(request.allowed_root)
-    file_path = _assert_within_roots(request.file_path, allowed_roots, "file_path")
+    """Generate a thumbnail from base64 image bytes, including RAW formats.
 
-    if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
+    The client sends the source bytes (not a path), so the server never opens a
+    file off disk — this is the structural fix for AUDIT H2. RAW decoding
+    (rawpy) is selected by the client-supplied ``is_raw`` flag rather than a
+    filename extension.
+    """
+    import io
+    import base64
+
+    payload = request.image_base64
+    if payload.startswith("data:"):
+        payload = payload.split(",", 1)[1]
     try:
-        ext = os.path.splitext(file_path)[1].lower()
-        if ext in ['.nef', '.cr2', '.arw', '.dng', '.orf', '.sr2']:
+        raw_bytes = base64.b64decode(payload)
+    except Exception as e:
+        print(f"[ERROR] Invalid base64 image payload: {e}")
+        raise HTTPException(status_code=400, detail="Invalid image payload.")
+
+    try:
+        if request.is_raw:
             import rawpy
-            with rawpy.imread(file_path) as raw:
+            with rawpy.imread(io.BytesIO(raw_bytes)) as raw:
                 rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True, bright=1.0)
                 img = Image.fromarray(rgb)
         else:
-            img = Image.open(file_path)
+            img = Image.open(io.BytesIO(raw_bytes))
         img.thumbnail((request.width, request.height))
-        import io
-        import base64
+        # JPEG can't hold alpha/palette modes — normalize to RGB before saving.
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=85)
         return {

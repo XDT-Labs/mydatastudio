@@ -22,6 +22,7 @@ import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
 import 'dart:io' as io;
 
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
@@ -491,10 +492,12 @@ class OutlookScannerIsolateWorker {
     required List<MimePart> parts,
     required String targetFolderPath,
     required String extractionRoot,
+    required String appDir,
     required AppLogger logger,
   }) async {
     List<db_file.File> files = [];
     await io.Directory(targetFolderPath).create(recursive: true);
+    final thumbnailCache = ThumbnailCache(appDir);
 
     // SMTP Message-IDs often contain '<', '>', '@', '/' and other chars that
     // are illegal in file-system paths. Strip everything unsafe.
@@ -527,13 +530,21 @@ class OutlookScannerIsolateWorker {
           );
           await file.writeAsBytes(content);
 
+          final fileId = const Uuid().v5(
+            Namespace.url.value,
+            'file:email:${collection.id}:$messageId:$fileName',
+          );
+
           String? thumbnail;
           if (mapMimeType(part.mediaType.text) ==
               FilesConstants.mimeTypeImage) {
             try {
-              thumbnail = await ThumbnailGenerator().pathImageToBase64(
+              thumbnail = await ThumbnailGenerator().generate(
+                collection.id,
+                fileId,
                 file.path,
                 FilesConstants.mimeTypeImage,
+                thumbnailCache,
               );
             } catch (e) {
               logger.w(
@@ -557,10 +568,7 @@ class OutlookScannerIsolateWorker {
           }
 
           final f = db_file.File(
-            id: const Uuid().v5(
-              Namespace.url.value,
-              'file:email:${collection.id}:$messageId:$fileName',
-            ),
+            id: fileId,
             collectionId: collection.id,
             name: fileName,
             path: relPath ?? file.path,
@@ -737,6 +745,7 @@ class OutlookScannerIsolateWorker {
         parts: attachmentParts,
         targetFolderPath: absoluteYearPath,
         extractionRoot: extractionRoot,
+        appDir: appDir,
         logger: logger,
       );
       emailObj.attachments = attachments;

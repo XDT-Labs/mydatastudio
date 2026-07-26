@@ -17,6 +17,7 @@ import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
 import 'package:path/path.dart' as p;
 import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 
 /// [LocalFileIsolate] is a collection scanner responsible for indexing files
@@ -194,28 +195,34 @@ class LocalFileIsolateWorker {
   static const int _maxConcurrentThumbnails = 4;
   Completer<void>? _thumbnailCompleter;
 
+  // Thumbnails are cached on disk under <storagePath>/thumbnails; the DB only
+  // holds the relative key.
+  late final ThumbnailCache _thumbnailCache = ThumbnailCache(storagePath);
+
   void _enqueueThumbnailJob(
     AppDatabase appDb,
+    String collectionId,
     String fileId,
     String absPath,
     String mimeType,
     String? llmServiceUrl,
     String? llmServiceToken,
-    String? allowedRoot,
   ) {
     _thumbnailQueue.add(() async {
       try {
-        final thumbnail = await ThumbnailGenerator().pathImageToBase64(
+        final key = await ThumbnailGenerator().generate(
+          collectionId,
+          fileId,
           absPath,
           mimeType,
+          _thumbnailCache,
           llmServiceUrl: llmServiceUrl,
           llmServiceToken: llmServiceToken,
-          allowedRoot: allowedRoot,
         );
-        if (thumbnail != null) {
+        if (key != null) {
           await appDb.execute(
             "UPDATE files SET thumbnail = ? WHERE id = ?",
-            [thumbnail, fileId],
+            [key, fileId],
           );
           logger?.d('LocalScanner: Saved thumbnail for $absPath');
         }
@@ -408,12 +415,12 @@ class LocalFileIsolateWorker {
               file.contentType == FilesConstants.mimeTypeImage) {
             _enqueueThumbnailJob(
               appDb,
+              file.collectionId,
               file.id,
               asset.path,
               file.contentType,
               llmServiceUrl,
               llmServiceToken,
-              rootPath,
             );
             generatedThumbnails++;
           }
@@ -583,7 +590,15 @@ class LocalFileIsolateWorker {
           (cached.dateLastModified.millisecondsSinceEpoch ~/ 1000) ==
           (lmDate.millisecondsSinceEpoch ~/ 1000);
 
-      final bool hasThumbnail = cached.thumbnail != null;
+      // A cached thumbnail only counts if it's still usable: for on-disk keys
+      // the file must still exist (it may have been deleted or the storage dir
+      // moved), otherwise we regenerate. http URLs and legacy base64 are always
+      // considered present.
+      final cachedThumb = cached.thumbnail;
+      final bool hasThumbnail =
+          cachedThumb != null &&
+          (!ThumbnailCache.isCacheKey(cachedThumb) ||
+              _thumbnailCache.existsForKey(cachedThumb));
       final bool isImage = getMimeType(name) == FilesConstants.mimeTypeImage;
 
       if (mtimeMatches && (!isImage || hasThumbnail)) {
@@ -659,21 +674,21 @@ class LocalFileIsolateWorker {
 
   void enqueueThumbnailJobForTesting(
     AppDatabase appDb,
+    String collectionId,
     String fileId,
     String absPath,
     String mimeType,
     String? llmServiceUrl, {
     String? llmServiceToken,
-    String? allowedRoot,
   }) {
     _enqueueThumbnailJob(
       appDb,
+      collectionId,
       fileId,
       absPath,
       mimeType,
       llmServiceUrl,
       llmServiceToken,
-      allowedRoot,
     );
   }
 
