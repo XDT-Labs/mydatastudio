@@ -367,7 +367,7 @@ class AppDatabase {
       extensions: [SqliteVectorExtension()],
     );
     await db.execute('PRAGMA busy_timeout = 5000;');
-    
+
     final bootstrapDb = AppDatabase(db);
     bootstrapDb.path = finalDbDir;
     bootstrapDb.name = dbName;
@@ -488,7 +488,7 @@ class AppDatabase {
         'group': 'local',
         'name': 'Gemma 4 12B',
         'type': 'gguf',
-        'file': 'gemma-4-12B-it-Q4_K_M.gguf',
+        'file': 'gemma-4-12B-it-Q4_0.gguf',
         'mmproj': 'mmproj-gemma-4-12B-it-Q8_0.gguf',
         'hf_repo': 'ggml-org/gemma-4-12B-it-GGUF',
         'chat_handler': 'Gemma4ChatHandler',

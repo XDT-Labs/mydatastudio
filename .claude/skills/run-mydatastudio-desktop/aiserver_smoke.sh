@@ -45,7 +45,7 @@ curl -s "http://127.0.0.1:$PORT/skills" | python3 -c 'import sys,json;d=json.loa
 echo "== POST /util/model-status (reports whether the GGUF is on local disk) =="
 curl -s -X POST "http://127.0.0.1:$PORT/util/model-status" \
   -H 'Content-Type: application/json' \
-  -d '{"model_name":"ggml-org/gemma-4-12B-it-GGUF","filename":"gemma-4-12B-it-Q4_K_M.gguf"}' \
+  -d '{"model_name":"ggml-org/gemma-4-12B-it-GGUF","filename":"gemma-4-12B-it-Q4_0.gguf"}' \
   | python3 -m json.tool || fail "model-status failed"
 
 echo
