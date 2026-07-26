@@ -261,10 +261,6 @@ class _ConversationTileState extends State<_ConversationTile> {
                   borderRadius: BorderRadius.circular(6),
                   onPressed: widget.onDelete,
                   child: Container(
-                    constraints: const BoxConstraints(
-                      minWidth: 24,
-                      minHeight: 24,
-                    ),
                     alignment: Alignment.center,
                     padding: const EdgeInsets.only(left: 6),
                     child: const Icon(

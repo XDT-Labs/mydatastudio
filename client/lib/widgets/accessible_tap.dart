@@ -9,7 +9,8 @@ import 'package:flutter/services.dart';
 /// pattern was missing for WCAG 2.2 AA:
 ///   * keyboard focus + Enter/Space activation (2.1.1 Keyboard), and
 ///   * a focus ring drawn over the child on keyboard focus (2.4.7 Focus
-///     Visible),
+///     Visible), and
+///   * a floor under the hit area (2.5.8 Target Size (Minimum)) via [minSize],
 /// while leaving the child's own visuals untouched — no Material ink ripple, so
 /// the control looks identical to today until it is focused via the keyboard.
 class AccessibleTap extends StatefulWidget {
@@ -23,6 +24,7 @@ class AccessibleTap extends StatefulWidget {
     this.expanded,
     this.tooltip,
     this.borderRadius = const BorderRadius.all(Radius.circular(8)),
+    this.minSize = 24,
     this.mergeSemantics = true,
     this.autofocus = false,
   });
@@ -50,6 +52,13 @@ class AccessibleTap extends StatefulWidget {
 
   /// Shape of the focus ring — match the visible control's corner radius.
   final BorderRadius borderRadius;
+
+  /// Minimum hit-area extent in logical pixels, so a call site can't ship a
+  /// target below WCAG 2.2 AA 2.5.8 by forgetting to size its child. This is a
+  /// *floor*, not a size: children already larger (padded rows, thumbnails) are
+  /// untouched. The default is the 24×24 AA figure — pass 44 for the 2.5.5 AAA
+  /// target, or 0 to opt out where the child is inline text.
+  final double minSize;
 
   /// Merge descendant semantics into this single button node (the default).
   /// Set to false when the child contains a *separate* control (e.g. a nested
@@ -79,6 +88,10 @@ class _AccessibleTapState extends State<AccessibleTap> {
       behavior: HitTestBehavior.opaque,
       onTap: _enabled ? _activate : null,
       child: Container(
+        constraints: BoxConstraints(
+          minWidth: widget.minSize,
+          minHeight: widget.minSize,
+        ),
         foregroundDecoration: _focused
             ? BoxDecoration(
                 borderRadius: widget.borderRadius,
