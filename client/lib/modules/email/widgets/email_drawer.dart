@@ -12,6 +12,7 @@ import 'package:mydatastudio/modules/files/widgets/file_drawer/collection_tile_w
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -575,12 +576,10 @@ class _EmailFolderListState extends State<_EmailFolderList> {
             onTap: () => widget.onFolderTap(spam!.id),
           ),
         if (otherFolders.isNotEmpty) ...[
-          Semantics(
-            button: true,
+          AccessibleTap(
             expanded: _showAllFolders,
             label: 'All Folders',
-            child: InkWell(
-            onTap: () => setState(() => _showAllFolders = !_showAllFolders),
+            onPressed: () => setState(() => _showAllFolders = !_showAllFolders),
             borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -604,7 +603,6 @@ class _EmailFolderListState extends State<_EmailFolderList> {
                 ],
               ),
             ),
-          ),
           ),
           if (_showAllFolders)
             Padding(
