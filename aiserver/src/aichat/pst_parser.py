@@ -39,6 +39,11 @@ WRAPPER_FOLDER_NAMES = frozenset({
     "outlook data file",
 })
 
+# Stand-in for a folder whose name could not be read. Must stay outside both
+# sets above so an unnamed-by-error folder is still treated as a real mail
+# folder and its direct messages are imported.
+UNREADABLE_FOLDER_NAME = "(unreadable folder)"
+
 
 class PstParser:
     def __init__(self, pst_file, output_dir):
@@ -185,10 +190,17 @@ class PstParser:
     def _process_folder(self, folder, folder_path):
         # A folder whose name can't be read is still worth descending into, so
         # fall back to a placeholder name rather than aborting the subtree.
+        #
+        # The two fallbacks differ deliberately. An *empty* name is the real
+        # PST root, which must be treated as a wrapper so it stays out of the
+        # path. A name that *raised* belongs to an unknown folder that may well
+        # hold mail, so it gets a placeholder matching neither
+        # WRAPPER_FOLDER_NAMES nor NON_EMAIL_FOLDER_NAMES — classifying it as a
+        # wrapper would silently skip its direct messages.
         try:
             folder_name = folder.get_name() or "Root"
         except Exception as e:
-            folder_name = "Root"
+            folder_name = UNREADABLE_FOLDER_NAME
             yield self._emit_error(f"Error reading folder name: {str(e)}")
 
         is_wrapper = self._is_wrapper_folder(folder_name)
@@ -204,16 +216,20 @@ class PstParser:
         self._folder_count += 1
 
         # Notify Dart about the folder. A corrupt message-count must not discard
-        # the folder or its subtree — report 0 and carry on.
+        # the folder or its subtree — report 0, say so once, and carry on. This
+        # single read is reused for the message loop below.
         try:
-            reported_count = folder.get_number_of_sub_messages()
-        except Exception:
-            reported_count = 0
+            num_messages = folder.get_number_of_sub_messages()
+        except Exception as e:
+            num_messages = 0
+            yield self._emit_error(
+                f"Error reading message count in {folder_name}: {str(e)}"
+            )
         yield {
             "type": "folder",
             "name": folder_name,
             "path": current_path,
-            "count": reported_count,
+            "count": num_messages,
             "is_email_folder": not is_non_email,
         }
 
@@ -221,11 +237,6 @@ class PstParser:
         # calendar, etc.) whose items aren't mail. Either way we still descend
         # into sub-folders below.
         if not is_non_email:
-            try:
-                num_messages = folder.get_number_of_sub_messages()
-            except Exception as e:
-                num_messages = 0
-                yield self._emit_error(f"Error reading message count in {folder_name}: {str(e)}")
             for i in range(num_messages):
                 try:
                     message = folder.get_sub_message(i)

@@ -19,6 +19,7 @@ from aichat.state import (
     unregister_stream,
     is_stop_requested,
     request_stop,
+    active_stream_count,
     get_generation_lock,
 )
 
@@ -120,6 +121,22 @@ class TestStopRegistry:
         finally:
             unregister_stream("gen-a")
             unregister_stream("gen-b")
+
+    def test_active_stream_count_tracks_registrations(self):
+        """/v1/chat/stop uses this to decide whether an id-less stop request is
+        unambiguous — an untargeted stop with 2+ streams would cancel the wrong
+        generation, so the count has to be exact."""
+        assert active_stream_count() == 0
+        register_stream("gen-a")
+        try:
+            assert active_stream_count() == 1
+            register_stream("gen-b")
+            assert active_stream_count() == 2
+            unregister_stream("gen-b")
+            assert active_stream_count() == 1
+        finally:
+            unregister_stream("gen-a")
+        assert active_stream_count() == 0
 
     def test_unregister_discards_flag(self):
         register_stream("gen-a")

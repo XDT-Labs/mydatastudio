@@ -185,6 +185,12 @@ def is_stop_requested(gen_id: str) -> bool:
     return event.is_set() if event is not None else False
 
 
+def active_stream_count() -> int:
+    """How many streaming generations are currently registered."""
+    with _stop_lock:
+        return len(_stop_events)
+
+
 def request_stop(gen_id: Optional[str] = None) -> None:
     """Signal a specific generation to stop, or every active generation when
     ``gen_id`` is ``None`` (the backward-compatible "stop the active stream")."""

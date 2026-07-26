@@ -42,6 +42,7 @@ from .state import (
     get_embedding_model_id, set_embedding_model_id,
     get_locks, get_generation_lock,
     is_stop_requested, request_stop, register_stream, unregister_stream,
+    active_stream_count,
 )
 
 
@@ -497,8 +498,11 @@ async def stop_generation(request: Request) -> Dict[str, Any]:
     """Signal a streaming generation to stop after the current token.
 
     The body may carry ``{"id": "<completion id>"}`` to target a specific
-    stream; with no id (or an unparseable body) every active generation is
-    stopped, preserving the original "stop the active stream" behaviour.
+    stream. With no id (or an unparseable body) the request is only honoured
+    when exactly one generation is registered — the unambiguous "stop the
+    active stream" case the client hits when it cancels before the first chunk
+    arrives and so has no id yet. With several streams running, an untargeted
+    stop would cancel unrelated generations, so it is refused instead.
     """
     gen_id: Optional[str] = None
     try:
@@ -507,6 +511,12 @@ async def stop_generation(request: Request) -> Dict[str, Any]:
             gen_id = body.get("id")
     except Exception:
         gen_id = None
+
+    if gen_id is None:
+        active = active_stream_count()
+        if active != 1:
+            return {"status": "ambiguous", "active": active}
+
     request_stop(gen_id)
     return {"status": "stopping"}
 

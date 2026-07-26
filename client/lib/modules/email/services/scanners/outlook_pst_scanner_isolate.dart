@@ -30,9 +30,11 @@ import 'package:http/http.dart' as http;
 /// FastAPI service to parse the PST file and stream results back.
 ///
 /// **PST is the exception to the standard scanner contract.** Unlike the live
-/// email providers (Gmail/Outlook/Yahoo), a `.pst` is an **immutable local
-/// archive**: its contents can't change on a server, so there is nothing to
-/// re-sync and nothing to refresh once a folder is imported. Consequently PST:
+/// email providers (Gmail/Outlook/Yahoo), a `.pst` is a local file this app
+/// neither owns nor watches — there is no change feed to poll. Outlook may
+/// still write to the file, so rather than try to reconcile that, each selected
+/// PST is treated as a **one-shot snapshot**: imported whole when the user
+/// picks it, never refreshed afterwards. Consequently PST:
 ///
 ///   * is a **one-shot import**, run exactly once when the collection is added
 ///     (see `NewEmailPage._import`), and is **not** registered in
@@ -143,9 +145,30 @@ class OutlookPstScannerIsolateWorker {
       "PST Scanner: Started parsing ${collection.path} -> $extractionRoot",
     );
 
+    // Opened before the request so every exit path — including the failures
+    // below — can record a terminal status. A PST is never re-synced, so a
+    // collection left at its initial 'pending' would stay that way forever.
+    final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
+
+    Future<void> markStatus(String status) async {
+      final repo = CollectionRepository(appDb);
+      final col = await repo.collectionById(collection.id);
+      if (col != null) {
+        col.scanStatus = status;
+        col.lastScanDate = DateTime.now();
+        await repo.updateCollection(col);
+      }
+    }
+
+    Future<Never> exitIncomplete(String error) async {
+      await markStatus('incomplete');
+      clientPort.send({'type': 'refresh'});
+      Isolate.exit(clientPort, {'error': error});
+    }
+
     if (serverUrl == null) {
       logger.e("PST Scanner: serverUrl is missing!");
-      Isolate.exit(clientPort, {'error': 'missing_server_url'});
+      await exitIncomplete('missing_server_url');
     }
 
     // 2. Call FastAPI endpoint
@@ -160,14 +183,20 @@ class OutlookPstScannerIsolateWorker {
       'output_dir': extractionRoot,
     });
 
-    final response = await client.send(request);
+    // A refused/dropped connection is the same class of failure as a non-200:
+    // the import never ran, and the collection must not be left pending.
+    final http.StreamedResponse response;
+    try {
+      response = await client.send(request);
+    } catch (e) {
+      logger.e("PST Scanner: request to the aiserver failed: $e");
+      await exitIncomplete('api_failed');
+    }
 
     if (response.statusCode != 200) {
       logger.e("PST Scanner: API failed with status ${response.statusCode}");
-      Isolate.exit(clientPort, {'error': 'api_failed'});
+      await exitIncomplete('api_failed');
     }
-
-    final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
 
     // Keep track of internal IDs
     final Map<String, String> folderPathToId = {};
@@ -179,6 +208,7 @@ class OutlookPstScannerIsolateWorker {
     // arrived AND nothing failed; otherwise it's 'incomplete' and the user is
     // told to delete + re-add (see status update below).
     int errorCount = 0;
+    int summaryErrors = 0;
     bool sawSummary = false;
     bool streamFailed = false;
 
@@ -308,6 +338,10 @@ class OutlookPstScannerIsolateWorker {
           logger.e("PST Parser Error: ${data['message']}");
         } else if (data['type'] == 'summary') {
           sawSummary = true;
+          // Cross-check against our own tally: the parser's count is
+          // authoritative for errors it hit, ours for lines we failed to
+          // apply. Either being non-zero means the import isn't whole.
+          summaryErrors = (data['errors'] as num?)?.toInt() ?? 0;
           logger.i(
             "PST Parser Summary: folders=${data['folders']} "
             "emails=${data['emails']} errors=${data['errors']}",
@@ -329,23 +363,19 @@ class OutlookPstScannerIsolateWorker {
 
     // 4. Cleanup. A PST import is only 'complete' when the parser's end-of-walk
     // summary arrived AND nothing failed; anything else is 'incomplete'.
-    final clean = sawSummary && !streamFailed && errorCount == 0;
+    final clean =
+        sawSummary && !streamFailed && errorCount == 0 && summaryErrors == 0;
     logger.i(
       "PST Scanner: Finished. Processed $count emails "
-      "(errors=$errorCount, sawSummary=$sawSummary, streamFailed=$streamFailed) "
+      "(errors=$errorCount, parserErrors=$summaryErrors, "
+      "sawSummary=$sawSummary, streamFailed=$streamFailed) "
       "→ ${clean ? 'complete' : 'incomplete'}.",
     );
 
     // Update collection status. 'incomplete' is terminal for a PST — there is
     // no re-sync — so the UI surfaces it and the user re-imports by deleting the
     // collection and selecting the file again.
-    final collectionRepo = CollectionRepository(appDb);
-    final col = await collectionRepo.collectionById(collection.id);
-    if (col != null) {
-      col.scanStatus = clean ? 'complete' : 'incomplete';
-      col.lastScanDate = DateTime.now();
-      await collectionRepo.updateCollection(col);
-    }
+    await markStatus(clean ? 'complete' : 'incomplete');
 
     clientPort.send({'type': 'refresh'});
     Isolate.exit(clientPort, {'done': true});

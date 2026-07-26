@@ -24,7 +24,12 @@ import pytest
 # Adjust the path so we can import PstParser from the sibling package
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from pst_parser import PstParser, NON_EMAIL_FOLDER_NAMES  # noqa: E402
+from pst_parser import (  # noqa: E402
+    PstParser,
+    NON_EMAIL_FOLDER_NAMES,
+    WRAPPER_FOLDER_NAMES,
+    UNREADABLE_FOLDER_NAME,
+)
 
 # ---------------------------------------------------------------------------
 # Path to the test PST file – override via env var if needed
@@ -796,13 +801,17 @@ class _FakeFolder:
     """Minimal stand-in for a pypff.folder. `corrupt_count=True` makes
     get_number_of_sub_messages raise, mimicking a damaged descriptor table."""
 
-    def __init__(self, name, msgs=0, subs=None, corrupt_count=False):
+    def __init__(self, name, msgs=0, subs=None, corrupt_count=False,
+                 corrupt_name=False):
         self._name = name
         self._msgs = msgs
         self._subs = subs or []
         self._corrupt = corrupt_count
+        self._corrupt_name = corrupt_name
 
     def get_name(self):
+        if self._corrupt_name:
+            raise RuntimeError("name descriptor error")
         return self._name
 
     def get_number_of_sub_messages(self):
@@ -875,6 +884,32 @@ class TestWalkResilience:
         # Exactly the one corrupt folder produced an error.
         assert summary["errors"] == 1
         assert summary["errors"] == sum(1 for e in events if e["type"] == "error")
+
+    def test_unreadable_folder_name_still_imports_its_messages(self, tmp_path):
+        """A folder whose name raises must not be mistaken for a wrapper.
+
+        Wrapper folders are skipped in the path *and* return before their own
+        messages are read, so falling back to a name in WRAPPER_FOLDER_NAMES
+        (e.g. "Root") would silently drop every message the folder holds.
+        """
+        nameless = _FakeFolder("Mystery", msgs=2, corrupt_name=True)
+        root = _FakeFolder("Root", subs=[nameless])
+        events = _walk_fake_tree(root, tmp_path)
+
+        folder_paths = [e["path"] for e in events if e["type"] == "folder"]
+        assert folder_paths == [UNREADABLE_FOLDER_NAME]
+
+        summary = events[-1]
+        assert summary["emails"] == 2, "messages under an unnamed folder were lost"
+        assert summary["folders"] == 1
+        # The unreadable name is reported, not swallowed.
+        assert summary["errors"] == 1
+
+    def test_unreadable_folder_placeholder_is_not_classified_away(self):
+        """Guards the placeholder itself: if it ever lands in either set, the
+        folder above would be skipped as a wrapper or as non-mail."""
+        assert UNREADABLE_FOLDER_NAME.strip().lower() not in WRAPPER_FOLDER_NAMES
+        assert UNREADABLE_FOLDER_NAME.strip().lower() not in NON_EMAIL_FOLDER_NAMES
 
     def test_clean_tree_reports_zero_errors(self, tmp_path):
         """A healthy tree must end with errors == 0 so the client can mark the
