@@ -1,6 +1,7 @@
 import 'dart:io' as io;
 import 'package:flutter/material.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 import 'package:open_filex/open_filex.dart';
 
 class AttachmentThumbnailWidget extends StatelessWidget {
@@ -13,15 +14,18 @@ class AttachmentThumbnailWidget extends StatelessWidget {
     final theme = Theme.of(context);
     final isImage = file.contentType.startsWith('image/');
 
-    return GestureDetector(
-      onTap: () async {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: AccessibleTap(
+      label: 'Open attachment ${file.name}',
+      borderRadius: BorderRadius.circular(4),
+      onPressed: () async {
         if (await io.File(file.path).exists()) {
           await OpenFilex.open(file.path);
         }
       },
       child: Container(
         width: 120,
-        margin: const EdgeInsets.only(right: 8),
         decoration: BoxDecoration(
           color: theme.colorScheme.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(4),
@@ -72,6 +76,7 @@ class AttachmentThumbnailWidget extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
   }
 

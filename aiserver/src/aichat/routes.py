@@ -1,6 +1,7 @@
 """
 API route handlers.
 """
+import asyncio
 import gc
 import os
 import json
@@ -8,7 +9,7 @@ import time
 import uuid
 from typing import Dict, Any, Generator, Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from PIL import Image
 
@@ -39,8 +40,20 @@ from .state import (
     get_current_model_id, set_current_model_id,
     get_embedding_model, set_embedding_model,
     get_embedding_model_id, set_embedding_model_id,
-    get_locks,
-    is_stop_requested, request_stop, reset_stop,
+    get_locks, get_generation_lock,
+    is_stop_requested, request_stop, register_stream, unregister_stream,
+    active_stream_count,
+)
+
+
+# Returned as the 409 detail when the single local-model generation slot is
+# already taken. The shared llama_cpp instance has one decoder state, so
+# generations cannot overlap; this app is single-user and the client serializes
+# its own requests, so a second concurrent generation is a caller bug worth
+# reporting loudly rather than a queue worth building.
+GENERATION_BUSY_DETAIL = (
+    "A generation is already in progress. Wait for it to finish, "
+    "or POST /v1/chat/stop to cancel it."
 )
 
 
@@ -165,11 +178,11 @@ async def _handle_cloud_request(provider: str, request: "ChatCompletionRequest")
 
     if request.stream:
         def _cloud_sse_stream() -> Generator[str, None, None]:
-            reset_stop()
+            register_stream(completion_id)
             accumulated = None
             try:
                 for chunk in llm.stream(lc_messages):
-                    if is_stop_requested():
+                    if is_stop_requested(completion_id):
                         break
                     delta = chunk.content if hasattr(chunk, 'content') else str(chunk)
                     # Accumulate chunks so the final result carries usage_metadata
@@ -188,6 +201,8 @@ async def _handle_cloud_request(provider: str, request: "ChatCompletionRequest")
                 yield _sse_error_chunk(completion_id, created_at, current_model, _cloud_user_error(provider, e))
                 yield "data: [DONE]\n\n"
                 return
+            finally:
+                unregister_stream(completion_id)
 
             # Final chunk with finish_reason and token usage
             final: dict = {
@@ -448,21 +463,57 @@ async def generate_chat_completion(request: ChatCompletionRequest):
 
         if request.stream:
             current_model = get_current_model_id()
+            stop_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+
+            # Claim the generation slot *before* the response starts. Acquiring
+            # non-blocking is what keeps the lock off the yield path: the holder
+            # may sit parked at a yield waiting on a slow client, but nobody is
+            # ever queued behind it — a second caller is refused immediately
+            # instead of hanging on a 200 whose body never arrives.
+            lock = get_generation_lock()
+            if not lock.acquire(blocking=False):
+                raise HTTPException(status_code=409, detail=GENERATION_BUSY_DETAIL)
 
             def _sse_stream() -> Generator[str, None, None]:
-                reset_stop()
-                for chunk in llm_instance.create_chat_completion(
-                    stream=True, **kwargs
-                ):
-                    if is_stop_requested():
-                        break
-                    chunk["model"] = current_model
-                    yield f"data: {json.dumps(chunk)}\n\n"
-                yield "data: [DONE]\n\n"
+                # Ownership of the lock passes to this generator; its finally is
+                # the sole release point (it also runs on GeneratorExit when the
+                # client disconnects mid-stream).
+                register_stream(stop_id)
+                try:
+                    for chunk in llm_instance.create_chat_completion(
+                        stream=True, **kwargs
+                    ):
+                        if is_stop_requested(stop_id):
+                            break
+                        # Stable id the client echoes back to target /v1/chat/stop.
+                        chunk["id"] = stop_id
+                        chunk["model"] = current_model
+                        yield f"data: {json.dumps(chunk)}\n\n"
+                    yield "data: [DONE]\n\n"
+                finally:
+                    unregister_stream(stop_id)
+                    lock.release()
 
-            return StreamingResponse(_sse_stream(), media_type="text/event-stream")
+            try:
+                return StreamingResponse(_sse_stream(), media_type="text/event-stream")
+            except BaseException:
+                # Nothing between the acquire and here should raise, but a leaked
+                # generation lock would 409 every later request until restart, so
+                # it is worth the guard.
+                lock.release()
+                raise
 
-        result = llm_instance.create_chat_completion(**kwargs)
+        # Same slot, same refusal: the non-streaming path shares the lock with
+        # any active stream. Run the blocking call off the event loop.
+        lock = get_generation_lock()
+        if not lock.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail=GENERATION_BUSY_DETAIL)
+        try:
+            result = await asyncio.to_thread(
+                lambda: llm_instance.create_chat_completion(**kwargs)
+            )
+        finally:
+            lock.release()
         result["model"] = get_current_model_id() or result.get("model", "unknown")
         return result
 
@@ -475,9 +526,30 @@ async def generate_chat_completion(request: ChatCompletionRequest):
         raise HTTPException(status_code=500, detail="Failed to generate response.")
 
 
-async def stop_generation() -> Dict[str, Any]:
-    """Signal the active streaming generation to stop after the current token."""
-    request_stop()
+async def stop_generation(request: Request) -> Dict[str, Any]:
+    """Signal a streaming generation to stop after the current token.
+
+    The body may carry ``{"id": "<completion id>"}`` to target a specific
+    stream. With no id (or an unparseable body) the request is only honoured
+    when exactly one generation is registered — the unambiguous "stop the
+    active stream" case the client hits when it cancels before the first chunk
+    arrives and so has no id yet. With several streams running, an untargeted
+    stop would cancel unrelated generations, so it is refused instead.
+    """
+    gen_id: Optional[str] = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            gen_id = body.get("id")
+    except Exception:
+        gen_id = None
+
+    if gen_id is None:
+        active = active_stream_count()
+        if active != 1:
+            return {"status": "ambiguous", "active": active}
+
+    request_stop(gen_id)
     return {"status": "stopping"}
 
 

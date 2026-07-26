@@ -18,6 +18,7 @@ import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/scanners/collection_scanner.dart';
+import 'package:mydatastudio/scanners/scan_isolate_support.dart';
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:resqlite/resqlite.dart' show ResqliteQueryException;
@@ -758,30 +759,10 @@ class CloudFileIsolateWorker {
     }
   }
 
-  Future<T> _retryNetworkOp<T>(Future<T> Function() operation) async {
-    int attempt = 0;
-    const int maxRetries = 3;
-    while (true) {
-      attempt++;
-      try {
-        return await operation();
-      } catch (e) {
-        final isTransient =
-            e is io.IOException ||
-            e is TimeoutException ||
-            e.toString().contains('HandshakeException');
-        if (isTransient && attempt < maxRetries) {
-          final backoffMs = 1000 * attempt * attempt;
-          logger.w(
-            'CloudFileIsolateWorker: Transient network error ($e). Attempt $attempt/$maxRetries. Retrying in ${backoffMs}ms...',
-          );
-          await Future.delayed(Duration(milliseconds: backoffMs));
-          continue;
-        }
-        rethrow;
-      }
-    }
-  }
+  // Thin delegate to the shared helper (scan_isolate_support.dart); the retry
+  // logic is centralized there, call sites are unchanged.
+  Future<T> _retryNetworkOp<T>(Future<T> Function() operation) =>
+      retryNetworkOp(operation, logger: logger);
 
   Future<void> _downloadFile(
     drive.DriveApi driveApi,

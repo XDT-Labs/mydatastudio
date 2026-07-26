@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
@@ -303,35 +304,42 @@ class _EmailPage extends State<EmailPage> {
 
   Widget _buildListHeader(ThemeData theme) {
     final hasSelected = emails.any((e) => e.isSelected == true);
+    // A PST is an immutable archive imported once — there is nothing to refresh,
+    // so the folder-refresh control (and its divider) are hidden for PST
+    // collections. Re-importing means deleting the collection and re-adding the
+    // file. See OutlookPstScannerIsolate.
+    final isPst = collection?.scanner == AppConstants.scannerEmailOutlookPst;
     return Row(
       children: [
         Expanded(child: _getBreadcrumb(theme)),
-        IconButton(
-          icon: Icon(
-            Icons.refresh,
-            color: theme.colorScheme.onSurfaceVariant,
-            size: 20,
+        if (!isPst) ...[
+          IconButton(
+            icon: Icon(
+              Icons.refresh,
+              color: theme.colorScheme.onSurfaceVariant,
+              size: 20,
+            ),
+            tooltip: 'Refresh Current Folder',
+            onPressed: () {
+              if (collection != null && EmailPage.selectedFolder.value != null) {
+                final folderId = EmailPage.selectedFolder.value!;
+                logger.s(
+                  "Refreshing $selectedFolderName folder for ${collection!.name}",
+                );
+                ScannerManager.getInstance()
+                    .getScanner(collection!)
+                    ?.start(collection!, folderId, true, true);
+              }
+            },
           ),
-          tooltip: 'Refresh Current Folder',
-          onPressed: () {
-            if (collection != null && EmailPage.selectedFolder.value != null) {
-              final folderId = EmailPage.selectedFolder.value!;
-              logger.s(
-                "Refreshing $selectedFolderName folder for ${collection!.name}",
-              );
-              ScannerManager.getInstance()
-                  .getScanner(collection!)
-                  ?.start(collection!, folderId, true, true);
-            }
-          },
-        ),
-        const SizedBox(width: 8),
-        Container(
-          height: 20,
-          width: 1,
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
-        ),
-        const SizedBox(width: 8),
+          const SizedBox(width: 8),
+          Container(
+            height: 20,
+            width: 1,
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+          ),
+          const SizedBox(width: 8),
+        ],
         IconButton(
           icon: const Icon(Icons.delete_outline, size: 20),
           color: theme.colorScheme.error,

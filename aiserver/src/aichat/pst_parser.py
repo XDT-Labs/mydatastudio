@@ -39,12 +39,21 @@ WRAPPER_FOLDER_NAMES = frozenset({
     "outlook data file",
 })
 
+# Stand-in for a folder whose name could not be read. Must stay outside both
+# sets above so an unnamed-by-error folder is still treated as a real mail
+# folder and its direct messages are imported.
+UNREADABLE_FOLDER_NAME = "(unreadable folder)"
+
 
 class PstParser:
     def __init__(self, pst_file, output_dir):
         self.pst_file = pst_file
         self.output_dir = output_dir
         self.pst = pypff.file()
+        # Per-walk counters for the completion summary (reset in walk()).
+        self._folder_count = 0
+        self._email_count = 0
+        self._error_count = 0
         
     @staticmethod
     def safe_str(value):
@@ -94,9 +103,32 @@ class PstParser:
         self.pst.close()
         
     def walk(self):
-        root = self.pst.get_root_folder()
-        yield from self._process_folder(root, "")
-        
+        # Reset counters so a reused parser reports a fresh summary.
+        self._folder_count = 0
+        self._email_count = 0
+        self._error_count = 0
+        try:
+            root = self.pst.get_root_folder()
+            yield from self._process_folder(root, "")
+        except Exception as e:
+            yield self._emit_error(f"Error walking PST root: {str(e)}")
+        # Explicit end-of-walk marker. Its presence tells the client the parser
+        # reached the end (as opposed to an aborted stream); the counts let the
+        # client decide whether the import was clean or only partial. PST is a
+        # one-shot import with no re-sync, so this signal gates completion.
+        yield {
+            "type": "summary",
+            "folders": self._folder_count,
+            "emails": self._email_count,
+            "errors": self._error_count,
+        }
+
+    def _emit_error(self, message):
+        """Build an error event and count it toward the completion summary."""
+        self._error_count += 1
+        return {"type": "error", "message": message}
+
+
     @staticmethod
     def _is_wrapper_folder(folder_name: str) -> bool:
         """Return True if this folder is a transparent wrapper (Root, Top of Personal Folders, etc.)."""
@@ -156,64 +188,85 @@ class PstParser:
 
 
     def _process_folder(self, folder, folder_path):
-        folder_name = folder.get_name() or "Root"
+        # A folder whose name can't be read is still worth descending into, so
+        # fall back to a placeholder name rather than aborting the subtree.
+        #
+        # The two fallbacks differ deliberately. An *empty* name is the real
+        # PST root, which must be treated as a wrapper so it stays out of the
+        # path. A name that *raised* belongs to an unknown folder that may well
+        # hold mail, so it gets a placeholder matching neither
+        # WRAPPER_FOLDER_NAMES nor NON_EMAIL_FOLDER_NAMES — classifying it as a
+        # wrapper would silently skip its direct messages.
+        try:
+            folder_name = folder.get_name() or "Root"
+        except Exception as e:
+            folder_name = UNREADABLE_FOLDER_NAME
+            yield self._emit_error(f"Error reading folder name: {str(e)}")
+
         is_wrapper = self._is_wrapper_folder(folder_name)
         is_non_email = self._is_non_email_folder(folder_name)
 
         # Wrapper folders (Root, Top of Personal Folders, etc.) are transparent:
         # we skip them in the path so Inbox appears at the top level.
         if is_wrapper:
-            num_folders = folder.get_number_of_sub_folders()
-            for i in range(num_folders):
-                try:
-                    sub_folder = folder.get_sub_folder(i)
-                    yield from self._process_folder(sub_folder, folder_path)
-                except Exception as e:
-                    yield {"type": "error", "message": f"Error getting sub-folder {i} in {folder_name}: {str(e)}"}
+            yield from self._recurse_subfolders(folder, folder_path, folder_name)
             return
 
         current_path = os.path.join(folder_path, folder_name) if folder_path else folder_name
+        self._folder_count += 1
 
-        # Notify Dart about the folder
+        # Notify Dart about the folder. A corrupt message-count must not discard
+        # the folder or its subtree — report 0, say so once, and carry on. This
+        # single read is reused for the message loop below.
+        try:
+            num_messages = folder.get_number_of_sub_messages()
+        except Exception as e:
+            num_messages = 0
+            yield self._emit_error(
+                f"Error reading message count in {folder_name}: {str(e)}"
+            )
         yield {
             "type": "folder",
             "name": folder_name,
             "path": current_path,
-            "count": folder.get_number_of_sub_messages(),
+            "count": num_messages,
             "is_email_folder": not is_non_email,
         }
 
-        # Skip messages in well-known non-email folders (contacts, calendar, etc.)
-        if is_non_email:
-            num_folders = folder.get_number_of_sub_folders()
-            for i in range(num_folders):
+        # Process messages, except in well-known non-email folders (contacts,
+        # calendar, etc.) whose items aren't mail. Either way we still descend
+        # into sub-folders below.
+        if not is_non_email:
+            for i in range(num_messages):
                 try:
-                    sub_folder = folder.get_sub_folder(i)
-                    yield from self._process_folder(sub_folder, current_path)
+                    message = folder.get_sub_message(i)
+                    result = self._process_message(message, current_path)
+                    if result:
+                        if result.get("type") == "email":
+                            self._email_count += 1
+                        elif result.get("type") == "error":
+                            self._error_count += 1
+                        yield result
                 except Exception as e:
-                    yield {"type": "error", "message": f"Error getting sub-folder {i} in {folder_name}: {str(e)}"}
+                    yield self._emit_error(f"Error getting message {i} in {folder_name}: {str(e)}")
+
+        yield from self._recurse_subfolders(folder, current_path, folder_name)
+
+    def _recurse_subfolders(self, folder, child_path, folder_name):
+        """Recurse into every sub-folder, isolating per-folder failures so one
+        corrupt sub-tree can't abort the whole walk."""
+        try:
+            num_folders = folder.get_number_of_sub_folders()
+        except Exception as e:
+            yield self._emit_error(f"Error reading sub-folder count in {folder_name}: {str(e)}")
             return
-
-        # Process messages using index-based access
-        num_messages = folder.get_number_of_sub_messages()
-        for i in range(num_messages):
-            try:
-                message = folder.get_sub_message(i)
-                result = self._process_message(message, current_path)
-                if result:
-                    yield result
-            except Exception as e:
-                yield {"type": "error", "message": f"Error getting message {i} in {folder_name}: {str(e)}"}
-
-        # Recursive walk using index-based access
-        num_folders = folder.get_number_of_sub_folders()
         for i in range(num_folders):
             try:
                 sub_folder = folder.get_sub_folder(i)
-                yield from self._process_folder(sub_folder, current_path)
+                yield from self._process_folder(sub_folder, child_path)
             except Exception as e:
-                yield {"type": "error", "message": f"Error getting sub-folder {i} in {folder_name}: {str(e)}"}
-            
+                yield self._emit_error(f"Error getting sub-folder {i} in {folder_name}: {str(e)}")
+
     def _process_message(self, message, folder_path):
         try:
             entry_id = "unknown"

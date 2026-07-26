@@ -9,6 +9,7 @@ from aichat.routes import (
     health_check, generate_chat_completion, generate_embedding, generate_embedding_v1, delete_model,
     download_model, check_model_status,
 )
+from aichat.state import get_generation_lock
 from aichat.models import (
     ChatCompletionRequest, ChatMessage, EmbeddingRequest, EmbeddingV1Request, DeleteModelRequest, DownloadModelRequest,
 )
@@ -226,6 +227,100 @@ class TestChatCompletion:
             kwargs = mock_llm.client.create_chat_completion.call_args[1]
             assert kwargs["temperature"] == 0.5
             assert kwargs["max_tokens"] == 100
+
+
+class TestGenerationSlot:
+    """Only one local generation may run at a time — the shared llama_cpp
+    instance has a single decoder state, so overlapping generations corrupt it.
+
+    The slot is claimed *non-blocking*: a second caller is refused with 409
+    rather than queued. That is the point. A streaming generator holds the lock
+    while parked at a `yield` waiting on the client, so anything queued behind
+    it would hang for as long as that client is slow — including the
+    non-streaming path, which shares the same lock. Refusing keeps the failure
+    immediate and legible instead of turning it into a server-wide stall.
+    """
+
+    def _mock_llm(self, stream_chunks=None):
+        mock_llm = Mock()
+        mock_llm.chat_handler = None
+        if stream_chunks is None:
+            mock_llm.create_chat_completion = Mock(return_value={
+                "id": "chatcmpl-x",
+                "model": "m",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "hi"},
+                    "finish_reason": "stop",
+                }],
+            })
+        else:
+            mock_llm.create_chat_completion = Mock(
+                return_value=iter(stream_chunks)
+            )
+        return mock_llm
+
+    def _request(self, stream=False):
+        return ChatCompletionRequest(
+            model="m",
+            messages=[ChatMessage(role="user", content="Hi")],
+            stream=stream,
+        )
+
+    @pytest.mark.asyncio
+    async def test_busy_slot_refuses_with_409(self):
+        lock = get_generation_lock()
+        assert lock.acquire(blocking=False), "lock should be free at test start"
+        try:
+            with patch('aichat.routes.get_llm_instance', return_value=self._mock_llm()), \
+                 patch('aichat.routes.get_current_model_id', return_value="m"):
+                with pytest.raises(HTTPException) as exc:
+                    await generate_chat_completion(self._request())
+            assert exc.value.status_code == 409
+        finally:
+            lock.release()
+
+    @pytest.mark.asyncio
+    async def test_busy_slot_refuses_a_streaming_request_too(self):
+        """The refusal must happen before the response starts — a 200 whose
+        body then blocks is exactly what this replaces."""
+        lock = get_generation_lock()
+        assert lock.acquire(blocking=False)
+        try:
+            with patch('aichat.routes.get_llm_instance', return_value=self._mock_llm([])), \
+                 patch('aichat.routes.get_current_model_id', return_value="m"):
+                with pytest.raises(HTTPException) as exc:
+                    await generate_chat_completion(self._request(stream=True))
+            assert exc.value.status_code == 409
+        finally:
+            lock.release()
+
+    @pytest.mark.asyncio
+    async def test_completion_releases_the_slot(self):
+        with patch('aichat.routes.get_llm_instance', return_value=self._mock_llm()), \
+             patch('aichat.routes.get_current_model_id', return_value="m"):
+            await generate_chat_completion(self._request())
+
+        lock = get_generation_lock()
+        assert lock.acquire(blocking=False), "slot leaked after a completion"
+        lock.release()
+
+    @pytest.mark.asyncio
+    async def test_stream_holds_the_slot_then_releases_it_at_the_end(self):
+        chunks = [{"choices": [{"index": 0, "delta": {"content": "a"}}]}]
+        with patch('aichat.routes.get_llm_instance', return_value=self._mock_llm(chunks)), \
+             patch('aichat.routes.get_current_model_id', return_value="m"):
+            response = await generate_chat_completion(self._request(stream=True))
+
+            # Held for the whole in-flight response, not just the generate call.
+            assert get_generation_lock().acquire(blocking=False) is False
+
+            body = [part async for part in response.body_iterator]
+
+        assert any("[DONE]" in str(part) for part in body)
+        lock = get_generation_lock()
+        assert lock.acquire(blocking=False), "slot leaked after the stream ended"
+        lock.release()
 
 
 class TestMultimodalEmbedding:

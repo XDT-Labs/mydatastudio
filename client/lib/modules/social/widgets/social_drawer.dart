@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -101,11 +102,13 @@ class _SocialDrawerState extends State<SocialDrawer> {
             : Colors.transparent;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2.0),
-      child: GestureDetector(
-        onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2.0),
+      child: AccessibleTap(
+        onPressed: onTap,
+        selected: isSelected,
+        label: name,
+        borderRadius: BorderRadius.circular(6),
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 12),
           height: 38,
           decoration: BoxDecoration(
             color: tileColor,

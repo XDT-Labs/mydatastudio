@@ -9,8 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
-import 'package:mydatastudio/services/credential_codec.dart';
-import 'package:mydatastudio/services/vault_manager.dart';
+import 'package:mydatastudio/scanners/scan_isolate_support.dart';import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
@@ -141,14 +140,10 @@ class GmailScannerIsolateWorker {
     final String appDir = args['appDir'];
     final String dbDir = args['dbDir'] ?? appDir;
 
-    if (token != null) {
-      BackgroundIsolateBinaryMessenger.ensureInitialized(token);
-    }
-
-    // Install the credential vault from the DEK handed in via spawn args, so
-    // in-isolate collection reads/writes and token refresh can use secrets
-    // (AUDIT M2 phase 4). Without it, decrypting the collection tokens fails.
-    CredentialCodec.installIsolateVault(args['vaultDek'] as Uint8List?);
+    // Init platform channels + install the credential vault (AUDIT M2 phase 4)
+    // so in-isolate collection reads/writes and token refresh can decrypt
+    // secrets. Without the vault, decrypting the collection tokens fails.
+    bootstrapScanIsolate(token, args['vaultDek'] as Uint8List?);
 
     final AppLogger logger = AppLogger(clientPort);
 
@@ -645,31 +640,11 @@ class GmailScannerIsolateWorker {
     );
   }
 
+  // Thin delegate to the shared helper (scan_isolate_support.dart) so call
+  // sites are unchanged; the retry logic lives in one place now.
   static Future<T> _retryNetworkOp<T>(
     Future<T> Function() operation,
     AppLogger logger,
-  ) async {
-    int attempt = 0;
-    const int maxRetries = 3;
-    while (true) {
-      attempt++;
-      try {
-        return await operation();
-      } catch (e) {
-        final isTransient =
-            e is io.IOException ||
-            e is TimeoutException ||
-            e.toString().contains('HandshakeException');
-        if (isTransient && attempt < maxRetries) {
-          final backoffMs = 1000 * attempt * attempt;
-          logger.w(
-            'GmailScannerIsolateWorker: Transient network error ($e). Attempt $attempt/$maxRetries. Retrying in ${backoffMs}ms...',
-          );
-          await Future.delayed(Duration(milliseconds: backoffMs));
-          continue;
-        }
-        rethrow;
-      }
-    }
-  }
+  ) =>
+      retryNetworkOp(operation, logger: logger);
 }

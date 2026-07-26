@@ -96,20 +96,22 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
           ),
         ),
         const SizedBox(height: 8),
-        InkWell(
-          onTap:
-              () => launchUrl(
-                Uri.parse(
-                  'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
-                ),
+        Semantics(
+          link: true,
+          child: InkWell(
+            onTap: () => launchUrl(
+              Uri.parse(
+                'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
               ),
-          child: const Text(
-            'Get Credentials from Microsoft Azure Portal',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.blue,
-              decoration: TextDecoration.underline,
+            ),
+            child: const Text(
+              'Get Credentials from Microsoft Azure Portal',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.blue,
+                decoration: TextDecoration.underline,
+              ),
             ),
           ),
         ),

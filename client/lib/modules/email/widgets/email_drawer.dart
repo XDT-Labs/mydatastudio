@@ -2,21 +2,18 @@ import 'dart:async';
 
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/app_constants.dart';
-import 'package:mydatastudio/main.dart';
-import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/modules/email/widgets/email_drawer/email_folder_tile_widget.dart';
 import 'package:mydatastudio/modules/email/pages/email_page.dart';
 import 'package:mydatastudio/modules/email/services/get_email_folders_service.dart';
-import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
 import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
 import 'package:mydatastudio/modules/files/widgets/file_drawer/collection_tile_widget.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 enum _EmailAccordionSection { gmail, yahoo, outlook, other }
@@ -361,6 +358,9 @@ class _EmailDrawer extends State<EmailDrawer> {
             EmailPage.selectedFolder.add(null);
             context.go('/email');
           },
+          // A PST is an immutable, one-shot import — never re-synced. Hide Sync
+          // for it; re-importing means delete the collection and re-add the file.
+          showSync: col.scanner != AppConstants.scannerEmailOutlookPst,
           onSync: () => _syncAccount(context, col),
           onDelete: () => _showDeleteConfirmationDialog(context, col),
         ),
@@ -382,36 +382,10 @@ class _EmailDrawer extends State<EmailDrawer> {
   }
 
   Future<void> _syncAccount(BuildContext context, Collection col) async {
-    if (col.scanner == AppConstants.scannerEmailOutlookPst) {
-      final serverUrl = MainApp.llmServiceUrl.valueOrNull;
-      final appDataDir = MainApp.appDataDirectory.valueOrNull;
-
-      if (serverUrl != null && appDataDir != null) {
-        final pstIsolate = OutlookPstScannerIsolate(
-          token: RootIsolateToken.instance,
-          appDir: appDataDir,
-          dbDir: DatabaseManager.instance.databaseDirectoryPath!,
-          serverUrl: serverUrl,
-          serverToken: MainApp.llmServiceToken.valueOrNull,
-        );
-        ScannerManager.getInstance().pstScanners[col.id] = pstIsolate;
-        await pstIsolate.start(col, force: true);
-      } else {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Cannot start PST sync: services or directory not ready',
-              ),
-            ),
-          );
-        }
-      }
-    } else {
-      ScannerManager.getInstance()
-          .getScanner(col)
-          ?.start(col, null, true, true);
-    }
+    // Live email providers (Gmail/Outlook/Yahoo) re-sync from the server. PST
+    // archives are imported once and never re-synced, so the Sync action is
+    // hidden for them (see CollectionTileWidget.showSync) and never reaches here.
+    ScannerManager.getInstance().getScanner(col)?.start(col, null, true, true);
   }
 
   void _showDeleteConfirmationDialog(
@@ -602,8 +576,10 @@ class _EmailFolderListState extends State<_EmailFolderList> {
             onTap: () => widget.onFolderTap(spam!.id),
           ),
         if (otherFolders.isNotEmpty) ...[
-          InkWell(
-            onTap: () => setState(() => _showAllFolders = !_showAllFolders),
+          AccessibleTap(
+            expanded: _showAllFolders,
+            label: 'All Folders',
+            onPressed: () => setState(() => _showAllFolders = !_showAllFolders),
             borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

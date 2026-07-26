@@ -4,6 +4,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/aichat_conversation.dart';
 import 'package:mydatastudio/modules/aichat/pages/aichat_page.dart';
 import 'package:mydatastudio/repositories/aichat_repository.dart';
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 
 const _drawerBg = Color(0xFF0A0A0A);
 const _drawerBorder = Color(0xFF2C2C2E);
@@ -114,8 +115,11 @@ class _AiChatDrawerState extends State<AiChatDrawer> {
           // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
-            child: GestureDetector(
-              onTap: streaming ? null : _newConversation,
+            child: AccessibleTap(
+              enabled: !streaming,
+              label: 'New conversation',
+              borderRadius: BorderRadius.circular(10),
+              onPressed: streaming ? null : _newConversation,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
@@ -205,10 +209,16 @@ class _ConversationTileState extends State<_ConversationTile> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
-      child: GestureDetector(
-        onTap: widget.disabled ? null : widget.onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+        child: AccessibleTap(
+        enabled: !widget.disabled,
+        selected: widget.isActive,
+        label: '${widget.conversation.name}, ${widget.formattedDate}',
+        mergeSemantics: false,
+        borderRadius: BorderRadius.circular(8),
+        onPressed: widget.disabled ? null : widget.onTap,
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
             color: widget.isActive
@@ -221,6 +231,7 @@ class _ConversationTileState extends State<_ConversationTile> {
           child: Row(
             children: [
               Expanded(
+                child: ExcludeSemantics(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
@@ -242,18 +253,27 @@ class _ConversationTileState extends State<_ConversationTile> {
                     ),
                   ],
                 ),
+                ),
               ),
               if ((_hovering || widget.isActive) && !widget.disabled)
-                GestureDetector(
-                  onTap: widget.onDelete,
-                  child: const Padding(
-                    padding: EdgeInsets.only(left: 6),
-                    child: Icon(Icons.close, size: 14, color: _accentColor),
+                AccessibleTap(
+                  label: 'Delete conversation',
+                  borderRadius: BorderRadius.circular(6),
+                  onPressed: widget.onDelete,
+                  child: Container(
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.only(left: 6),
+                    child: const Icon(
+                      Icons.close,
+                      size: 14,
+                      color: _accentColor,
+                    ),
                   ),
                 ),
             ],
           ),
         ),
+      ),
       ),
     );
   }

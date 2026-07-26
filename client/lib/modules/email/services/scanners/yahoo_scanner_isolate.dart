@@ -4,9 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
-import 'package:mydatastudio/database_manager.dart';
-import 'package:mydatastudio/services/credential_codec.dart';
-import 'package:mydatastudio/services/vault_manager.dart';
+import 'package:mydatastudio/scanners/scan_isolate_support.dart';
+import 'package:mydatastudio/database_manager.dart';import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
@@ -192,12 +191,8 @@ class YahooScannerIsolateWorker {
     final List<int>? uidsToMove =
         args['uids'] != null ? (args['uids'] as List).cast<int>() : null;
 
-    if (token != null) {
-      BackgroundIsolateBinaryMessenger.ensureInitialized(token);
-    }
-
-    // DEK-backed vault for in-isolate credential access (AUDIT M2 phase 4).
-    CredentialCodec.installIsolateVault(args['vaultDek'] as Uint8List?);
+    // Init platform channels + install the credential vault (AUDIT M2 phase 4).
+    bootstrapScanIsolate(token, args['vaultDek'] as Uint8List?);
 
     final AppLogger logger = AppLogger(clientPort);
     final emailAddress = collection.userId!;

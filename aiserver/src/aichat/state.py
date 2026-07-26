@@ -25,6 +25,18 @@ embedding_model_id: Optional[str] = None
 model_lock = asyncio.Lock()
 embedding_lock = asyncio.Lock()
 
+# Serializes text generation on the shared llm_instance. A local
+# llama_cpp.Llama is not safe for concurrent create_chat_completion calls
+# (streaming runs in a worker thread, so two chats can overlap and corrupt the
+# decoder state). A threading.Lock — not the asyncio locks above — because the
+# streaming generator that holds it runs off the event loop in a threadpool.
+generation_lock = threading.Lock()
+
+
+def get_generation_lock() -> threading.Lock:
+    """Return the lock that serializes text generation on the shared model."""
+    return generation_lock
+
 
 def get_llm_instance() -> Optional[LlamaCpp | ChatGoogleGenerativeAI]:
     """
@@ -146,19 +158,50 @@ def set_embedding_model_id(model_id: Optional[str]) -> None:
     embedding_model_id = model_id
 
 
-_stop_event = threading.Event()
+# Per-generation stop flags, keyed by the generation/completion id. A single
+# global event would let one request's stop halt every active stream and let a
+# new stream clear another's pending stop; scoping the flag per generation keeps
+# each stream independent.
+_stop_events: dict[str, threading.Event] = {}
+_stop_lock = threading.Lock()
 
 
-def is_stop_requested() -> bool:
-    return _stop_event.is_set()
+def register_stream(gen_id: str) -> None:
+    """Create a fresh stop flag for a streaming generation."""
+    with _stop_lock:
+        _stop_events[gen_id] = threading.Event()
 
 
-def request_stop() -> None:
-    _stop_event.set()
+def unregister_stream(gen_id: str) -> None:
+    """Drop a generation's stop flag once its stream has finished."""
+    with _stop_lock:
+        _stop_events.pop(gen_id, None)
 
 
-def reset_stop() -> None:
-    _stop_event.clear()
+def is_stop_requested(gen_id: str) -> bool:
+    """Whether a stop was requested for the given generation."""
+    with _stop_lock:
+        event = _stop_events.get(gen_id)
+    return event.is_set() if event is not None else False
+
+
+def active_stream_count() -> int:
+    """How many streaming generations are currently registered."""
+    with _stop_lock:
+        return len(_stop_events)
+
+
+def request_stop(gen_id: Optional[str] = None) -> None:
+    """Signal a specific generation to stop, or every active generation when
+    ``gen_id`` is ``None`` (the backward-compatible "stop the active stream")."""
+    with _stop_lock:
+        if gen_id is None:
+            for event in _stop_events.values():
+                event.set()
+        else:
+            event = _stop_events.get(gen_id)
+            if event is not None:
+                event.set()
 
 
 def get_locks() -> Tuple[asyncio.Lock, asyncio.Lock]:

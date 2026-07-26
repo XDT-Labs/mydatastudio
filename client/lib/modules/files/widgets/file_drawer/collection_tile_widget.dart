@@ -11,6 +11,7 @@ class CollectionTileWidget extends StatelessWidget {
     required this.onTap,
     required this.onSync,
     required this.onDelete,
+    this.showSync = true,
   });
 
   final Collection collection;
@@ -20,6 +21,10 @@ class CollectionTileWidget extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onSync;
   final VoidCallback onDelete;
+
+  /// Whether to offer the "Sync" action. Hidden for immutable sources (e.g. a
+  /// PST archive) that are imported once and never re-synced.
+  final bool showSync;
 
   @override
   Widget build(BuildContext context) {
@@ -80,11 +85,11 @@ class CollectionTileWidget extends StatelessWidget {
             if (value == 'sync') onSync();
             if (value == 'delete') onDelete();
           },
-          itemBuilder:
-              (context) => const [
-                PopupMenuItem<String>(value: 'sync', child: Text('Sync')),
-                PopupMenuItem<String>(value: 'delete', child: Text('Delete')),
-              ],
+          itemBuilder: (context) => [
+            if (showSync)
+              const PopupMenuItem<String>(value: 'sync', child: Text('Sync')),
+            const PopupMenuItem<String>(value: 'delete', child: Text('Delete')),
+          ],
         ),
         onTap: onTap,
       ),
