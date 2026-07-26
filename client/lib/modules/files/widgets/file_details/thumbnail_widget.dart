@@ -1,6 +1,5 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
 
 class ThumbnailWidget extends StatelessWidget {
   const ThumbnailWidget({super.key, required this.thumbnail});
@@ -9,20 +8,17 @@ class ThumbnailWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (thumbnail.startsWith('http')) {
-      return Image.network(
-        thumbnail,
-        fit: BoxFit.contain,
-        errorBuilder:
-            (context, error, stackTrace) => const Center(
-              child: Icon(
-                Icons.broken_image_outlined,
-                size: 40,
-                color: Colors.grey,
-              ),
-            ),
-      );
-    }
-    return Image.memory(base64Decode(thumbnail), fit: BoxFit.contain);
+    final provider = ThumbnailResolver.providerFor(thumbnail);
+    if (provider == null) return _brokenIcon;
+
+    return Image(
+      image: provider,
+      fit: BoxFit.contain,
+      errorBuilder: (context, error, stackTrace) => _brokenIcon,
+    );
   }
+
+  static const Widget _brokenIcon = Center(
+    child: Icon(Icons.broken_image_outlined, size: 40, color: Colors.grey),
+  );
 }

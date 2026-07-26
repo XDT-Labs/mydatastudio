@@ -1,7 +1,7 @@
-import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
 import 'package:flutter/material.dart';
 import 'package:progressive_image/progressive_image.dart';
 
@@ -65,11 +65,9 @@ class _PhotoCardState extends State<PhotoCard> {
 
   ImageProvider<Object> getImageComponent(File file) {
     try {
-      if (file.thumbnail != null) {
-        return MemoryImage(base64Decode(file.thumbnail!));
-      } else {
-        return FileImage(io.File(file.path));
-      }
+      final provider = ThumbnailResolver.providerFor(file.thumbnail);
+      if (provider != null) return provider;
+      return FileImage(io.File(file.path));
     } catch (err) {
       //do nothing, return placeholder
     }
