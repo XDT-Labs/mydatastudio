@@ -98,8 +98,8 @@ flutter test                         # Run Flutter tests
 cd aiserver
 pdm install                          # Install dependencies
 python main.py                       # Run dev server (Uvicorn on random port)
-pytest tests/ -v                     # Run full test suite (120+ tests)
-pytest tests/test_routes.py -v       # Run a single test file
+PYTHONPATH=src pdm run pytest        # Run full test suite (tests/ + src/aichat/tests/)
+PYTHONPATH=src pdm run pytest tests/test_routes.py   # Run a single test file
 pdm run pyinstaller -y main.spec     # Compile to standalone binary
 ```
 
