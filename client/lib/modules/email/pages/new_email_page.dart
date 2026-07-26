@@ -324,7 +324,9 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
         DatabaseManager.instance.database!,
       ).addCollection(collection);
 
-      // Start the one-time scan isolate immediately
+      // Start the one-time scan isolate immediately. PST is a one-shot import
+      // with no re-sync, so force: true is required — this is the only place the
+      // archive is ever parsed.
       final serverUrl = MainApp.llmServiceUrl.valueOrNull;
       if (serverUrl == null) {
         throw Exception('LLM Service url is not configured');
@@ -337,7 +339,7 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
         serverUrl: serverUrl,
         serverToken: MainApp.llmServiceToken.valueOrNull,
       );
-      await pstIsolate.start(collection);
+      await pstIsolate.start(collection, force: true);
 
       // Refresh collections
       GetCollectionsService.instance.invoke(

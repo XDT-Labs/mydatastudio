@@ -167,12 +167,20 @@ class OutlookPstScannerIsolateWorker {
     // Track directories already emitted as Folder records for the file module.
     final Set<String> emittedFolderPaths = {};
     int count = 0;
+    // Completion tracking. PST is a one-shot import with no re-sync, so we only
+    // mark the collection 'complete' when the parser's end-of-walk summary
+    // arrived AND nothing failed; otherwise it's 'incomplete' and the user is
+    // told to delete + re-add (see status update below).
+    int errorCount = 0;
+    bool sawSummary = false;
+    bool streamFailed = false;
 
     // 3. Listen to stream output — use await-for to support async service calls
-    await for (final line in response.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())) {
-      try {
+    try {
+      await for (final line in response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())) {
+        try {
         if (line.trim().isEmpty) continue;
         final data = jsonDecode(line);
 
@@ -289,23 +297,45 @@ class OutlookPstScannerIsolateWorker {
         } else if (data['type'] == 'debug') {
           logger.d("PST Parser Debug: ${data['message']}");
         } else if (data['type'] == 'error') {
+          errorCount++;
           logger.e("PST Parser Error: ${data['message']}");
+        } else if (data['type'] == 'summary') {
+          sawSummary = true;
+          logger.i(
+            "PST Parser Summary: folders=${data['folders']} "
+            "emails=${data['emails']} errors=${data['errors']}",
+          );
         }
       } catch (e) {
+        // A line we couldn't decode/persist is lost data — count it so the
+        // import is flagged incomplete rather than silently truncated.
+        errorCount++;
         logger.e("PST Isolate: Failed to parse line: $line. Error: $e");
       }
+      }
+    } catch (e) {
+      // The HTTP stream itself failed partway (dropped connection, server
+      // died). Whatever was upserted persists, but the import didn't finish.
+      streamFailed = true;
+      logger.e("PST Isolate: Stream failed mid-import: $e");
     }
 
-    // 4. Cleanup
+    // 4. Cleanup. A PST import is only 'complete' when the parser's end-of-walk
+    // summary arrived AND nothing failed; anything else is 'incomplete'.
+    final clean = sawSummary && !streamFailed && errorCount == 0;
     logger.i(
-      "PST Scanner: Finished processing stream. Processed $count emails.",
+      "PST Scanner: Finished. Processed $count emails "
+      "(errors=$errorCount, sawSummary=$sawSummary, streamFailed=$streamFailed) "
+      "→ ${clean ? 'complete' : 'incomplete'}.",
     );
 
-    // Update collection status
+    // Update collection status. 'incomplete' is terminal for a PST — there is
+    // no re-sync — so the UI surfaces it and the user re-imports by deleting the
+    // collection and selecting the file again.
     final collectionRepo = CollectionRepository(appDb);
     final col = await collectionRepo.collectionById(collection.id);
     if (col != null) {
-      col.scanStatus = 'complete';
+      col.scanStatus = clean ? 'complete' : 'incomplete';
       col.lastScanDate = DateTime.now();
       await collectionRepo.updateCollection(col);
     }

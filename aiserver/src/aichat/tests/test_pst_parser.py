@@ -753,3 +753,136 @@ class TestPstFileSanity:
                     names = ", ".join(a.get("name", "?") for a in e["attachments"])
                     print(f"    subject={e.get('subject', '')!r} | files=[{names}]")
             print(f"{'='*60}")
+
+
+# ---------------------------------------------------------------------------
+# Walk resilience + completion summary — runs WITHOUT a real PST file by
+# driving the walk over an in-memory fake folder tree. PST is a one-shot import
+# with no re-sync, so a single corrupt folder must never abort the whole walk,
+# and the walk must end with a summary the client can use to decide whether the
+# import was clean or only partial.
+# ---------------------------------------------------------------------------
+
+class _FakeMsg:
+    def __init__(self, i):
+        self._i = i
+
+    def get_entry_identifier(self):
+        return f"id{self._i}".encode()
+
+    def get_delivery_time(self):
+        return None
+
+    def get_subject(self):
+        return f"subject {self._i}"
+
+    def get_transport_headers(self):
+        return "From: sender@example.com\nTo: rcpt@example.com\n"
+
+    def get_sender_name(self):
+        return "Sender"
+
+    def get_plain_text_body(self):
+        return "body"
+
+    def get_html_body(self):
+        return ""
+
+    def get_number_of_attachments(self):
+        return 0
+
+
+class _FakeFolder:
+    """Minimal stand-in for a pypff.folder. `corrupt_count=True` makes
+    get_number_of_sub_messages raise, mimicking a damaged descriptor table."""
+
+    def __init__(self, name, msgs=0, subs=None, corrupt_count=False):
+        self._name = name
+        self._msgs = msgs
+        self._subs = subs or []
+        self._corrupt = corrupt_count
+
+    def get_name(self):
+        return self._name
+
+    def get_number_of_sub_messages(self):
+        if self._corrupt:
+            raise RuntimeError("descriptor table error")
+        return self._msgs
+
+    def get_sub_message(self, i):
+        return _FakeMsg(i)
+
+    def get_number_of_sub_folders(self):
+        return len(self._subs)
+
+    def get_sub_folder(self, i):
+        return self._subs[i]
+
+
+def _walk_fake_tree(root):
+    parser = PstParser("unused.pst", output_dir="/tmp/pst_resilience_out")
+    # Bypass pypff entirely: hand the walk a root folder directly.
+    parser.pst = type("_FakePst", (), {"get_root_folder": lambda self: root})()
+    return list(parser.walk())
+
+
+class TestWalkResilience:
+    """The walk must survive a corrupt folder and always end with a summary."""
+
+    def _tree(self):
+        # Root(wrapper) → Inbox(2 msgs) → Broken(corrupt count) → Deep(1 msg)
+        #              → Contacts(non-email, 1 msg)
+        deep = _FakeFolder("Deep", msgs=1)
+        broken = _FakeFolder("Broken", corrupt_count=True, subs=[deep])
+        inbox = _FakeFolder("Inbox", msgs=2, subs=[broken])
+        contacts = _FakeFolder("Contacts", msgs=1)
+        return _FakeFolder("Root", subs=[inbox, contacts])
+
+    def test_corrupt_folder_does_not_abort_subtree(self):
+        """A folder with an unreadable message count must still yield its
+        folder event AND be descended into — its children are not lost."""
+        events = _walk_fake_tree(self._tree())
+        folder_paths = [e["path"] for e in events if e["type"] == "folder"]
+        # 'Deep' lives under the corrupt 'Broken' folder; it must still appear.
+        assert os.path.join("Inbox", "Broken", "Deep") in folder_paths
+        # The corruption is surfaced, not swallowed.
+        assert any(e["type"] == "error" for e in events)
+
+    def test_wrapper_folder_is_hidden_from_paths(self):
+        events = _walk_fake_tree(self._tree())
+        folder_paths = [e["path"] for e in events if e["type"] == "folder"]
+        assert "Root" not in folder_paths
+        assert "Inbox" in folder_paths
+
+    def test_non_email_folder_messages_are_skipped(self):
+        """Contacts is a non-email folder: its message must not be emitted,
+        even though the folder itself is still traversed."""
+        events = _walk_fake_tree(self._tree())
+        contacts_emails = [
+            e for e in events
+            if e["type"] == "email" and e.get("folder") == "Contacts"
+        ]
+        assert contacts_emails == []
+
+    def test_walk_ends_with_summary_counts(self):
+        events = _walk_fake_tree(self._tree())
+        assert events, "walk yielded nothing"
+        summary = events[-1]
+        assert summary["type"] == "summary"
+        # Inbox(2) + Deep(1); Contacts(1) is non-email and excluded.
+        assert summary["emails"] == 3
+        # Exactly the one corrupt folder produced an error.
+        assert summary["errors"] == 1
+        assert summary["errors"] == sum(1 for e in events if e["type"] == "error")
+
+    def test_clean_tree_reports_zero_errors(self):
+        """A healthy tree must end with errors == 0 so the client can mark the
+        import complete."""
+        inbox = _FakeFolder("Inbox", msgs=3)
+        root = _FakeFolder("Root", subs=[inbox])
+        events = _walk_fake_tree(root)
+        summary = events[-1]
+        assert summary["type"] == "summary"
+        assert summary["errors"] == 0
+        assert summary["emails"] == 3
