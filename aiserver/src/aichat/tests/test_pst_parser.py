@@ -820,8 +820,8 @@ class _FakeFolder:
         return self._subs[i]
 
 
-def _walk_fake_tree(root):
-    parser = PstParser("unused.pst", output_dir="/tmp/pst_resilience_out")
+def _walk_fake_tree(root, output_dir):
+    parser = PstParser("unused.pst", output_dir=str(output_dir))
     # Bypass pypff entirely: hand the walk a root folder directly.
     parser.pst = type("_FakePst", (), {"get_root_folder": lambda self: root})()
     return list(parser.walk())
@@ -839,34 +839,34 @@ class TestWalkResilience:
         contacts = _FakeFolder("Contacts", msgs=1)
         return _FakeFolder("Root", subs=[inbox, contacts])
 
-    def test_corrupt_folder_does_not_abort_subtree(self):
+    def test_corrupt_folder_does_not_abort_subtree(self, tmp_path):
         """A folder with an unreadable message count must still yield its
         folder event AND be descended into — its children are not lost."""
-        events = _walk_fake_tree(self._tree())
+        events = _walk_fake_tree(self._tree(), tmp_path)
         folder_paths = [e["path"] for e in events if e["type"] == "folder"]
         # 'Deep' lives under the corrupt 'Broken' folder; it must still appear.
         assert os.path.join("Inbox", "Broken", "Deep") in folder_paths
         # The corruption is surfaced, not swallowed.
         assert any(e["type"] == "error" for e in events)
 
-    def test_wrapper_folder_is_hidden_from_paths(self):
-        events = _walk_fake_tree(self._tree())
+    def test_wrapper_folder_is_hidden_from_paths(self, tmp_path):
+        events = _walk_fake_tree(self._tree(), tmp_path)
         folder_paths = [e["path"] for e in events if e["type"] == "folder"]
         assert "Root" not in folder_paths
         assert "Inbox" in folder_paths
 
-    def test_non_email_folder_messages_are_skipped(self):
+    def test_non_email_folder_messages_are_skipped(self, tmp_path):
         """Contacts is a non-email folder: its message must not be emitted,
         even though the folder itself is still traversed."""
-        events = _walk_fake_tree(self._tree())
+        events = _walk_fake_tree(self._tree(), tmp_path)
         contacts_emails = [
             e for e in events
             if e["type"] == "email" and e.get("folder") == "Contacts"
         ]
         assert contacts_emails == []
 
-    def test_walk_ends_with_summary_counts(self):
-        events = _walk_fake_tree(self._tree())
+    def test_walk_ends_with_summary_counts(self, tmp_path):
+        events = _walk_fake_tree(self._tree(), tmp_path)
         assert events, "walk yielded nothing"
         summary = events[-1]
         assert summary["type"] == "summary"
@@ -876,12 +876,12 @@ class TestWalkResilience:
         assert summary["errors"] == 1
         assert summary["errors"] == sum(1 for e in events if e["type"] == "error")
 
-    def test_clean_tree_reports_zero_errors(self):
+    def test_clean_tree_reports_zero_errors(self, tmp_path):
         """A healthy tree must end with errors == 0 so the client can mark the
         import complete."""
         inbox = _FakeFolder("Inbox", msgs=3)
         root = _FakeFolder("Root", subs=[inbox])
-        events = _walk_fake_tree(root)
+        events = _walk_fake_tree(root, tmp_path)
         summary = events[-1]
         assert summary["type"] == "summary"
         assert summary["errors"] == 0
