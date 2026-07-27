@@ -349,48 +349,79 @@ class YahooScannerIsolateWorker {
             sequence.add(uid);
           }
 
+          ImapFetchResult? fetchResult;
           try {
-            final fetchResult = await client.uidFetchMessages(
+            fetchResult = await client.uidFetchMessages(
               sequence,
               'BODY.PEEK[]',
             );
+          } catch (e) {
+            logger.w(
+              "Batch fetch starting at $i failed ($e). Retrying UIDs individually...",
+            );
+          }
 
-            List<Email> emailBatch = [];
-            for (final message in fetchResult.messages) {
-              final msgDate = message.decodeDate() ?? DateTime.now();
-
-              // Refine incremental check with second-level precision
-              if (!force && lastScanDate != null) {
-                final lastScanSecs =
-                    lastScanDate.millisecondsSinceEpoch ~/ 1000;
-                final msgSecs = msgDate.millisecondsSinceEpoch ~/ 1000;
-
-                if (msgSecs <= lastScanSecs) {
-                  skipped++;
-                  continue;
+          final List<MimeMessage> messagesToProcess = [];
+          if (fetchResult != null) {
+            messagesToProcess.addAll(fetchResult.messages);
+          } else {
+            for (final uid in batchUids) {
+              try {
+                final singleSeq = MessageSequence()..add(uid);
+                final singleResult = await client.uidFetchMessages(
+                  singleSeq,
+                  'BODY.PEEK[]',
+                );
+                messagesToProcess.addAll(singleResult.messages);
+              } catch (singleErr) {
+                logger.w(
+                  "Full fetch failed for UID $uid ($singleErr). Attempting header salvage...",
+                );
+                final salvagedMsg = await _salvageCorruptedMessage(
+                  client,
+                  uid,
+                  logger,
+                );
+                if (salvagedMsg != null) {
+                  messagesToProcess.add(salvagedMsg);
                 }
               }
+            }
+          }
 
-              final emailObj = await _parseAndProcessMessage(
-                message: message,
-                collection: collection,
-                targetFolder: targetFolder,
-                appDir: appDir,
-                appDb: appDb,
-                logger: logger,
-              );
-              emailBatch.add(emailObj);
-              newEmails++;
+          List<Email> emailBatch = [];
+          for (final message in messagesToProcess) {
+            final msgDate = message.decodeDate() ?? DateTime.now();
+
+            // Refine incremental check with second-level precision
+            if (!force && lastScanDate != null) {
+              final lastScanSecs =
+                  lastScanDate.millisecondsSinceEpoch ~/ 1000;
+              final msgSecs = msgDate.millisecondsSinceEpoch ~/ 1000;
+
+              if (msgSecs <= lastScanSecs) {
+                skipped++;
+                continue;
+              }
             }
 
-            if (emailBatch.isNotEmpty) {
-              await EmailUpsertService.instance.invoke(
-                EmailUpsertServiceCommand(emailBatch, appDb),
-              );
-              clientPort?.send({'type': 'refresh'});
-            }
-          } catch (e) {
-            logger.e("Failed to fetch batch starting at $i: $e");
+            final emailObj = await _parseAndProcessMessage(
+              message: message,
+              collection: collection,
+              targetFolder: targetFolder,
+              appDir: appDir,
+              appDb: appDb,
+              logger: logger,
+            );
+            emailBatch.add(emailObj);
+            newEmails++;
+          }
+
+          if (emailBatch.isNotEmpty) {
+            await EmailUpsertService.instance.invoke(
+              EmailUpsertServiceCommand(emailBatch, appDb),
+            );
+            clientPort?.send({'type': 'refresh'});
           }
         }
       }
@@ -418,6 +449,32 @@ class YahooScannerIsolateWorker {
       Isolate.exit(clientPort, {'status': 'done'});
     }
     });
+  }
+
+  /// Attempts to fetch header-only metadata for a message whose full body
+  /// fetch threw an encoding exception, preserving Subject, From, To, Date, and ID.
+  static Future<MimeMessage?> _salvageCorruptedMessage(
+    ImapClient client,
+    int uid,
+    AppLogger logger,
+  ) async {
+    try {
+      final singleSeq = MessageSequence()..add(uid);
+      final result = await client.uidFetchMessages(
+        singleSeq,
+        'BODY.PEEK[HEADER]',
+      );
+      if (result.messages.isNotEmpty) {
+        final msg = result.messages.first;
+        logger.i(
+          "Salvaged header metadata for message UID $uid (Subject: ${msg.decodeSubject()})",
+        );
+        return msg;
+      }
+    } catch (e) {
+      logger.w("Could not salvage header for message UID $uid: $e");
+    }
+    return null;
   }
 
   /// Returns all MIME parts that have a filename (i.e. are attachments or
