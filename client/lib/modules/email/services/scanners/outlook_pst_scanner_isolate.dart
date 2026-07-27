@@ -123,7 +123,8 @@ class OutlookPstScannerIsolate {
 /// FastAPI service via HTTP to parse the PST file.
 class OutlookPstScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> workerArgs) async {
-    final RootIsolateToken? token = workerArgs['token'];
+    runInScanIsolateZone(() async {
+      final RootIsolateToken? token = workerArgs['token'];
     final SendPort clientPort = workerArgs['port'];
     final Collection collection = workerArgs['collection'];
     final String appDir = workerArgs['appDir'];
@@ -264,6 +265,11 @@ class OutlookPstScannerIsolateWorker {
           );
           final folderId = folderPathToId[data['folder']] ?? 'INBOX';
 
+          final plainBody = data['body'] as String? ?? "";
+          final snippet = plainBody.length > 200
+              ? plainBody.substring(0, 200)
+              : plainBody;
+
           final email = Email(
             id: emailId,
             collectionId: collection.id,
@@ -272,7 +278,8 @@ class OutlookPstScannerIsolateWorker {
             to: (data['to'] as List?)?.map((e) => e.toString()).toList() ?? [],
             cc: (data['cc'] as List?)?.map((e) => e.toString()).toList() ?? [],
             subject: data['subject'] ?? "(No Subject)",
-            plainBody: data['body'] ?? "",
+            snippet: snippet,
+            plainBody: plainBody,
             htmlBody: data['html_body'] ?? "",
             folderId: folderId,
             isRead: true,
@@ -348,10 +355,16 @@ class OutlookPstScannerIsolateWorker {
             clientPort.send({'type': 'refresh'});
           }
         } else if (data['type'] == 'debug') {
-          logger.d("PST Parser Debug: ${data['message']}");
+          final msg = data['message']?.toString() ?? '';
+          logger.d(
+            "PST Parser Debug: ${msg.length > 200 ? '${msg.substring(0, 200)}...' : msg}",
+          );
         } else if (data['type'] == 'error') {
           errorCount++;
-          logger.e("PST Parser Error: ${data['message']}");
+          final msg = data['message']?.toString() ?? '';
+          logger.e(
+            "PST Parser Error: ${msg.length > 200 ? '${msg.substring(0, 200)}...' : msg}",
+          );
         } else if (data['type'] == 'summary') {
           sawSummary = true;
           // Cross-check against our own tally: the parser's count is
@@ -416,6 +429,7 @@ class OutlookPstScannerIsolateWorker {
 
     clientPort.send({'type': 'refresh'});
     Isolate.exit(clientPort, {'done': true});
+    });
   }
 
   /// Describes a stream line for an error message, without quoting its content.

@@ -180,7 +180,8 @@ class OutlookScannerIsolate {
 
 class OutlookScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> args) async {
-    final RootIsolateToken? token = args['token'];
+    runInScanIsolateZone(() async {
+      final RootIsolateToken? token = args['token'];
     final SendPort? clientPort = args['port'];
     final Collection collection = args['collection'];
     final String? folderId = args['folderId'];
@@ -202,10 +203,8 @@ class OutlookScannerIsolateWorker {
     final emailAddress = collection.name;
     final accessToken = collection.accessToken!;
 
-    final client = ImapClient(isLogEnabled: true);
+    final client = ImapClient(isLogEnabled: false);
     try {
-      logger.i("DEBUG: Outlook Isolate - Connecting for $type...");
-      logger.i("DEBUG: Outlook Isolate - Target Email: $emailAddress");
       // Use imap-mail.outlook.com for better personal account support
       await client.connectToServer(
         'imap-mail.outlook.com',
@@ -393,10 +392,6 @@ class OutlookScannerIsolateWorker {
                   : reversedUids.length;
           final batchUids = reversedUids.sublist(i, end);
 
-          logger.s(
-            "Fetching batch ${(i ~/ batchSize) + 1} (${batchUids.length} messages)...",
-          );
-
           final sequence = MessageSequence();
           for (final uid in batchUids) {
             sequence.add(uid);
@@ -406,9 +401,6 @@ class OutlookScannerIsolateWorker {
             final fetchResult = await client.uidFetchMessages(
               sequence,
               'BODY.PEEK[]',
-            );
-            logger.s(
-              "Fetched ${fetchResult.messages.length} messages in batch.",
             );
 
             List<Email> emailBatch = [];
@@ -475,6 +467,7 @@ class OutlookScannerIsolateWorker {
       }
       Isolate.exit(clientPort, {'status': 'done'});
     }
+    });
   }
 
   /// Returns all MIME parts that have a filename (i.e. are attachments or

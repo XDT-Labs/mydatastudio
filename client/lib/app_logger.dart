@@ -89,16 +89,35 @@ class CustomLogOutput extends LogOutput {
     await super.init();
   }
 
+  static const int _maxConsoleLineLength = 300;
+  static const int _maxConsoleLineCount = 10;
+
   @override
   void output(OutputEvent event) {
-    consoleOutput.output(event);
+    // 1. Cap vertical line count to prevent multi-line HTML string flooding
+    List<String> lines = event.lines;
+    if (lines.length > _maxConsoleLineCount) {
+      final truncatedCount = lines.length - _maxConsoleLineCount;
+      lines = lines.sublist(0, _maxConsoleLineCount)
+        ..add('... [truncated $truncatedCount remaining lines]');
+    }
+
+    // 2. Cap horizontal line length
+    final truncatedLines = lines.map((l) {
+      if (l.length > _maxConsoleLineLength) {
+        return '${l.substring(0, _maxConsoleLineLength)}... [truncated ${l.length - _maxConsoleLineLength} chars]';
+      }
+      return l;
+    }).toList();
+
+    consoleOutput.output(OutputEvent(event.origin, truncatedLines));
 
     try {
       _ensureLogFile();
 
       if (_logFile != null) {
-        // Strip ANSI color codes
-        final parsedLines = event.lines
+        // Strip ANSI color codes and write bounded lines to file sink as well
+        final parsedLines = truncatedLines
             .map((l) => l.replaceAll(RegExp(r'\x1B\[[0-?]*[ -/]*[@-~]'), ''))
             .join('\n');
         final text = '$parsedLines\n';

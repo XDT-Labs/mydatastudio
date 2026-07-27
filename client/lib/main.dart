@@ -39,37 +39,68 @@ Map<String, String> aiServerAuthHeaders(String? token) =>
 /// Finally, it runs the FamilyDamApp widget wrapped in a ProviderScope using the runApp function.
 
 Future<void> main(List<String> args) async {
-  WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
+  runZonedGuarded(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
+      MediaKit.ensureInitialized();
 
-  // Thumbnails now render from on-disk files (Image.file). Raise the in-memory
-  // decoded-image cache from the 100 MB default so scrolling large photo grids
-  // keeps a bigger working set resident and avoids re-reading/decoding from the
-  // storage dir (which may be a network volume).
-  PaintingBinding.instance.imageCache.maximumSizeBytes = 300 << 20; // 300 MB
+      // Thumbnails now render from on-disk files (Image.file). Raise the in-memory
+      // decoded-image cache from the 100 MB default so scrolling large photo grids
+      // keeps a bigger working set resident and avoids re-reading/decoding from the
+      // storage dir (which may be a network volume).
+      PaintingBinding.instance.imageCache.maximumSizeBytes =
+          300 << 20; // 300 MB
 
-  // Must add this line.
-  await windowManager.ensureInitialized();
+      // Must add this line.
+      await windowManager.ensureInitialized();
 
-  // Intercept close events to manually shutdown python service before exit
-  await windowManager.setPreventClose(true);
+      // Intercept close events to manually shutdown python service before exit
+      await windowManager.setPreventClose(true);
 
-  // Set log level: debug builds always use debug; release defaults to info
-  // unless the user passes --log-level=debug at launch.
-  if (kDebugMode) {
-    MainApp.logLevel = 'debug';
-  } else {
-    for (final arg in args) {
-      if (arg.startsWith('--log-level=')) {
-        MainApp.logLevel = arg.substring('--log-level='.length).toLowerCase();
-        break;
+      // Set log level: debug builds always use debug; release defaults to info
+      // unless the user passes --log-level=debug at launch.
+      if (kDebugMode) {
+        MainApp.logLevel = 'debug';
+      } else {
+        for (final arg in args) {
+          if (arg.startsWith('--log-level=')) {
+            MainApp.logLevel =
+                arg.substring('--log-level='.length).toLowerCase();
+            break;
+          }
+        }
       }
-    }
-  }
-  Logger.level = MainApp.logLevel == 'debug' ? Level.debug : Level.info;
+      Logger.level = MainApp.logLevel == 'debug' ? Level.debug : Level.info;
 
-  // Start desktop client
-  runApp(const MainApp());
+      // Start desktop client
+      runApp(const MainApp());
+    },
+    (error, stack) {
+      _logger.e(
+        "Uncaught error in zone: $error",
+        error: error,
+        stackTrace: stack,
+      );
+    },
+    zoneSpecification: ZoneSpecification(
+      print: (self, parent, zone, line) {
+        final subLines = line.split('\n');
+        List<String> outputLines = subLines;
+        if (outputLines.length > 10) {
+          final extra = outputLines.length - 10;
+          outputLines = outputLines.sublist(0, 10)
+            ..add('... [truncated $extra remaining lines]');
+        }
+        final formatted = outputLines.map((l) {
+          if (l.length > 300) {
+            return '${l.substring(0, 300)}... [truncated ${l.length - 300} chars]';
+          }
+          return l;
+        }).join('\n');
+        parent.print(zone, formatted);
+      },
+    ),
+  );
 }
 
 class MainApp extends StatefulWidget {

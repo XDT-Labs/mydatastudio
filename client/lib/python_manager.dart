@@ -43,12 +43,15 @@ class PythonManager {
     // AppLogger's output already writes to the console, so the extra print()
     // that used to sit here doubled every aiserver line — ~19k lines in a
     // single import session, each also written synchronously to the log file.
-    logger.i('[python] $line');
+    final logLine = line.length > 500
+        ? '${line.substring(0, 500)}... [truncated ${line.length - 500} bytes]'
+        : line;
+    logger.i('[python] $logLine');
     if (line.contains('[LOADER]')) {
       logger.s(line.replaceAll('[LOADER]', '').trim());
     }
     // Update splash screen progress
-    PythonManager.startupProgress.value = line;
+    PythonManager.startupProgress.value = logLine;
 
     final match = urlRegex.firstMatch(line);
     if (match != null) {

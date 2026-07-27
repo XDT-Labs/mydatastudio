@@ -132,7 +132,8 @@ class GmailScannerIsolate {
 /// and writes results directly via upsert services.
 class GmailScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> args) async {
-    final RootIsolateToken? token = args['token'];
+    runInScanIsolateZone(() async {
+      final RootIsolateToken? token = args['token'];
     final SendPort clientPort = args['port'];
     final Collection collection = args['collection'];
     final String? folderId = args['folderId'];
@@ -263,6 +264,7 @@ class GmailScannerIsolateWorker {
     } finally {
       Isolate.exit(clientPort, {'status': 'done'});
     }
+    });
   }
 
   static Future<Map<String, int>> _pullEmails(
@@ -391,10 +393,6 @@ class GmailScannerIsolateWorker {
           final relativeYearPath = p.join(labelName, year);
           final absoluteYearPath = p.normalize(
             p.join(rootPathNormalized, relativeYearPath),
-          );
-
-          logger.s(
-            "GmailScanner: Processing email ${email.id} with attachments. Target: $absoluteYearPath",
           );
 
           // 1. Ensure folder hierarchy (Collection -> Label -> Year)

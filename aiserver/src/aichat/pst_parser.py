@@ -663,7 +663,16 @@ def main():
         pst_parser = PstParser(args.file, args.output_dir)
         pst_parser.open()
         for item in pst_parser.walk():
-            print(json.dumps(item))
+            itype = item.get("type") if isinstance(item, dict) else None
+            if itype == "folder":
+                print(f"Folder: {item.get('name')} ({item.get('path')})")
+            elif itype == "summary":
+                print(
+                    f"PST Parsing Complete: folders={item.get('folders')}, "
+                    f"emails={item.get('emails')}, errors={item.get('errors')}"
+                )
+            elif itype == "error":
+                print(f"Error: {item.get('message')}", file=sys.stderr)
         pst_parser.close()
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)

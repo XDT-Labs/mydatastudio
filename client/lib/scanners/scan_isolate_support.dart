@@ -28,6 +28,37 @@ void bootstrapScanIsolate(RootIsolateToken? token, Uint8List? vaultDek) {
   CredentialCodec.installIsolateVault(vaultDek);
 }
 
+/// Runs a background scan isolate worker inside a guarded Zone that intercepts
+/// bare `print()` calls from third-party packages (like `enough_mail`'s
+/// `quoted_printable_mail_codec.dart`) and truncates multi-line payload dumps.
+void runInScanIsolateZone(Future<void> Function() body) {
+  runZonedGuarded(
+    body,
+    (error, stack) {
+      final logger = AppLogger(null);
+      logger.e("Uncaught error in isolate zone: $error", error: error, stackTrace: stack);
+    },
+    zoneSpecification: ZoneSpecification(
+      print: (self, parent, zone, line) {
+        final subLines = line.split('\n');
+        List<String> outputLines = subLines;
+        if (outputLines.length > 5) {
+          final extra = outputLines.length - 5;
+          outputLines = outputLines.sublist(0, 5)
+            ..add('... [truncated $extra remaining lines]');
+        }
+        final formatted = outputLines.map((l) {
+          if (l.length > 200) {
+            return '${l.substring(0, 200)}... [truncated ${l.length - 200} chars]';
+          }
+          return l;
+        }).join('\n');
+        parent.print(zone, formatted);
+      },
+    ),
+  );
+}
+
 /// Replays a log record relayed from a scan isolate onto the calling isolate.
 ///
 /// A worker's [AppLogger] reaches the console but never the log *file*:
