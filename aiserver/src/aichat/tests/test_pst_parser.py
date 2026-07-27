@@ -840,9 +840,9 @@ class TestBundledFixtures:
         folders, emails, errors, summary = _split(outlook_records[0])
         assert errors == [], f"unexpected errors: {[e['message'] for e in errors]}"
         assert summary == {
-            "type": "summary", "folders": 23, "emails": 11, "errors": 0,
+            "type": "summary", "folders": 17, "emails": 11, "errors": 0,
         }
-        assert len(folders) == 23
+        assert len(folders) == 17
         assert len(emails) == 11
 
     def test_outlook_email_ids_are_the_pst_descriptor_ids(self, outlook_records):
@@ -881,6 +881,49 @@ class TestBundledFixtures:
         assert "Inbox" in paths
         assert "Inbox/SubInbox" in paths, "nested folder lost its parent"
         assert not any(p.startswith("Root") for p in paths), "wrapper leaked into paths"
+
+    def test_outlook_system_folders_are_not_emitted(self, outlook_records):
+        """Outlook's bookkeeping folders must never reach the client.
+
+        IPM_VIEWS, IPM_COMMON_VIEWS, Search Root, ItemProcSearch and the stock
+        "SPAM Search Folder N" are MAPI special folders that Outlook itself
+        never shows a user. Emitting them filled the app's sidebar with folders
+        that are not mail and not user structure — the visible symptom that
+        prompted this filter.
+
+        Distinct from `_is_non_email_folder` (Calendar/Contacts), which emits
+        the folder and only skips its *messages*: these folders are not
+        interesting even as containers, so they are suppressed entirely.
+        """
+        folders, _, _, _ = _split(outlook_records[0])
+        paths = {f["path"] for f in folders}
+        for suppressed in (
+            "IPM_VIEWS", "IPM_COMMON_VIEWS", "Search Root",
+            "ItemProcSearch", "SPAM Search Folder 2", "To-Do Search",
+        ):
+            assert suppressed not in paths, f"{suppressed} leaked to the client"
+
+    def test_outlook_system_folder_children_survive_one_level_up(self, outlook_records):
+        """A system folder is transparent, not pruned.
+
+        Its children still get walked and emitted, just without the system
+        folder in their path — "Search Root/All Messages" becomes "All
+        Messages". This is what keeps the filter from ever losing mail: were a
+        real folder to turn up under one of these, it is imported one level up
+        rather than silently dropped.
+        """
+        folders, _, _, _ = _split(outlook_records[0])
+        paths = {f["path"] for f in folders}
+        assert "All Messages" in paths
+        assert "Search Root/All Messages" not in paths
+
+    def test_outlook_system_folder_filter_loses_no_mail(self, outlook_records):
+        """The folder count dropped when system folders were suppressed; the
+        email count must not have. Guards against widening the deny list into a
+        name a user could plausibly give a real mail folder."""
+        _, emails, _, _ = _split(outlook_records[0])
+        assert len(emails) == 11
+        assert {e["folder"] for e in emails} == {"Inbox", "Sent Items"}
 
     def test_outlook_non_mail_folders_are_flagged_and_skipped(self, outlook_records):
         """Calendar and Contacts each hold one item in this fixture. They must be
@@ -982,9 +1025,9 @@ class TestBundledFixtures:
         folders, emails, errors, summary = _split(aspose_records[0])
         assert errors == []
         assert summary == {
-            "type": "summary", "folders": 8, "emails": 1, "errors": 0,
+            "type": "summary", "folders": 4, "emails": 1, "errors": 0,
         }
-        assert len(folders) == 8
+        assert len(folders) == 4
         assert len(emails) == 1
 
     def test_aspose_nested_folder_is_preserved(self, aspose_records):

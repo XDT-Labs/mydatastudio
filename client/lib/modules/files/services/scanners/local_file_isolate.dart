@@ -358,7 +358,7 @@ class LocalFileIsolateWorker {
     }
 
     // return file count
-    print('Worker: Exiting isolate with count $fileCount');
+    logger?.i('LocalScan: Exiting isolate with count $fileCount');
     Isolate.exit(receiverPort, fileCount);
   }
 

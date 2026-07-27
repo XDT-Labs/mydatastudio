@@ -212,3 +212,14 @@ class TestModelManager:
         """Test decoding raises ValueError on bad string."""
         with pytest.raises(ValueError):
             decode_base64_image("not_a_valid_base64_string!!!")
+
+    def test_decode_base64_image_ghostscript_oserror(self):
+        """Test that OSError from PIL (e.g. Ghostscript missing for EPS) is converted to ValueError."""
+        valid_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+        with patch("PIL.Image.open") as mock_open:
+            mock_img = Mock()
+            mock_img.load.side_effect = OSError("Unable to locate Ghostscript on paths")
+            mock_open.return_value = mock_img
+            with pytest.raises(ValueError) as exc_info:
+                decode_base64_image(valid_b64)
+            assert "Unable to locate Ghostscript" in str(exc_info.value)

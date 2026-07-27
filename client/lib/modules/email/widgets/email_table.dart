@@ -4,6 +4,11 @@ import 'package:mydatastudio/modules/email/notifications/email_sort_changed_noti
 import 'package:flutter/material.dart';
 import 'package:moment_dart/moment_dart.dart';
 import 'dart:math' as math;
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 class EmailTable extends StatefulWidget {
   const EmailTable({
@@ -285,7 +290,7 @@ class _EmailTable extends State<EmailTable> {
           ),
         ],
         onSelectChanged: (bool? e) {
-          debugPrint("Email row select changed: ${email.subject} - $e");
+          _logger.e("Email row select changed: ${email.subject} - $e");
           setState(() {
             email.isSelected = e ?? false;
             // Always dispatch notification when a row is clicked/selected

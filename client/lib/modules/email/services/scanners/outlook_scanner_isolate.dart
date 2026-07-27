@@ -97,6 +97,7 @@ class OutlookScannerIsolate {
     }
 
     receivePort.listen((message) {
+      if (relayIsolateLog(logger, message, '[OutlookScan]')) return;
       if (message is Map) {
         if (message['type'] == 'refresh') {
           GetEmailsService.instance.invoke(

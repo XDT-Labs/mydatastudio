@@ -6,6 +6,11 @@ import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 const _rawExtensions = ['.nef', '.cr2', '.arw', '.dng', '.orf', '.sr2'];
 
@@ -76,7 +81,7 @@ class ThumbnailGenerator {
           if (b64 != null) return base64Decode(b64);
         }
       } catch (e) {
-        print('ThumbnailGenerator: Python service error: $e');
+        _logger.w('ThumbnailGenerator: Python service error: $e');
       }
       return null;
     }
@@ -104,7 +109,7 @@ class ThumbnailGenerator {
             return img.encodeJpg(thumb);
           }
         } catch (e) {
-          print('ThumbnailGenerator: Dart image decode error: $e');
+          _logger.w('ThumbnailGenerator: Dart image decode error: $e');
         }
       }
     }

@@ -144,7 +144,7 @@ class ScannerManager {
   }
 
   Future<CollectionScanner> registerScanner(Collection c) async {
-    print("DEBUG registerScanner: scanners keys = ${scanners.keys.toList()}, futures keys = ${_registrationFutures.keys.toList()}");
+    logger.d("registerScanner: scanners keys = ${scanners.keys.toList()}, futures keys = ${_registrationFutures.keys.toList()}");
     if (scanners.containsKey(c.id)) return scanners[c.id]!;
 
     // If registration is already in progress, return the existing future

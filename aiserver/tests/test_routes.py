@@ -581,3 +581,27 @@ class TestCheckModelStatus:
 
         assert result == {"exists": True, "model_path": "/tmp/gemma-local/gemma-4-12B-it-Q4_0.gguf"}
 
+
+class TestGenerateEmbedding:
+    @pytest.mark.asyncio
+    async def test_generate_embedding_value_error_returns_400(self):
+        from fastapi import HTTPException
+        from aichat.routes import generate_embedding
+        from aichat.models import EmbeddingRequest
+
+        req = EmbeddingRequest(
+            model_name="Qwen/Qwen3-VL-Embedding-2B",
+            image_base64="invalid_or_eps_base64_data",
+            filename="Logo.mac"
+        )
+
+        with patch('aichat.routes._embedding_model_downloaded', return_value=True), \
+             patch('aichat.routes.get_embedding_model', return_value=(Mock(), Mock())), \
+             patch('aichat.routes.get_embedding_model_id', return_value="Qwen/Qwen3-VL-Embedding-2B"), \
+             patch('aichat.routes.gen_emb_fn', side_effect=ValueError("Invalid image_base64 format provided: Unable to locate Ghostscript on paths")):
+            with pytest.raises(HTTPException) as exc_info:
+                await generate_embedding(req)
+
+            assert exc_info.value.status_code == 400
+            assert "Ghostscript" in exc_info.value.detail
+

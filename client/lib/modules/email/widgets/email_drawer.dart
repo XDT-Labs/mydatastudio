@@ -5,6 +5,7 @@ import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/modules/email/widgets/email_drawer/email_folder_tile_widget.dart';
+import 'package:mydatastudio/modules/email/widgets/email_drawer/email_folder_tree.dart';
 import 'package:mydatastudio/modules/email/pages/email_page.dart';
 import 'package:mydatastudio/modules/email/services/get_email_folders_service.dart';
 import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
@@ -494,6 +495,29 @@ class _EmailFolderListState extends State<_EmailFolderList> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    // A PST is a static archive, and its folder tree comes straight from the
+    // file — so it routinely contains folders holding nothing at all (stock
+    // Deleted Items/Outbox that were never used, containers whose mail lives in
+    // subfolders). Hiding those keeps the sidebar to folders worth clicking.
+    //
+    // Scoped to PST on purpose: `messages_total` is NOT NULL and only Gmail
+    // populates it, so every Outlook/Yahoo folder currently stores 0. Applying
+    // this filter to live accounts would empty their sidebars.
+    //
+    // The second condition guards the same hazard for PSTs imported *before*
+    // the scanner started writing counts: those rows are all 0 too, and there
+    // is no schema migration to backfill them. If nothing in this collection
+    // has a count, the counts are absent rather than genuinely zero — so show
+    // everything, which is the pre-existing behaviour, instead of blanking the
+    // sidebar of an archive that has mail in it. Re-importing the PST populates
+    // the counts and the filter starts applying on its own.
+    final hasFolderCounts = folders.any((f) => (f.messagesTotal ?? 0) > 0);
+    final hideEmptyFolders =
+        widget.collection.scanner == AppConstants.scannerEmailOutlookPst &&
+        hasFolderCounts;
+    bool isEmpty(EmailFolder f) =>
+        hideEmptyFolders && (f.messagesTotal ?? 0) == 0;
+
     EmailFolder? inbox;
     EmailFolder? sent;
     EmailFolder? drafts;
@@ -502,6 +526,7 @@ class _EmailFolderListState extends State<_EmailFolderList> {
     final List<EmailFolder> otherFolders = [];
 
     for (var f in folders) {
+      if (isEmpty(f)) continue;
       final normalizedId = f.id.toUpperCase();
       final normalizedName = f.name.toUpperCase();
 
@@ -531,6 +556,8 @@ class _EmailFolderListState extends State<_EmailFolderList> {
     otherFolders.sort(
       (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
     );
+
+    final nestedFolders = buildEmailFolderTree(otherFolders);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -610,13 +637,15 @@ class _EmailFolderListState extends State<_EmailFolderList> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children:
-                    otherFolders
+                    nestedFolders
                         .map(
-                          (f) => EmailFolderTileWidget(
-                            folder: f,
-                            label: f.name,
-                            isSelected: widget.selectedFolderId == f.id,
-                            onTap: () => widget.onFolderTap(f.id),
+                          (entry) => EmailFolderTileWidget(
+                            folder: entry.folder,
+                            label: entry.folder.name,
+                            indent: 48.0 + entry.depth * 14.0,
+                            isSelected:
+                                widget.selectedFolderId == entry.folder.id,
+                            onTap: () => widget.onFolderTap(entry.folder.id),
                           ),
                         )
                         .toList(),

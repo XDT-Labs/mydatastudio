@@ -281,7 +281,7 @@ class _RxFilesPage extends State<RxFilesPage> {
       _showLightbox = false;
     }
     final theme = Theme.of(context);
-    print(
+    logger.d(
       'RxFilesPage.build: collections.length = ${collections.length}, collection = $collection',
     );
     if (collections.isEmpty) {
@@ -1073,7 +1073,7 @@ class _RxFilesPage extends State<RxFilesPage> {
         return response.bodyBytes;
       }
     } catch (e) {
-      debugPrint('Error downloading GDrive file for preview: $e');
+      logger.e('Error downloading GDrive file for preview: $e');
     }
     return null;
   }
@@ -1092,7 +1092,7 @@ class _RxFilesPage extends State<RxFilesPage> {
         }
       }
     } catch (e) {
-      debugPrint('Error loading lightbox text preview: $e');
+      logger.e('Error loading lightbox text preview: $e');
     }
     return 'Could not load file content.';
   }

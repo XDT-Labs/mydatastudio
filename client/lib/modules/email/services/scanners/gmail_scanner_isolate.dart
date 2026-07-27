@@ -88,6 +88,9 @@ class GmailScannerIsolate {
         statusPort.send(message);
       }
 
+      // Replayed after the forward above so statusPort still sees every message.
+      if (relayIsolateLog(logger, message, '[GmailScan]')) return;
+
       if (message is Map) {
         if (message['type'] == 'refresh') {
           GetEmailsService.instance.invoke(

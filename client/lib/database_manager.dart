@@ -142,15 +142,15 @@ class DatabaseManager {
       } catch (_) {}
 
       if (mode.toLowerCase() != 'wal') {
-        print(
-          "DEBUG testPathSupportsWal: Path does not support WAL mode (returned: $mode)",
+        AppLogger(null).d(
+          "testPathSupportsWal: path does not support WAL mode (returned: $mode)",
         );
         return false;
       }
       return true;
     } catch (e) {
       // Clean up test files if created.
-      print("DEBUG testPathSupportsWal failed: $e");
+      AppLogger(null).w("testPathSupportsWal failed: $e");
       try {
         if (testDbFile.existsSync()) testDbFile.deleteSync();
         final shmFile = io.File('${testDbFile.path}-shm');
@@ -339,7 +339,7 @@ class AppDatabase {
     }
 
     final dbFile = io.File(p.join(finalDbDir, 'data', dbName));
-    print("DEBUG AppDatabase.create: opening db at ${dbFile.path}");
+    AppLogger(null).d("AppDatabase.create: opening db at ${dbFile.path}");
     if (!dbFile.parent.existsSync()) {
       dbFile.parent.createSync(recursive: true);
     }

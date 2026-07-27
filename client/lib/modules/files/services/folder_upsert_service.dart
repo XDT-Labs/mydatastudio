@@ -3,8 +3,12 @@ import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/files/services/repositories/folder_repository.dart';
 
 import 'package:mydatastudio/services/rx_service.dart';
-import 'package:flutter/material.dart';
 import 'package:resqlite/resqlite.dart' show ResqliteQueryException;
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 class FolderUpsertService
     extends RxService<FolderUpsertServiceCommand, Folder?> {
@@ -32,7 +36,7 @@ class FolderUpsertService
         sink.add(folder);
       }
     } catch (err) {
-      debugPrint('FolderUpsertService error: $err');
+      _logger.e('FolderUpsertService error: $err');
     }
     //UserRepository repo = UserRepository()
     //AppUser? user = await repo.user(command.password!)
@@ -63,7 +67,7 @@ class FolderUpsertService
         if (e.sqliteCode == 5 && attempt < _maxRetries) {
           // SQLITE_BUSY — wait with exponential backoff then retry
           final delay = _retryBaseDelay * (1 << attempt);
-          debugPrint(
+          _logger.w(
             'FolderUpsertService: SQLITE_BUSY (attempt ${attempt + 1}/$_maxRetries), '
             'retrying in ${delay.inMilliseconds}ms...',
           );

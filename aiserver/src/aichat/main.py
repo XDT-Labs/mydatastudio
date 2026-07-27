@@ -100,6 +100,28 @@ def setup_logging(log_level: str = 'info') -> None:
     root = logging.getLogger()
     root.setLevel(level)
 
+    # Setting the *root* level to debug also switches on debug logging for every
+    # third-party library in the process, which is not what "debug the aiserver"
+    # is asking for. PIL alone emitted 4,400 per-chunk STREAM lines in a single
+    # import session, and every one of those crosses the pipe to Flutter, which
+    # logs it again. Clamp the known-chatty dependencies so our own debug output
+    # stays readable and the client isn't flooded.
+    if level < logging.INFO:
+        for noisy in (
+            'PIL',
+            'urllib3',
+            'httpx',
+            'httpcore',
+            'filelock',
+            'fsspec',
+            'huggingface_hub',
+            'transformers',
+            'matplotlib',
+            'asyncio',
+            'multipart',
+        ):
+            logging.getLogger(noisy).setLevel(logging.INFO)
+
     # Console handler (stderr — Flutter reads both stdout and stderr)
     ch = logging.StreamHandler(sys.stderr)
     ch.setLevel(level)
@@ -205,7 +227,21 @@ def main() -> None:
 
     import uvicorn
     port = int(os.environ.get("AICHAT_PORT", 0))
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level=log_level, reload=False)
+    # access_log=False: uvicorn's per-request line ("POST /util/embedding 200 OK")
+    # carries no information the caller doesn't already have — it names the
+    # endpoint and a status, with no timing, payload or identity — while a single
+    # import emits one per embedded item (3,887 in one measured session), each of
+    # which then crosses the pipe into the client's log too. Failures are still
+    # reported: exceptions surface through the route handlers and uvicorn.error,
+    # neither of which is affected by this flag.
+    uvicorn.run(
+        app,
+        host="127.0.0.1",
+        port=port,
+        log_level=log_level,
+        reload=False,
+        access_log=False,
+    )
 
 
 if __name__ == "__main__":

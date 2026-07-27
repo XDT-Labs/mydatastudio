@@ -3,8 +3,12 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 
 import 'package:mydatastudio/services/rx_service.dart';
-import 'package:flutter/material.dart';
 import 'package:resqlite/resqlite.dart' show ResqliteQueryException;
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 class FileUpsertService extends RxService<FileUpsertServiceCommand, File> {
   static final FileUpsertService _singleton = FileUpsertService();
@@ -30,7 +34,7 @@ class FileUpsertService extends RxService<FileUpsertServiceCommand, File> {
       }
       return Future(() => file ?? command.file);
     } catch (err) {
-      debugPrint('FileUpsertService error: $err');
+      _logger.e('FileUpsertService error: $err');
     }
     isLoading.add(false);
     return Future(() => command.file);
@@ -52,7 +56,7 @@ class FileUpsertService extends RxService<FileUpsertServiceCommand, File> {
       } on ResqliteQueryException catch (e) {
         if (e.sqliteCode == 5 && attempt < _maxRetries) {
           final delay = _retryBaseDelay * (1 << attempt);
-          debugPrint(
+          _logger.w(
             'FileUpsertService: SQLITE_BUSY (attempt ${attempt + 1}/$_maxRetries), '
             'retrying in ${delay.inMilliseconds}ms...',
           );

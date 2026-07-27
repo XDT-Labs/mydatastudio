@@ -40,8 +40,10 @@ class PythonManager {
   }
 
   void _handleOutputLine(String line) {
+    // AppLogger's output already writes to the console, so the extra print()
+    // that used to sit here doubled every aiserver line — ~19k lines in a
+    // single import session, each also written synchronously to the log file.
     logger.i('[python] $line');
-    print('[python] $line'); // Ensure standard Flutter debug console output
     if (line.contains('[LOADER]')) {
       logger.s(line.replaceAll('[LOADER]', '').trim());
     }
@@ -53,7 +55,6 @@ class PythonManager {
       final url = match.group(1);
       if (url != null) {
         logger.i('[python] AI Chat service is running at: $url');
-        print('[python] AI Chat service is running at: $url');
         MainApp.llmServiceUrl.add(url);
         isLLMServiceRunning.value = true;
         if (_startupCompleter != null && !_startupCompleter!.isCompleted) {

@@ -425,7 +425,7 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
         );
       } catch (e) {
         // Server unreachable — log and continue so the DB row is still removed
-        debugPrint('delete-model server call failed: $e');
+        AppLogger(null).e('delete-model server call failed: $e');
       }
     }
 

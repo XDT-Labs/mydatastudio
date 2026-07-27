@@ -270,7 +270,10 @@ class CloudFileIsolateWorker {
 
       await worker._scan(args);
     } catch (e, stack) {
-      // If we can't even start the worker, send a log if possible, otherwise print
+      // If we can't even start the worker, relay the failure to the parent so it
+      // reaches the log file. Only when there is no port to relay over does this
+      // fall back to print — an AppLogger here would be console-only too, since
+      // the file sink needs state the isolate doesn't have.
       if (loggerPort != null) {
         loggerPort.send({
           'type': 'log',
@@ -278,8 +281,9 @@ class CloudFileIsolateWorker {
           'message': 'CRITICAL: CloudFileIsolate failed to start: $e',
           'stackTrace': stack.toString(),
         });
+      } else {
+        print('CRITICAL: CloudFileIsolate failed to start: $e\n$stack');
       }
-      print('CRITICAL: CloudFileIsolate failed to start: $e\n$stack');
       Isolate.exit(args['port'] as SendPort, 1);
     }
   }

@@ -24,6 +24,11 @@ import 'package:mydatastudio/modules/files/widgets/file_details/file_type_icon_w
 import 'package:mydatastudio/modules/files/widgets/file_details/pdf_preview_widget.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/stl_preview_widget.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/text_preview_widget.dart';
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 class FileDetailsDrawer extends StatefulWidget {
   const FileDetailsDrawer({
@@ -155,7 +160,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         }
       }
     } catch (e) {
-      debugPrint('Error getting image resolution: $e');
+      _logger.e('Error getting image resolution: $e');
     }
   }
 
@@ -192,7 +197,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         return response.bodyBytes;
       }
     } catch (e) {
-      debugPrint('Error downloading GDrive file for preview: $e');
+      _logger.e('Error downloading GDrive file for preview: $e');
     }
     return null;
   }
@@ -519,7 +524,7 @@ class _TextPreviewLoaderState extends State<_TextPreviewLoader> {
         }
       }
     } catch (e) {
-      debugPrint('Error loading text content: $e');
+      _logger.e('Error loading text content: $e');
     }
     if (mounted) setState(() => _loading = false);
   }

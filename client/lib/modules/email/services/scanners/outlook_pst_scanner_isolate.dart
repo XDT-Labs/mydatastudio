@@ -98,6 +98,7 @@ class OutlookPstScannerIsolate {
     _isolate = await Isolate.spawn(OutlookPstScannerIsolateWorker.worker, args);
 
     receivePort.listen((message) {
+      if (relayIsolateLog(logger, message, '[PstScan]')) return;
       if (message is Map) {
         if (message['type'] == 'refresh') {
           // Trigger UI refresh
@@ -200,6 +201,14 @@ class OutlookPstScannerIsolateWorker {
 
     // Keep track of internal IDs
     final Map<String, String> folderPathToId = {};
+    // Every folder record as it was first upserted, keyed by PST path, so the
+    // second pass below can rewrite it with a message count.
+    final Map<String, EmailFolder> foldersByPath = {};
+    // Emails actually imported per folder path. Deliberately *not* the parser's
+    // `count`: that is the raw sub-message tally, which includes the free/busy
+    // blocks and view definitions the parser skips. Only what we persisted
+    // should decide whether a folder reads as empty in the UI.
+    final Map<String, int> emailCountByPath = {};
     // Track directories already emitted as Folder records for the file module.
     final Set<String> emittedFolderPaths = {};
     int count = 0;
@@ -243,6 +252,7 @@ class OutlookPstScannerIsolateWorker {
                     : folderPathToId[p.dirname(data['path'])],
           );
 
+          foldersByPath[data['path']] = folder;
           await EmailFolderUpsertService.instance.invoke(
             EmailFolderUpsertServiceCommand(folder, appDb),
           );
@@ -273,6 +283,12 @@ class OutlookPstScannerIsolateWorker {
           await EmailUpsertService.instance.invoke(
             EmailUpsertServiceCommand([email], appDb),
           );
+
+          final emailFolderPath = data['folder'] as String?;
+          if (emailFolderPath != null) {
+            emailCountByPath[emailFolderPath] =
+                (emailCountByPath[emailFolderPath] ?? 0) + 1;
+          }
 
           // Process attachments — also emit Folder records so the file module
           // can navigate the directory tree (e.g., INBOX → 2010 → files).
@@ -351,7 +367,12 @@ class OutlookPstScannerIsolateWorker {
         // A line we couldn't decode/persist is lost data — count it so the
         // import is flagged incomplete rather than silently truncated.
         errorCount++;
-        logger.e("PST Isolate: Failed to parse line: $line. Error: $e");
+        // Never log the line itself: it is a whole parsed email, HTML body and
+        // all, and a run where many fail (a stretch of SQLITE_BUSY, say) dumped
+        // megabytes into the console — at error level, so each one also carried
+        // a stack trace. Identify the message instead; the id is what you would
+        // use to find it in the archive anyway.
+        logger.e("PST Isolate: ${_describeLine(line)}. Error: $e");
       }
       }
     } catch (e) {
@@ -361,7 +382,23 @@ class OutlookPstScannerIsolateWorker {
       logger.e("PST Isolate: Stream failed mid-import: $e");
     }
 
-    // 4. Cleanup. A PST import is only 'complete' when the parser's end-of-walk
+    // 4. Second pass: stamp each folder with the number of emails it holds,
+    // counting its whole subtree. This can only run once the stream is done,
+    // because a folder's children stream in after the folder itself.
+    //
+    // The rollup is what makes "empty" mean the right thing in the sidebar. A
+    // PST archive routinely has container folders that hold no mail directly
+    // but parent everything that does (in mnimer_digitalchef.pst, all 1181
+    // emails sit under a `non-Allaire Email` folder with zero of its own).
+    // Counting only direct messages would hide exactly the folders the user
+    // needs to navigate through.
+    await _writeFolderCounts(
+      foldersByPath: foldersByPath,
+      emailCountByPath: emailCountByPath,
+      appDb: appDb,
+    );
+
+    // 5. Cleanup. A PST import is only 'complete' when the parser's end-of-walk
     // summary arrived AND nothing failed; anything else is 'incomplete'.
     final clean =
         sawSummary && !streamFailed && errorCount == 0 && summaryErrors == 0;
@@ -379,6 +416,76 @@ class OutlookPstScannerIsolateWorker {
 
     clientPort.send({'type': 'refresh'});
     Isolate.exit(clientPort, {'done': true});
+  }
+
+  /// Describes a stream line for an error message, without quoting its content.
+  ///
+  /// An email record carries the full plain-text *and* HTML body, so logging
+  /// the raw line is what turned a run of failures into megabytes of console
+  /// output. The identifying fields are bounded in size and are what you would
+  /// actually search the archive by; the byte length stands in when the line
+  /// isn't decodable JSON at all.
+  static String _describeLine(String line) {
+    try {
+      final data = jsonDecode(line);
+      if (data is Map) {
+        final type = data['type'] ?? 'unknown';
+        if (type == 'email') {
+          return "failed to apply email id=${data['id']} in '${data['folder']}'";
+        }
+        if (type == 'folder') {
+          return "failed to apply folder '${data['path']}'";
+        }
+        return "failed to apply a '$type' record";
+      }
+    } catch (_) {
+      // Falls through: an undecodable line is exactly the case where there are
+      // no fields to name.
+    }
+    return "failed to decode a ${line.length}-byte line";
+  }
+
+  /// Re-upserts every imported folder with `messagesTotal` set to the number of
+  /// emails in that folder **and all of its descendants**.
+  ///
+  /// A folder's subtree is identified by path prefix rather than by walking
+  /// `parentId`, because the paths are what the parser streams and they are
+  /// already the key both maps are built on. Folder counts are in the tens, so
+  /// the nested scan costs nothing.
+  static Future<void> _writeFolderCounts({
+    required Map<String, EmailFolder> foldersByPath,
+    required Map<String, int> emailCountByPath,
+    required AppDatabase appDb,
+  }) async {
+    for (final entry in foldersByPath.entries) {
+      final path = entry.key;
+      final folder = entry.value;
+
+      // `path + separator` matters: without it, a sibling folder named
+      // `Inbox2` would be counted as part of `Inbox`.
+      final prefix = '$path${p.separator}';
+      int total = 0;
+      emailCountByPath.forEach((emailPath, count) {
+        if (emailPath == path || emailPath.startsWith(prefix)) {
+          total += count;
+        }
+      });
+
+      await EmailFolderUpsertService.instance.invoke(
+        EmailFolderUpsertServiceCommand(
+          EmailFolder(
+            id: folder.id,
+            collectionId: folder.collectionId,
+            name: folder.name,
+            type: folder.type,
+            messagesTotal: total,
+            messagesUnread: folder.messagesUnread,
+            parentId: folder.parentId,
+          ),
+          appDb,
+        ),
+      );
+    }
   }
 
   /// Maps a standard MIME type (e.g. "image/jpeg") to the internal

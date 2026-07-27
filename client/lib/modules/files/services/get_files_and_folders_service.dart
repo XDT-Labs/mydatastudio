@@ -111,7 +111,7 @@ class GetFileAndFoldersService
       );
 
       final List<FileAsset> newItems = [...folders, ...files];
-      print(
+      logger.d(
         'GetFileAndFoldersService.invoke: query returned ${folders.length} folders and ${files.length} files (total: ${newItems.length}) for path "${command.path}" in db "${db.path}"',
       );
 

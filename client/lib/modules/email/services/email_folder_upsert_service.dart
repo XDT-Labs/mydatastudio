@@ -1,9 +1,13 @@
-import 'package:flutter/material.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/modules/email/services/email_folder_repository.dart';
 import 'package:mydatastudio/services/rx_service.dart';
 import 'package:resqlite/resqlite.dart' show ResqliteQueryException;
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 class EmailFolderUpsertService
     extends RxService<EmailFolderUpsertServiceCommand, EmailFolder> {
@@ -38,7 +42,7 @@ class EmailFolderUpsertService
       } on ResqliteQueryException catch (e) {
         if (e.sqliteCode == 5 && attempt < _maxRetries) {
           final delay = _retryBaseDelay * (1 << attempt);
-          debugPrint(
+          _logger.w(
             'EmailFolderUpsertService: SQLITE_BUSY (attempt ${attempt + 1}/$_maxRetries), '
             'retrying in ${delay.inMilliseconds}ms...',
           );

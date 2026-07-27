@@ -1,4 +1,9 @@
 import 'package:http/http.dart' as http;
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 /// A custom HTTP client that adds the 'Accept: application/json' header to all requests.
 /// Additionally, it can inject a 'scope' parameter into POST requests if it is missing,
@@ -35,7 +40,7 @@ class JsonAcceptingHttpClient extends http.BaseClient {
       if (injected) {
         // Use a simple print or dev log for this specific internal check
         // ignore: avoid_print
-        print("DEBUG: Injected scopes into token request: ${scopes!.join(' ')}");
+        _logger.d("Injected scopes into token request: ${scopes!.join(' ')}");
       }
     }
 

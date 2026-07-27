@@ -28,6 +28,43 @@ void bootstrapScanIsolate(RootIsolateToken? token, Uint8List? vaultDek) {
   CredentialCodec.installIsolateVault(vaultDek);
 }
 
+/// Replays a log record relayed from a scan isolate onto the calling isolate.
+///
+/// A worker's [AppLogger] reaches the console but never the log *file*:
+/// `CustomLogOutput` needs `MainApp.appDataDirectory`, and that subject is
+/// empty in a spawned isolate because statics aren't shared. So the worker
+/// ships every record over its port (see `AppLogger.log`) and the parent
+/// replays it here, where the file sink is live.
+///
+/// A parent that ignores these messages silently loses everything its scanner
+/// logged — which is how a PST import could dump whole HTML email bodies to the
+/// console with no trace of them on disk.
+///
+/// [tag] prefixes the replayed message (e.g. `[PstScan]`) so the origin survives
+/// the hop. Returns true if [message] was a log record and has been handled.
+bool relayIsolateLog(AppLogger logger, Object? message, String tag) {
+  if (message is! Map || message['type'] != 'log') return false;
+
+  final text = '$tag ${message['message']}';
+  switch (message['level']) {
+    case 'error':
+    case 'fatal':
+      logger.e(
+        text,
+        error: message['error'],
+        stackTrace: message['stackTrace'],
+      );
+    case 'warning':
+      logger.w(text);
+    case 'debug':
+    case 'trace':
+      logger.d(text);
+    default:
+      logger.i(text);
+  }
+  return true;
+}
+
 /// Runs [operation], retrying on transient network failures with quadratic
 /// backoff (attempt² seconds). Non-transient errors, and any error once
 /// [maxRetries] is reached, are rethrown unchanged.

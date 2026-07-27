@@ -40,6 +40,41 @@ WRAPPER_FOLDER_NAMES = frozenset({
     "outlook data file",
 })
 
+# Outlook's own bookkeeping folders. These are MAPI special folders that live
+# outside "Top of Personal Folders" (view definitions, the search-folder root,
+# the item-processing queue) and Outlook never shows them to the user — they are
+# not mail and not user structure, so surfacing them as folders is just noise.
+#
+# They are treated exactly like WRAPPER_FOLDER_NAMES rather than being pruned
+# outright: the folder itself is not emitted and its direct messages are
+# skipped, but the walk still descends into its children. Skipping the subtree
+# would be marginally tidier and is almost certainly safe — Outlook does not
+# create user mail folders here — but "almost certainly" is the wrong standard
+# for a one-shot import with no re-sync, and a stray mail folder found under one
+# of these is better imported one level up than silently dropped. Any *empty*
+# child that surfaces this way (the stock "All Messages" search folder, say) is
+# hidden by the client's empty-folder filter anyway.
+SYSTEM_FOLDER_NAMES = frozenset({
+    "ipm_views",
+    "ipm_common_views",
+    "common views",
+    "views",
+    "finder",
+    "search root",
+    "itemprocsearch",
+    "deferred action",
+    "spooler queue",
+    "shortcuts",
+    "schedule",
+    "to-do search",
+    "quick step settings",
+    "conversation action settings",
+})
+
+# Outlook numbers its stock search folders ("SPAM Search Folder 2"), so those
+# can't be matched by an exact name.
+SYSTEM_FOLDER_PREFIXES = ("spam search folder",)
+
 # Stand-in for a folder whose name could not be read. Must stay outside both
 # sets above so an unnamed-by-error folder is still treated as a real mail
 # folder and its direct messages are imported.
@@ -264,6 +299,12 @@ class PstParser:
         return (folder_name or "").strip().lower() in WRAPPER_FOLDER_NAMES
 
     @staticmethod
+    def _is_system_folder(folder_name: str) -> bool:
+        """Return True if this is an Outlook bookkeeping folder (IPM_VIEWS, Search Root, etc.)."""
+        name = (folder_name or "").strip().lower()
+        return name in SYSTEM_FOLDER_NAMES or name.startswith(SYSTEM_FOLDER_PREFIXES)
+
+    @staticmethod
     def _is_non_email_folder(folder_name: str) -> bool:
         """Return True if this folder stores non-email items (contacts, calendar, etc.)."""
         return (folder_name or "").strip().lower() in NON_EMAIL_FOLDER_NAMES
@@ -344,11 +385,14 @@ class PstParser:
             folder_name = UNREADABLE_FOLDER_NAME
             yield self._emit_error(f"Error reading folder name: {str(e)}")
 
-        is_wrapper = self._is_wrapper_folder(folder_name)
+        is_wrapper = self._is_wrapper_folder(folder_name) or self._is_system_folder(
+            folder_name
+        )
         is_non_email = self._is_non_email_folder(folder_name)
 
-        # Wrapper folders (Root, Top of Personal Folders, etc.) are transparent:
-        # we skip them in the path so Inbox appears at the top level.
+        # Wrapper folders (Root, Top of Personal Folders, etc.) and Outlook's
+        # bookkeeping folders are transparent: we skip them in the path so Inbox
+        # appears at the top level and IPM_VIEWS never appears at all.
         if is_wrapper:
             yield from self._recurse_subfolders(folder, folder_path, folder_name)
             return

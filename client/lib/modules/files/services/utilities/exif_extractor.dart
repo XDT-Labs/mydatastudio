@@ -2,6 +2,11 @@ import 'dart:io' as io;
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:exif/exif.dart';
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 class ExifExtractor {
   Future<Map<String, dynamic>?> extractLatLng(File file) async {
@@ -20,7 +25,7 @@ class ExifExtractor {
         }
       }
     }
-    print(metadata);
+    _logger.d('ExifExtractor: extracted ${metadata.length} tags');
     return Future(() => metadata);
   }
 

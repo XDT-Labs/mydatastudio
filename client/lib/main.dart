@@ -19,6 +19,11 @@ import 'package:rxdart/rxdart.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 /// Authorization header(s) for the local AI server, or an empty map when no
 /// token is configured (dev). Main-isolate callers pass
@@ -134,7 +139,7 @@ class MainAppState extends State<MainApp>
         // This callback is invoked when the application is requested to exit.
         // You can perform cleanup or prompt the user for confirmation here.
         // Return AppExitResponse.exit to allow exit, or AppExitResponse.cancel to prevent it.
-        print('Exit requested!');
+        _logger.i('Exit requested!');
         await MainApp.pythonManager?.stopAiServerService();
         return AppExitResponse.exit;
       },

@@ -179,7 +179,7 @@ class EmbeddingIsolate {
         final files = await repo.getFilesWithMissingEmbeddings(limit: 10);
 
         if (files.isEmpty) {
-          logger.d("No files with missing embeddings found. Sleeping...");
+          //logger.d("No files with missing embeddings found. Sleeping...");
           await Future.delayed(const Duration(minutes: 1));
           continue;
         }
@@ -212,13 +212,15 @@ class EmbeddingIsolate {
             if (embedding != null) {
               await repo.upsertFileEmbedding(file.id, embedding);
               logger.d("Saved embedding for file: ${file.path}");
+            } else {
+              await repo.upsertFileEmbedding(file.id, []);
+              logger.w("Skipped unprocessable file: ${file.path}");
             }
             // Batch complete
           } catch (e) {
             logger.e("Error processing file ${file.path}: $e");
           }
         }
-        
       } catch (e, stack) {
         logger.e(
           "Error in EmbeddingIsolate loop: $e",
