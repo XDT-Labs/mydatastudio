@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/image_preview_widget.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/pdf_preview_widget.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/stl_preview_widget.dart';
