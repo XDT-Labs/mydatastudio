@@ -17,6 +17,7 @@ import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
+import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
@@ -461,10 +462,17 @@ class OutlookPstScannerIsolateWorker {
               emailId: emailId,
               // Empty for an ordinary attachment; set only when the HTML body
               // embeds this file as `<img src="cid:...">`.
-              contentId:
-                  (att['contentId'] as String?)?.isNotEmpty == true
-                      ? att['contentId'] as String
-                      : null,
+              contentId: InlineAttachment.normalizeContentId(
+                att['contentId'] as String?,
+              ),
+              // Decided here rather than in the parser so all four scanners
+              // share one rule. MAPI has no Content-Disposition, so a PST
+              // attachment is inline exactly when the body references it.
+              isInline: InlineAttachment.isInline(
+                contentId: att['contentId'] as String?,
+                fileName: att['name'] as String?,
+                htmlBody: email.htmlBody,
+              ),
             );
             await FileUpsertService.instance.invoke(
               FileUpsertServiceCommand(file, appDb),

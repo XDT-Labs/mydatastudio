@@ -170,6 +170,12 @@ class DatabaseRepository {
   /// Returns a list of files that do not have a corresponding entry in the
   /// `files_embeddings` table, limited to [limit] results.
   /// Filters for image content types.
+  ///
+  /// Images the message body embeds — spacers, logos, tracking pixels, ad
+  /// banners — are skipped. Embedding them costs real on-device inference time
+  /// per image and buys nothing: they are only ever looked at inside the email
+  /// they decorate, and an HTML newsletter carries a dozen apiece. Worse, they
+  /// then pollute similarity search. See `InlineAttachment`.
   Future<List<File>> getFilesWithMissingEmbeddings({int limit = 10}) async {
     final rows = await db.select(
       '''
@@ -180,6 +186,7 @@ class DatabaseRepository {
       WHERE (fe.file_id IS NULL OR fe.qwen3_vl_embedding IS NULL)
         AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
         AND f.is_deleted = 0
+        AND f.is_inline = 0
       LIMIT ?
       ''',
       [limit],

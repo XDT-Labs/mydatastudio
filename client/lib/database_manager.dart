@@ -417,7 +417,13 @@ class AppDatabase {
       await _seedAichatModels(_db);
       await _seedAichatSkills(_db);
     }
-    await _addMissingColumns();
+    final added = await _addMissingColumns();
+
+    // Only on the open that introduces the column, so a large archive pays for
+    // this pass once rather than on every launch.
+    if (added.contains('files.is_inline')) {
+      await _backfillInlineAttachments();
+    }
   }
 
   /// Columns added to [schemaDDL] after the initial schema shipped.
@@ -426,13 +432,22 @@ class AppDatabase {
   /// would never see them. Each add is guarded by the table's current columns,
   /// which makes this safe to run on every open — and idempotent, which matters
   /// because `initSchema` is called twice during [create].
-  Future<void> _addMissingColumns() async {
+  ///
+  /// Returns the `table.column` names actually added, so a caller can run a
+  /// one-time backfill for exactly the columns that are new.
+  Future<Set<String>> _addMissingColumns() async {
     const additions = <String, Map<String, String>>{
-      // Inline images in an HTML email are referenced as `cid:<content id>`;
-      // without this the client can't tell which attachment a cid names.
-      'files': {'content_id': 'TEXT'},
+      'files': {
+        // Inline images in an HTML email are referenced as `cid:<content id>`;
+        // without this the client can't tell which attachment a cid names.
+        'content_id': 'TEXT',
+        // Whether the attachment is part of the message body — a spacer, logo
+        // or tracking pixel — rather than something the sender attached.
+        'is_inline': 'INTEGER NOT NULL DEFAULT 0',
+      },
     };
 
+    final added = <String>{};
     for (final table in additions.entries) {
       final existing =
           (await _db.select("PRAGMA table_info(${table.key})"))
@@ -444,7 +459,62 @@ class AppDatabase {
         await _db.execute(
           "ALTER TABLE ${table.key} ADD COLUMN ${column.key} ${column.value}",
         );
+        added.add('${table.key}.${column.key}');
       }
+    }
+    return added;
+  }
+
+  /// Marks already-imported attachments that the message body embeds.
+  ///
+  /// Without this, `is_inline` would only ever be right for mail scanned after
+  /// the upgrade, and every archive already on disk would keep pouring its
+  /// spacer GIFs and ad banners into the photos module until the user deleted
+  /// and re-imported it. The information needed is already in the database —
+  /// the stored HTML body says which attachments it references — so this is a
+  /// single statement rather than a re-scan.
+  ///
+  /// Matching mirrors `InlineAttachment`: content id first, then filename for
+  /// mail that predates content ids. `instr` rather than `LIKE` because a
+  /// filename containing `%` or `_` would otherwise act as a wildcard and flag
+  /// unrelated attachments; `lower()` on both sides because senders are
+  /// inconsistent about case.
+  Future<void> _backfillInlineAttachments() async {
+    logger.i("AppDatabase: flagging inline attachments in existing mail...");
+    await _db.execute('''
+      UPDATE files SET is_inline = 1
+      WHERE email_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM emails e
+          WHERE e.id = files.email_id
+            AND e.html_body IS NOT NULL
+            AND e.html_body <> ''
+            AND (
+              (files.content_id IS NOT NULL AND files.content_id <> ''
+                AND instr(lower(e.html_body),
+                          'cid:' || lower(files.content_id)) > 0)
+              OR instr(lower(e.html_body), 'cid:' || lower(files.name)) > 0
+            )
+        )
+    ''');
+
+    // Embeddings already computed for those images are now dead weight: they
+    // can never be reached through the photos module and only add spacer GIFs
+    // and ad banners to similarity results. Dropping them is safe — an
+    // embedding is a derived cache, and the isolate recomputes anything still
+    // eligible — but it is deliberately part of the same one-time pass so a
+    // pre-existing index converges on the same contents a fresh one would have.
+    final cleared = await _db.select('''
+      SELECT COUNT(*) AS c FROM files_embeddings
+      WHERE file_id IN (SELECT id FROM files WHERE is_inline = 1)
+    ''');
+    final count = cleared.isEmpty ? 0 : (cleared.first['c'] as int? ?? 0);
+    if (count > 0) {
+      logger.i("AppDatabase: dropping $count embeddings for inline images");
+      await _db.execute('''
+        DELETE FROM files_embeddings
+        WHERE file_id IN (SELECT id FROM files WHERE is_inline = 1)
+      ''');
     }
   }
 
@@ -937,7 +1007,8 @@ class AppDatabase {
       latitude REAL,
       longitude REAL,
       local_path TEXT,
-      content_id TEXT
+      content_id TEXT,
+      is_inline INTEGER NOT NULL DEFAULT 0
     );
     ''',
     // folders

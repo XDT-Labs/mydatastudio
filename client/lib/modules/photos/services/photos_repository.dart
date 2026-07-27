@@ -10,6 +10,13 @@ import 'package:intl/intl.dart';
 class PhotosRepository {
   AppLogger logger = AppLogger(null);
 
+  /// Attachments that are part of an email's own presentation — spacers,
+  /// logos, tracking pixels, ad banners — are excluded here. They are images by
+  /// content type and are attached to the message like any other file, so
+  /// without this filter a single HTML newsletter drops a dozen of them into
+  /// the photo grid. See `InlineAttachment`.
+  static const String _excludeInline = " AND f.is_inline = 0";
+
   Future<List<File>> photos() async {
     AppDatabase? db = DatabaseManager.instance.database;
     if (db == null) return [];
@@ -18,7 +25,8 @@ class PhotosRepository {
       "SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner"
       " FROM files f"
       " JOIN collections c ON f.collection_id = c.id"
-      " WHERE f.content_type = ? ORDER BY f.date_created DESC",
+      " WHERE f.content_type = ?$_excludeInline"
+      " ORDER BY f.date_created DESC",
       [FilesConstants.mimeTypeImage],
     );
     return rows.map((r) => _fileWithAbsolutePath(r)).toList();
@@ -34,7 +42,8 @@ class PhotosRepository {
       "SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner"
       " FROM files f"
       " JOIN collections c ON f.collection_id = c.id"
-      " WHERE f.content_type = ? ORDER BY f.date_created ASC",
+      " WHERE f.content_type = ?$_excludeInline"
+      " ORDER BY f.date_created ASC",
       [FilesConstants.mimeTypeImage],
     );
 

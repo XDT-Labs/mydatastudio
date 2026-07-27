@@ -16,6 +16,7 @@ import 'package:mydatastudio/modules/email/services/email_repository.dart';
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
+import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
@@ -495,6 +496,9 @@ class YahooScannerIsolateWorker {
     required String extractionRoot,
     required String appDir,
     required AppLogger logger,
+    // Needed to tell an embedded image from a real attachment: the body is
+    // what says which parts it references. See `InlineAttachment`.
+    String? htmlBody,
   }) async {
     List<db_file.File> files = [];
     await io.Directory(targetFolderPath).create(recursive: true);
@@ -512,6 +516,21 @@ class YahooScannerIsolateWorker {
       if (rawFileName == null) continue;
       // Sanitize filename to prevent path traversal
       final fileName = p.basename(rawFileName).replaceAll('..', '');
+
+      // An HTML message drags in every spacer, logo and tracking pixel as a
+      // real MIME part. Flagging them here is what keeps them out of the photo
+      // grid and the embedding queue further downstream.
+      final contentId = InlineAttachment.normalizeContentId(
+        part.getHeaderValue('content-id'),
+      );
+      final isInline = InlineAttachment.isInline(
+        contentId: contentId,
+        fileName: fileName,
+        htmlBody: htmlBody,
+        dispositionInline:
+            part.getHeaderContentDisposition()?.disposition ==
+            ContentDisposition.inline,
+      );
 
       Uint8List? content;
       try {
@@ -581,6 +600,8 @@ class YahooScannerIsolateWorker {
             isDeleted: false,
             emailId: messageId,
             thumbnail: thumbnail,
+            contentId: contentId,
+            isInline: isInline,
           );
           files.add(f);
         }
@@ -748,6 +769,7 @@ class YahooScannerIsolateWorker {
         extractionRoot: extractionRoot,
         appDir: appDir,
         logger: logger,
+        htmlBody: htmlBody,
       );
       emailObj.attachments = attachments;
       for (var file in attachments) {

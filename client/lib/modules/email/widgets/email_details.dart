@@ -113,8 +113,14 @@ class _EmailDetails extends State<EmailDetails> {
     }
 
     setState(() {
+      // Two signals, because they cover different mail. `isInline` is what the
+      // scanners recorded at import; `inlined` is what this render actually
+      // resolved, which still catches archives scanned before the flag existed
+      // and never got the backfill.
       _attachments =
-          attachments.where((a) => !inlined.contains(a.id)).toList();
+          attachments
+              .where((a) => !a.isInline && !inlined.contains(a.id))
+              .toList();
     });
     _controller.loadHtmlString(html);
   }

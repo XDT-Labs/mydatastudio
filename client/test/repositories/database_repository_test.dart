@@ -238,6 +238,63 @@ void main() {
       expect(rows, isEmpty);
     });
 
+    test('embedding queue skips images embedded in an email body', () async {
+      // Every HTML newsletter carries a dozen spacers, logos and tracking
+      // pixels as real image attachments. Embedding them costs on-device
+      // inference time per image, buys nothing — they are only ever seen
+      // inside the email they decorate — and pollutes similarity search.
+      final db = databaseManager.database!;
+      final dbRepo = DatabaseRepository(db);
+      final colRepo = CollectionRepository(db);
+      final fileRepo = FileDesktopRepository(db);
+
+      final colId = const Uuid().v4();
+      await colRepo.addCollection(
+        Collection(
+          id: colId,
+          name: 'Mail',
+          path: '/mail',
+          type: 'email',
+          scanner: 'gmail',
+          needsReAuth: false,
+          scanStatus: 'idle',
+        ),
+      );
+
+      Future<String> addImage({required bool isInline, required String name}) async {
+        final id = const Uuid().v4();
+        await fileRepo.create(
+          File(
+            id: id,
+            name: name,
+            path: name,
+            parent: '/mail',
+            dateCreated: DateTime.now(),
+            dateLastModified: DateTime.now(),
+            collectionId: colId,
+            contentType: 'application/image',
+            size: 2048,
+            isDeleted: false,
+            isInline: isInline,
+          ),
+        );
+        return id;
+      }
+
+      final photoId = await addImage(isInline: false, name: 'Sunset.jpg');
+      final spacerId = await addImage(isInline: true, name: 'spacer.gif');
+
+      final missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 50);
+      final ids = missing.map((f) => f.id);
+
+      expect(ids, contains(photoId), reason: 'a real attachment still queues');
+      expect(
+        ids,
+        isNot(contains(spacerId)),
+        reason: 'an image the message body embeds must never be embedded',
+      );
+    });
+
     test('AichatModelRepository Ollama model initialization and update', () async {
       final db = databaseManager.database!;
       final repo = AichatModelRepository(db);

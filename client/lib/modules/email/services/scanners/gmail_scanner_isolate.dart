@@ -19,6 +19,7 @@ import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
@@ -414,6 +415,7 @@ class GmailScannerIsolateWorker {
             [m.payload!],
             targetFolderPath: absoluteYearPath,
             logger: logger,
+            htmlBody: htmlBody,
           );
           email.attachments = attachments;
 
@@ -483,6 +485,19 @@ class GmailScannerIsolateWorker {
     return null;
   }
 
+  /// First value of [name] in a Gmail part's header list, case-insensitively.
+  ///
+  /// The Gmail API hands back headers as an unparsed name/value list, so
+  /// anything enough_mail would have parsed for the IMAP scanners has to be
+  /// looked up by hand here.
+  static String? _headerValue(MessagePart part, String name) {
+    final wanted = name.toLowerCase();
+    for (final header in part.headers ?? const <MessagePartHeader>[]) {
+      if (header.name?.toLowerCase() == wanted) return header.value;
+    }
+    return null;
+  }
+
   static bool _checkAttachments(MessagePart part) {
     if (part.body?.attachmentId != null) return true;
     if (part.parts != null) {
@@ -502,6 +517,9 @@ class GmailScannerIsolateWorker {
     List<MessagePart> parts, {
     String? targetFolderPath,
     AppLogger? logger,
+    // Needed to tell an embedded image from a real attachment: the body is
+    // what says which parts it references. See `InlineAttachment`.
+    String? htmlBody,
   }) async {
     List<File> files = [];
     final sep = io.Platform.pathSeparator;
@@ -525,6 +543,24 @@ class GmailScannerIsolateWorker {
           );
 
           final originalFileName = part.filename ?? 'unnamed_attachment';
+          // An HTML message drags in every spacer, logo and tracking pixel as
+          // a real MIME part. Flagging them here keeps them out of the photo
+          // grid and the embedding queue. Gmail exposes the headers as a flat
+          // name/value list rather than parsed, hence the lookup.
+          final contentId = InlineAttachment.normalizeContentId(
+            _headerValue(part, 'content-id'),
+          );
+          final isInline = InlineAttachment.isInline(
+            contentId: contentId,
+            fileName: originalFileName,
+            htmlBody: htmlBody,
+            dispositionInline:
+                _headerValue(
+                  part,
+                  'content-disposition',
+                )?.trim().toLowerCase().startsWith('inline') ??
+                false,
+          );
           // Use prefix to avoid collisions in the flat Year folder
           final fileName = '${messageId}_$originalFileName';
           final file = io.File(p.join(effectiveFolderPath, fileName));
@@ -545,6 +581,8 @@ class GmailScannerIsolateWorker {
             contentType: part.mimeType ?? 'application/octet-stream',
             isDeleted: false,
             emailId: messageId,
+            contentId: contentId,
+            isInline: isInline,
           );
 
           logger?.s(
@@ -566,6 +604,7 @@ class GmailScannerIsolateWorker {
             part.parts!,
             targetFolderPath: effectiveFolderPath,
             logger: logger,
+            htmlBody: htmlBody,
           ),
         );
       }
