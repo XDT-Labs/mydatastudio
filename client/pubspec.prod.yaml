@@ -116,7 +116,7 @@ dev_dependencies:
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
-  # rules league.
+  # rules and activating additional ones.
   build_runner: ^2.15.1
   flutter_lints: ^6.0.0
   test: ^1.24.9
