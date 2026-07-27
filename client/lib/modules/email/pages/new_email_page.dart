@@ -339,12 +339,21 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
         serverUrl: serverUrl,
         serverToken: MainApp.llmServiceToken.valueOrNull,
       );
+      // Held by the manager, not this page: the import outlives the setup
+      // screen (it can run for many minutes on a multi-gigabyte archive) and
+      // deleting the collection needs something to stop.
+      ScannerManager.getInstance().pstScanners[collection.id] = pstIsolate;
       await pstIsolate.start(collection, force: true);
 
       // Refresh collections
       GetCollectionsService.instance.invoke(
         GetCollectionsServiceCommand('email'),
       );
+
+      // Select the collection being imported, otherwise the email page falls
+      // back to whichever email collection happens to be first and the user
+      // watches the wrong mailbox.
+      EmailPage.selectedCollection.add(collection);
 
       if (!mounted) return;
       GoRouter.of(context).go('/email');

@@ -22,7 +22,8 @@ class EmailAttachmentsSection extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           SizedBox(
-            height: 100,
+            // Preview + filename + the open/save button row.
+            height: 150,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: attachments.length,

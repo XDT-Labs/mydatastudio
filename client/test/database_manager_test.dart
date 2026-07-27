@@ -168,6 +168,38 @@ void main() {
       }
     });
 
+    test(
+      'AppDatabase.create adds files.content_id to a database created before it existed',
+      () async {
+        // The DDL only runs for a brand-new database, so a column added later
+        // reaches existing installs solely through the guarded ALTER. If that
+        // stops working, every attachment write fails at runtime — on an
+        // upgraded install only, which is exactly where it would go unnoticed.
+        final supportDir = await getApplicationSupportDirectory();
+        const dbName = 'content_id_migration_test.db';
+        final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+        if (dbFile.existsSync()) dbFile.deleteSync();
+
+        var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        // Drop back to the pre-migration shape.
+        await appDb.rawDb.execute('ALTER TABLE files DROP COLUMN content_id');
+        expect(await _fileColumns(appDb), isNot(contains('content_id')));
+        await appDb.close();
+
+        // Reopening is what an upgraded install does.
+        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        expect(await _fileColumns(appDb), contains('content_id'));
+
+        // And again — the ALTER must not fire a second time and throw.
+        await appDb.close();
+        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        expect(await _fileColumns(appDb), contains('content_id'));
+
+        await appDb.close();
+        if (dbFile.existsSync()) dbFile.deleteSync();
+      },
+    );
+
     test('getRealApplicationSupportPath should return correct path even if PathProviderPlatform is overridden', () async {
       final originalSupportDir = await getApplicationSupportDirectory();
       final realPath = await DatabaseManager.getRealApplicationSupportPath();
@@ -191,4 +223,10 @@ void main() {
       PathProviderPlatform.instance = oldPlatform;
     });
   });
+}
+
+/// Column names currently on the `files` table.
+Future<Set<String>> _fileColumns(AppDatabase db) async {
+  final rows = await db.rawDb.select('PRAGMA table_info(files)');
+  return rows.map((r) => r['name'] as String).toSet();
 }

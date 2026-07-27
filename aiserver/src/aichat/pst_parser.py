@@ -110,6 +110,11 @@ PR_SENDER_EMAIL_ADDRESS = 0x0C1F
 # open here loses nothing, while failing closed would silently drop real mail.
 MAIL_MESSAGE_CLASS_PREFIXES = ("ipm.note", "report.")
 
+# How many messages to examine between "progress" events. Importing a
+# multi-gigabyte archive takes long enough that the client needs something to
+# show; emitting per message would just flood the stream.
+PROGRESS_EVERY = 50
+
 
 class PstParser:
     def __init__(self, pst_file, output_dir):
@@ -120,6 +125,11 @@ class PstParser:
         self._folder_count = 0
         self._email_count = 0
         self._error_count = 0
+        # Messages looked at, including ones skipped as non-mail. This is what
+        # progress is measured against, because it is what `count_messages()`
+        # predicts — counting only imported emails would leave the bar short of
+        # 100% by however many free/busy blocks the archive holds.
+        self._examined_count = 0
         
     @staticmethod
     def safe_str(value):
@@ -271,6 +281,11 @@ class PstParser:
         self._folder_count = 0
         self._email_count = 0
         self._error_count = 0
+        self._examined_count = 0
+        # Message total up front so the client can show a real percentage
+        # instead of a spinner. The pre-pass only reads folder metadata, which
+        # is cheap next to parsing every message.
+        yield {"type": "start", "total_messages": self.count_messages()}
         try:
             root = self.pst.get_root_folder()
             yield from self._process_folder(root, "")
@@ -291,6 +306,54 @@ class PstParser:
         """Build an error event and count it toward the completion summary."""
         self._error_count += 1
         return {"type": "error", "message": message}
+
+    def count_messages(self) -> int:
+        """Count the messages `walk()` will examine, for progress reporting.
+
+        Mirrors the folder filtering in `_process_folder` exactly — wrapper,
+        system and non-email folders have their direct messages skipped there,
+        so counting them here would make the import look like it stalled short
+        of the end. Reads only folder metadata, never a message, so it is cheap
+        even on a multi-gigabyte archive.
+
+        Returns 0 when the tree can't be read; the client treats that as
+        "total unknown" and falls back to an indeterminate progress bar.
+        """
+        total = 0
+        try:
+            stack = [self.pst.get_root_folder()]
+        except Exception:
+            return 0
+
+        while stack:
+            folder = stack.pop()
+            try:
+                folder_name = folder.get_name() or "Root"
+            except Exception:
+                folder_name = UNREADABLE_FOLDER_NAME
+
+            skips_messages = (
+                self._is_wrapper_folder(folder_name)
+                or self._is_system_folder(folder_name)
+                or self._is_non_email_folder(folder_name)
+            )
+            if not skips_messages:
+                try:
+                    total += folder.get_number_of_sub_messages()
+                except Exception:
+                    pass
+
+            try:
+                num_folders = folder.get_number_of_sub_folders()
+            except Exception:
+                continue
+            for i in range(num_folders):
+                try:
+                    stack.append(folder.get_sub_folder(i))
+                except Exception:
+                    pass
+
+        return total
 
 
     @staticmethod
@@ -322,19 +385,15 @@ class PstParser:
         return message_class.strip().lower().startswith(MAIL_MESSAGE_CLASS_PREFIXES)
 
     @staticmethod
-    def _get_attachment_filename(att, index: int) -> str:
+    def _attachment_prop(att, prop_ids) -> str:
         """
-        Extract a human-readable filename from a pypff.attachment object.
+        Read the first readable string property in [prop_ids] off an attachment.
 
-        pypff.attachment has no get_name() method; filenames are stored as MAPI
-        properties inside the record set:
-          PR_ATTACH_LONG_FILENAME  (0x3707) – preferred (full Unicode name)
-          PR_ATTACH_FILENAME       (0x3704) – 8.3 short name fallback
-          PR_DISPLAY_NAME          (0x3001) – last resort display name
+        pypff.attachment exposes almost nothing directly; its metadata lives as
+        MAPI properties inside the record set, so every attachment field has to
+        be dug out this way. Returns "" when none of the properties are present
+        or readable.
         """
-        # MAPI property IDs to probe, in order of preference
-        FILENAME_PROPS = (0x3707, 0x3704, 0x3001)
-
         try:
             for rs_idx in range(att.number_of_record_sets):
                 rs = att.get_record_set(rs_idx)
@@ -346,18 +405,46 @@ class PstParser:
                         props[entry.entry_type] = entry
                     except Exception:
                         continue
-                for prop_id in FILENAME_PROPS:
+                for prop_id in prop_ids:
                     if prop_id in props:
                         try:
-                            name = props[prop_id].get_data_as_string()
-                            if name and name.strip():
-                                return name.strip()
+                            value = props[prop_id].get_data_as_string()
+                            if value and value.strip():
+                                return value.strip()
                         except Exception:
                             continue
         except Exception:
             pass
+        return ""
 
-        return f"attachment_{index}"
+    @classmethod
+    def _get_attachment_filename(cls, att, index: int) -> str:
+        """
+        Extract a human-readable filename from a pypff.attachment object.
+
+        pypff.attachment has no get_name() method; filenames are stored as MAPI
+        properties inside the record set:
+          PR_ATTACH_LONG_FILENAME  (0x3707) – preferred (full Unicode name)
+          PR_ATTACH_FILENAME       (0x3704) – 8.3 short name fallback
+          PR_DISPLAY_NAME          (0x3001) – last resort display name
+        """
+        name = cls._attachment_prop(att, (0x3707, 0x3704, 0x3001))
+        return name or f"attachment_{index}"
+
+    @classmethod
+    def _get_attachment_content_id(cls, att) -> str:
+        """
+        Read PR_ATTACH_CONTENT_ID (0x3712) — the token an HTML body references
+        as `<img src="cid:...">`.
+
+        Without it an inline image is indistinguishable from a regular
+        attachment, and the client has nothing to resolve the cid against, so
+        every embedded image in the message renders broken. The surrounding
+        angle brackets some clients store are stripped: the cid: URL never
+        carries them.
+        """
+        content_id = cls._attachment_prop(att, (0x3712,))
+        return content_id.strip("<>")
 
     @staticmethod
     def _get_content_type(filename: str) -> str:
@@ -423,6 +510,10 @@ class PstParser:
         # into sub-folders below.
         if not is_non_email:
             for i in range(num_messages):
+                # Counted before the work, and on every path out of it, so the
+                # tally stays in step with what count_messages() predicted even
+                # when a message fails or is skipped as non-mail.
+                self._examined_count += 1
                 try:
                     message = folder.get_sub_message(i)
                     result = self._process_message(message, current_path, i)
@@ -434,6 +525,13 @@ class PstParser:
                         yield result
                 except Exception as e:
                     yield self._emit_error(f"Error getting message {i} in {folder_name}: {str(e)}")
+                if self._examined_count % PROGRESS_EVERY == 0:
+                    yield {
+                        "type": "progress",
+                        "examined": self._examined_count,
+                        "emails": self._email_count,
+                        "folder": current_path,
+                    }
 
         yield from self._recurse_subfolders(folder, current_path, folder_name)
 
@@ -634,6 +732,7 @@ class PstParser:
                                 "path": file_path,
                                 "size": os.path.getsize(file_path),
                                 "contentType": self._get_content_type(filename),
+                                "contentId": self._get_attachment_content_id(att),
                             })
                         except Exception as att_e:
                             # Individual attachment failed; keep processing others

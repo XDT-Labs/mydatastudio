@@ -24,6 +24,65 @@ import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:http/http.dart' as http;
+import 'package:rxdart/rxdart.dart';
+
+/// A snapshot of an in-flight PST import, for the UI to render.
+///
+/// A multi-gigabyte archive takes long enough that an unannotated spinner is
+/// indistinguishable from a hang, so the parser reports its message total up
+/// front and the worker relays its position against it.
+class PstImportProgress {
+  const PstImportProgress({
+    required this.collectionId,
+    required this.collectionName,
+    this.totalMessages = 0,
+    this.examined = 0,
+    this.emails = 0,
+    this.folder,
+    this.done = false,
+  });
+
+  final String collectionId;
+  final String collectionName;
+
+  /// Messages the parser expects to examine, or 0 when it could not read the
+  /// folder tree well enough to say — in which case there is no percentage and
+  /// the UI falls back to an indeterminate bar.
+  final int totalMessages;
+  final int examined;
+
+  /// Messages actually imported. Lower than [examined], because a PST folder
+  /// also holds non-mail items the parser skips.
+  final int emails;
+
+  /// PST path of the folder being read, for a "what is it doing" line.
+  final String? folder;
+  final bool done;
+
+  /// Fraction complete in 0..1, or null when the total is unknown.
+  double? get fraction {
+    if (totalMessages <= 0) return null;
+    return (examined / totalMessages).clamp(0.0, 1.0);
+  }
+
+  PstImportProgress copyWith({
+    int? totalMessages,
+    int? examined,
+    int? emails,
+    String? folder,
+    bool? done,
+  }) {
+    return PstImportProgress(
+      collectionId: collectionId,
+      collectionName: collectionName,
+      totalMessages: totalMessages ?? this.totalMessages,
+      examined: examined ?? this.examined,
+      emails: emails ?? this.emails,
+      folder: folder ?? this.folder,
+      done: done ?? this.done,
+    );
+  }
+}
 
 /// [OutlookPstScannerIsolate] is the client-side manager for the Outlook PST
 /// scanning background isolate. It spawns the worker, which calls the Python
@@ -61,6 +120,13 @@ class OutlookPstScannerIsolate {
 
   final String dbDir;
 
+  /// The import currently running, or null when none is. The import is started
+  /// from the setup page but has to be reported on the email page, which is
+  /// where the user lands as soon as it begins — hence a broadcast subject
+  /// rather than a callback.
+  static final BehaviorSubject<PstImportProgress?> importProgress =
+      BehaviorSubject<PstImportProgress?>.seeded(null);
+
   OutlookPstScannerIsolate({
     this.token,
     required this.appDir,
@@ -95,6 +161,13 @@ class OutlookPstScannerIsolate {
       'vaultDek': VaultManager.instance.dek,
     };
 
+    importProgress.add(
+      PstImportProgress(
+        collectionId: collection.id,
+        collectionName: collection.name,
+      ),
+    );
+
     _isolate = await Isolate.spawn(OutlookPstScannerIsolateWorker.worker, args);
 
     receivePort.listen((message) {
@@ -104,6 +177,20 @@ class OutlookPstScannerIsolate {
           // Trigger UI refresh
           GetEmailsService.instance.invoke(
             EmailServiceCommand(collection, sortColumn: "date", sortAsc: false),
+          );
+        } else if (message['type'] == 'progress') {
+          final current = importProgress.valueOrNull;
+          // A progress report for a collection that is no longer the one
+          // importing (a second import started) is stale — drop it.
+          if (current == null || current.collectionId != collection.id) return;
+          importProgress.add(
+            current.copyWith(
+              totalMessages: (message['totalMessages'] as int?),
+              examined: (message['examined'] as int?),
+              emails: (message['emails'] as int?),
+              folder: message['folder'] as String?,
+              done: message['done'] as bool?,
+            ),
           );
         }
       }
@@ -164,6 +251,9 @@ class OutlookPstScannerIsolateWorker {
 
     Future<Never> exitIncomplete(String error) async {
       await markStatus('incomplete');
+      // Without this the progress banner would sit at 0% forever on a failure
+      // that never reached the stream at all.
+      clientPort.send({'type': 'progress', 'done': true});
       clientPort.send({'type': 'refresh'});
       Isolate.exit(clientPort, {'error': error});
     }
@@ -221,6 +311,10 @@ class OutlookPstScannerIsolateWorker {
     int summaryErrors = 0;
     bool sawSummary = false;
     bool streamFailed = false;
+    // Messages the parser said it would examine, from its opening 'start'
+    // record. 0 means it couldn't read the tree; the UI shows an indeterminate
+    // bar rather than a wrong percentage.
+    int totalMessages = 0;
 
     // 3. Listen to stream output — use await-for to support async service calls
     try {
@@ -231,7 +325,28 @@ class OutlookPstScannerIsolateWorker {
         if (line.trim().isEmpty) continue;
         final data = jsonDecode(line);
 
-        if (data['type'] == 'folder') {
+        if (data['type'] == 'start') {
+          // Arrives before any folder or email, so the UI can show a real
+          // percentage from the first update instead of switching partway.
+          totalMessages = (data['total_messages'] as num?)?.toInt() ?? 0;
+          clientPort.send({
+            'type': 'progress',
+            'totalMessages': totalMessages,
+            'examined': 0,
+            'emails': 0,
+          });
+        } else if (data['type'] == 'progress') {
+          clientPort.send({
+            'type': 'progress',
+            'totalMessages': totalMessages,
+            'examined': (data['examined'] as num?)?.toInt() ?? 0,
+            // Emails the *client* persisted, not the parser's tally: a record
+            // that failed to apply below is not in the archive the user ends
+            // up with, and the count sits next to the progress bar.
+            'emails': count,
+            'folder': data['folder'] as String?,
+          });
+        } else if (data['type'] == 'folder') {
           final folderId = const Uuid().v5(
             Namespace.url.value,
             'folder:pst:${collection.id}:${data['path']}',
@@ -344,6 +459,12 @@ class OutlookPstScannerIsolateWorker {
               size: (att['size'] as num).toInt(),
               isDeleted: false,
               emailId: emailId,
+              // Empty for an ordinary attachment; set only when the HTML body
+              // embeds this file as `<img src="cid:...">`.
+              contentId:
+                  (att['contentId'] as String?)?.isNotEmpty == true
+                      ? att['contentId'] as String
+                      : null,
             );
             await FileUpsertService.instance.invoke(
               FileUpsertServiceCommand(file, appDb),
@@ -427,6 +548,15 @@ class OutlookPstScannerIsolateWorker {
     // collection and selecting the file again.
     await markStatus(clean ? 'complete' : 'incomplete');
 
+    // Sent before the refresh so the UI drops the progress banner in the same
+    // frame it repaints the list, rather than flashing a stalled bar over it.
+    clientPort.send({
+      'type': 'progress',
+      'totalMessages': totalMessages,
+      'examined': totalMessages,
+      'emails': count,
+      'done': true,
+    });
     clientPort.send({'type': 'refresh'});
     Isolate.exit(clientPort, {'done': true});
     });

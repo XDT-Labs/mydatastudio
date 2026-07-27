@@ -49,13 +49,18 @@ class EmailRepository {
       args.add('%$search%');
     }
 
-    String colName = 'date';
+    // Sorting is done here, in SQL, over the whole folder — never over the page
+    // already in memory, which would only order the hundred rows loaded so far.
+    // COLLATE NOCASE on the text columns because SQLite's default BINARY
+    // collation orders by byte, which files every lowercase sender after every
+    // uppercase one.
+    String orderBy = 'date';
     if (sortColumn == 'from') {
-      colName = '[from]';
+      orderBy = '[from] COLLATE NOCASE';
     } else if (sortColumn == 'subject') {
-      colName = 'subject';
+      orderBy = 'subject COLLATE NOCASE';
     }
-    query += "ORDER BY $colName ${sortAsc ? 'ASC' : 'DESC'} ";
+    query += "ORDER BY $orderBy ${sortAsc ? 'ASC' : 'DESC'} ";
 
     if (limit > 0) {
       query += "LIMIT ? OFFSET ? ";

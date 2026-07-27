@@ -6,20 +6,62 @@ import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/modules/email/notifications/email_selected_notification.dart';
+import 'package:mydatastudio/modules/email/notifications/email_selection_changed_notification.dart';
 import 'package:mydatastudio/modules/email/notifications/email_sort_changed_notification.dart';
 import 'package:mydatastudio/modules/email/pages/new_email_page.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/email/services/email_repository.dart';
 import 'package:mydatastudio/modules/email/services/get_email_folders_service.dart';
+import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
 import 'package:mydatastudio/modules/email/widgets/email_details.dart';
 import 'package:mydatastudio/modules/email/widgets/email_table.dart';
 import 'package:mydatastudio/modules/email/widgets/scanning_placeholder_widget.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_breadcrumb/flutter_breadcrumb.dart';
 import 'package:moment_dart/moment_dart.dart';
 import 'package:rxdart/rxdart.dart';
+
+/// Whether an import progress update should make the email list re-query.
+///
+/// The import writes to the database from its own isolate and nothing notifies
+/// the page, so without a refresh the list sits empty until the user happens to
+/// click the collection in the sidebar. Refreshing on *every* update is the
+/// other failure: it fires every fifty messages for the length of a
+/// multi-gigabyte import, and each refresh rebuilds the list from scratch.
+///
+/// Hence the conditions, in order of precedence:
+///   * a finished import always refreshes — that is the authoritative one, and
+///     it is what puts the messages on screen;
+///   * an update for some other collection is ignored;
+///   * a reader must not have the message they are on rebuilt away;
+///   * once a full page is loaded, paging is the scroll handler's job and a
+///     refresh would only cost the user their position;
+///   * otherwise, at most one refresh per [minInterval].
+///
+/// Kept free of widget state so the policy can be exercised on its own.
+bool shouldRefreshForImport({
+  required PstImportProgress? progress,
+  required String? currentCollectionId,
+  required bool hasOpenEmail,
+  required int loadedCount,
+  required int pageSize,
+  required DateTime now,
+  required DateTime? lastRefresh,
+  Duration minInterval = const Duration(seconds: 2),
+}) {
+  if (progress == null) return false;
+  if (progress.collectionId != currentCollectionId) return false;
+  if (progress.done) return true;
+  if (hasOpenEmail) return false;
+  if (loadedCount >= pageSize) return false;
+  if (lastRefresh != null && now.difference(lastRefresh) < minInterval) {
+    return false;
+  }
+  return true;
+}
 
 class EmailPage extends StatefulWidget {
   const EmailPage({super.key});
@@ -44,6 +86,7 @@ class _EmailPage extends State<EmailPage> {
   StreamSubscription? _emailsSub;
   StreamSubscription? _folderSub;
   StreamSubscription? _scannerSub;
+  StreamSubscription? _pstProgressSub;
 
   List<Collection> collections = [];
   Collection? collection;
@@ -59,13 +102,23 @@ class _EmailPage extends State<EmailPage> {
   int _currentOffset = 0;
   bool _isLoadingMore = false;
   bool _hasMore = true;
+
+  /// Bumped by every [_refreshEmails]; an in-flight page fetch carrying an
+  /// older value has been superseded and must discard its rows.
+  int _loadGeneration = 0;
+
+  /// When the import last pushed new messages into the list, so a long import
+  /// doesn't re-query on every progress tick.
+  DateTime? _lastImportRefresh;
   Email? selectedEmail;
+  PstImportProgress? pstProgress;
   final TextEditingController searchController = TextEditingController();
   bool _needsFolderAutoSelect = false;
 
   @override
   void initState() {
     _scrollController.addListener(_onScroll);
+    HardwareKeyboard.instance.addHandler(_onKeyEvent);
     _collectionService = GetCollectionsService.instance;
 
     _collectionsServiceSub = _collectionService!.sink.listen((value) {
@@ -95,10 +148,14 @@ class _EmailPage extends State<EmailPage> {
 
     _selectedFolderSub = EmailPage.selectedFolder.listen((value) {
       if (mounted) {
+        // Picking a folder is a request to see that folder's messages, so the
+        // open message has to close — the detail view covers the whole pane,
+        // and leaving it up made clicking a folder in the drawer look dead.
+        setState(() {
+          selectedEmail = null;
+          if (value == null) selectedFolderName = null;
+        });
         _refreshEmails();
-        if (value == null) {
-          setState(() => selectedFolderName = null);
-        }
       }
     });
 
@@ -144,6 +201,14 @@ class _EmailPage extends State<EmailPage> {
       }
     });
 
+    // A PST import is started from the setup page and keeps running after it
+    // navigates here, so this page is where it has to be reported.
+    _pstProgressSub = OutlookPstScannerIsolate.importProgress.listen((value) {
+      if (!mounted) return;
+      setState(() => pstProgress = value);
+      _refreshForImport(value);
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _collectionService?.invoke(GetCollectionsServiceCommand("email"));
     });
@@ -152,6 +217,13 @@ class _EmailPage extends State<EmailPage> {
 
   void _refreshEmails() {
     if (collection == null) return;
+
+    // Invalidates any page request already in flight. Without this, a fetch
+    // issued before the reset lands afterwards and appends its rows to the
+    // freshly emptied list — duplicating messages, or showing the previous
+    // folder's. Rare when a refresh only followed a click; routine now that an
+    // import refreshes on its own while a scroll may be paging.
+    _loadGeneration++;
 
     if (mounted) {
       setState(() {
@@ -169,6 +241,28 @@ class _EmailPage extends State<EmailPage> {
     );
   }
 
+  /// Pulls in what the import has written so far, per
+  /// [shouldRefreshForImport].
+  void _refreshForImport(PstImportProgress? progress) {
+    final now = DateTime.now();
+    if (!shouldRefreshForImport(
+      progress: progress,
+      currentCollectionId: collection?.id,
+      hasOpenEmail: selectedEmail != null,
+      loadedCount: emails.length,
+      pageSize: _pageSize,
+      now: now,
+      lastRefresh: _lastImportRefresh,
+    )) {
+      return;
+    }
+
+    // Cleared on the final refresh so the next import isn't throttled by the
+    // last one's clock.
+    _lastImportRefresh = (progress?.done ?? false) ? null : now;
+    _refreshEmails();
+  }
+
   void _onScroll() {
     if (!_scrollController.hasClients) return;
 
@@ -178,6 +272,74 @@ class _EmailPage extends State<EmailPage> {
     if (currentScroll >= (maxScroll * 0.7) && !_isLoadingMore && _hasMore) {
       _loadMoreEmails();
     }
+  }
+
+  /// Index of the open message in the currently loaded page, or -1.
+  ///
+  /// Matched by id rather than identity: `_refreshEmails` rebuilds the list from
+  /// the database, so the open message is a different instance afterwards.
+  int get _selectedIndex {
+    final email = selectedEmail;
+    if (email == null) return -1;
+    return emails.indexWhere((e) => e.id == email.id);
+  }
+
+  bool get _canShowPrevious => _selectedIndex > 0;
+
+  /// True while there is a next message, counting ones not yet paged in.
+  bool get _canShowNext {
+    final index = _selectedIndex;
+    if (index < 0) return false;
+    return index < emails.length - 1 || _hasMore;
+  }
+
+  void _showPrevious() {
+    final index = _selectedIndex;
+    if (index <= 0) return;
+    setState(() => selectedEmail = emails[index - 1]);
+  }
+
+  Future<void> _showNext() async {
+    var index = _selectedIndex;
+    if (index < 0) return;
+
+    // Reading past the end of the loaded page is the common case for a large
+    // folder — page the next batch in rather than dead-ending on message 100.
+    if (index >= emails.length - 1) {
+      if (!_hasMore) return;
+      await _loadMoreEmails();
+      if (!mounted) return;
+      index = _selectedIndex;
+      if (index < 0 || index >= emails.length - 1) return;
+    }
+
+    setState(() => selectedEmail = emails[index + 1]);
+  }
+
+  /// Left/right arrows step through messages while one is open.
+  ///
+  /// Registered globally rather than via a focused [Focus] widget because the
+  /// message body is a platform WebView: once the user clicks into it, a
+  /// focus-scoped handler stops seeing key events.
+  bool _onKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
+    if (!mounted || selectedEmail == null) return false;
+
+    // A global handler would otherwise eat the arrow keys someone is using to
+    // move the caret in a search or chat field.
+    if (FocusManager.instance.primaryFocus?.context?.widget is EditableText) {
+      return false;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      _showPrevious();
+      return true;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _showNext();
+      return true;
+    }
+    return false;
   }
 
   void _listenToScannerStatus(Collection? c) {
@@ -209,6 +371,8 @@ class _EmailPage extends State<EmailPage> {
     if (!_hasMore || _isLoadingMore || collection == null) return;
     setState(() => _isLoadingMore = true);
 
+    final generation = _loadGeneration;
+
     // _currentOffset is the offset of the page about to be fetched, not the one
     // already loaded. It used to be the latter, and the first page of every
     // folder was therefore fetched at offset 0 + _pageSize — silently skipping
@@ -228,16 +392,19 @@ class _EmailPage extends State<EmailPage> {
       offset: nextOffset,
     );
 
-    if (mounted) {
-      setState(() {
-        // Advance by what actually came back, so a short page can't leave a gap.
-        _currentOffset = nextOffset + nextPage.length;
-        emails = [...emails, ...nextPage];
-        count = emails.length;
-        _hasMore = nextPage.length >= _pageSize;
-        _isLoadingMore = false;
-      });
-    }
+    if (!mounted) return;
+    // A refresh landed while this page was being fetched, so these rows belong
+    // to a list that no longer exists. Appending them would duplicate messages.
+    if (generation != _loadGeneration) return;
+
+    setState(() {
+      // Advance by what actually came back, so a short page can't leave a gap.
+      _currentOffset = nextOffset + nextPage.length;
+      emails = [...emails, ...nextPage];
+      count = emails.length;
+      _hasMore = nextPage.length >= _pageSize;
+      _isLoadingMore = false;
+    });
   }
 
   @override
@@ -248,6 +415,8 @@ class _EmailPage extends State<EmailPage> {
     _selectedFolderSub?.cancel();
     _folderSub?.cancel();
     _scannerSub?.cancel();
+    _pstProgressSub?.cancel();
+    HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     searchController.dispose();
@@ -266,20 +435,26 @@ class _EmailPage extends State<EmailPage> {
 
     final theme = Theme.of(context);
     final bool showDetail = selectedEmail != null;
+    final importing = _activeImport;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (isScanning || _isLoadingMore)
+          if (importing != null || isScanning || _isLoadingMore)
             LinearProgressIndicator(
               minHeight: 2,
+              // Null value keeps the bar indeterminate — which is what an
+              // archive whose size the parser couldn't read has to fall back
+              // to, and what an ordinary folder scan has always used.
+              value: importing?.fraction,
               backgroundColor: Colors.transparent,
               valueColor: AlwaysStoppedAnimation<Color>(
                 theme.colorScheme.primary,
               ),
             ),
+          if (importing != null) _buildImportBanner(theme, importing),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Container(
@@ -304,6 +479,79 @@ class _EmailPage extends State<EmailPage> {
           Expanded(
             child: showDetail ? _buildEmailDetailArea() : _buildEmailListArea(),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// The running PST import, but only when it is the collection on screen.
+  ///
+  /// Null once it finishes, so the banner disappears on its own.
+  PstImportProgress? get _activeImport {
+    final progress = pstProgress;
+    if (progress == null || progress.done) return null;
+    if (progress.collectionId != collection?.id) return null;
+    return progress;
+  }
+
+  /// One-line status for a running import.
+  ///
+  /// Parsing a multi-gigabyte PST can run for many minutes without a single
+  /// email landing in a folder the user is looking at, so this has to say
+  /// something concrete — a bare spinner reads as a hang.
+  Widget _buildImportBanner(ThemeData theme, PstImportProgress progress) {
+    final fraction = progress.fraction;
+    final parts = <String>[
+      if (fraction != null)
+        'Importing ${progress.collectionName} — ${(fraction * 100).toStringAsFixed(0)}%'
+      else
+        'Importing ${progress.collectionName}…',
+      if (progress.totalMessages > 0)
+        '${progress.examined} of ${progress.totalMessages} messages'
+      else if (progress.examined > 0)
+        '${progress.examined} messages read',
+      if (progress.emails > 0) '${progress.emails} imported',
+    ];
+
+    return Container(
+      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              value: fraction,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              parts.join(' · '),
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSurface,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (progress.folder != null)
+            Flexible(
+              child: Text(
+                progress.folder!,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+              ),
+            ),
         ],
       ),
     );
@@ -417,6 +665,25 @@ class _EmailPage extends State<EmailPage> {
         ),
         const SizedBox(width: 8),
         IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 16),
+          color: theme.colorScheme.onSurfaceVariant,
+          tooltip: 'Previous Message (←)',
+          onPressed: _canShowPrevious ? _showPrevious : null,
+        ),
+        IconButton(
+          icon: const Icon(Icons.arrow_forward_ios, size: 16),
+          color: theme.colorScheme.onSurfaceVariant,
+          tooltip: 'Next Message (→)',
+          onPressed: _canShowNext ? _showNext : null,
+        ),
+        const SizedBox(width: 8),
+        Container(
+          height: 20,
+          width: 1,
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
           icon: const Icon(Icons.delete_outline, size: 20),
           color: theme.colorScheme.error,
           tooltip: 'Delete Message',
@@ -430,6 +697,21 @@ class _EmailPage extends State<EmailPage> {
   }
 
   Widget _buildEmailListArea() {
+    final importing = _activeImport;
+    if (emails.isEmpty && importing != null) {
+      // The first messages of a large archive can take minutes to land; an
+      // empty table with no explanation is the state this replaces.
+      return ScanningPlaceholderWidget(
+        collectionName: importing.collectionName,
+        progress: importing.fraction,
+        message: 'Importing ${importing.collectionName}…',
+        detail:
+            importing.totalMessages > 0
+                ? 'Read ${importing.examined} of ${importing.totalMessages} messages'
+                : 'Reading the archive. Large files can take several minutes.',
+      );
+    }
+
     if (emails.isEmpty && (isScanning || _isLoadingMore)) {
       return isScanning
           ? _buildScanningPlaceholder()
@@ -449,6 +731,12 @@ class _EmailPage extends State<EmailPage> {
           if (n is EmailSelectedNotification) {
             logger.i("Email selected: ${n.email.subject}");
             setState(() => selectedEmail = n.email);
+            return true;
+          }
+          if (n is EmailSelectionChangedNotification) {
+            // Checkbox state lives on the Email objects the table mutates in
+            // place; this rebuild is what re-evaluates the delete button.
+            setState(() {});
             return true;
           }
           return false;

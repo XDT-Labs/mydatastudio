@@ -417,6 +417,35 @@ class AppDatabase {
       await _seedAichatModels(_db);
       await _seedAichatSkills(_db);
     }
+    await _addMissingColumns();
+  }
+
+  /// Columns added to [schemaDDL] after the initial schema shipped.
+  ///
+  /// The DDL above only runs for a brand-new database, so an existing install
+  /// would never see them. Each add is guarded by the table's current columns,
+  /// which makes this safe to run on every open — and idempotent, which matters
+  /// because `initSchema` is called twice during [create].
+  Future<void> _addMissingColumns() async {
+    const additions = <String, Map<String, String>>{
+      // Inline images in an HTML email are referenced as `cid:<content id>`;
+      // without this the client can't tell which attachment a cid names.
+      'files': {'content_id': 'TEXT'},
+    };
+
+    for (final table in additions.entries) {
+      final existing =
+          (await _db.select("PRAGMA table_info(${table.key})"))
+              .map((r) => r['name'] as String)
+              .toSet();
+      for (final column in table.value.entries) {
+        if (existing.contains(column.key)) continue;
+        logger.i("AppDatabase: adding ${table.key}.${column.key}");
+        await _db.execute(
+          "ALTER TABLE ${table.key} ADD COLUMN ${column.key} ${column.value}",
+        );
+      }
+    }
   }
 
   static Future<void> _seedAichatSkills(Database db) async {
@@ -907,7 +936,8 @@ class AppDatabase {
       email_id TEXT,
       latitude REAL,
       longitude REAL,
-      local_path TEXT
+      local_path TEXT,
+      content_id TEXT
     );
     ''',
     // folders

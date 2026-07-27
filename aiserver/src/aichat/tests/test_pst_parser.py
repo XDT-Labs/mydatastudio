@@ -872,6 +872,62 @@ class TestBundledFixtures:
         assert len(set(ids)) == len(ids) == 11
         assert all("/" not in i and "\\" not in i for i in ids)
 
+    def test_outlook_walk_announces_the_message_total_up_front(
+        self, outlook_records
+    ):
+        """The walk opens with a `start` record carrying the message total.
+
+        The client shows a percentage against it while importing a
+        multi-gigabyte archive, so the total has to match what the walk
+        actually examines — folders the walk skips wholesale must not be
+        counted, or the bar stops short of the end and the import looks hung.
+        """
+        records = outlook_records[0]
+        assert records[0]["type"] == "start"
+
+        _, emails, errors, _ = _split(records)
+        # 11 mail items plus the one non-mail item the class filter drops; the
+        # total counts everything the walk looks at, which is the point.
+        assert records[0]["total_messages"] == 12
+        assert records[0]["total_messages"] >= len(emails) + len(errors)
+
+    def test_outlook_inline_attachments_carry_their_content_id(
+        self, outlook_records
+    ):
+        """Every `cid:` an HTML body references must be resolvable to an
+        attachment we extracted.
+
+        This is what makes embedded images render. The client rewrites each
+        `<img src="cid:...">` to the file the id names; without contentId there
+        is nothing to match on and every inline image in the message shows as a
+        broken link.
+        """
+        _, emails, _, _ = _split(outlook_records[0])
+        html_emails = [e for e in emails if e["subject"] == "HTML body"]
+        assert html_emails, "fixture must contain an email with inline images"
+
+        for email in html_emails:
+            refs = set(re.findall(r'cid:([^"\'\s>]+)', email["html_body"]))
+            assert refs, "the HTML body should reference its images by cid"
+            content_ids = {
+                a["contentId"] for a in email["attachments"] if a["contentId"]
+            }
+            assert refs <= content_ids, (
+                f"unresolvable cid refs: {sorted(refs - content_ids)}"
+            )
+
+    def test_outlook_non_inline_attachments_have_no_content_id(
+        self, outlook_records
+    ):
+        """A regular file attachment isn't referenced from the body, so it has
+        no content id — the client must keep listing it in the attachments
+        strip rather than inlining it into the message."""
+        _, emails, _, _ = _split(outlook_records[0])
+        plain = [e for e in emails if e["subject"] == "Multiple attachments"]
+        assert plain
+        for email in plain:
+            assert [a["contentId"] for a in email["attachments"]] == ["", "", ""]
+
     def test_outlook_folder_tree_including_nesting(self, outlook_records):
         """Folder paths carry their parent, and the PST root wrapper is hidden.
         The client rebuilds its folder hierarchy by splitting these paths, so a

@@ -34,8 +34,8 @@ class FileDesktopRepository {
     await db.execute(
       "INSERT INTO files (id, name, path, parent, date_created, date_last_modified, "
       "last_scanned_date, collection_id, content_type, size, is_deleted, thumbnail, "
-      "download_url, email_id, latitude, longitude, local_path) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "download_url, email_id, latitude, longitude, local_path, content_id) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         f.id,
         f.name,
@@ -54,6 +54,7 @@ class FileDesktopRepository {
         f.latitude,
         f.longitude,
         f.localPath,
+        f.contentId,
       ],
     );
     return f;
@@ -64,7 +65,7 @@ class FileDesktopRepository {
       "UPDATE files SET "
       "name = ?, path = ?, parent = ?, date_created = ?, date_last_modified = ?, "
       "last_scanned_date = ?, collection_id = ?, content_type = ?, size = ?, is_deleted = ?, "
-      "thumbnail = ?, download_url = ?, email_id = ?, latitude = ?, longitude = ?, local_path = ? "
+      "thumbnail = ?, download_url = ?, email_id = ?, latitude = ?, longitude = ?, local_path = ?, content_id = ? "
       "WHERE id = ?",
       [
         f.name,
@@ -83,6 +84,7 @@ class FileDesktopRepository {
         f.latitude,
         f.longitude,
         f.localPath,
+        f.contentId,
         f.id,
       ],
     );
@@ -142,8 +144,8 @@ class FileDesktopRepository {
         await tx.execute(
           "INSERT INTO files (id, name, path, parent, date_created, date_last_modified, "
           "last_scanned_date, collection_id, content_type, size, is_deleted, thumbnail, "
-          "download_url, email_id, latitude, longitude, local_path) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+          "download_url, email_id, latitude, longitude, local_path, content_id) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
           "ON CONFLICT(id) DO UPDATE SET "
           "name = excluded.name, "
           "path = excluded.path, "
@@ -155,6 +157,7 @@ class FileDesktopRepository {
           "thumbnail = excluded.thumbnail, "
           "download_url = excluded.download_url, "
           "email_id = excluded.email_id, "
+          "content_id = excluded.content_id, "
           "is_deleted = 0",
           [
             f.id,
@@ -174,6 +177,7 @@ class FileDesktopRepository {
             f.latitude,
             f.longitude,
             f.localPath,
+            f.contentId,
           ],
         );
       }

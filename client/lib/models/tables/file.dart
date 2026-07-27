@@ -27,6 +27,10 @@ class File implements FileAsset {
   double? longitude;
   String? localPath;
 
+  /// MAPI/MIME content id, set only for an attachment an HTML body embeds as
+  /// `<img src="cid:...">`. Null for an ordinary file attachment.
+  String? contentId;
+
   File({
     required this.id,
     required this.name,
@@ -45,6 +49,7 @@ class File implements FileAsset {
     this.latitude,
     this.longitude,
     this.localPath,
+    this.contentId,
   });
 
   factory File.fromDbMap(Map<String, dynamic> map) {
@@ -79,6 +84,7 @@ class File implements FileAsset {
               ? (map['longitude'] as num).toDouble()
               : null,
       localPath: map['local_path'] as String?,
+      contentId: map['content_id'] as String?,
     );
   }
 
@@ -101,6 +107,7 @@ class File implements FileAsset {
       'latitude': latitude,
       'longitude': longitude,
       'local_path': localPath,
+      'content_id': contentId,
     };
   }
 }

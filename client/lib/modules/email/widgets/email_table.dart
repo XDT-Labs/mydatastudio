@@ -1,14 +1,10 @@
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/modules/email/notifications/email_selected_notification.dart';
+import 'package:mydatastudio/modules/email/notifications/email_selection_changed_notification.dart';
 import 'package:mydatastudio/modules/email/notifications/email_sort_changed_notification.dart';
 import 'package:flutter/material.dart';
 import 'package:moment_dart/moment_dart.dart';
 import 'dart:math' as math;
-import 'package:mydatastudio/app_logger.dart';
-
-/// Module logger. AppLogger writes to the session log file as well as the
-/// console; a bare print() only reaches the console.
-final AppLogger _logger = AppLogger(null);
 
 class EmailTable extends StatefulWidget {
   const EmailTable({
@@ -116,6 +112,7 @@ class _EmailTable extends State<EmailTable> {
                 sortColumnIndex: sortColumnIndex,
                 sortAscending: sortAsc,
                 showCheckboxColumn: true,
+                onSelectAll: _onSelectAll,
                 horizontalMargin: 8,
                 columnSpacing: 8,
                 dataRowMaxHeight: 40,
@@ -129,6 +126,21 @@ class _EmailTable extends State<EmailTable> {
         },
       ),
     );
+  }
+
+  /// Handles the heading select-all checkbox.
+  ///
+  /// Must be supplied: with `onSelectAll` null, [DataTable] falls back to
+  /// invoking every row's `onSelectChanged`, so ticking select-all also ran the
+  /// per-row handler for each message.
+  void _onSelectAll(bool? checked) {
+    final select = checked ?? false;
+    setState(() {
+      for (final email in widget.emails) {
+        email.isSelected = select;
+      }
+    });
+    EmailSelectionChangedNotification().dispatch(context);
   }
 
   List<DataColumn> getColumns(BuildContext context, double totalWidth) {
@@ -289,13 +301,16 @@ class _EmailTable extends State<EmailTable> {
             onTap: () => EmailSelectedNotification(email).dispatch(context),
           ),
         ],
+        // Only reached via the row's checkbox — every cell above has its own
+        // onTap, which is what opens the message. Checking a row marks it for a
+        // bulk action and nothing else; it used to also dispatch
+        // EmailSelectedNotification, which is why ticking a checkbox opened the
+        // email.
         onSelectChanged: (bool? e) {
-          _logger.e("Email row select changed: ${email.subject} - $e");
           setState(() {
             email.isSelected = e ?? false;
-            // Always dispatch notification when a row is clicked/selected
-            EmailSelectedNotification(email).dispatch(context);
           });
+          EmailSelectionChangedNotification().dispatch(context);
         },
       );
     }).toList();
