@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:resqlite/resqlite.dart'
     show
         ResqliteException,
@@ -33,3 +34,40 @@ int? sqliteCodeOf(Object e) {
 /// was noticed.
 bool isRetryableLockError(Object e) =>
     e is ResqliteException && retryableSqliteCodes.contains(sqliteCodeOf(e));
+
+/// Runs [operation], retrying while it fails with transient lock contention.
+///
+/// The write services all needed this loop and each had grown its own copy with
+/// slightly different behaviour — one of which caught the wrong exception type
+/// and so never retried at all. Shared here so there is one implementation to
+/// get right.
+///
+/// Retries [maxRetries] times with exponential backoff ([baseDelay] doubling per
+/// attempt: 200ms, 400ms, 800ms by default). Anything that is not a retryable
+/// lock, and any lock still failing after the last attempt, is rethrown — the
+/// caller must decide what a lost write means, and for a one-shot import it
+/// means lost data.
+///
+/// [operation] must be idempotent: it can run several times. Every current
+/// caller is an `ON CONFLICT ... DO UPDATE` upsert, which is.
+Future<T> retryOnLock<T>(
+  Future<T> Function() operation, {
+  required String label,
+  int maxRetries = 3,
+  Duration baseDelay = const Duration(milliseconds: 200),
+}) async {
+  for (int attempt = 0; ; attempt++) {
+    try {
+      return await operation();
+    } on ResqliteException catch (e) {
+      if (!isRetryableLockError(e) || attempt >= maxRetries) rethrow;
+      final delay = baseDelay * (1 << attempt);
+      debugPrint(
+        '$label: sqlite code ${sqliteCodeOf(e)} '
+        '(attempt ${attempt + 1}/$maxRetries), '
+        'retrying in ${delay.inMilliseconds}ms...',
+      );
+      await Future.delayed(delay);
+    }
+  }
+}

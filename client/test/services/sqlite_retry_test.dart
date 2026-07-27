@@ -88,4 +88,79 @@ void main() {
       expect(sqliteCodeOf(StateError('z')), isNull);
     });
   });
+
+  group('retryOnLock', () {
+    ResqliteTransactionException lock() => ResqliteTransactionException(
+      'database is locked',
+      operation: 'begin',
+      sqliteCode: 5,
+    );
+
+    test('returns the value when the first attempt succeeds', () async {
+      var calls = 0;
+      final result = await retryOnLock(() async {
+        calls++;
+        return 'ok';
+      }, label: 'test');
+
+      expect(result, 'ok');
+      expect(calls, 1, reason: 'must not retry a successful call');
+    });
+
+    test('succeeds after transient locks, which is the whole point', () async {
+      var calls = 0;
+      final result = await retryOnLock(() async {
+        calls++;
+        if (calls < 3) throw lock();
+        return 'ok';
+      }, label: 'test', baseDelay: Duration.zero);
+
+      expect(result, 'ok');
+      expect(calls, 3);
+    });
+
+    test('rethrows once the retry budget is exhausted', () async {
+      var calls = 0;
+      await expectLater(
+        retryOnLock(() async {
+          calls++;
+          throw lock();
+        }, label: 'test', maxRetries: 3, baseDelay: Duration.zero),
+        throwsA(isA<ResqliteTransactionException>()),
+      );
+
+      // 1 initial attempt + 3 retries. A caller that loses data must find out.
+      expect(calls, 4);
+    });
+
+    test('does not retry a constraint violation', () async {
+      var calls = 0;
+      await expectLater(
+        retryOnLock(() async {
+          calls++;
+          throw ResqliteQueryException(
+            'UNIQUE constraint failed',
+            sql: 'INSERT ...',
+            sqliteCode: 19,
+          );
+        }, label: 'test', baseDelay: Duration.zero),
+        throwsA(isA<ResqliteQueryException>()),
+      );
+
+      expect(calls, 1, reason: 'a real error must surface immediately');
+    });
+
+    test('does not swallow an unrelated error', () async {
+      var calls = 0;
+      await expectLater(
+        retryOnLock(() async {
+          calls++;
+          throw StateError('unrelated');
+        }, label: 'test', baseDelay: Duration.zero),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(calls, 1);
+    });
+  });
 }

@@ -330,22 +330,41 @@ class LocalFileIsolateWorker {
     );
 
     // Final cleanup — mark anything not seen this scan as deleted.
-    final cleanupRelPath = p.relative(path, from: rootPath);
-    await CleanupDeletedFilesService.instance.invoke(
-      CleanupDeletedFilesServiceCommand(
-        collectionId,
-        cleanupRelPath == '.' ? '' : cleanupRelPath,
-        scanStartTime,
-        appDb,
-        recursive: recursive,
-      ),
-    );
+    //
+    // Only safe after a complete scan. The sweep deletes by absence: every row
+    // whose last_scanned_date predates this run. A batch that failed to write
+    // leaves its files with an old timestamp, so running the sweep anyway marks
+    // records deleted that are still sitting on disk — a transient database
+    // lock could make a hundred files vanish from the UI. Skipping the sweep
+    // leaves genuinely-removed files flagged for one more cycle, which is the
+    // far cheaper mistake.
+    final failedBatches = results['failedBatches'] ?? 0;
+    if (failedBatches > 0) {
+      logger?.w(
+        'LocalScan: $failedBatches batch(es) failed to save — skipping the '
+        'deleted-file sweep so present files are not marked deleted. '
+        'Collection left incomplete; the next scan will reconcile.',
+      );
+    } else {
+      final cleanupRelPath = p.relative(path, from: rootPath);
+      await CleanupDeletedFilesService.instance.invoke(
+        CleanupDeletedFilesServiceCommand(
+          collectionId,
+          cleanupRelPath == '.' ? '' : cleanupRelPath,
+          scanStartTime,
+          appDb,
+          recursive: recursive,
+        ),
+      );
+    }
 
     // Update collection lastScanDate and status
     final colRepo = CollectionRepository(appDb);
     final col = await colRepo.collectionById(collectionId);
     if (col != null) {
-      col.scanStatus = 'idle';
+      // 'incomplete' records that this run did not see the whole tree, so the
+      // status doesn't claim a clean scan the sweep was skipped for.
+      col.scanStatus = failedBatches > 0 ? 'incomplete' : 'idle';
       col.lastScanDate = scanStartTime;
       await colRepo.updateCollection(col);
     }
@@ -378,6 +397,11 @@ class LocalFileIsolateWorker {
     int cacheHits = 0;
     int generatedThumbnails = 0;
     int totalFiles = 0;
+    // Batches that never reached the database. Any non-zero value means this
+    // scan is partial, and the caller must not run the delete-sweep — files it
+    // failed to write still carry an old last_scanned_date and would be marked
+    // deleted despite being present on disk.
+    int failedBatches = 0;
 
     List<File> fileBatch = currentBatch ?? [];
     AppLogger logger = AppLogger(loggerPort);
@@ -391,7 +415,15 @@ class LocalFileIsolateWorker {
       logger.i('Found ${dirList.length} items in ${dir.path}');
     } catch (e) {
       logger.e('Failed to list directory ${dir.path}: $e');
-      return {'count': 0, 'cacheHits': 0, 'generatedThumbnails': 0, 'total': 0};
+      // An unreadable directory is itself a partial scan: whatever lives under
+      // it was never seen, so the sweep must not treat it as gone.
+      return {
+        'count': 0,
+        'cacheHits': 0,
+        'generatedThumbnails': 0,
+        'total': 0,
+        'failedBatches': 1,
+      };
     }
 
     for (var asset in dirList) {
@@ -427,9 +459,19 @@ class LocalFileIsolateWorker {
           fileBatch.add(file);
           if (fileBatch.length >= 100) {
             logger.i('Found ${fileBatch.length} files, saving batch');
-            await BatchFileUpsertService.instance.invoke(
-              BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
-            );
+            try {
+              await BatchFileUpsertService.instance.invoke(
+                BatchFileUpsertServiceCommand(
+                  List<File>.from(fileBatch),
+                  appDb,
+                ),
+              );
+            } catch (e) {
+              failedBatches++;
+              logger.e(
+                'LocalScan: batch of ${fileBatch.length} files was not saved: $e',
+              );
+            }
             fileBatch.clear();
           }
         }
@@ -467,9 +509,12 @@ class LocalFileIsolateWorker {
               cacheHits += subResults['cacheHits'] ?? 0;
               generatedThumbnails += subResults['generatedThumbnails'] ?? 0;
               totalFiles += subResults['total'] ?? 0;
+              failedBatches += subResults['failedBatches'] ?? 0;
             }
           } catch (err) {
-            logger.w(err);
+            // A sub-tree that blew up is unscanned, not empty.
+            failedBatches++;
+            logger.e('LocalScan: sub-directory scan failed: $err');
           }
         }
       } else {
@@ -479,9 +524,16 @@ class LocalFileIsolateWorker {
 
     if (currentBatch == null && fileBatch.isNotEmpty) {
       logger.i('Found ${fileBatch.length} files, saving final batch');
-      await BatchFileUpsertService.instance.invoke(
-        BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
-      );
+      try {
+        await BatchFileUpsertService.instance.invoke(
+          BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+        );
+      } catch (e) {
+        failedBatches++;
+        logger.e(
+          'LocalScan: final batch of ${fileBatch.length} files was not saved: $e',
+        );
+      }
       fileBatch.clear();
     }
 
@@ -490,6 +542,7 @@ class LocalFileIsolateWorker {
       'cacheHits': cacheHits,
       'generatedThumbnails': generatedThumbnails,
       'total': totalFiles,
+      'failedBatches': failedBatches,
     };
   }
 

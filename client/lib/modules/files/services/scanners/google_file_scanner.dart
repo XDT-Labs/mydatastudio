@@ -238,6 +238,12 @@ class CloudFileIsolateWorker {
   final Map<String, String> _folderNames = {};
   final Map<String, String> _folderParents = {};
 
+  /// Batches this scan failed to write. Non-zero means the scan is partial and
+  /// the delete-sweep must be skipped: files that never reached the database
+  /// still carry an old last_scanned_date, so sweeping would mark records
+  /// deleted that are still present in Drive.
+  int _failedBatches = 0;
+
   // Download management
   final List<File> _downloadQueue = [];
   static const int _maxConcurrentDownloads = 3;
@@ -390,7 +396,13 @@ class CloudFileIsolateWorker {
         'CloudFileIsolate: scan complete — $count items for "$collectionName"',
       );
 
-      if (!skipCleanup) {
+      if (_failedBatches > 0) {
+        logger.w(
+          'CloudFileIsolate: $_failedBatches batch(es) failed to save — '
+          'skipping the deleted-file sweep so present files are not marked '
+          'deleted. The next scan will reconcile.',
+        );
+      } else if (!skipCleanup) {
         // Mark anything not seen this scan as deleted (full walks / forced refreshes)
         await CleanupDeletedFilesService.instance.invoke(
           CleanupDeletedFilesServiceCommand(
@@ -521,12 +533,19 @@ class CloudFileIsolateWorker {
             logger.i('Found NEW/CHANGED file: ${f.name} (${f.id})');
 
             if (fileBatch.length >= 100) {
-              await BatchFileUpsertService.instance.invoke(
-                BatchFileUpsertServiceCommand(
-                  List<File>.from(fileBatch),
-                  appDb,
-                ),
-              );
+              try {
+                await BatchFileUpsertService.instance.invoke(
+                  BatchFileUpsertServiceCommand(
+                    List<File>.from(fileBatch),
+                    appDb,
+                  ),
+                );
+              } catch (e) {
+                _failedBatches++;
+                logger.e(
+                  'CloudFileIsolate: batch of ${fileBatch.length} files was not saved: $e',
+                );
+              }
               fileBatch.clear();
             }
           }
@@ -536,9 +555,16 @@ class CloudFileIsolateWorker {
     } while (pageToken != null);
 
     if (fileBatch.isNotEmpty) {
-      await BatchFileUpsertService.instance.invoke(
-        BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
-      );
+      try {
+        await BatchFileUpsertService.instance.invoke(
+          BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+        );
+      } catch (e) {
+        _failedBatches++;
+        logger.e(
+          'CloudFileIsolate: batch of ${fileBatch.length} files was not saved: $e',
+        );
+      }
     }
 
     return count;
@@ -599,9 +625,16 @@ class CloudFileIsolateWorker {
       logger.d(
         'CloudFileIsolate: Sending final batch of ${fileBatch.length} files to DB writer',
       );
-      await BatchFileUpsertService.instance.invoke(
-        BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
-      );
+      try {
+        await BatchFileUpsertService.instance.invoke(
+          BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
+        );
+      } catch (e) {
+        _failedBatches++;
+        logger.e(
+          'CloudFileIsolate: batch of ${fileBatch.length} files was not saved: $e',
+        );
+      }
     }
 
     return count;
@@ -682,12 +715,19 @@ class CloudFileIsolateWorker {
               logger.d(
                 'CloudFileIsolate: Sending batch of ${fileBatch.length} files to DB writer',
               );
-              await BatchFileUpsertService.instance.invoke(
-                BatchFileUpsertServiceCommand(
-                  List<File>.from(fileBatch),
-                  appDb,
-                ),
-              );
+              try {
+                await BatchFileUpsertService.instance.invoke(
+                  BatchFileUpsertServiceCommand(
+                    List<File>.from(fileBatch),
+                    appDb,
+                  ),
+                );
+              } catch (e) {
+                _failedBatches++;
+                logger.e(
+                  'CloudFileIsolate: batch of ${fileBatch.length} files was not saved: $e',
+                );
+              }
               fileBatch.clear();
             }
           }
