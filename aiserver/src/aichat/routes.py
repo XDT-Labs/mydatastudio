@@ -723,6 +723,17 @@ def _assert_within_roots(path: str, roots: list, label: str = "Path") -> str:
         real_root = os.path.realpath(root)
         if real == real_root or real.startswith(real_root + os.sep):
             return real
+    # Logged explicitly, not left to the access log: uvicorn's per-request line is
+    # off, and even with it on a bare "403" never said *which* path was refused or
+    # what it was checked against. A misconfigured root makes every import fail
+    # with no local trace of why.
+    # flush: this is the only trace of a refusal, and a server killed before its
+    # buffer drains would otherwise lose it — which is how it stayed invisible.
+    print(
+        f"[ERROR] {label} rejected: {real!r} is not inside any allowed root "
+        f"({[os.path.realpath(r) for r in roots if r]})",
+        flush=True,
+    )
     raise HTTPException(status_code=403, detail=f"{label} is outside the allowed directories")
 
 

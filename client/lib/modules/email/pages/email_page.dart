@@ -209,7 +209,13 @@ class _EmailPage extends State<EmailPage> {
     if (!_hasMore || _isLoadingMore || collection == null) return;
     setState(() => _isLoadingMore = true);
 
-    final nextOffset = _currentOffset + _pageSize;
+    // _currentOffset is the offset of the page about to be fetched, not the one
+    // already loaded. It used to be the latter, and the first page of every
+    // folder was therefore fetched at offset 0 + _pageSize — silently skipping
+    // the first 100 emails. Any folder holding 100 or fewer looked completely
+    // empty; only the two folders in the PST archive with more than 100 showed
+    // anything at all, starting at their 101st message.
+    final nextOffset = _currentOffset;
     final nextPage = await EmailRepository(
       DatabaseManager.instance.database!,
     ).emails(
@@ -224,7 +230,8 @@ class _EmailPage extends State<EmailPage> {
 
     if (mounted) {
       setState(() {
-        _currentOffset = nextOffset;
+        // Advance by what actually came back, so a short page can't leave a gap.
+        _currentOffset = nextOffset + nextPage.length;
         emails = [...emails, ...nextPage];
         count = emails.length;
         _hasMore = nextPage.length >= _pageSize;

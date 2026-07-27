@@ -46,7 +46,21 @@
             "justMyCode": true,
             "python": "${workspaceFolder}/aiserver/.venv/bin/python",
             "env": {
-                "AICHAT_PORT": "8000"
+                "AICHAT_PORT": "8000",
+                // Normally set by PythonManager when it spawns the bundled
+                // binary. Running the server standalone, nothing sets it, and
+                // resolve_data_roots() then refuses every caller-supplied path
+                // with a 403 — PST import and thumbnails fail while the rest of
+                // the server looks perfectly healthy.
+                //
+                // There is a fallback that probes the known bundle ids, but it
+                // takes com.xdtlabs.mydatastudio.dev before com.xdtlabs.mydatastudio
+                // and both may exist locally, so debugging a non-dev build would
+                // silently resolve to the wrong directory. Being explicit avoids that.
+                //
+                // ${userHome} keeps this portable — do not hardcode /Users/<name>,
+                // this file is committed.
+                "APP_SUPPORT_DIR": "${userHome}/Library/Application Support/com.xdtlabs.mydatastudio.dev"
             }
         },
         {

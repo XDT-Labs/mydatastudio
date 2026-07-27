@@ -349,7 +349,7 @@ class YahooScannerIsolateWorker {
             sequence.add(uid);
           }
 
-          ImapFetchResult? fetchResult;
+          FetchImapResult? fetchResult;
           try {
             fetchResult = await client.uidFetchMessages(
               sequence,
