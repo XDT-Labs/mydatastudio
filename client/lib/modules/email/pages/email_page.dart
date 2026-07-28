@@ -505,9 +505,7 @@ class _EmailPage extends State<EmailPage> {
     if (progress.totalMessages <= 0) {
       return 'Reading the archive. Large files can take several minutes.';
     }
-    final read = '${progress.examined} of ${progress.totalMessages} messages';
-    if (progress.emails <= 0) return 'Read $read';
-    return 'Read $read · ${progress.emails} imported';
+    return 'Read ${progress.examined} of ${progress.totalMessages} messages';
   }
 
   Widget _buildListHeader(ThemeData theme) {
