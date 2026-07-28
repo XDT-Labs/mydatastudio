@@ -16,6 +16,12 @@ from typing import List, Optional
 # is correctly treated as incomplete and resumed rather than skipped.
 _SNAPSHOT_COMPLETE_MARKER = '.mydatastudio_download_complete'
 
+# Written into a snapshot's local_path only once every file has downloaded
+# successfully. Its presence — not "directory is non-empty" — is what
+# is_snapshot_downloaded() checks, so a snapshot interrupted partway through
+# is correctly treated as incomplete and resumed rather than skipped.
+_SNAPSHOT_COMPLETE_MARKER = '.mydatastudio_download_complete'
+
 
 def _resolve_models_base() -> str:
     """

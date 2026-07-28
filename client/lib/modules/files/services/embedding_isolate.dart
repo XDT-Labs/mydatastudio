@@ -288,6 +288,7 @@ class EmbeddingIsolate {
     }
   }
 
+
   static Future<List<double>?> _processLocalFile(
     File file,
     String serviceUrl,

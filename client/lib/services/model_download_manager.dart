@@ -413,7 +413,6 @@ class ModelDownloadManager {
               '[ModelDownload] Completed $hfRepo/$filename -> $resultPath',
             );
           } else if (status == 'error') {
-            item.error = event['message'] as String? ?? 'Download failed';
             _logger.e(
               '[ModelDownload] Server reported error for $hfRepo/$filename: ${item.error}',
             );
