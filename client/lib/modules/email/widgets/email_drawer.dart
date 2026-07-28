@@ -653,7 +653,7 @@ class _EmailFolderListState extends State<_EmailFolderList> {
                           folder: entry.folder,
                           label: entry.folder.name,
                           indent: 72.0 + entry.depth * 12.0,
-                          fontSize: 10.0,
+                          fontSize: 12.0,
                           isSelected:
                               widget.selectedFolderId == entry.folder.id,
                           onTap: () => widget.onFolderTap(entry.folder.id),

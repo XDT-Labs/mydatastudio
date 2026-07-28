@@ -38,7 +38,7 @@ void main() {
               folder: folder,
               label: 'YELLOW_STAR',
               indent: 72.0,
-              fontSize: 10.0,
+              fontSize: 12.0,
               isSelected: false,
               onTap: () {},
             ),
@@ -52,7 +52,7 @@ void main() {
       expect(contentPadding.left, equals(64.0));
 
       final text = tester.widget<Text>(find.text('YELLOW_STAR'));
-      expect(text.style?.fontSize, equals(10.0));
+      expect(text.style?.fontSize, equals(12.0));
     });
   });
 }

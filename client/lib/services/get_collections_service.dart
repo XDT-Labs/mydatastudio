@@ -1,6 +1,7 @@
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/services/rx_service.dart';
+import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/app_logger.dart';
 
 /// Module logger. AppLogger writes to the session log file as well as the
@@ -18,6 +19,12 @@ class GetCollectionsService
   @override
   Future<List<Collection>> invoke(GetCollectionsServiceCommand command) async {
     currentCommand = command;
+    if (DatabaseManager.instance.database == null) {
+      _logger.d(
+        'GetCollectionsService.invoke: database is null, skipping DB query',
+      );
+      return sink.valueOrNull ?? [];
+    }
     CollectionRepository repo = CollectionRepository();
 
     // Always push all collections to the sink.
