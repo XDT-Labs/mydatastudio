@@ -177,6 +177,42 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
   });
 
+  testWidgets('LoginForm never mints a vault for an unverified password', (
+    WidgetTester tester,
+  ) async {
+    // Why this matters: the vault is created once, by the setup wizard, from a
+    // password the user confirmed. If login could create one, a typo at the
+    // prompt would wrap a fresh DEK under the wrong password — the real password
+    // could never unlock it again, and any credential written in that session
+    // would be keyed to the typo. Login unlocks; it must never create.
+    final String tempPath =
+        '${tempDir.path}/mydatastudio_test_novault_${const Uuid().v4()}';
+    Directory('$tempPath/keys').createSync(recursive: true);
+    MainApp.appDataDirectory.add(tempPath);
+
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: LoginForm(onLoginSuccessful: () {}))),
+    );
+
+    await tester.enterText(find.byType(TextField), 'a-typo-not-my-password');
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Login'));
+      await Future.delayed(const Duration(seconds: 2));
+    });
+    await tester.pumpAndSettle();
+
+    expect(
+      File('$tempPath/keys/${VaultManager.vaultFileName}').existsSync(),
+      isFalse,
+      reason: 'An unverified password must not create a vault descriptor',
+    );
+    expect(VaultManager.instance.isUnlocked, isFalse);
+
+    await tester.pump(const Duration(seconds: 5));
+  });
+
   testWidgets('LoginForm login failure test', (WidgetTester tester) async {
     // 1. Pump the widget (no user in DB)
     await tester.pumpWidget(

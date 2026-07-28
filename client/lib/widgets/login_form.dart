@@ -110,22 +110,31 @@ class _LoginFormState extends State<LoginForm> {
     return false;
   }
 
-  /// Unlock the credential vault (or create it on first login after this feature
-  /// ships) from the just-entered plaintext password. Best-effort: a failure is
-  /// logged but never blocks login — features needing secrets degrade until the
-  /// vault is unlocked. See AUDIT.md M2.
-  Future<void> _unlockVault(String password) async {
+  /// Unlock the credential vault from the just-entered plaintext password.
+  ///
+  /// Unlock only — the vault is minted once by the setup wizard, never here. The
+  /// password is not verified yet at this point, so creating a vault would wrap
+  /// a fresh DEK under a typo, permanently locking out the real password and
+  /// keying every credential written that session to it. See AUDIT.md M2.
+  ///
+  /// Returns null on success, or a message describing why the vault could not be
+  /// unlocked. The caller decides what to do with it once the password has been
+  /// verified — a wrong password is expected to fail here.
+  Future<String?> _unlockVault(String password) async {
     final storagePath = MainApp.appDataDirectory.valueOrNull;
-    if (storagePath == null || storagePath.isEmpty) return;
+    if (storagePath == null || storagePath.isEmpty) {
+      return 'No app data directory is configured';
+    }
     final keysDir = p.join(storagePath, 'keys');
     try {
-      if (await VaultManager.instance.vaultExists(keysDir)) {
-        await VaultManager.instance.unlock(keysDir, password);
-      } else {
-        await VaultManager.instance.createAndUnlock(keysDir, password);
+      if (!await VaultManager.instance.vaultExists(keysDir)) {
+        return 'No credential vault found in $keysDir';
       }
+      await VaultManager.instance.unlock(keysDir, password);
+      return null;
     } catch (e) {
       logger.e('Vault unlock failed: $e');
+      return 'Could not unlock the credential vault';
     }
   }
 
@@ -157,15 +166,26 @@ class _LoginFormState extends State<LoginForm> {
         // Unlock the credential vault from the plaintext password BEFORE loading
         // the user: user() now reads keys/private.pem encrypted with the vault
         // DEK, so the vault must be unlocked first (AUDIT M2 phase 4). The
-        // password itself is never persisted. A unlock failure is logged but not
-        // fatal here — an actually-wrong password still fails the user lookup
-        // below and shows "Wrong password".
-        await _unlockVault(pwd);
+        // password itself is never persisted. Any failure is held, not acted on,
+        // until the password is verified below: a wrong password is *supposed*
+        // to fail the unlock, and reporting it before authentication would say
+        // more than "Wrong password" should.
+        final vaultError = await _unlockVault(pwd);
 
         var dbUser = await GetUserService.instance.invoke(
           GetUserServiceCommand(hash),
         );
         if (dbUser != null) {
+          // Password is known-good, so a failed unlock is a real fault (missing
+          // or corrupt descriptor), not a typo. Fail loudly instead of entering
+          // a session where every credential read throws.
+          if (vaultError != null) {
+            logger.e('Login blocked, vault locked: $vaultError');
+            if (context != null && context.mounted) {
+              context.showToast(vaultError);
+            }
+            return;
+          }
           widget.onLoginSuccessful!();
         } else {
           if (context != null && context.mounted) {
