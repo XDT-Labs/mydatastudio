@@ -30,24 +30,25 @@ import 'package:rxdart/rxdart.dart';
 /// the page, so without a refresh the list sits empty until the user happens to
 /// click the collection in the sidebar. Refreshing on *every* update is the
 /// other failure: it fires every fifty messages for the length of a
-/// multi-gigabyte import, and each refresh rebuilds the list from scratch.
+/// multi-gigabyte import.
 ///
 /// Hence the conditions, in order of precedence:
 ///   * a finished import always refreshes — that is the authoritative one, and
-///     it is what puts the messages on screen;
+///     it is what reveals the imported messages;
 ///   * an update for some other collection is ignored;
-///   * a reader must not have the message they are on rebuilt away;
-///   * once a full page is loaded, paging is the scroll handler's job and a
-///     refresh would only cost the user their position;
 ///   * otherwise, at most one refresh per [minInterval].
+///
+/// The list itself is not rendered during an import — the progress placeholder
+/// stands in its place — so these mid-import refreshes exist to keep the
+/// sidebar's folder tree filling in as folders are discovered. That is also
+/// why there is no guard for an open message or a full page: both once
+/// protected a list the user can no longer be looking at, while suppressing
+/// the folder updates that are now the point.
 ///
 /// Kept free of widget state so the policy can be exercised on its own.
 bool shouldRefreshForImport({
   required PstImportProgress? progress,
   required String? currentCollectionId,
-  required bool hasOpenEmail,
-  required int loadedCount,
-  required int pageSize,
   required DateTime now,
   required DateTime? lastRefresh,
   Duration minInterval = const Duration(seconds: 2),
@@ -55,8 +56,6 @@ bool shouldRefreshForImport({
   if (progress == null) return false;
   if (progress.collectionId != currentCollectionId) return false;
   if (progress.done) return true;
-  if (hasOpenEmail) return false;
-  if (loadedCount >= pageSize) return false;
   if (lastRefresh != null && now.difference(lastRefresh) < minInterval) {
     return false;
   }
@@ -248,9 +247,6 @@ class _EmailPage extends State<EmailPage> {
     if (!shouldRefreshForImport(
       progress: progress,
       currentCollectionId: collection?.id,
-      hasOpenEmail: selectedEmail != null,
-      loadedCount: emails.length,
-      pageSize: _pageSize,
       now: now,
       lastRefresh: _lastImportRefresh,
     )) {
@@ -498,6 +494,22 @@ class _EmailPage extends State<EmailPage> {
     return progress;
   }
 
+  /// The line under the import spinner.
+  ///
+  /// Reads the archive's own totals rather than the loaded page, because the
+  /// list is not on screen during an import. The parser announces its message
+  /// total before it emits anything else, but a large archive on a network
+  /// volume can spend ten or twenty seconds counting first — hence the
+  /// fallback, which is all there is to say until then.
+  String _importDetail(PstImportProgress progress) {
+    if (progress.totalMessages <= 0) {
+      return 'Reading the archive. Large files can take several minutes.';
+    }
+    final read = '${progress.examined} of ${progress.totalMessages} messages';
+    if (progress.emails <= 0) return 'Read $read';
+    return 'Read $read · ${progress.emails} imported';
+  }
+
   Widget _buildListHeader(ThemeData theme) {
     final hasSelected = emails.any((e) => e.isSelected == true);
     // A PST is an immutable archive imported once — there is nothing to refresh,
@@ -639,17 +651,18 @@ class _EmailPage extends State<EmailPage> {
 
   Widget _buildEmailListArea() {
     final importing = _activeImport;
-    if (emails.isEmpty && importing != null) {
-      // The first messages of a large archive can take minutes to land; an
-      // empty table with no explanation is the state this replaces.
+    if (importing != null) {
+      // Held for the whole import, not just while the list is empty. Gating
+      // this on `emails.isEmpty` meant the auto-refresh replaced it with the
+      // table seconds after the first messages landed — so on a three-minute
+      // import the count was legible for about two seconds and the rest of the
+      // run had no progress reading at all. The list is revealed by the final
+      // refresh when the import finishes.
       return ScanningPlaceholderWidget(
         collectionName: importing.collectionName,
         progress: importing.fraction,
         message: 'Importing ${importing.collectionName}…',
-        detail:
-            importing.totalMessages > 0
-                ? 'Read ${importing.examined} of ${importing.totalMessages} messages'
-                : 'Reading the archive. Large files can take several minutes.',
+        detail: _importDetail(importing),
       );
     }
 

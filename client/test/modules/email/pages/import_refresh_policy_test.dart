@@ -7,7 +7,6 @@ import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner
 /// user staring at an empty list or rebuilds the list out from under them.
 void main() {
   const collectionId = 'collection-1';
-  const pageSize = 100;
   final now = DateTime(2026, 7, 27, 12, 0, 0);
 
   PstImportProgress progress({
@@ -25,18 +24,10 @@ void main() {
     );
   }
 
-  bool decide({
-    PstImportProgress? value,
-    bool hasOpenEmail = false,
-    int loadedCount = 0,
-    DateTime? lastRefresh,
-  }) {
+  bool decide({PstImportProgress? value, DateTime? lastRefresh}) {
     return shouldRefreshForImport(
       progress: value,
       currentCollectionId: collectionId,
-      hasOpenEmail: hasOpenEmail,
-      loadedCount: loadedCount,
-      pageSize: pageSize,
       now: now,
       lastRefresh: lastRefresh,
     );
@@ -50,15 +41,6 @@ void main() {
       expect(decide(value: progress(done: true)), isTrue);
     });
 
-    test('a finished import refreshes even while a message is open', () {
-      // The open message is stale by then — it may not even be in the folder
-      // the final list shows.
-      expect(
-        decide(value: progress(done: true), hasOpenEmail: true),
-        isTrue,
-      );
-    });
-
     test('a finished import refreshes despite the throttle', () {
       expect(
         decide(
@@ -69,14 +51,7 @@ void main() {
       );
     });
 
-    test('a finished import refreshes even with a full page loaded', () {
-      expect(
-        decide(value: progress(done: true), loadedCount: pageSize),
-        isTrue,
-      );
-    });
-
-    test('an in-flight import refreshes so messages appear as they land', () {
+    test('an in-flight import refreshes so folders appear as they land', () {
       expect(decide(value: progress()), isTrue);
     });
 
@@ -88,19 +63,18 @@ void main() {
       expect(decide(value: null), isFalse);
     });
 
-    test('does not rebuild the list while a message is open', () {
-      expect(decide(value: progress(), hasOpenEmail: true), isFalse);
-    });
-
-    test('stops once a full page is on screen', () {
-      // Past this point the scroll handler pages in more; refreshing would
-      // throw away the reader's scroll position for nothing.
-      expect(decide(value: progress(), loadedCount: pageSize), isFalse);
-      expect(decide(value: progress(), loadedCount: pageSize + 1), isFalse);
-    });
-
-    test('still refreshes on a partly filled page', () {
-      expect(decide(value: progress(), loadedCount: pageSize - 1), isTrue);
+    test('keeps refreshing for the whole import', () {
+      // The list is hidden behind the progress placeholder while an import
+      // runs, so these refreshes exist to fill in the sidebar's folder tree.
+      // An earlier version stopped once a page of messages had loaded, which
+      // silently froze the folder list partway through.
+      expect(
+        decide(
+          value: progress(examined: 5000),
+          lastRefresh: now.subtract(const Duration(seconds: 10)),
+        ),
+        isTrue,
+      );
     });
 
     test('throttles repeated progress updates', () {
