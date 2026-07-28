@@ -15,6 +15,8 @@ import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:mydatastudio/modules/files/services/embedding_isolate.dart';
+import 'package:mydatastudio/modules/email/services/email_embedding_isolate.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:uuid/uuid.dart';
 
 class DatabaseManager {
@@ -35,10 +37,22 @@ class DatabaseManager {
   String? databaseDirectoryPath;
   AppDatabase? appDatabase;
   EmbeddingIsolate? _embeddingIsolate;
+  EmailEmbeddingIsolate? _emailEmbeddingIsolate;
   DatabaseRepository? _repository;
+  bool _backgroundServicesStarted = false;
+  VoidCallback? _vaultUnlockListener;
   final AppLogger logger = AppLogger(null);
 
-  DatabaseManager._();
+  DatabaseManager._() {
+    _vaultUnlockListener = () {
+      if (VaultManager.instance.unlocked.value) {
+        unawaited(startBackgroundServices());
+      } else {
+        stopBackgroundServices();
+      }
+    };
+    VaultManager.instance.unlocked.addListener(_vaultUnlockListener!);
+  }
 
   /// Returns the [DatabaseRepository] instance
   DatabaseRepository? get repository {
@@ -219,16 +233,43 @@ class DatabaseManager {
     // start database repository
     _repository = DatabaseRepository(appDatabase!);
 
-    if (!isTesting) {
-      // start scanners
-      await _startScanners();
+    isInitializedNotifier.value = true;
 
-      // start embedding isolate
+    // If vault is already unlocked at initialization (e.g. auto-login flow), start background services.
+    if (!isTesting && VaultManager.instance.isUnlocked) {
+      unawaited(startBackgroundServices());
+    }
+
+    return appDatabase!;
+  }
+
+  Future<void> startBackgroundServices() async {
+    if (_backgroundServicesStarted || isTesting || appDatabase == null) return;
+    _backgroundServicesStarted = true;
+
+    logger.i("Starting background isolates and scanners (vault unlocked)...");
+
+    // 1. Start scanners
+    await _startScanners();
+
+    // 2. Stagger background embedding isolate startup by 500ms to avoid concurrent SQLite connection opening contention
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (appDatabase != null && _embeddingIsolate == null) {
       await _startEmbeddingIsolate(appDatabase!.path!);
     }
 
-    isInitializedNotifier.value = true;
-    return appDatabase!;
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (appDatabase != null && _emailEmbeddingIsolate == null) {
+      await _startEmailEmbeddingIsolate(appDatabase!.path!);
+    }
+  }
+
+  void stopBackgroundServices() {
+    _backgroundServicesStarted = false;
+    _embeddingIsolate?.stop();
+    _embeddingIsolate = null;
+    _emailEmbeddingIsolate?.stop();
+    _emailEmbeddingIsolate = null;
   }
 
   Future<AppDatabase> _openDatabase(String dbDir) async {
@@ -284,9 +325,33 @@ class DatabaseManager {
     );
   }
 
+  Future<void> _startEmailEmbeddingIsolate(String storagePath) async {
+    _emailEmbeddingIsolate = EmailEmbeddingIsolate();
+    await _emailEmbeddingIsolate!.start(
+      storagePath,
+      AppConstants.dbName,
+      RootIsolateToken.instance!,
+    );
+  }
+
+  void pauseEmbeddingIsolates() {
+    logger.d("Pausing embedding isolates for active scanner/import");
+    _embeddingIsolate?.pause();
+    _emailEmbeddingIsolate?.pause();
+  }
+
+  void resumeEmbeddingIsolates() {
+    logger.d("Resuming embedding isolates after active scanner/import finished");
+    _embeddingIsolate?.resume();
+    _emailEmbeddingIsolate?.resume();
+  }
+
   void dispose() {
-    _embeddingIsolate?.stop();
-    _embeddingIsolate = null;
+    if (_vaultUnlockListener != null) {
+      VaultManager.instance.unlocked.removeListener(_vaultUnlockListener!);
+      _vaultUnlockListener = null;
+    }
+    stopBackgroundServices();
 
     appDatabase?.close();
     appDatabase = null;
@@ -357,6 +422,11 @@ class AppDatabase {
           column: 'qwen3_vl_embedding',
           dimension: 2048,
         ),
+        SqliteVectorIndex(
+          table: 'emails_embeddings',
+          column: 'qwen3_vl_embedding',
+          dimension: 2048,
+        ),
       ],
     );
 
@@ -417,6 +487,13 @@ class AppDatabase {
       await _seedAichatModels(_db);
       await _seedAichatSkills(_db);
     }
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS emails_embeddings (
+        email_id TEXT PRIMARY KEY,
+        qwen3_vl_embedding BLOB,
+        FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
+      );
+    ''');
     final added = await _addMissingColumns();
 
     // Only on the open that introduces the column, so a large archive pays for
@@ -1040,6 +1117,14 @@ class AppDatabase {
       file_id TEXT PRIMARY KEY,
       qwen3_vl_embedding BLOB,
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
+    ''',
+    // emails_embeddings
+    '''
+    CREATE TABLE IF NOT EXISTS emails_embeddings (
+      email_id TEXT PRIMARY KEY,
+      qwen3_vl_embedding BLOB,
+      FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
     );
     ''',
     // providers

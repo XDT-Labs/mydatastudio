@@ -12,6 +12,7 @@ import 'package:mydatastudio/modules/email/pages/new_email_page.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/email/services/email_repository.dart';
 import 'package:mydatastudio/modules/email/services/get_email_folders_service.dart';
+import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
 import 'package:mydatastudio/modules/email/widgets/email_details.dart';
 import 'package:mydatastudio/modules/email/widgets/email_table.dart';
@@ -125,10 +126,13 @@ class _EmailPage extends State<EmailPage> {
       setState(() {
         collections = emailCollections;
       });
-      if (emailCollections.isNotEmpty &&
-          EmailPage.selectedCollection.value == null) {
-        _needsFolderAutoSelect = true;
-        EmailPage.selectedCollection.add(emailCollections.first);
+      if (emailCollections.isNotEmpty) {
+        if (EmailPage.selectedCollection.value == null) {
+          _needsFolderAutoSelect = true;
+          EmailPage.selectedCollection.add(emailCollections.first);
+        } else if (EmailPage.selectedFolder.value == null) {
+          _needsFolderAutoSelect = true;
+        }
       }
     });
 
@@ -139,9 +143,16 @@ class _EmailPage extends State<EmailPage> {
           EmailPage.selectedFolder.add(null);
           selectedFolderName = null;
           selectedEmail = null;
+          _needsFolderAutoSelect = true;
         });
         _refreshEmails();
         _listenToScannerStatus(value);
+      }
+    });
+
+    _emailsSub = GetEmailsService.instance.sink.listen((_) {
+      if (mounted) {
+        _refreshEmails();
       }
     });
 
@@ -171,10 +182,9 @@ class _EmailPage extends State<EmailPage> {
                         f.id.toUpperCase() == 'INBOX' ||
                         f.name.toUpperCase() == 'INBOX',
                   )
-                  .firstOrNull;
-          if (inbox != null) {
-            EmailPage.selectedFolder.add(inbox.id);
-          }
+                  .firstOrNull ??
+              folders.first;
+          EmailPage.selectedFolder.add(inbox.id);
         }
 
         if (EmailPage.selectedFolder.value != null) {
@@ -186,15 +196,6 @@ class _EmailPage extends State<EmailPage> {
             setState(() {
               selectedFolderName = folder.name;
             });
-
-            if (collection != null) {
-              logger.s(
-                "Refreshing $selectedFolderName folder for ${collection!.name}",
-              );
-              ScannerManager.getInstance()
-                  .getScanner(collection!)
-                  ?.start(collection!, folder.id, true, true);
-            }
           }
         }
       }

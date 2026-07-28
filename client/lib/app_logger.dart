@@ -28,9 +28,7 @@ class ConcisePrinter extends LogPrinter {
 
   @override
   List<String> log(LogEvent event) {
-    if (event.level == Level.error ||
-        event.level == Level.warning ||
-        event.level == Level.fatal) {
+    if (event.level == Level.error || event.level == Level.fatal) {
       return _errorPrinter.log(event);
     }
 

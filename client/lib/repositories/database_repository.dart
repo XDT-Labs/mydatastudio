@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
@@ -142,8 +143,7 @@ class DatabaseRepository {
     final excludeClause = excludeFileId != null ? 'AND e.file_id != ?' : '';
     final params = [jsonArray, limit, if (excludeFileId != null) excludeFileId];
 
-    final rows = await db.select(
-      '''
+    final rows = await db.select('''
       SELECT f.*, v.distance
       FROM files_embeddings AS e
       JOIN files AS f ON f.id = e.file_id
@@ -156,9 +156,7 @@ class DatabaseRepository {
       WHERE f.is_deleted = 0
         $excludeClause
       ORDER BY v.distance ASC
-      ''',
-      params,
-    );
+      ''', params);
 
     return rows.map((row) {
       final distance = (row['distance'] as num).toDouble();
@@ -191,22 +189,103 @@ class DatabaseRepository {
       ''',
       [limit],
     );
-    var results = rows.map((row) {
-      final file = File.fromDbMap(row);
-      final fakeCollection = Collection(
-        id: file.collectionId,
-        name: '',
-        path: (row['col_path'] as String?) ?? '',
-        type: '',
-        scanner: (row['scanner'] as String?) ?? '',
-        scanStatus: '',
-        needsReAuth: false,
-        localCopyPath: row['local_copy_path'] as String?,
-      );
-      file.path = FilePathResolver.absolute(file, fakeCollection);
-      return file;
-    }).toList();
+    var results =
+        rows.map((row) {
+          final file = File.fromDbMap(row);
+          final fakeCollection = Collection(
+            id: file.collectionId,
+            name: '',
+            path: (row['col_path'] as String?) ?? '',
+            type: '',
+            scanner: (row['scanner'] as String?) ?? '',
+            scanStatus: '',
+            needsReAuth: false,
+            localCopyPath: row['local_copy_path'] as String?,
+          );
+          file.path = FilePathResolver.absolute(file, fakeCollection);
+          return file;
+        }).toList();
     return results;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Email Embedding Methods (sqlite_vector API)
+  // ---------------------------------------------------------------------------
+
+  /// Upserts the Qwen3-VL embedding for [emailId] into the `emails_embeddings`
+  /// table, storing values as a packed Float32 BLOB via `vector_as_f32()`.
+  Future<void> upsertEmailEmbedding(
+    String emailId,
+    List<double> embedding,
+  ) async {
+    final jsonArray = '[${embedding.join(',')}]';
+
+    await db.transaction((tx) async {
+      try {
+        await tx.execute(
+          '''
+          INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding)
+          VALUES (?, vector_as_f32(?))
+          ON CONFLICT(email_id) DO UPDATE SET
+            qwen3_vl_embedding = excluded.qwen3_vl_embedding
+          ''',
+          [emailId, jsonArray],
+        );
+      } catch (e) {
+        logger.w('vector_as_f32 unavailable, storing raw BLOB: $e');
+        final blob = Float32List.fromList(embedding).buffer.asUint8List();
+        await tx.execute(
+          '''
+          INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding)
+          VALUES (?, ?)
+          ON CONFLICT(email_id) DO UPDATE SET
+            qwen3_vl_embedding = excluded.qwen3_vl_embedding
+          ''',
+          [emailId, blob],
+        );
+      }
+    });
+
+    // logger.d('upsertEmailEmbedding: emailId=$emailId dim=${embedding.length}');
+  }
+
+  /// Deletes the embedding record for [emailId] from `emails_embeddings`.
+  Future<void> deleteEmailEmbedding(String emailId) async {
+    await db.transaction((tx) async {
+      await tx.execute('DELETE FROM emails_embeddings WHERE email_id = ?', [
+        emailId,
+      ]);
+    });
+    logger.d('deleteEmailEmbedding: emailId=$emailId');
+  }
+
+  /// Fetches the Qwen3-VL embedding for [emailId].
+  /// Returns null if no embedding exists for this email.
+  Future<List<double>?> getEmailEmbedding(String emailId) async {
+    final rows = await db.select(
+      'SELECT qwen3_vl_embedding FROM emails_embeddings WHERE email_id = ? LIMIT 1',
+      [emailId],
+    );
+    if (rows.isEmpty || rows.first['qwen3_vl_embedding'] == null) return null;
+    final blob = rows.first['qwen3_vl_embedding'] as Uint8List;
+    return Float32List.view(blob.buffer).toList();
+  }
+
+  /// Returns a list of emails that do not have a corresponding entry in the
+  /// `emails_embeddings` table, limited to [limit] results.
+  Future<List<Email>> getEmailsWithMissingEmbeddings({int limit = 10}) async {
+    final rows = await db.select(
+      '''
+      SELECT e.*
+      FROM emails e
+      LEFT OUTER JOIN emails_embeddings ee ON ee.email_id = e.id
+      WHERE (ee.email_id IS NULL OR ee.qwen3_vl_embedding IS NULL)
+        AND e.is_deleted = 0
+      LIMIT ?
+      ''',
+      [limit],
+    );
+    return rows.map((row) => Email.fromDbMap(row)).toList();
   }
 
   Future<Collection?> getCollection(String id) async {

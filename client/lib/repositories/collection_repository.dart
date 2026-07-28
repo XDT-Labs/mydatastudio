@@ -5,6 +5,7 @@ import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/services/sqlite_retry.dart';
 import 'package:path/path.dart' as p;
 
 class CollectionRepository {
@@ -56,64 +57,72 @@ class CollectionRepository {
 
   /// Create new collection
   Future<Collection?> addCollection(Collection val) async {
-    await db.execute(
-      "INSERT INTO collections (id, name, path, type, scanner, scan_status, oauth_service, "
-      "access_token, refresh_token, id_token, user_id, expiration, last_scan_date, "
-      "needs_re_auth, download_local_copy, local_copy_path) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [
-        val.id,
-        val.name,
-        val.path,
-        val.type,
-        val.scanner,
-        val.scanStatus,
-        val.oauthService,
-        // Encrypt tokens at the DB boundary; the passed-in [val] keeps plaintext
-        // so callers (e.g. scanner start) still see usable tokens.
-        CredentialCodec.encrypt(val.accessToken),
-        CredentialCodec.encrypt(val.refreshToken),
-        CredentialCodec.encrypt(val.idToken),
-        val.userId,
-        val.expiration?.millisecondsSinceEpoch,
-        val.lastScanDate?.millisecondsSinceEpoch,
-        val.needsReAuth ? 1 : 0,
-        val.downloadLocalCopy ? 1 : 0,
-        val.localCopyPath,
-      ],
+    return retryOnLock(
+      () async {
+        await db.execute(
+          "INSERT INTO collections (id, name, path, type, scanner, scan_status, oauth_service, "
+          "access_token, refresh_token, id_token, user_id, expiration, last_scan_date, "
+          "needs_re_auth, download_local_copy, local_copy_path) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [
+            val.id,
+            val.name,
+            val.path,
+            val.type,
+            val.scanner,
+            val.scanStatus,
+            val.oauthService,
+            CredentialCodec.encrypt(val.accessToken),
+            CredentialCodec.encrypt(val.refreshToken),
+            CredentialCodec.encrypt(val.idToken),
+            val.userId,
+            val.expiration?.millisecondsSinceEpoch,
+            val.lastScanDate?.millisecondsSinceEpoch,
+            val.needsReAuth ? 1 : 0,
+            val.downloadLocalCopy ? 1 : 0,
+            val.localCopyPath,
+          ],
+        );
+        return val;
+      },
+      label: 'CollectionRepository.addCollection',
     );
-    return val;
   }
 
   /// Update an existing collection (used for re-auth token refresh)
   Future<Collection?> updateCollection(Collection val) async {
-    await db.execute(
-      "UPDATE collections SET "
-      "name = ?, path = ?, type = ?, scanner = ?, scan_status = ?, "
-      "oauth_service = ?, access_token = ?, refresh_token = ?, id_token = ?, user_id = ?, "
-      "expiration = ?, last_scan_date = ?, needs_re_auth = ?, "
-      "download_local_copy = ?, local_copy_path = ? "
-      "WHERE id = ?",
-      [
-        val.name,
-        val.path,
-        val.type,
-        val.scanner,
-        val.scanStatus,
-        val.oauthService,
-        CredentialCodec.encrypt(val.accessToken),
-        CredentialCodec.encrypt(val.refreshToken),
-        CredentialCodec.encrypt(val.idToken),
-        val.userId,
-        val.expiration?.millisecondsSinceEpoch,
-        val.lastScanDate?.millisecondsSinceEpoch,
-        val.needsReAuth ? 1 : 0,
-        val.downloadLocalCopy ? 1 : 0,
-        val.localCopyPath,
-        val.id,
-      ],
+    return retryOnLock(
+      () async {
+        await db.execute(
+          "UPDATE collections SET "
+          "name = ?, path = ?, type = ?, scanner = ?, scan_status = ?, "
+          "oauth_service = ?, access_token = ?, refresh_token = ?, id_token = ?, user_id = ?, "
+          "expiration = ?, last_scan_date = ?, needs_re_auth = ?, "
+          "download_local_copy = ?, local_copy_path = ? "
+          "WHERE id = ?",
+          [
+            val.name,
+            val.path,
+            val.type,
+            val.scanner,
+            val.scanStatus,
+            val.oauthService,
+            CredentialCodec.encrypt(val.accessToken),
+            CredentialCodec.encrypt(val.refreshToken),
+            CredentialCodec.encrypt(val.idToken),
+            val.userId,
+            val.expiration?.millisecondsSinceEpoch,
+            val.lastScanDate?.millisecondsSinceEpoch,
+            val.needsReAuth ? 1 : 0,
+            val.downloadLocalCopy ? 1 : 0,
+            val.localCopyPath,
+            val.id,
+          ],
+        );
+        return val;
+      },
+      label: 'CollectionRepository.updateCollection',
     );
-    return val;
   }
 
   /// Update the scan date for services that check external systems on a schedule, such as email
@@ -127,39 +136,32 @@ class CollectionRepository {
     final collection = await collectionById(id);
     if (collection == null) return;
 
-    await db.transaction((tx) async {
-      // 2. Find and delete all file embeddings associated with files in this collection
-      final fileRows = await tx.select(
-        "SELECT id FROM files WHERE collection_id = ?",
-        [id],
-      );
-      final fileIds = fileRows.map((r) => r['id'] as String).toList();
-
-      if (fileIds.isNotEmpty) {
-        final placeholders = List.filled(fileIds.length, '?').join(',');
-        await tx.execute(
-          "DELETE FROM files_embeddings WHERE file_id IN ($placeholders)",
-          fileIds,
+    await retryOnLock(
+      () => db.transaction((tx) async {
+        final fileRows = await tx.select(
+          "SELECT id FROM files WHERE collection_id = ?",
+          [id],
         );
-      }
+        final fileIds = fileRows.map((r) => r['id'] as String).toList();
 
-      // 3. Delete all files linked to this collection
-      await tx.execute("DELETE FROM files WHERE collection_id = ?", [id]);
+        if (fileIds.isNotEmpty) {
+          final placeholders = List.filled(fileIds.length, '?').join(',');
+          await tx.execute(
+            "DELETE FROM files_embeddings WHERE file_id IN ($placeholders)",
+            fileIds,
+          );
+        }
 
-      // 4. Delete all folders linked to this collection
-      await tx.execute("DELETE FROM folders WHERE collection_id = ?", [id]);
-
-      // 5. Delete all emails linked to this collection
-      await tx.execute("DELETE FROM emails WHERE collection_id = ?", [id]);
-
-      // 6. Delete all email folders linked to this collection
-      await tx.execute("DELETE FROM email_folders WHERE collection_id = ?", [
-        id,
-      ]);
-
-      // 7. Finally delete the collection itself
-      await tx.execute("DELETE FROM collections WHERE id = ?", [id]);
-    });
+        await tx.execute("DELETE FROM files WHERE collection_id = ?", [id]);
+        await tx.execute("DELETE FROM folders WHERE collection_id = ?", [id]);
+        await tx.execute("DELETE FROM emails WHERE collection_id = ?", [id]);
+        await tx.execute("DELETE FROM email_folders WHERE collection_id = ?", [
+          id,
+        ]);
+        await tx.execute("DELETE FROM collections WHERE id = ?", [id]);
+      }),
+      label: 'CollectionRepository.deleteCollection',
+    );
 
     // 8. Physical disk cleanup (especially for email attachments/cache)
     String? appDir = MainApp.appDataDirectory.value;

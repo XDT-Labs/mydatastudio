@@ -80,10 +80,17 @@ bool relayIsolateLog(AppLogger logger, Object? message, String tag) {
   switch (message['level']) {
     case 'error':
     case 'fatal':
+      StackTrace? parsedStackTrace;
+      final stRaw = message['stackTrace'];
+      if (stRaw is String && stRaw.isNotEmpty) {
+        parsedStackTrace = StackTrace.fromString(stRaw);
+      } else if (stRaw is StackTrace) {
+        parsedStackTrace = stRaw;
+      }
       logger.e(
         text,
         error: message['error'],
-        stackTrace: message['stackTrace'],
+        stackTrace: parsedStackTrace,
       );
     case 'warning':
       logger.w(text);

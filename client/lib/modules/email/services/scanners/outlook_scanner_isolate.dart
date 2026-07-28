@@ -13,6 +13,7 @@ import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/models/tables/file.dart' as db_file;
 import 'package:mydatastudio/models/tables/folder.dart' as db_folder;
+import 'package:mydatastudio/modules/email/services/email_decoding_helper.dart';
 import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/email_repository.dart';
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
@@ -770,8 +771,57 @@ class OutlookScannerIsolateWorker {
           'email:outlook:${collection.id}:$targetFolder:${uid ?? const Uuid().v4()}',
         );
 
-    final plainBody = message.decodeTextPlainPart();
-    final htmlBody = message.decodeTextHtmlPart();
+    String? plainBody;
+    try {
+      plainBody = message.decodeTextPlainPart();
+    } catch (e) {
+      logger.w("enough_mail decodeTextPlainPart error for $emailId: $e");
+    }
+
+    String? htmlBody;
+    try {
+      htmlBody = message.decodeTextHtmlPart();
+    } catch (e) {
+      logger.w("enough_mail decodeTextHtmlPart error for $emailId: $e");
+    }
+
+    if (plainBody == null) {
+      try {
+        final part = message.allPartsFlat.cast<MimePart?>().firstWhere(
+          (p) => p?.mediaType.text.toLowerCase().contains('plain') ?? false,
+          orElse: () => null,
+        );
+        if (part != null) {
+          final rawBytes = part.decodeContentBinary();
+          if (rawBytes != null && rawBytes.isNotEmpty) {
+            plainBody = EmailDecodingHelper.decodeQuotedPrintable(rawBytes);
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (htmlBody == null) {
+      try {
+        final part = message.allPartsFlat.cast<MimePart?>().firstWhere(
+          (p) => p?.mediaType.text.toLowerCase().contains('html') ?? false,
+          orElse: () => null,
+        );
+        if (part != null) {
+          final rawBytes = part.decodeContentBinary();
+          if (rawBytes != null && rawBytes.isNotEmpty) {
+            htmlBody = EmailDecodingHelper.decodeQuotedPrintable(rawBytes);
+          }
+        }
+      } catch (_) {}
+    }
+
+    String subject;
+    try {
+      subject = message.decodeSubject() ?? '(no subject)';
+    } catch (_) {
+      subject = message.getHeaderValue('Subject') ?? '(no subject)';
+    }
+
     final snippet =
         plainBody != null
             ? (plainBody.length > 200 ? plainBody.substring(0, 200) : plainBody)
@@ -788,7 +838,7 @@ class OutlookScannerIsolateWorker {
       from: message.from?.first.toString() ?? 'unknown',
       to: message.to?.map((e) => e.toString()).toList() ?? [],
       cc: message.cc?.map((e) => e.toString()).toList() ?? [],
-      subject: message.decodeSubject() ?? '(no subject)',
+      subject: subject,
       snippet: snippet,
       plainBody: plainBody,
       htmlBody: htmlBody,

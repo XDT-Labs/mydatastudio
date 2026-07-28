@@ -15,7 +15,9 @@ import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/email/services/email_decoding_helper.dart';
 import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/email_repository.dart';
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
@@ -310,6 +312,10 @@ class GmailScannerIsolateWorker {
       return {'total': 0, 'new': 0, 'skipped': 0};
     }
 
+    final messageIds = messages.map((m) => m.id).whereType<String>().toList();
+    final existingEmails = await EmailRepository(appDb).getAllById(messageIds);
+    final existingIds = existingEmails.map((e) => e.id).toSet();
+
     List<Email> emailBatch = [];
 
     final labelsResponse = await _retryNetworkOp(
@@ -322,10 +328,19 @@ class GmailScannerIsolateWorker {
 
     for (var msgRef in messages) {
       try {
+        final id = msgRef.id;
+        if (id == null) continue;
+
+        // Skip downloading full body and upserting if email is already in local DB
+        if (existingIds.contains(id) && !force) {
+          skippedCount++;
+          continue;
+        }
+
         final m = await _retryNetworkOp(
           () => gmailApi.users.messages.get(
             'me',
-            msgRef.id!,
+            id,
             format: 'full',
           ),
           logger,
@@ -341,11 +356,8 @@ class GmailScannerIsolateWorker {
         String? ccRaw = _getHeader(m.payload?.headers, 'cc');
         String? messageId = _getHeader(m.payload?.headers, 'message-id');
 
-        String? plainBody = _parseBodyParts(
-          m.payload?.parts ?? [],
-          'text/plain',
-        );
-        String? htmlBody = _parseBodyParts(m.payload?.parts ?? [], 'text/html');
+        String? plainBody = _extractBody(m.payload, 'text/plain');
+        String? htmlBody = _extractBody(m.payload, 'text/html');
 
         // Note: Gmail API doesn't provide a simple "hasAttachments" flag in list view.
         // We check if there are parts with attachmentId or if mimeType is multipart/mixed.
@@ -472,16 +484,32 @@ class GmailScannerIsolateWorker {
     }
   }
 
-  static String? _parseBodyParts(List<MessagePart> parts, String mimeType) {
-    for (var part in parts) {
-      if (part.mimeType == mimeType && part.body?.data != null) {
-        return utf8.decode(base64Url.decode(part.body!.data!));
+  static String? _extractBody(MessagePart? part, String mimeType) {
+    if (part == null) return null;
+
+    if (part.mimeType == mimeType && part.body?.data != null) {
+      final rawBytes = EmailDecodingHelper.safeBase64Decode(part.body!.data!);
+      if (rawBytes != null && rawBytes.isNotEmpty) {
+        final encoding =
+            _headerValue(part, 'content-transfer-encoding')?.toLowerCase();
+        if (encoding == 'quoted-printable') {
+          return EmailDecodingHelper.decodeQuotedPrintable(rawBytes);
+        }
+        try {
+          return utf8.decode(rawBytes, allowMalformed: true);
+        } catch (_) {
+          return EmailDecodingHelper.decodeQuotedPrintable(rawBytes);
+        }
       }
-      if (part.parts != null) {
-        final result = _parseBodyParts(part.parts!, mimeType);
+    }
+
+    if (part.parts != null) {
+      for (var subPart in part.parts!) {
+        final result = _extractBody(subPart, mimeType);
         if (result != null) return result;
       }
     }
+
     return null;
   }
 

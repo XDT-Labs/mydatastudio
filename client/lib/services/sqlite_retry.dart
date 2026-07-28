@@ -53,15 +53,18 @@ bool isRetryableLockError(Object e) =>
 Future<T> retryOnLock<T>(
   Future<T> Function() operation, {
   required String label,
-  int maxRetries = 3,
-  Duration baseDelay = const Duration(milliseconds: 200),
+  int maxRetries = 10,
+  Duration baseDelay = const Duration(milliseconds: 100),
+  Duration maxDelay = const Duration(seconds: 2),
 }) async {
   for (int attempt = 0; ; attempt++) {
     try {
       return await operation();
     } on ResqliteException catch (e) {
       if (!isRetryableLockError(e) || attempt >= maxRetries) rethrow;
-      final delay = baseDelay * (1 << attempt);
+      final rawDelayMs = baseDelay.inMilliseconds * (1 << attempt);
+      final delayMs = rawDelayMs.clamp(0, maxDelay.inMilliseconds);
+      final delay = Duration(milliseconds: delayMs);
       debugPrint(
         '$label: sqlite code ${sqliteCodeOf(e)} '
         '(attempt ${attempt + 1}/$maxRetries), '

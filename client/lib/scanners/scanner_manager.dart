@@ -46,7 +46,37 @@ class ScannerManager {
     //_instance.startScanners();
   }
 
+  int _activeScanCount = 0;
+  final Map<String, StreamSubscription> _scannerScanSubs = {};
+  StreamSubscription? _pstProgressSub;
+
+  void _listenToPstProgress() {
+    _pstProgressSub ??= OutlookPstScannerIsolate.importProgress.listen((progress) {
+      if (progress == null) return;
+      if (!progress.done) {
+        DatabaseManager.instance.pauseEmbeddingIsolates();
+      } else {
+        DatabaseManager.instance.resumeEmbeddingIsolates();
+      }
+    });
+  }
+
+  void _onScannerStateChanged(bool scanning) {
+    if (scanning) {
+      _activeScanCount++;
+      DatabaseManager.instance.pauseEmbeddingIsolates();
+    } else {
+      _activeScanCount--;
+      if (_activeScanCount <= 0) {
+        _activeScanCount = 0;
+        DatabaseManager.instance.resumeEmbeddingIsolates();
+      }
+    }
+  }
+
   Future<void> startScanners() async {
+    _listenToPstProgress();
+
     // Delay scanner startup to let the app UI finish initializing and prevent startup lockups
     await Future.delayed(const Duration(seconds: 5));
 
@@ -91,6 +121,8 @@ class ScannerManager {
   }
 
   void stopScanner(String collectionId) {
+    _scannerScanSubs[collectionId]?.cancel();
+    _scannerScanSubs.remove(collectionId);
     if (scanners.containsKey(collectionId)) {
       logger.i("Stopping scanner for collection: $collectionId");
       scanners[collectionId]?.stop();
@@ -237,6 +269,10 @@ class ScannerManager {
       }
 
       scanners[c.id] = scanner;
+      _scannerScanSubs[c.id]?.cancel();
+      _scannerScanSubs[c.id] = scanner.isScanning.distinct().listen((scanning) {
+        _onScannerStateChanged(scanning);
+      });
       _pendingScanners.remove(c.id)?.complete(scanner);
       return scanner;
     } finally {

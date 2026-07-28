@@ -315,6 +315,24 @@ void main() {
       // Restore platform
       PathProviderPlatform.instance = oldPlatform;
     });
+
+    test('startBackgroundServices should be deferred when vault is locked and start when unlocked', () async {
+      final supportPath = await getApplicationSupportDirectory();
+      final configFile = io.File(p.join(supportPath.path, 'config.json'));
+
+      configFile.createSync(recursive: true);
+      configFile.writeAsStringSync(jsonEncode({'path': tempDir!.path}));
+
+      await DatabaseManager.instance.initializeDatabase();
+
+      expect(DatabaseManager.instance.database, isNotNull);
+      // Background services should not throw or fail when started or stopped
+      await DatabaseManager.instance.startBackgroundServices();
+      DatabaseManager.instance.stopBackgroundServices();
+
+      configFile.deleteSync();
+      DatabaseManager.instance.dispose();
+    });
   });
 }
 

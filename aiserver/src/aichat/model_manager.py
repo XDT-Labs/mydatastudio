@@ -201,7 +201,13 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
     """
     print(f"[EMBEDDING] Loading Transformers model: {model_id} from {local_dir}")
     
-    device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
+    # MPS (Metal Performance Shaders) on Apple Silicon has PyTorch memory allocation
+    # bugs with Qwen-VL 3D position embeddings (mrope), causing "RuntimeError: Invalid buffer size: XX GiB".
+    # Use CUDA if available, otherwise CPU.
+    if torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
     print(f"[EMBEDDING] Using device: {device}")
 
     # The Makefile downloads the full repo into models/<org>/<model_name>/
@@ -282,18 +288,29 @@ def generate_transformers_multimodal_embedding(
         return_tensors="pt"
     ).to(device)
     
-    # Per-call inference logging (device, tensor shape, embedding head) ran once
-    # per embedded item and told us nothing that varies between calls.
-    with torch.no_grad():
-        outputs = model(**inputs)
-        # Last Token Pooling ([EOS]) as per research
-        # Qwen3-VL-Embedding returns the embedding in the last hidden state of the [EOS] token
-        embeddings = outputs.last_hidden_state[:, -1, :]
+    try:
+        with torch.no_grad():
+            outputs = model(**inputs)
+            # Last Token Pooling ([EOS]) as per research
+            # Qwen3-VL-Embedding returns the embedding in the last hidden state of the [EOS] token
+            embeddings = outputs.last_hidden_state[:, -1, :]
 
-        # Normalize the embedding
-        embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+            # Normalize the embedding
+            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
-    return embeddings[0].tolist()
+        return embeddings[0].tolist()
+    except Exception as e:
+        if "buffer size" in str(e).lower() or "out of memory" in str(e).lower() or "mps" in str(e).lower():
+            print(f"[EMBEDDING] Device error on {device} ({e}). Falling back to CPU...")
+            cpu_device = torch.device("cpu")
+            model.to(cpu_device)
+            inputs_cpu = {k: (v.to(cpu_device) if isinstance(v, torch.Tensor) else v) for k, v in inputs.items()}
+            with torch.no_grad():
+                outputs = model(**inputs_cpu)
+                embeddings = outputs.last_hidden_state[:, -1, :]
+                embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+            return embeddings[0].tolist()
+        raise
 
 
 def generate_text_embedding(text: str, model: Any, processor: Any) -> List[float]:

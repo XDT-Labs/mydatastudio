@@ -112,6 +112,14 @@ class EmbeddingIsolate {
     });
   }
 
+  void pause() {
+    _controlPort?.send({'type': 'pause'});
+  }
+
+  void resume() {
+    _controlPort?.send({'type': 'resume'});
+  }
+
   /// Send the unwrapped DEK to the worker so it can decrypt collection tokens
   /// when embedding Google Drive files. A null DEK (vault still locked) is not
   /// sent — the worker keeps failing loudly on secret access until it arrives.
@@ -137,16 +145,26 @@ class EmbeddingIsolate {
 
     String? serviceUrl;
     String? serviceToken;
+    bool isPaused = false;
+
     controlPort.listen((message) {
-      if (message is Map && message['type'] == 'url') {
-        serviceUrl = message['url'];
-        serviceToken = message['token'];
-        logger.d("Python service URL updated: $serviceUrl");
-      } else if (message is Map && message['type'] == 'vaultDek') {
-        // Install the credential vault so _processGDriveFile can decrypt the
-        // collection's tokens (AUDIT M2 phase 4).
-        CredentialCodec.installIsolateVault(message['dek'] as Uint8List?);
-        logger.d("Credential vault DEK installed in embedding isolate");
+      if (message is Map) {
+        if (message['type'] == 'url') {
+          serviceUrl = message['url'];
+          serviceToken = message['token'];
+          logger.d("Python service URL updated: $serviceUrl");
+        } else if (message['type'] == 'vaultDek') {
+          // Install the credential vault so _processGDriveFile can decrypt the
+          // collection's tokens (AUDIT M2 phase 4).
+          CredentialCodec.installIsolateVault(message['dek'] as Uint8List?);
+          logger.d("Credential vault DEK installed in embedding isolate");
+        } else if (message['type'] == 'pause') {
+          isPaused = true;
+          logger.d("EmbeddingIsolate paused during active sync");
+        } else if (message['type'] == 'resume') {
+          isPaused = false;
+          logger.d("EmbeddingIsolate resumed after sync completion");
+        }
       }
     });
 
@@ -160,6 +178,11 @@ class EmbeddingIsolate {
 
     while (true) {
       try {
+        if (isPaused) {
+          await Future.delayed(const Duration(seconds: 10));
+          continue;
+        }
+
         if (serviceUrl == null) {
           logger.d("Waiting for Python service URL...");
           await Future.delayed(const Duration(seconds: 10));
@@ -231,7 +254,7 @@ class EmbeddingIsolate {
       }
 
       // Heartbeat sleep
-      await Future.delayed(const Duration(seconds: 5));
+      await Future.delayed(const Duration(seconds: 10));
     }
   }
 
