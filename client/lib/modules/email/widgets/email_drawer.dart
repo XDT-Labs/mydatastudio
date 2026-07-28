@@ -603,53 +603,63 @@ class _EmailFolderListState extends State<_EmailFolderList> {
             onTap: () => widget.onFolderTap(spam!.id),
           ),
         if (otherFolders.isNotEmpty) ...[
-          AccessibleTap(
-            expanded: _showAllFolders,
-            label: 'All Folders',
-            onPressed: () => setState(() => _showAllFolders = !_showAllFolders),
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  Icon(
-                    _showAllFolders
-                        ? Icons.keyboard_arrow_down
-                        : Icons.keyboard_arrow_right,
-                    size: 16,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'All Folders',
-                    style: TextStyle(
-                      fontSize: 12,
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              vertical: 2.0,
+              horizontal: 8.0,
+            ),
+            child: AccessibleTap(
+              expanded: _showAllFolders,
+              label: 'All Folders',
+              onPressed:
+                  () => setState(() => _showAllFolders = !_showAllFolders),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.only(
+                  left: 40.0,
+                  top: 8.0,
+                  bottom: 8.0,
+                  right: 8.0,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _showAllFolders
+                          ? Icons.keyboard_arrow_down
+                          : Icons.keyboard_arrow_right,
+                      size: 18,
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 6),
+                    Text(
+                      'All Folders',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
           if (_showAllFolders)
-            Padding(
-              padding: const EdgeInsets.only(left: 8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children:
-                    nestedFolders
-                        .map(
-                          (entry) => EmailFolderTileWidget(
-                            folder: entry.folder,
-                            label: entry.folder.name,
-                            indent: 48.0 + entry.depth * 14.0,
-                            isSelected:
-                                widget.selectedFolderId == entry.folder.id,
-                            onTap: () => widget.onFolderTap(entry.folder.id),
-                          ),
-                        )
-                        .toList(),
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children:
+                  nestedFolders
+                      .map(
+                        (entry) => EmailFolderTileWidget(
+                          folder: entry.folder,
+                          label: entry.folder.name,
+                          indent: 72.0 + entry.depth * 12.0,
+                          fontSize: 10.0,
+                          isSelected:
+                              widget.selectedFolderId == entry.folder.id,
+                          onTap: () => widget.onFolderTap(entry.folder.id),
+                        ),
+                      )
+                      .toList(),
             ),
         ],
       ],
