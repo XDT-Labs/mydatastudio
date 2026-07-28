@@ -30,5 +30,12 @@ def require_token(authorization: Optional[str] = Header(None)) -> None:
         return
 
     scheme, _, presented = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or not hmac.compare_digest(presented, expected):
+    # Compare bytes, not str: hmac.compare_digest only accepts str when both
+    # sides are ASCII-only, and Starlette decodes headers as latin-1 — so a
+    # header like "Bearer é" would raise TypeError (a 500, on a path an
+    # unauthenticated caller controls) instead of returning 401.
+    if scheme.lower() != "bearer" or not hmac.compare_digest(
+        presented.encode("utf-8", "surrogateescape"),
+        expected.encode("utf-8", "surrogateescape"),
+    ):
         raise HTTPException(status_code=401, detail="Unauthorized")

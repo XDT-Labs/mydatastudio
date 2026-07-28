@@ -219,10 +219,13 @@ class _RxFilesPage extends State<RxFilesPage> {
     ScannerManager.getInstance()
         .getScannerAsync(col)
         .then((scanner) {
-          if (scanner.isScanning.value && col.scanner != AppConstants.scannerFileGDrive) {
-            return;
+          if (scanner.isScanning.value &&
+              col.scanner != AppConstants.scannerFileGDrive) {
+            return Future<void>.value();
           }
-          scanner.start(col, absPath, false, true).then((_) {
+          // Returned, not fire-and-forget: otherwise a failing scan escapes
+          // the .catchError below and surfaces as an unhandled async error.
+          return scanner.start(col, absPath, false, true).then((_) {
             if (mounted && collection?.id == col.id && path == targetPath) {
               _filesAndFoldersService?.invoke(
                 GetFileAndFoldersServiceCommand(
@@ -615,13 +618,17 @@ class _RxFilesPage extends State<RxFilesPage> {
                         // collections.
                         var targetCollection = collection!;
                         if (file.collectionId != collection!.id) {
-                          final found = await DatabaseManager.instance.repository
+                          final found = await DatabaseManager
+                              .instance
+                              .repository
                               ?.getCollection(file.collectionId);
                           if (!mounted) return;
                           if (found == null) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Could not find collection for this file'),
+                                content: Text(
+                                  'Could not find collection for this file',
+                                ),
                               ),
                             );
                             return;
@@ -770,10 +777,12 @@ class _RxFilesPage extends State<RxFilesPage> {
     final parts = folderPath.split('/').where((s) => s.isNotEmpty).toList();
     final trail = <_BreadcrumbEntry>[];
     for (int i = 0; i < parts.length; i++) {
-      trail.add(_BreadcrumbEntry(
-        name: parts[i],
-        path: parts.sublist(0, i + 1).join('/'),
-      ));
+      trail.add(
+        _BreadcrumbEntry(
+          name: parts[i],
+          path: parts.sublist(0, i + 1).join('/'),
+        ),
+      );
     }
     return trail;
   }
@@ -860,7 +869,8 @@ class _RxFilesPage extends State<RxFilesPage> {
       if (item is File) {
         try {
           // Reconstruct absolute path for filesystem delete.
-          final absPath = item.localPath ?? FilePathResolver.absolute(item, collection!);
+          final absPath =
+              item.localPath ?? FilePathResolver.absolute(item, collection!);
           final ioFile = io.File(absPath);
           if (await ioFile.exists()) {
             await ioFile.delete();

@@ -116,7 +116,7 @@ not caused by setup.
 - **Login needs a `keys` directory.** The client authenticates against `<storage>/keys`, where `<storage>` comes from `~/Library/Application Support/com.xdtlabs.mydatastudio.dev/config.json` (here it points at a Drobo NAS: `/Volumes/Drobo5N/.../dev-1`). If that dir is missing/empty the app logs `⛔ Login error: Exception: Keys not found at ... Stopping application.` and sits on the login screen. On a clean machine without that config + keys, expect to land on login, not the file browser.
 - **`screencapture` CLI is blocked.** Run from Bash it returns `could not create image from display` (the terminal lacks macOS Screen Recording permission). Use the computer-use MCP screenshot tool instead.
 - **pdm venv is shared across worktrees.** `pdm info` in a worktree reports the interpreter under the **main** checkout's `.venv`. Deps installed there are already available — don't expect a per-worktree `.venv`.
-- **No `build_runner` needed for the current tree.** There are no `part '*.g.dart'` directives in `lib/`, so the committed source compiles as-is. Only re-run `dart run build_runner build` after you change Drift tables or `@JsonSerializable` classes.
+- **No `build_runner` needed for the current tree.** There are no `part '*.g.dart'` directives in `lib/`, so the committed source compiles as-is. Only re-run `dart run build_runner build` after you change `@JsonSerializable` classes. The database layer is raw resqlite DDL (`database_manager.dart`), so schema changes need no codegen.
 
 ## Troubleshooting
 

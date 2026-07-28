@@ -45,6 +45,23 @@ def test_wrong_token_is_rejected(monkeypatch):
     assert exc.value.status_code == 401
 
 
+def test_non_ascii_token_is_rejected_not_a_crash(monkeypatch):
+    # Starlette decodes header values as latin-1, so a caller can put non-ASCII
+    # characters in the Authorization header. hmac.compare_digest only accepts
+    # str when both sides are ASCII-only — comparing str would raise TypeError
+    # here and turn an unauthorized request into an attacker-triggerable 500.
+    monkeypatch.setenv("AISERVER_TOKEN", TOKEN)
+    with pytest.raises(HTTPException) as exc:
+        require_token(authorization="Bearer \xe9\xc3\xbf")
+    assert exc.value.status_code == 401
+
+
+def test_non_ascii_configured_token_still_matches(monkeypatch):
+    # The expected side can be non-ASCII too; encoding both keeps it working.
+    monkeypatch.setenv("AISERVER_TOKEN", "tøken-é")
+    require_token(authorization="Bearer tøken-é")  # must not raise
+
+
 def test_wrong_scheme_is_rejected(monkeypatch):
     # A bare token or a different scheme must not satisfy the check.
     monkeypatch.setenv("AISERVER_TOKEN", TOKEN)

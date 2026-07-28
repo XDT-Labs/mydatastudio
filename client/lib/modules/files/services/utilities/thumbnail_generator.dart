@@ -60,20 +60,32 @@ class ThumbnailGenerator {
     // buffer (rawpy) and returns a JPEG. The server never opens the path.
     if (isRaw && llmServiceUrl != null) {
       try {
+        // RAW files run 30-100MB+; the non-RAW branch below caps decode input
+        // at 50MB, and base64-ing an uncapped file into a JSON body is worse.
+        final rawLength = await io.File(filePath).length();
+        if (rawLength > 100 * 1024 * 1024) {
+          _logger.w(
+            'ThumbnailGenerator: RAW file over 100MB, skipping: $filePath',
+          );
+          return null;
+        }
         final rawBytes = await io.File(filePath).readAsBytes();
-        final response = await http.post(
-          Uri.parse("$llmServiceUrl/util/thumbnail"),
-          headers: {
-            'Content-Type': 'application/json',
-            ...aiServerAuthHeaders(llmServiceToken),
-          },
-          body: jsonEncode({
-            'image_base64': base64Encode(rawBytes),
-            'is_raw': true,
-            'width': 320,
-            'height': 240,
-          }),
-        );
+        final response = await http
+            .post(
+              Uri.parse("$llmServiceUrl/util/thumbnail"),
+              headers: {
+                'Content-Type': 'application/json',
+                ...aiServerAuthHeaders(llmServiceToken),
+              },
+              body: jsonEncode({
+                'image_base64': base64Encode(rawBytes),
+                'is_raw': true,
+                'width': 320,
+                'height': 240,
+              }),
+            )
+            // Without this an unresponsive aiserver hangs the generator forever.
+            .timeout(const Duration(seconds: 30));
 
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);

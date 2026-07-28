@@ -464,6 +464,7 @@ async def generate_chat_completion(request: ChatCompletionRequest):
         if request.stream:
             current_model = get_current_model_id()
             stop_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+            created_at = int(time.time())
 
             # Claim the generation slot *before* the response starts. Acquiring
             # non-blocking is what keeps the lock off the yield path: the holder
@@ -489,6 +490,15 @@ async def generate_chat_completion(request: ChatCompletionRequest):
                         chunk["id"] = stop_id
                         chunk["model"] = current_model
                         yield f"data: {json.dumps(chunk)}\n\n"
+                    yield "data: [DONE]\n\n"
+                except Exception as e:
+                    # Same contract as the cloud path: the client always gets a
+                    # terminal event. Without this the generator just stops and
+                    # the client sees a bare connection drop with no reason.
+                    print(f"[ERROR] local generation stream failed: {e}")
+                    yield _sse_error_chunk(
+                        stop_id, created_at, current_model, "Generation failed."
+                    )
                     yield "data: [DONE]\n\n"
                 finally:
                     unregister_stream(stop_id)

@@ -37,9 +37,12 @@ class EmailRepository {
     List<dynamic> args = [collectionId];
 
     if (folderId != null) {
-      query += "AND (folder_id = ? OR ',' || labels || ',' LIKE ?) ";
+      // instr(), not LIKE: Gmail label ids routinely contain '_' (Label_12),
+      // which LIKE reads as "any single character" — so a folder filter could
+      // match a different label differing only at that position.
+      query += "AND (folder_id = ? OR instr(',' || labels || ',', ?) > 0) ";
       args.add(folderId);
-      args.add('%,$folderId,%');
+      args.add(',$folderId,');
     }
 
     if (search != null && search.isNotEmpty) {

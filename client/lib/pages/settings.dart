@@ -99,24 +99,52 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _saveProvider(String service) async {
+    // When the vault is locked, _loadProviders left the secret fields blank
+    // (it could not decrypt them). Saving now would write those blanks over
+    // the stored ciphertext — encrypt() passes empty strings through — and the
+    // credential would be gone with nothing reported. Editing the Client ID
+    // alone is enough to trigger it, because this writes all three columns.
+    if (!CredentialCodec.isUnlocked) {
+      logger.w(
+        'Vault is locked; not saving $service — the stored secrets would be '
+        'overwritten with blanks.',
+      );
+      _showMessage('Unlock required before provider settings can be saved');
+      return;
+    }
+
     final clientId = _clientIdControllers[service]?.text.trim() ?? '';
     final clientSecret = _clientSecretControllers[service]?.text.trim() ?? '';
     final apiKey = _apiKeyControllers[service]?.text.trim() ?? '';
 
-    await DatabaseManager.instance.database!.execute(
-      'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
-      'VALUES (?, ?, ?, ?, \'collection\') '
-      'ON CONFLICT(service) DO UPDATE SET '
-      'client_id = excluded.client_id, '
-      'client_secret = excluded.client_secret, '
-      'api_key = excluded.api_key',
-      [
-        service,
-        clientId,
-        CredentialCodec.encrypt(clientSecret),
-        CredentialCodec.encrypt(apiKey),
-      ],
-    );
+    try {
+      await DatabaseManager.instance.database!.execute(
+        'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
+        'VALUES (?, ?, ?, ?, \'collection\') '
+        'ON CONFLICT(service) DO UPDATE SET '
+        'client_id = excluded.client_id, '
+        'client_secret = excluded.client_secret, '
+        'api_key = excluded.api_key',
+        [
+          service,
+          clientId,
+          CredentialCodec.encrypt(clientSecret),
+          CredentialCodec.encrypt(apiKey),
+        ],
+      );
+    } catch (e) {
+      // Runs from an un-awaited debounce Timer, so anything escaping here is
+      // an unhandled async error the user never sees.
+      logger.e('Failed to save provider $service: $e');
+      _showMessage('Could not save $service settings');
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -188,11 +216,12 @@ class _SettingsPageState extends State<SettingsPage> {
               Semantics(
                 link: true,
                 child: InkWell(
-                  onTap: () => launchUrl(
-                    Uri.parse(
-                      'https://console.cloud.google.com/apis/credentials',
-                    ),
-                  ),
+                  onTap:
+                      () => launchUrl(
+                        Uri.parse(
+                          'https://console.cloud.google.com/apis/credentials',
+                        ),
+                      ),
                   child: const Text(
                     'Get Credentials from Google Cloud Console',
                     style: TextStyle(

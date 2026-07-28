@@ -13,6 +13,7 @@ class EmailEmbeddingIsolate {
   Isolate? _isolate;
   ReceivePort? _receivePort;
   SendPort? _controlPort;
+  StreamSubscription<String?>? _urlSubscription;
 
   Future<void> start(
     String storagePath,
@@ -80,7 +81,7 @@ class EmailEmbeddingIsolate {
       }
     });
 
-    MainApp.llmServiceUrl.listen((url) {
+    _urlSubscription = MainApp.llmServiceUrl.listen((url) {
       if (url != null) {
         updateUrl(url);
       }
@@ -290,5 +291,10 @@ class EmailEmbeddingIsolate {
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
     _receivePort?.close();
+    // Held so it can be cancelled: unstored, every start/stop cycle left a
+    // live listener pushing url updates at a dead _controlPort.
+    _urlSubscription?.cancel();
+    _urlSubscription = null;
+    _controlPort = null;
   }
 }

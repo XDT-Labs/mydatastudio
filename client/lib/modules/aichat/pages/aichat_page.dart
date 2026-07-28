@@ -41,7 +41,13 @@ class TextMessageItem extends ChatItem {
   final String? model;
   final List<Uint8List> images;
   final Map<String, int>? usage;
-  TextMessageItem({required this.role, required this.text, this.model, this.images = const [], this.usage});
+  TextMessageItem({
+    required this.role,
+    required this.text,
+    this.model,
+    this.images = const [],
+    this.usage,
+  });
 }
 
 class GenUiSurfaceItem extends ChatItem {
@@ -158,12 +164,14 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     _contentGenerator.textResponseStream.listen((text) {
       if (mounted) {
         setState(() {
-          _chatItems.add(TextMessageItem(
-            role: 'assistant',
-            text: text,
-            model: _contentGenerator.lastResponseModel,
-            usage: _contentGenerator.lastUsage,
-          ));
+          _chatItems.add(
+            TextMessageItem(
+              role: 'assistant',
+              text: text,
+              model: _contentGenerator.lastResponseModel,
+              usage: _contentGenerator.lastUsage,
+            ),
+          );
           _streamingText = null;
         });
         AichatPage.isStreaming.value = false;
@@ -294,12 +302,10 @@ class _AichatPage extends State<AichatPage> with RouteAware {
         items.add(
           DropdownMenuItem<String>(
             value: m.alias,
-            child: (m.description != null && m.description!.isNotEmpty)
-                ? Tooltip(
-                    message: m.description!,
-                    child: textWidget,
-                  )
-                : textWidget,
+            child:
+                (m.description != null && m.description!.isNotEmpty)
+                    ? Tooltip(message: m.description!, child: textWidget)
+                    : textWidget,
           ),
         );
       }
@@ -341,10 +347,13 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     String conversationName = '';
 
     for (final m in messages) {
-      final usage = (m.tokenCount != null && m.tokenCount! > 0)
-          ? {'total_tokens': m.tokenCount!}
-          : null;
-      chatItems.add(TextMessageItem(role: m.role, text: m.content, usage: usage));
+      final usage =
+          (m.tokenCount != null && m.tokenCount! > 0)
+              ? {'total_tokens': m.tokenCount!}
+              : null;
+      chatItems.add(
+        TextMessageItem(role: m.role, text: m.content, usage: usage),
+      );
       llmHistory.add({'role': m.role, 'content': m.content});
     }
 
@@ -494,7 +503,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     }
 
     setState(() {
-      _chatItems.add(TextMessageItem(role: 'user', text: message, images: attachmentBytes));
+      _chatItems.add(
+        TextMessageItem(role: 'user', text: message, images: attachmentBytes),
+      );
       _pendingFiles.clear();
     });
 
@@ -526,14 +537,31 @@ class _AichatPage extends State<AichatPage> with RouteAware {
         );
         if (rows.isNotEmpty) {
           // Decrypt the cloud provider key (AUDIT M2 phase 3/4). A locked vault
-          // throws rather than sending ciphertext as the API key.
-          apiKey = CredentialCodec.decrypt(rows.first['api_key'] as String?);
+          // throws rather than sending ciphertext as the API key — caught here
+          // because _sendMessage is called fire-and-forget, so an escaping
+          // throw would leave the user's message sitting in the list with no
+          // request sent and nothing reported.
+          try {
+            apiKey = CredentialCodec.decrypt(rows.first['api_key'] as String?);
+          } catch (e) {
+            logger.e('Could not decrypt the $group API key: $e');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('API key unavailable — unlock required.'),
+                ),
+              );
+            }
+            return;
+          }
         }
       }
     }
     _contentGenerator.apiKey = apiKey;
 
-    _genUiConversation.sendRequest(UserMessage.text(llmMessage.isEmpty ? message : llmMessage));
+    _genUiConversation.sendRequest(
+      UserMessage.text(llmMessage.isEmpty ? message : llmMessage),
+    );
     _textController.clear();
     _focusNode.requestFocus();
     _scrollToBottom();
@@ -578,26 +606,24 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                     spacing: 6,
                     runSpacing: 6,
                     alignment: WrapAlignment.end,
-                    children: images
-                        .map(
-                          (bytes) => ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.memory(
-                              bytes,
-                              width: 120,
-                              height: 120,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                        )
-                        .toList(),
+                    children:
+                        images
+                            .map(
+                              (bytes) => ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.memory(
+                                  bytes,
+                                  width: 120,
+                                  height: 120,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            )
+                            .toList(),
                   ),
                 ),
               if (text.isNotEmpty)
-                Text(
-                  text,
-                  style: TextStyle(color: _textColor, fontSize: 15),
-                ),
+                Text(text, style: TextStyle(color: _textColor, fontSize: 15)),
             ],
           ),
         ),
@@ -605,7 +631,11 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     );
   }
 
-  Widget _buildAssistantBubble(String text, {bool streaming = false, String? model}) {
+  Widget _buildAssistantBubble(
+    String text, {
+    bool streaming = false,
+    String? model,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Align(
@@ -628,11 +658,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
               child: MarkdownBody(
                 data: streaming ? '$text▋' : text,
                 styleSheet: MarkdownStyleSheet(
-                  p: TextStyle(
-                    color: _textColor,
-                    fontSize: 15,
-                    height: 1.5,
-                  ),
+                  p: TextStyle(color: _textColor, fontSize: 15, height: 1.5),
                   code: TextStyle(
                     backgroundColor: _codeBgColor,
                     color: _textColor,
@@ -646,7 +672,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                   ),
                   blockquoteDecoration: BoxDecoration(
                     color: _codeBlockBgColor,
-                    border: Border(left: BorderSide(color: _mutedColor, width: 3)),
+                    border: Border(
+                      left: BorderSide(color: _mutedColor, width: 3),
+                    ),
                   ),
                   h1: TextStyle(
                     color: _textColor,
@@ -668,10 +696,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                     color: _textColor,
                     fontWeight: FontWeight.bold,
                   ),
-                  em: TextStyle(
-                    color: _textColor,
-                    fontStyle: FontStyle.italic,
-                  ),
+                  em: TextStyle(color: _textColor, fontStyle: FontStyle.italic),
                 ),
               ),
             ),
@@ -730,8 +755,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
   }
 
   Widget _buildModelDownloadGate() {
-    final hasError =
-        _downloadItems.any((i) => i.status == ModelDownloadStatus.error);
+    final hasError = _downloadItems.any(
+      (i) => i.status == ModelDownloadStatus.error,
+    );
 
     return ColoredBox(
       color: _bgColor,
@@ -784,9 +810,10 @@ class _AichatPage extends State<AichatPage> with RouteAware {
         statusText = 'Checking…';
         break;
       case ModelDownloadStatus.downloading:
-        statusText = item.totalMb > 0
-            ? '${item.downloadedMb.toStringAsFixed(0)} MB / ${item.totalMb.toStringAsFixed(0)} MB'
-            : 'Starting download…';
+        statusText =
+            item.totalMb > 0
+                ? '${item.downloadedMb.toStringAsFixed(0)} MB / ${item.totalMb.toStringAsFixed(0)} MB'
+                : 'Starting download…';
         break;
       case ModelDownloadStatus.complete:
         statusText = 'Ready';
@@ -823,9 +850,10 @@ class _AichatPage extends State<AichatPage> with RouteAware {
           Text(
             statusText,
             style: TextStyle(
-              color: item.status == ModelDownloadStatus.error
-                  ? _cs.error
-                  : _mutedColor,
+              color:
+                  item.status == ModelDownloadStatus.error
+                      ? _cs.error
+                      : _mutedColor,
               fontSize: 12,
             ),
           ),
@@ -837,7 +865,11 @@ class _AichatPage extends State<AichatPage> with RouteAware {
   Widget _buildDownloadStatusIcon(ModelDownloadStatus status) {
     switch (status) {
       case ModelDownloadStatus.complete:
-        return const Icon(Icons.check_circle, color: Colors.greenAccent, size: 18);
+        return const Icon(
+          Icons.check_circle,
+          color: Colors.greenAccent,
+          size: 18,
+        );
       case ModelDownloadStatus.error:
         return Icon(Icons.error_outline, color: _cs.error, size: 18);
       case ModelDownloadStatus.downloading:
@@ -879,45 +911,45 @@ class _AichatPage extends State<AichatPage> with RouteAware {
           _buildTitleBar(),
           Expanded(
             child: SelectionArea(
-             child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.only(
-                bottom: 20,
-                left: 24,
-                right: 24,
-                top: 24,
+              child: ListView.builder(
+                controller: _scrollController,
+                padding: const EdgeInsets.only(
+                  bottom: 20,
+                  left: 24,
+                  right: 24,
+                  top: 24,
+                ),
+                itemCount: itemCount,
+                itemBuilder: (context, index) {
+                  if (index == _chatItems.length && _streamingText != null) {
+                    return _buildAssistantBubble(
+                      _streamingText!,
+                      streaming: true,
+                    );
+                  }
+
+                  final item = _chatItems[index];
+
+                  if (item is TextMessageItem) {
+                    return item.role == 'user'
+                        ? _buildUserBubble(item.text, images: item.images)
+                        : _buildAssistantBubble(item.text, model: item.model);
+                  }
+
+                  if (item is GenUiSurfaceItem) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: GenUiSurface(
+                        host: _genUiConversation.host,
+                        surfaceId: item.surfaceId,
+                      ),
+                    );
+                  }
+
+                  return const SizedBox.shrink();
+                },
               ),
-              itemCount: itemCount,
-              itemBuilder: (context, index) {
-                if (index == _chatItems.length && _streamingText != null) {
-                  return _buildAssistantBubble(
-                    _streamingText!,
-                    streaming: true,
-                  );
-                }
-
-                final item = _chatItems[index];
-
-                if (item is TextMessageItem) {
-                  return item.role == 'user'
-                      ? _buildUserBubble(item.text, images: item.images)
-                      : _buildAssistantBubble(item.text, model: item.model);
-                }
-
-                if (item is GenUiSurfaceItem) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: GenUiSurface(
-                      host: _genUiConversation.host,
-                      surfaceId: item.surfaceId,
-                    ),
-                  );
-                }
-
-                return const SizedBox.shrink();
-              },
             ),
-           ),
           ),
           Container(
             color: _bgColor,
@@ -941,180 +973,200 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: _inputBorderColor, width: 1),
                   ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Focus(
-                    focusNode: _focusNode,
-                    onKeyEvent: _handleKeyEvent,
-                    child: TextField(
-                      controller: _textController,
-                      keyboardType: TextInputType.multiline,
-                      minLines: 1,
-                      maxLines: 10,
-                      style: TextStyle(fontSize: 15, color: _textColor),
-                      decoration: InputDecoration(
-                        hintText: "Ask a question",
-                        hintStyle: TextStyle(color: _hintColor, fontSize: 15),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14.0,
-                          vertical: 14.0,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Focus(
+                        focusNode: _focusNode,
+                        onKeyEvent: _handleKeyEvent,
+                        child: TextField(
+                          controller: _textController,
+                          keyboardType: TextInputType.multiline,
+                          minLines: 1,
+                          maxLines: 10,
+                          style: TextStyle(fontSize: 15, color: _textColor),
+                          decoration: InputDecoration(
+                            hintText: "Ask a question",
+                            hintStyle: TextStyle(
+                              color: _hintColor,
+                              fontSize: 15,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14.0,
+                              vertical: 14.0,
+                            ),
+                            border: InputBorder.none,
+                            isDense: true,
+                          ),
                         ),
-                        border: InputBorder.none,
-                        isDense: true,
                       ),
-                    ),
-                  ),
-                  if (_pendingFiles.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 8, top: 4),
-                      child: Wrap(
-                        spacing: 6,
-                        children:
-                            _pendingFiles.map((f) {
-                              return Chip(
-                                label: Text(
-                                  f.name,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: _textColor,
-                                  ),
-                                ),
-                                backgroundColor: _cs.surfaceContainerHighest,
-                                deleteIcon: Icon(
-                                  Icons.close,
-                                  size: 14,
-                                  color: _mutedColor,
-                                ),
-                                onDeleted:
-                                    () =>
-                                        setState(() => _pendingFiles.remove(f)),
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                              );
-                            }).toList(),
-                      ),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(6, 4, 8, 8),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 24,
-                            minHeight: 24,
+                      if (_pendingFiles.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8, top: 4),
+                          child: Wrap(
+                            spacing: 6,
+                            children:
+                                _pendingFiles.map((f) {
+                                  return Chip(
+                                    label: Text(
+                                      f.name,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: _textColor,
+                                      ),
+                                    ),
+                                    backgroundColor:
+                                        _cs.surfaceContainerHighest,
+                                    deleteIcon: Icon(
+                                      Icons.close,
+                                      size: 14,
+                                      color: _mutedColor,
+                                    ),
+                                    onDeleted:
+                                        () => setState(
+                                          () => _pendingFiles.remove(f),
+                                        ),
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                    ),
+                                  );
+                                }).toList(),
                           ),
-                          tooltip: 'Attach files',
-                          icon: Icon(
-                            Icons.add,
-                            color: _mutedColor,
-                            size: 20,
-                          ),
-                          onPressed: () async {
-                            FilePickerResult? result = await FilePicker.platform
-                                .pickFiles(allowMultiple: true);
-                            if (result != null) {
-                              setState(
-                                () => _pendingFiles.addAll(result.files),
-                              );
-                            }
-                          },
                         ),
-                        const SizedBox(width: 12),
-                        Theme(
-                          data: Theme.of(context).copyWith(
-                            hoverColor: Colors.transparent,
-                            splashColor: Colors.transparent,
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: _buildModelItems().any((i) => i.value == _selectedModel) ? _selectedModel : null,
-                              dropdownColor: _cs.surfaceContainerHigh,
-                              icon: Padding(
-                                padding: const EdgeInsets.only(left: 4.0),
-                                child: Icon(
-                                  Icons.keyboard_arrow_up,
-                                  size: 16,
-                                  color: _mutedColor,
-                                ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(6, 4, 8, 8),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 24,
+                                minHeight: 24,
                               ),
-                              elevation: 2,
-                              onChanged: (String? newValue) {
-                                if (newValue != null) {
-                                  setState(() {
-                                    _selectedModel = newValue;
-                                  });
+                              tooltip: 'Attach files',
+                              icon: Icon(
+                                Icons.add,
+                                color: _mutedColor,
+                                size: 20,
+                              ),
+                              onPressed: () async {
+                                FilePickerResult? result = await FilePicker
+                                    .platform
+                                    .pickFiles(allowMultiple: true);
+                                if (result != null) {
+                                  setState(
+                                    () => _pendingFiles.addAll(result.files),
+                                  );
                                 }
                               },
-                              items: _buildModelItems(),
                             ),
-                          ),
+                            const SizedBox(width: 12),
+                            Theme(
+                              data: Theme.of(context).copyWith(
+                                hoverColor: Colors.transparent,
+                                splashColor: Colors.transparent,
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value:
+                                      _buildModelItems().any(
+                                            (i) => i.value == _selectedModel,
+                                          )
+                                          ? _selectedModel
+                                          : null,
+                                  dropdownColor: _cs.surfaceContainerHigh,
+                                  icon: Padding(
+                                    padding: const EdgeInsets.only(left: 4.0),
+                                    child: Icon(
+                                      Icons.keyboard_arrow_up,
+                                      size: 16,
+                                      color: _mutedColor,
+                                    ),
+                                  ),
+                                  elevation: 2,
+                                  onChanged: (String? newValue) {
+                                    if (newValue != null) {
+                                      setState(() {
+                                        _selectedModel = newValue;
+                                      });
+                                    }
+                                  },
+                                  items: _buildModelItems(),
+                                ),
+                              ),
+                            ),
+                            const Spacer(),
+                            if (_streamingText != null)
+                              AccessibleTap(
+                                label: 'Stop generating',
+                                borderRadius: BorderRadius.circular(22),
+                                onPressed:
+                                    () => _contentGenerator.cancelStream(),
+                                child: SizedBox(
+                                  width: 44,
+                                  height: 44,
+                                  child: Center(
+                                    child: Container(
+                                      width: 30,
+                                      height: 30,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: _sendEnabledBg,
+                                      ),
+                                      child: Icon(
+                                        Icons.stop_rounded,
+                                        color: _sendIconColor,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              AccessibleTap(
+                                enabled: _canSend,
+                                label: 'Send message',
+                                borderRadius: BorderRadius.circular(22),
+                                onPressed:
+                                    _canSend
+                                        ? () =>
+                                            _sendMessage(_textController.text)
+                                        : null,
+                                child: SizedBox(
+                                  width: 44,
+                                  height: 44,
+                                  child: Center(
+                                    child: Container(
+                                      width: 30,
+                                      height: 30,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color:
+                                            _canSend
+                                                ? _sendEnabledBg
+                                                : _sendDisabledBg,
+                                      ),
+                                      child: Icon(
+                                        Icons.arrow_upward_rounded,
+                                        color:
+                                            _canSend
+                                                ? _sendIconColor
+                                                : _mutedColor,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
-                        const Spacer(),
-                        if (_streamingText != null)
-                          AccessibleTap(
-                            label: 'Stop generating',
-                            borderRadius: BorderRadius.circular(22),
-                            onPressed: () => _contentGenerator.cancelStream(),
-                            child: SizedBox(
-                              width: 44,
-                              height: 44,
-                              child: Center(
-                                child: Container(
-                              width: 30,
-                              height: 30,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _sendEnabledBg,
-                              ),
-                              child: Icon(
-                                Icons.stop_rounded,
-                                color: _sendIconColor,
-                                size: 18,
-                              ),
-                            ),
-                              ),
-                            ),
-                          )
-                        else
-                          AccessibleTap(
-                            enabled: _canSend,
-                            label: 'Send message',
-                            borderRadius: BorderRadius.circular(22),
-                            onPressed: _canSend
-                                ? () => _sendMessage(_textController.text)
-                                : null,
-                            child: SizedBox(
-                              width: 44,
-                              height: 44,
-                              child: Center(
-                                child: Container(
-                              width: 30,
-                              height: 30,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _canSend ? _sendEnabledBg : _sendDisabledBg,
-                              ),
-                              child: Icon(
-                                Icons.arrow_upward_rounded,
-                                color: _canSend ? _sendIconColor : _mutedColor,
-                                size: 18,
-                              ),
-                            ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
+                ),
               ],
             ),
           ),

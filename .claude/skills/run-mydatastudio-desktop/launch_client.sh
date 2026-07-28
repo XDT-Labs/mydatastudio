@@ -24,13 +24,19 @@ echo "== starting aiserver on port $PORT =="
 ( cd "$AISERVER_DIR" && AICHAT_PORT="$PORT" AISERVER_LOG_LEVEL=info pdm run python main.py \
     >/tmp/mds_aiserver.log 2>&1 ) &
 AISERVER_PID=$!
+AISERVER_UP=0
 for i in $(seq 1 30); do
-  curl -sf "http://127.0.0.1:$PORT/" >/dev/null 2>&1 && { echo "aiserver up (pid $AISERVER_PID)"; break; }
+  curl -sf "http://127.0.0.1:$PORT/" >/dev/null 2>&1 && { AISERVER_UP=1; echo "aiserver up (pid $AISERVER_PID)"; break; }
   sleep 1
 done
+if [ "$AISERVER_UP" != 1 ]; then
+  echo "aiserver never bound port $PORT after 30s; tail of its log:" >&2
+  tail -20 /tmp/mds_aiserver.log >&2 || true
+  exit 1
+fi
 
 echo "== flutter pub get =="
-( cd "$CLIENT_DIR" && flutter pub get >/dev/null 2>&1 )
+( cd "$CLIENT_DIR" && flutter pub get ) || { echo "flutter pub get failed" >&2; exit 1; }
 
 echo "== flutter run -d macos (PYTHON_SERVER_URL=http://127.0.0.1:$PORT) =="
 ( cd "$CLIENT_DIR" && flutter run -d macos \

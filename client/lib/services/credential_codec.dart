@@ -38,6 +38,14 @@ class CredentialCodec {
     _isolateVault = SecureVault.fromDek(dek);
   }
 
+  /// Drop the DEK-backed vault for the current worker isolate.
+  ///
+  /// The counterpart to [installIsolateVault]: when the app locks, a worker
+  /// that already holds the DEK would otherwise keep decrypting with it for
+  /// the rest of its life, since isolates share no memory with
+  /// [VaultManager.instance] and never see it lock.
+  static void clearIsolateVault() => _isolateVault = null;
+
   /// The vault to use in this isolate: the DEK-installed one if present,
   /// otherwise the main-isolate [VaultManager] vault. Null when nothing is
   /// unlocked here.

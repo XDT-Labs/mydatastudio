@@ -21,7 +21,7 @@ import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:mydatastudio/scanners/scan_isolate_support.dart';
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
-import 'package:resqlite/resqlite.dart' show ResqliteQueryException;
+import 'package:mydatastudio/services/sqlite_retry.dart';
 
 /// Scanner lifecycle manager for cloud-based file sources (Google Drive, etc.).
 ///
@@ -50,7 +50,14 @@ class CloudFileIsolate extends CollectionScanner {
   final SendPort? loggerIsolatePort;
   final String? storagePath;
   final String? dbName;
-  Isolate? _isolate;
+
+  /// Every isolate this scanner has spawned, recursive and shallow alike.
+  ///
+  /// Replaces a single `_isolate` slot that only ever held the recursive scan,
+  /// so a shallow (single-folder) scan spawned alongside it was unreachable
+  /// from [stop] and kept scanning and writing after the collection was
+  /// stopped.
+  final Set<Isolate> _liveIsolates = {};
   AppLogger? _logger;
   int _activeScanningCount = 0;
 
@@ -130,8 +137,8 @@ class CloudFileIsolate extends CollectionScanner {
       args,
       debugName: debugName,
     );
-    if (recursive) {
-      _isolate = spawned;
+    if (spawned != null) {
+      _liveIsolates.add(spawned);
     }
     spawned?.addOnExitListener(p.sendPort);
 
@@ -204,8 +211,10 @@ class CloudFileIsolate extends CollectionScanner {
 
   @override
   void stop() {
-    _isolate?.kill(priority: Isolate.beforeNextEvent);
-    _isolate = null;
+    for (final isolate in _liveIsolates.toList()) {
+      isolate.kill(priority: Isolate.beforeNextEvent);
+    }
+    _liveIsolates.clear();
     _logger?.i('CloudFileIsolate stopped');
   }
 
@@ -487,13 +496,15 @@ class CloudFileIsolateWorker {
     // For now, we trust the DB upsert logic to handle items correctly.
 
     do {
-      final response = await _retryNetworkOp(() => driveApi.files.list(
-        q: query,
-        $fields:
-            'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, parents, thumbnailLink, webContentLink)',
-        pageToken: pageToken,
-        pageSize: 100,
-      ));
+      final response = await _retryNetworkOp(
+        () => driveApi.files.list(
+          q: query,
+          $fields:
+              'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, parents, thumbnailLink, webContentLink)',
+          pageToken: pageToken,
+          pageSize: 100,
+        ),
+      );
 
       final files = response.files ?? [];
       for (final f in files) {
@@ -658,14 +669,16 @@ class CloudFileIsolateWorker {
         'CloudFileIsolate: Fetching page of files for parent "$parentId" (pageToken: $pageToken)',
       );
 
-      final response = await _retryNetworkOp(() => driveApi.files.list(
-        q: "'$parentId' in parents and trashed = false",
-        $fields:
-            'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, parents, thumbnailLink, webContentLink)',
-        pageToken: pageToken,
-        pageSize: 200,
-        orderBy: 'folder, name',
-      ));
+      final response = await _retryNetworkOp(
+        () => driveApi.files.list(
+          q: "'$parentId' in parents and trashed = false",
+          $fields:
+              'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, parents, thumbnailLink, webContentLink)',
+          pageToken: pageToken,
+          pageSize: 200,
+          orderBy: 'folder, name',
+        ),
+      );
 
       final files = response.files ?? [];
       logger.d(
@@ -781,27 +794,16 @@ class CloudFileIsolateWorker {
     }
   }
 
-  Future<void> _executeWithRetry(String sql, List<Object?> params) async {
-    int attempt = 0;
-    const int maxRetries = 5;
-    while (true) {
-      attempt++;
-      try {
-        await appDb.execute(sql, params);
-        return;
-      } on ResqliteQueryException catch (e) {
-        if (e.sqliteCode == 5 && attempt < maxRetries) {
-          final backoffMs = 100 * attempt * attempt;
-          logger.w(
-            'CloudFileIsolateWorker: SQLITE_BUSY (attempt $attempt/$maxRetries) on update, retrying in ${backoffMs}ms...',
-          );
-          await Future.delayed(Duration(milliseconds: backoffMs));
-          continue;
-        }
-        rethrow;
-      }
-    }
-  }
+  // Delegates to the shared helper rather than keeping a local loop: this one
+  // caught only ResqliteQueryException code 5, so a ResqliteTransactionException
+  // or SQLITE_LOCKED (6) fell straight through unretried — the exact trap
+  // sqlite_retry.dart documents.
+  Future<void> _executeWithRetry(String sql, List<Object?> params) =>
+      retryOnLock(
+        () => appDb.execute(sql, params),
+        label: 'CloudFileIsolateWorker',
+        maxRetries: 5,
+      );
 
   // Thin delegate to the shared helper (scan_isolate_support.dart); the retry
   // logic is centralized there, call sites are unchanged.
@@ -835,29 +837,35 @@ class CloudFileIsolateWorker {
         final destFile = io.File(destPath);
         if (await destFile.exists()) {
           logger.d('File already exists on disk: $destPath');
-          await _executeWithRetry('UPDATE files SET local_path = ? WHERE id = ?', [
-            destPath,
-            file.id,
-          ]);
+          await _executeWithRetry(
+            'UPDATE files SET local_path = ? WHERE id = ?',
+            [destPath, file.id],
+          );
           return;
         }
 
         await destFile.parent.create(recursive: true);
-        logger.i('Downloading: ${file.name} to $destPath (attempt $attempt/$maxRetries)');
+        logger.i(
+          'Downloading: ${file.name} to $destPath (attempt $attempt/$maxRetries)',
+        );
 
-        final drive.Media media = await _retryNetworkOp(() => driveApi.files.get(
-              driveId,
-              downloadOptions: drive.DownloadOptions.fullMedia,
-            )) as drive.Media;
+        final drive.Media media =
+            await _retryNetworkOp(
+                  () => driveApi.files.get(
+                    driveId,
+                    downloadOptions: drive.DownloadOptions.fullMedia,
+                  ),
+                )
+                as drive.Media;
 
         final sink = destFile.openWrite();
         try {
           await media.stream.pipe(sink);
           logger.i('Downloaded: ${file.name}');
-          await _executeWithRetry('UPDATE files SET local_path = ? WHERE id = ?', [
-            destPath,
-            file.id,
-          ]);
+          await _executeWithRetry(
+            'UPDATE files SET local_path = ? WHERE id = ?',
+            [destPath, file.id],
+          );
           return; // Success!
         } finally {
           await sink.flush();

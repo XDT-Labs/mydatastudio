@@ -13,6 +13,7 @@ import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:uuid/uuid.dart';
 import 'package:mydatastudio/database_manager.dart';
 
@@ -171,6 +172,9 @@ extension LoginProviderExtension on LoginProviders {
     }
   }
 
+  /// How long either profile lookup may take before sign-in gives up.
+  static const Duration _profileTimeout = Duration(seconds: 20);
+
   /// Fetches Google user profile (email and userId).
   ///
   /// Tries Google People API first (`https://people.googleapis.com/v1/people/me`),
@@ -180,18 +184,25 @@ extension LoginProviderExtension on LoginProviders {
     String accessToken, {
     http.Client? client,
   }) async {
-    final httpClient = client ?? http.Client();
+    // A stalled Google endpoint would otherwise hang sign-in indefinitely.
+    // Both bounds are needed: connectionTimeout aborts the socket setup at the
+    // transport, and the per-request timeout below covers a connection that
+    // opens and then goes quiet.
+    final httpClient =
+        client ?? IOClient(HttpClient()..connectionTimeout = _profileTimeout);
     final shouldCloseClient = client == null;
 
     try {
       // 1. Attempt People API
       try {
-        final peopleResponse = await httpClient.get(
-          Uri.parse(
-            "https://people.googleapis.com/v1/people/me?personFields=emailAddresses",
-          ),
-          headers: {"Authorization": "Bearer $accessToken"},
-        );
+        final peopleResponse = await httpClient
+            .get(
+              Uri.parse(
+                "https://people.googleapis.com/v1/people/me?personFields=emailAddresses",
+              ),
+              headers: {"Authorization": "Bearer $accessToken"},
+            )
+            .timeout(_profileTimeout);
 
         if (peopleResponse.statusCode == 200) {
           final userData =
@@ -224,10 +235,12 @@ extension LoginProviderExtension on LoginProviders {
 
       // 2. Fallback to standard UserInfo API (does not require People API enabled in GCP Console)
       try {
-        final userInfoResponse = await httpClient.get(
-          Uri.parse("https://www.googleapis.com/oauth2/v2/userinfo"),
-          headers: {"Authorization": "Bearer $accessToken"},
-        );
+        final userInfoResponse = await httpClient
+            .get(
+              Uri.parse("https://www.googleapis.com/oauth2/v2/userinfo"),
+              headers: {"Authorization": "Bearer $accessToken"},
+            )
+            .timeout(_profileTimeout);
 
         if (userInfoResponse.statusCode == 200) {
           final userData =
@@ -293,9 +306,9 @@ extension LoginProviderExtension on LoginProviders {
 
       final profile = await fetchGoogleProfile(client.credentials.accessToken);
       if (profile == null) {
-        AppLogger(
-          null,
-        ).e('Failed to fetch Google profile from both People API and UserInfo API.');
+        AppLogger(null).e(
+          'Failed to fetch Google profile from both People API and UserInfo API.',
+        );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -398,9 +411,9 @@ extension LoginProviderExtension on LoginProviders {
 
       final profile = await fetchGoogleProfile(client.credentials.accessToken);
       if (profile == null) {
-        AppLogger(
-          null,
-        ).e('Failed to fetch Google profile from both People API and UserInfo API.');
+        AppLogger(null).e(
+          'Failed to fetch Google profile from both People API and UserInfo API.',
+        );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(

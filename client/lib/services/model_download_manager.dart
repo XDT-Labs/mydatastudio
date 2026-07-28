@@ -299,6 +299,11 @@ class ModelDownloadManager {
       key = CredentialCodec.decrypt(rows.first['api_key'] as String?)?.trim();
     } on VaultLockedException {
       return null;
+    } on CredentialFormatException {
+      // A row written outside the codec. The token is optional, so degrade to
+      // an anonymous download rather than let _runPending turn one malformed
+      // providers row into a failure for every queued model.
+      return null;
     }
     return (key == null || key.isEmpty) ? null : key;
   }
@@ -413,6 +418,9 @@ class ModelDownloadManager {
               '[ModelDownload] Completed $hfRepo/$filename -> $resultPath',
             );
           } else if (status == 'error') {
+            // Carry the server's reason across; without this the log said
+            // `null` and the UI had nothing to show for the failure.
+            item.error = event['message'] as String?;
             _logger.e(
               '[ModelDownload] Server reported error for $hfRepo/$filename: ${item.error}',
             );

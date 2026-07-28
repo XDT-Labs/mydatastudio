@@ -50,13 +50,25 @@ class ScannerManager {
   final Map<String, StreamSubscription> _scannerScanSubs = {};
   StreamSubscription? _pstProgressSub;
 
+  /// Collections whose PST import is currently counted in [_activeScanCount].
+  final Set<String> _activePstImports = {};
+
   void _listenToPstProgress() {
-    _pstProgressSub ??= OutlookPstScannerIsolate.importProgress.listen((progress) {
+    _pstProgressSub ??= OutlookPstScannerIsolate.importProgress.listen((
+      progress,
+    ) {
       if (progress == null) return;
-      if (!progress.done) {
-        DatabaseManager.instance.pauseEmbeddingIsolates();
-      } else {
-        DatabaseManager.instance.resumeEmbeddingIsolates();
+      // Routed through the same counter as every other scanner. Resuming
+      // directly on `done` would restart the embedding isolates while a
+      // Gmail/Drive/local scan was still running, because the two owners of
+      // the pause flag knew nothing about each other.
+      final counted = _activePstImports.contains(progress.collectionId);
+      if (!progress.done && !counted) {
+        _activePstImports.add(progress.collectionId);
+        _onScannerStateChanged(true);
+      } else if (progress.done && counted) {
+        _activePstImports.remove(progress.collectionId);
+        _onScannerStateChanged(false);
       }
     });
   }
@@ -121,12 +133,18 @@ class ScannerManager {
   }
 
   void stopScanner(String collectionId) {
+    // Read before the subscription goes away: `stop()` emits isScanning=false,
+    // but the listener that would decrement `_activeScanCount` is cancelled
+    // here, so a scanner stopped mid-scan would leave the count permanently
+    // above zero and the embedding isolates paused for the rest of the session.
+    final wasScanning = scanners[collectionId]?.isScanning.valueOrNull == true;
     _scannerScanSubs[collectionId]?.cancel();
     _scannerScanSubs.remove(collectionId);
     if (scanners.containsKey(collectionId)) {
       logger.i("Stopping scanner for collection: $collectionId");
       scanners[collectionId]?.stop();
       scanners.remove(collectionId);
+      if (wasScanning) _onScannerStateChanged(false);
     }
     if (pstScanners.containsKey(collectionId)) {
       logger.i("Stopping PST scanner for collection: $collectionId");
@@ -176,7 +194,9 @@ class ScannerManager {
   }
 
   Future<CollectionScanner> registerScanner(Collection c) async {
-    logger.d("registerScanner: scanners keys = ${scanners.keys.toList()}, futures keys = ${_registrationFutures.keys.toList()}");
+    logger.d(
+      "registerScanner: scanners keys = ${scanners.keys.toList()}, futures keys = ${_registrationFutures.keys.toList()}",
+    );
     if (scanners.containsKey(c.id)) return scanners[c.id]!;
 
     // If registration is already in progress, return the existing future

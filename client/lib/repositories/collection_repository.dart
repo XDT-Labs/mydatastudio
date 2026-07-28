@@ -57,72 +57,66 @@ class CollectionRepository {
 
   /// Create new collection
   Future<Collection?> addCollection(Collection val) async {
-    return retryOnLock(
-      () async {
-        await db.execute(
-          "INSERT INTO collections (id, name, path, type, scanner, scan_status, oauth_service, "
-          "access_token, refresh_token, id_token, user_id, expiration, last_scan_date, "
-          "needs_re_auth, download_local_copy, local_copy_path) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [
-            val.id,
-            val.name,
-            val.path,
-            val.type,
-            val.scanner,
-            val.scanStatus,
-            val.oauthService,
-            CredentialCodec.encrypt(val.accessToken),
-            CredentialCodec.encrypt(val.refreshToken),
-            CredentialCodec.encrypt(val.idToken),
-            val.userId,
-            val.expiration?.millisecondsSinceEpoch,
-            val.lastScanDate?.millisecondsSinceEpoch,
-            val.needsReAuth ? 1 : 0,
-            val.downloadLocalCopy ? 1 : 0,
-            val.localCopyPath,
-          ],
-        );
-        return val;
-      },
-      label: 'CollectionRepository.addCollection',
-    );
+    return retryOnLock(() async {
+      await db.execute(
+        "INSERT INTO collections (id, name, path, type, scanner, scan_status, oauth_service, "
+        "access_token, refresh_token, id_token, user_id, expiration, last_scan_date, "
+        "needs_re_auth, download_local_copy, local_copy_path) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+          val.id,
+          val.name,
+          val.path,
+          val.type,
+          val.scanner,
+          val.scanStatus,
+          val.oauthService,
+          CredentialCodec.encrypt(val.accessToken),
+          CredentialCodec.encrypt(val.refreshToken),
+          CredentialCodec.encrypt(val.idToken),
+          val.userId,
+          val.expiration?.millisecondsSinceEpoch,
+          val.lastScanDate?.millisecondsSinceEpoch,
+          val.needsReAuth ? 1 : 0,
+          val.downloadLocalCopy ? 1 : 0,
+          val.localCopyPath,
+        ],
+      );
+      return val;
+    }, label: 'CollectionRepository.addCollection');
   }
 
   /// Update an existing collection (used for re-auth token refresh)
   Future<Collection?> updateCollection(Collection val) async {
-    return retryOnLock(
-      () async {
-        await db.execute(
-          "UPDATE collections SET "
-          "name = ?, path = ?, type = ?, scanner = ?, scan_status = ?, "
-          "oauth_service = ?, access_token = ?, refresh_token = ?, id_token = ?, user_id = ?, "
-          "expiration = ?, last_scan_date = ?, needs_re_auth = ?, "
-          "download_local_copy = ?, local_copy_path = ? "
-          "WHERE id = ?",
-          [
-            val.name,
-            val.path,
-            val.type,
-            val.scanner,
-            val.scanStatus,
-            val.oauthService,
-            CredentialCodec.encrypt(val.accessToken),
-            CredentialCodec.encrypt(val.refreshToken),
-            CredentialCodec.encrypt(val.idToken),
-            val.userId,
-            val.expiration?.millisecondsSinceEpoch,
-            val.lastScanDate?.millisecondsSinceEpoch,
-            val.needsReAuth ? 1 : 0,
-            val.downloadLocalCopy ? 1 : 0,
-            val.localCopyPath,
-            val.id,
-          ],
-        );
-        return val;
-      },
-      label: 'CollectionRepository.updateCollection',
-    );
+    return retryOnLock(() async {
+      await db.execute(
+        "UPDATE collections SET "
+        "name = ?, path = ?, type = ?, scanner = ?, scan_status = ?, "
+        "oauth_service = ?, access_token = ?, refresh_token = ?, id_token = ?, user_id = ?, "
+        "expiration = ?, last_scan_date = ?, needs_re_auth = ?, "
+        "download_local_copy = ?, local_copy_path = ? "
+        "WHERE id = ?",
+        [
+          val.name,
+          val.path,
+          val.type,
+          val.scanner,
+          val.scanStatus,
+          val.oauthService,
+          CredentialCodec.encrypt(val.accessToken),
+          CredentialCodec.encrypt(val.refreshToken),
+          CredentialCodec.encrypt(val.idToken),
+          val.userId,
+          val.expiration?.millisecondsSinceEpoch,
+          val.lastScanDate?.millisecondsSinceEpoch,
+          val.needsReAuth ? 1 : 0,
+          val.downloadLocalCopy ? 1 : 0,
+          val.localCopyPath,
+          val.id,
+        ],
+      );
+      return val;
+    }, label: 'CollectionRepository.updateCollection');
   }
 
   /// Update the scan date for services that check external systems on a schedule, such as email
@@ -154,6 +148,16 @@ class CollectionRepository {
 
         await tx.execute("DELETE FROM files WHERE collection_id = ?", [id]);
         await tx.execute("DELETE FROM folders WHERE collection_id = ?", [id]);
+        // `emails_embeddings` declares ON DELETE CASCADE, but PRAGMA
+        // foreign_keys is never enabled, so the cascade never fires — the same
+        // reason files_embeddings is deleted explicitly above. Without this
+        // every deleted email leaves its 2048-dim vector in the index, where it
+        // keeps turning up in similarity results.
+        await tx.execute(
+          "DELETE FROM emails_embeddings WHERE email_id IN "
+          "(SELECT id FROM emails WHERE collection_id = ?)",
+          [id],
+        );
         await tx.execute("DELETE FROM emails WHERE collection_id = ?", [id]);
         await tx.execute("DELETE FROM email_folders WHERE collection_id = ?", [
           id,

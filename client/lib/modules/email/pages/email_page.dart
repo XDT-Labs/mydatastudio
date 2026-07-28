@@ -111,7 +111,13 @@ class _EmailPage extends State<EmailPage> {
   /// doesn't re-query on every progress tick.
   DateTime? _lastImportRefresh;
   Email? selectedEmail;
-  PstImportProgress? pstProgress;
+
+  /// Latest import progress per collection id.
+  ///
+  /// A single slot would be overwritten by whichever archive reported last, so
+  /// switching to a second concurrent import made the first one's bar vanish
+  /// until its own next tick.
+  final Map<String, PstImportProgress> _pstProgressByCollection = {};
   final TextEditingController searchController = TextEditingController();
   bool _needsFolderAutoSelect = false;
 
@@ -205,7 +211,11 @@ class _EmailPage extends State<EmailPage> {
     // navigates here, so this page is where it has to be reported.
     _pstProgressSub = OutlookPstScannerIsolate.importProgress.listen((value) {
       if (!mounted) return;
-      setState(() => pstProgress = value);
+      // The subject is seeded null, so the first event on subscribe carries no
+      // progress at all.
+      if (value != null) {
+        setState(() => _pstProgressByCollection[value.collectionId] = value);
+      }
       _refreshForImport(value);
     });
 
@@ -324,7 +334,14 @@ class _EmailPage extends State<EmailPage> {
 
     // A global handler would otherwise eat the arrow keys someone is using to
     // move the caret in a search or chat field.
-    if (FocusManager.instance.primaryFocus?.context?.widget is EditableText) {
+    //
+    // Checked via the ancestor rather than the focused widget itself:
+    // `EditableText` builds its `Focus` several levels down, so the focus
+    // node's own context resolves to that inner `Focus` widget and an
+    // `is EditableText` test on it never matches.
+    if (FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<EditableText>() !=
+        null) {
       return false;
     }
 
@@ -489,9 +506,10 @@ class _EmailPage extends State<EmailPage> {
   /// to sit between them — a banner with its own spinner and counts — which
   /// meant one operation announced itself three times over.
   PstImportProgress? get _activeImport {
-    final progress = pstProgress;
+    final id = collection?.id;
+    if (id == null) return null;
+    final progress = _pstProgressByCollection[id];
     if (progress == null || progress.done) return null;
-    if (progress.collectionId != collection?.id) return null;
     return progress;
   }
 
@@ -528,7 +546,8 @@ class _EmailPage extends State<EmailPage> {
             ),
             tooltip: 'Refresh Current Folder',
             onPressed: () {
-              if (collection != null && EmailPage.selectedFolder.value != null) {
+              if (collection != null &&
+                  EmailPage.selectedFolder.value != null) {
                 final folderId = EmailPage.selectedFolder.value!;
                 logger.s(
                   "Refreshing $selectedFolderName folder for ${collection!.name}",

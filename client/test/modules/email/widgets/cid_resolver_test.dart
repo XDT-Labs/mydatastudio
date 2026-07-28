@@ -73,25 +73,45 @@ void main() {
       );
     });
 
-    test(
-      'falls back to the filename in the cid for archives imported before '
-      'content ids were captured',
-      () {
-        // No contentId at all: exactly what a PST imported by the older client
-        // left in the database, and it must still render rather than requiring
-        // a full re-import.
-        final legacy = buildAttachment(id: 'a', name: 'image001.png');
+    test('falls back to the filename in the cid for archives imported before '
+        'content ids were captured', () {
+      // No contentId at all: exactly what a PST imported by the older client
+      // left in the database, and it must still render rather than requiring
+      // a full re-import.
+      final legacy = buildAttachment(id: 'a', name: 'image001.png');
 
-        expect(
-          CidResolver.match('image001.png@01CC3097.BF0BAC70', [legacy]),
-          same(legacy),
-        );
-      },
-    );
+      expect(
+        CidResolver.match('image001.png@01CC3097.BF0BAC70', [legacy]),
+        same(legacy),
+      );
+    });
 
     test('matches a cid that is a bare filename', () {
       final file = buildAttachment(id: 'a', name: 'chart.gif');
       expect(CidResolver.match('chart.gif', [file]), same(file));
+    });
+
+    test('matches a content id whose casing differs from the cid ref', () {
+      // Senders are inconsistent about Content-ID casing — InlineAttachment
+      // already matches case-insensitively when deciding isInline. If this
+      // resolver did not, the scanner would flag the part inline (keeping it
+      // out of the attachments strip) while the body failed to resolve it, and
+      // the attachment would be reachable from nowhere at all.
+      final file = buildAttachment(
+        id: 'a',
+        name: 'logo.png',
+        contentId: 'Image001.PNG@01CC3097.BF0BAC70',
+      );
+
+      expect(
+        CidResolver.match('image001.png@01cc3097.bf0bac70', [file]),
+        same(file),
+      );
+    });
+
+    test('filename fallback is case-insensitive too', () {
+      final file = buildAttachment(id: 'a', name: 'Chart.GIF');
+      expect(CidResolver.match('chart.gif@host', [file]), same(file));
     });
 
     test('returns null when nothing matches, leaving the ref untouched', () {

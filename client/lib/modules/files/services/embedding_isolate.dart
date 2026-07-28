@@ -125,7 +125,12 @@ class EmbeddingIsolate {
   /// sent — the worker keeps failing loudly on secret access until it arrives.
   void _sendVaultDek() {
     final dek = VaultManager.instance.dek;
-    if (dek == null) return;
+    if (dek == null) {
+      // Locked. Tell the worker explicitly — it cannot observe the lock
+      // itself, and left alone it would keep decrypting with a stale DEK.
+      _controlPort?.send({'type': 'vaultLocked'});
+      return;
+    }
     _controlPort?.send({'type': 'vaultDek', 'dek': dek});
   }
 
@@ -158,6 +163,9 @@ class EmbeddingIsolate {
           // collection's tokens (AUDIT M2 phase 4).
           CredentialCodec.installIsolateVault(message['dek'] as Uint8List?);
           logger.d("Credential vault DEK installed in embedding isolate");
+        } else if (message['type'] == 'vaultLocked') {
+          CredentialCodec.clearIsolateVault();
+          logger.d("Credential vault DEK cleared in embedding isolate");
         } else if (message['type'] == 'pause') {
           isPaused = true;
           logger.d("EmbeddingIsolate paused during active sync");
@@ -287,7 +295,6 @@ class EmbeddingIsolate {
       return false;
     }
   }
-
 
   static Future<List<double>?> _processLocalFile(
     File file,

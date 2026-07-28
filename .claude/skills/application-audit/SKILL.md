@@ -167,7 +167,7 @@ XSS, CSRF, SSRF, insecure redirects, unsafe file uploads, path traversal, weak s
 
 
 ## Missing Functionality
-The applicate is made up multiple modules, review each of the modules 
+The application is made up of multiple modules, review each of the modules 
 
 - Identify missing features that still need to be implemented. 
 

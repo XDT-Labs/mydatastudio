@@ -62,7 +62,7 @@ dependencies:
   moment_dart: ^5.3.0+1
   fluttertoast: ^9.1.0
   flutter_secure_storage: ^10.3.1
-  pointycastle: ^3.7.2
+  pointycastle: ^4.0.0
   rsa_encrypt: ^2.0.0
   convert: ^3.1.1
   crypto: ^3.0.6
@@ -123,6 +123,9 @@ dev_dependencies:
   mocktail: ^1.0.4
 
 dependency_overrides:
+  # Still required after the direct constraint above was aligned to 4.x:
+  # encrypt and rsa_encrypt both cap pointycastle at ^3.x, so without
+  # this the solver picks 3.x for everyone.
   pointycastle: ^4.0.0
 
 # For information on the generic Dart part of this file, see the

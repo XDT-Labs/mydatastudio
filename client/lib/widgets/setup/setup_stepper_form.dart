@@ -186,10 +186,16 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
               p.join(appUser!.localStoragePath, 'keys'),
               plaintextPassword,
             );
+            // Only once the vault exists — dropping it on the failure path
+            // would leave a retry with no password to build the vault from.
+            appUser!.plaintextPassword = null;
           } catch (e) {
+            // Fatal: saveUser below writes private.pem through the vault, and
+            // login later refuses to create one. Continuing here produced a
+            // half-set-up install that could never be unlocked.
             logger.e('Failed to create credential vault during setup: $e');
+            rethrow;
           }
-          appUser!.plaintextPassword = null;
         }
 
         //save user to database (writes private.pem encrypted via the vault)

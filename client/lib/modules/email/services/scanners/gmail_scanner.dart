@@ -23,6 +23,13 @@ class GmailScanner extends CollectionScanner {
   final Collection collection;
   final String appDir;
   GmailScannerIsolate? _fullScanIsolateManager;
+
+  /// Every isolate this scanner has spawned, full and targeted alike.
+  ///
+  /// [_fullScanIsolateManager] only ever holds the recursive scan, so a
+  /// targeted (single-label) scan running alongside it was unreachable from
+  /// [stop] and kept scanning and writing after the collection was stopped.
+  final Set<GmailScannerIsolate> _liveIsolates = {};
   int _activeScanningCount = 0;
   bool isStopped = false;
 
@@ -70,7 +77,11 @@ class GmailScanner extends CollectionScanner {
 
     if (labelId == null && force) {
       // Force recursive full scan: stop existing background scan first
-      _fullScanIsolateManager?.stop();
+      final previous = _fullScanIsolateManager;
+      if (previous != null) {
+        previous.stop();
+        _liveIsolates.remove(previous);
+      }
       _fullScanIsolateManager = null;
     }
 
@@ -80,13 +91,21 @@ class GmailScanner extends CollectionScanner {
     logger.i("Gmail sync started for ${collection.name} (label: $labelId)");
 
     //start scan in isolate
+    // Declared before the listener so the terminal-message branch can drop it
+    // from `_liveIsolates`; the worker cannot report before `start` assigns it.
+    late final GmailScannerIsolate scannerIsolate;
     ReceivePort receivePort = ReceivePort();
     receivePort.listen((message) {
       //listen for logger status messages
       if (message is String && message.isNotEmpty) {
         logger.s(message);
       }
-      if (message is Map && message['status'] == 'done') {
+      // Any terminal message, not just 'done': the worker exits with
+      // {'error': 'auth_failed'} when tokens are missing or refresh fails, and
+      // treating that as non-terminal left isScanning stuck true forever —
+      // which keeps the embedding isolates paused for the whole session.
+      if (message is Map &&
+          (message['status'] == 'done' || message.containsKey('error'))) {
         if (!hasDecremented) {
           hasDecremented = true;
           _activeScanningCount--;
@@ -95,13 +114,14 @@ class GmailScanner extends CollectionScanner {
             isScanning.add(false);
           }
         }
+        _liveIsolates.remove(scannerIsolate);
         receivePort.close();
       }
     });
 
     //start isolate
     RootIsolateToken? token = RootIsolateToken.instance;
-    final scannerIsolate = GmailScannerIsolate(
+    scannerIsolate = GmailScannerIsolate(
       token: token,
       appDir: appDir,
       dbDir: p.dirname(p.dirname(dbPath)),
@@ -109,6 +129,7 @@ class GmailScanner extends CollectionScanner {
     if (labelId == null) {
       _fullScanIsolateManager = scannerIsolate;
     }
+    _liveIsolates.add(scannerIsolate);
 
     await scannerIsolate.start(
       collection,
@@ -123,7 +144,10 @@ class GmailScanner extends CollectionScanner {
   @override
   void stop() async {
     isStopped = true;
-    _fullScanIsolateManager?.stop();
+    for (final isolate in _liveIsolates.toList()) {
+      isolate.stop();
+    }
+    _liveIsolates.clear();
     _fullScanIsolateManager = null;
     _activeScanningCount = 0;
     isScanning.add(false);

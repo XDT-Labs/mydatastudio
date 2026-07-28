@@ -167,11 +167,22 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
   Future<void> _saveHfKey() async {
     final key = _hfApiKeyController.text.trim();
     if (key.isEmpty) return;
+    // encrypt() throws when the vault is locked, and this runs from an
+    // un-awaited debounce Timer — unguarded, the key is silently never saved
+    // and the user is told nothing.
+    final String? stored;
+    try {
+      stored = CredentialCodec.encrypt(key);
+    } catch (e) {
+      AppLogger(null).e('Could not encrypt HuggingFace key: $e');
+      _showSnack('Unlock required before saving API keys');
+      return;
+    }
     await DatabaseManager.instance.database!.execute(
       'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
       'VALUES (?, \'\', \'\', ?, \'model\') '
       'ON CONFLICT(service) DO UPDATE SET api_key = excluded.api_key',
-      ['huggingface', CredentialCodec.encrypt(key)],
+      ['huggingface', stored],
     );
     _showSnack('HuggingFace API key saved');
   }
@@ -197,11 +208,19 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
   Future<void> _saveCloudApiKey(String group) async {
     final key = _apiKeyControllers[group]?.text.trim() ?? '';
     if (key.isEmpty) return;
+    final String? stored;
+    try {
+      stored = CredentialCodec.encrypt(key);
+    } catch (e) {
+      AppLogger(null).e('Could not encrypt $group API key: $e');
+      _showSnack('Unlock required before saving API keys');
+      return;
+    }
     await DatabaseManager.instance.database!.execute(
       'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
       'VALUES (?, \'\', \'\', ?, \'model\') '
       'ON CONFLICT(service) DO UPDATE SET api_key = excluded.api_key',
-      [group, CredentialCodec.encrypt(key)],
+      [group, stored],
     );
     // Enable all models in that group that aren't yet enabled
     for (final m in _byGroup(group)) {
@@ -215,7 +234,8 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     final url = _ollamaUrlController.text.trim();
     final existing = _byGroup('ollama');
     if (url.isEmpty) {
-      if (existing.isNotEmpty && (existing.first.baseUrl?.isNotEmpty ?? false)) {
+      if (existing.isNotEmpty &&
+          (existing.first.baseUrl?.isNotEmpty ?? false)) {
         await _repo.setBaseUrl(existing.first.id, '');
         await _repo.setEnabled(existing.first.id, false);
         _showSnack('Ollama disabled');
@@ -519,12 +539,14 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
   // ── Hugging Face download card ──────────────────────────────────────────────
 
   Widget _localLlmCard() {
-    final downloadable = _byGroup('local')
-        .where((m) => !m.enabled && (m.hfRepo ?? '').isNotEmpty)
-        .toList();
-    final downloaded = _byGroup('local')
-        .where((m) => m.alias != 'gemma4:12b' && m.enabled)
-        .toList();
+    final downloadable =
+        _byGroup(
+          'local',
+        ).where((m) => !m.enabled && (m.hfRepo ?? '').isNotEmpty).toList();
+    final downloaded =
+        _byGroup(
+          'local',
+        ).where((m) => m.alias != 'gemma4:12b' && m.enabled).toList();
 
     return Card(
       child: Padding(
@@ -568,14 +590,17 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
                 child: DropdownButton<AichatModel>(
                   value: _selectedModel,
                   isExpanded: true,
-                  items: downloadable
-                      .map(
-                        (m) => DropdownMenuItem(value: m, child: Text(m.name)),
-                      )
-                      .toList(),
-                  onChanged: _isDownloading
-                      ? null
-                      : (v) => setState(() => _selectedModel = v),
+                  items:
+                      downloadable
+                          .map(
+                            (m) =>
+                                DropdownMenuItem(value: m, child: Text(m.name)),
+                          )
+                          .toList(),
+                  onChanged:
+                      _isDownloading
+                          ? null
+                          : (v) => setState(() => _selectedModel = v),
                 ),
               ),
             ),
@@ -734,17 +759,18 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(model.name),
-      subtitle: (model.description != null && model.description!.isNotEmpty)
-          ? Text(
-              model.description!,
-              style: Theme.of(context).textTheme.bodySmall,
-            )
-          : (model.group == 'local'
+      subtitle:
+          (model.description != null && model.description!.isNotEmpty)
               ? Text(
-                  model.file ?? model.name,
-                  style: Theme.of(context).textTheme.bodySmall,
-                )
-              : null),
+                model.description!,
+                style: Theme.of(context).textTheme.bodySmall,
+              )
+              : (model.group == 'local'
+                  ? Text(
+                    model.file ?? model.name,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  )
+                  : null),
       trailing:
           isDefault
               ? null

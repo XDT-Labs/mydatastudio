@@ -299,6 +299,11 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
 
     setState(() => _isImporting = true);
 
+    // Tracks how far setup got, so the catch below only rolls back a collection
+    // whose import never started — never one that is already running.
+    Collection? persistedCollection;
+    bool importStarted = false;
+
     try {
       final filePath = _form.control('file').value as String;
       final title = _form.control('title').value as String;
@@ -323,6 +328,7 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
       await CollectionRepository(
         DatabaseManager.instance.database!,
       ).addCollection(collection);
+      persistedCollection = collection;
 
       // Start the one-time scan isolate immediately. PST is a one-shot import
       // with no re-sync, so force: true is required — this is the only place the
@@ -339,11 +345,16 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
         serverUrl: serverUrl,
         serverToken: MainApp.llmServiceToken.valueOrNull,
       );
+      await pstIsolate.start(collection, force: true);
+      // Registered only once the isolate is actually running. Registering
+      // first left a scanner entry pointing at nothing whenever the spawn
+      // threw, with the collection stuck on 'pending' beside it.
+      //
       // Held by the manager, not this page: the import outlives the setup
       // screen (it can run for many minutes on a multi-gigabyte archive) and
       // deleting the collection needs something to stop.
       ScannerManager.getInstance().pstScanners[collection.id] = pstIsolate;
-      await pstIsolate.start(collection, force: true);
+      importStarted = true;
 
       // Refresh collections
       GetCollectionsService.instance.invoke(
@@ -358,6 +369,22 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
       if (!mounted) return;
       GoRouter.of(context).go('/email');
     } catch (e) {
+      // Roll back the half-built import. Left behind, the collection sits in
+      // the email list on 'pending' forever with no scanner behind it, and the
+      // user has to delete it by hand.
+      if (!importStarted && persistedCollection != null) {
+        ScannerManager.getInstance().pstScanners.remove(persistedCollection.id);
+        try {
+          await CollectionRepository(
+            DatabaseManager.instance.database!,
+          ).deleteCollection(persistedCollection.id);
+        } catch (cleanupError) {
+          debugPrint(
+            'Failed to roll back collection after PST import error: '
+            '$cleanupError',
+          );
+        }
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,

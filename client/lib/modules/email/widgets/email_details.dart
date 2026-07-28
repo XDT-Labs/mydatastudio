@@ -33,13 +33,24 @@ class CidResolver {
   /// for archives imported before content ids were captured: Outlook writes
   /// ids of the form `image001.png@01CC3097.BF0BAC70`, whose local part is the
   /// attachment's filename, so those still resolve without a re-import.
+  ///
+  /// Matching is case-insensitive, like [pattern] above and
+  /// [InlineAttachment.isInline] — senders are inconsistent about Content-ID
+  /// casing. An exact match here would make a casing mismatch hide the
+  /// attachment completely: the scanner flags it `isInline` (so it is kept out
+  /// of the attachments strip) but the body then fails to resolve it.
   static model.File? match(String ref, List<model.File> attachments) {
+    final normalizedRef = ref.toLowerCase();
     for (final file in attachments) {
-      if (file.contentId != null && file.contentId == ref) return file;
+      final contentId = file.contentId;
+      if (contentId != null && contentId.toLowerCase() == normalizedRef) {
+        return file;
+      }
     }
-    final localPart = ref.split('@').first;
+    final localPart = normalizedRef.split('@').first;
     for (final file in attachments) {
-      if (file.name == ref || file.name == localPart) return file;
+      final name = file.name.toLowerCase();
+      if (name == normalizedRef || name == localPart) return file;
     }
     return null;
   }

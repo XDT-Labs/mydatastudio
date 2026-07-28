@@ -100,6 +100,41 @@ class _FileDrawer extends State<FileDrawer> {
 
   AccordionSection? _expandedSection = AccordionSection.localFiles;
 
+  /// [_expandedSection] resolved against what is actually on screen.
+  ///
+  /// The default (localFiles) only renders when the user has local
+  /// collections, so someone whose only source is Google Drive used to land on
+  /// a drawer of collapsed headers and no collections at all. Computed in
+  /// [build] and read wherever expansion is drawn.
+  AccordionSection? _effectiveSection;
+
+  AccordionSection? _resolveExpanded({
+    required bool hasLocal,
+    required bool hasGdrive,
+    required bool hasDropbox,
+    required bool hasOnedrive,
+  }) {
+    switch (_expandedSection) {
+      case AccordionSection.localFiles:
+        if (hasLocal) return AccordionSection.localFiles;
+      case AccordionSection.gdrive:
+        if (hasGdrive) return AccordionSection.gdrive;
+      case AccordionSection.dropbox:
+        if (hasDropbox) return AccordionSection.dropbox;
+      case AccordionSection.onedrive:
+        if (hasOnedrive) return AccordionSection.onedrive;
+      case null:
+        // Deliberately collapsed by the user; leave it that way.
+        return null;
+    }
+    // The chosen section has nothing in it — fall back to the first that does.
+    if (hasLocal) return AccordionSection.localFiles;
+    if (hasGdrive) return AccordionSection.gdrive;
+    if (hasDropbox) return AccordionSection.dropbox;
+    if (hasOnedrive) return AccordionSection.onedrive;
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -132,6 +167,13 @@ class _FileDrawer extends State<FileDrawer> {
         filtered
             .where((c) => c.scanner == AppConstants.scannerFileOneDrive)
             .toList();
+
+    _effectiveSection = _resolveExpanded(
+      hasLocal: localFiles.isNotEmpty,
+      hasGdrive: gdriveFiles.isNotEmpty,
+      hasDropbox: dropboxFiles.isNotEmpty,
+      hasOnedrive: onedriveFiles.isNotEmpty,
+    );
 
     return SizedBox.expand(
       child: Container(
@@ -176,7 +218,7 @@ class _FileDrawer extends State<FileDrawer> {
                           "Local Drive",
                           Icons.folder_outlined,
                         ),
-                        if (_expandedSection == AccordionSection.localFiles)
+                        if (_effectiveSection == AccordionSection.localFiles)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
@@ -201,7 +243,7 @@ class _FileDrawer extends State<FileDrawer> {
                           "Google Drive",
                           Icons.cloud_outlined,
                         ),
-                        if (_expandedSection == AccordionSection.gdrive)
+                        if (_effectiveSection == AccordionSection.gdrive)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
@@ -226,7 +268,7 @@ class _FileDrawer extends State<FileDrawer> {
                           "Dropbox",
                           Icons.cloud_outlined,
                         ),
-                        if (_expandedSection == AccordionSection.dropbox)
+                        if (_effectiveSection == AccordionSection.dropbox)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
@@ -251,7 +293,7 @@ class _FileDrawer extends State<FileDrawer> {
                           "OneDrive",
                           Icons.cloud_outlined,
                         ),
-                        if (_expandedSection == AccordionSection.onedrive)
+                        if (_effectiveSection == AccordionSection.onedrive)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
@@ -312,10 +354,13 @@ class _FileDrawer extends State<FileDrawer> {
     return AccordionHeaderWidget(
       title: title,
       icon: icon,
-      isExpanded: _expandedSection == section,
+      isExpanded: _effectiveSection == section,
       onTap:
           () => setState(() {
-            if (_expandedSection == section) {
+            // Compared against what is drawn, not the stored preference, so
+            // tapping a section that only looks expanded via the fallback
+            // collapses it instead of appearing to do nothing.
+            if (_effectiveSection == section) {
               _expandedSection = null;
             } else {
               _expandedSection = section;

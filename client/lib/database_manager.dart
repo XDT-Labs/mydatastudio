@@ -243,22 +243,34 @@ class DatabaseManager {
     return appDatabase!;
   }
 
+  /// Bumped by every start and every stop, so a startup still working through
+  /// its staggered delays can tell it has been superseded.
+  int _startGeneration = 0;
+
   Future<void> startBackgroundServices() async {
     if (_backgroundServicesStarted || isTesting || appDatabase == null) return;
     _backgroundServicesStarted = true;
+    final generation = ++_startGeneration;
 
     logger.i("Starting background isolates and scanners (vault unlocked)...");
 
     // 1. Start scanners
     await _startScanners();
 
+    // The stagger below is a window in which the vault can lock and
+    // stopBackgroundServices can run. It nulls the isolate fields, but this
+    // call is still in flight — without the generation check it would go on to
+    // assign fresh isolates that nothing holds a reference to, leaving them
+    // running against a locked vault with no way to stop them.
     // 2. Stagger background embedding isolate startup by 500ms to avoid concurrent SQLite connection opening contention
     await Future.delayed(const Duration(milliseconds: 500));
+    if (generation != _startGeneration) return;
     if (appDatabase != null && _embeddingIsolate == null) {
       await _startEmbeddingIsolate(appDatabase!.path!);
     }
 
     await Future.delayed(const Duration(milliseconds: 500));
+    if (generation != _startGeneration) return;
     if (appDatabase != null && _emailEmbeddingIsolate == null) {
       await _startEmailEmbeddingIsolate(appDatabase!.path!);
     }
@@ -266,6 +278,7 @@ class DatabaseManager {
 
   void stopBackgroundServices() {
     _backgroundServicesStarted = false;
+    _startGeneration++;
     _embeddingIsolate?.stop();
     _embeddingIsolate = null;
     _emailEmbeddingIsolate?.stop();
@@ -341,7 +354,9 @@ class DatabaseManager {
   }
 
   void resumeEmbeddingIsolates() {
-    logger.d("Resuming embedding isolates after active scanner/import finished");
+    logger.d(
+      "Resuming embedding isolates after active scanner/import finished",
+    );
     _embeddingIsolate?.resume();
     _emailEmbeddingIsolate?.resume();
   }
@@ -527,9 +542,9 @@ class AppDatabase {
     final added = <String>{};
     for (final table in additions.entries) {
       final existing =
-          (await _db.select("PRAGMA table_info(${table.key})"))
-              .map((r) => r['name'] as String)
-              .toSet();
+          (await _db.select(
+            "PRAGMA table_info(${table.key})",
+          )).map((r) => r['name'] as String).toSet();
       for (final column in table.value.entries) {
         if (existing.contains(column.key)) continue;
         logger.i("AppDatabase: adding ${table.key}.${column.key}");
