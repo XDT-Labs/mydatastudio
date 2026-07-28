@@ -454,7 +454,6 @@ class _EmailPage extends State<EmailPage> {
                 theme.colorScheme.primary,
               ),
             ),
-          if (importing != null) _buildImportBanner(theme, importing),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Container(
@@ -486,75 +485,17 @@ class _EmailPage extends State<EmailPage> {
 
   /// The running PST import, but only when it is the collection on screen.
   ///
-  /// Null once it finishes, so the banner disappears on its own.
+  /// Null once it finishes, so the progress bar disappears on its own.
+  ///
+  /// An import is reported in exactly two places: the bar along the top, and
+  /// the placeholder that stands in for the empty list. A third indicator used
+  /// to sit between them — a banner with its own spinner and counts — which
+  /// meant one operation announced itself three times over.
   PstImportProgress? get _activeImport {
     final progress = pstProgress;
     if (progress == null || progress.done) return null;
     if (progress.collectionId != collection?.id) return null;
     return progress;
-  }
-
-  /// One-line status for a running import.
-  ///
-  /// Parsing a multi-gigabyte PST can run for many minutes without a single
-  /// email landing in a folder the user is looking at, so this has to say
-  /// something concrete — a bare spinner reads as a hang.
-  Widget _buildImportBanner(ThemeData theme, PstImportProgress progress) {
-    final fraction = progress.fraction;
-    final parts = <String>[
-      if (fraction != null)
-        'Importing ${progress.collectionName} — ${(fraction * 100).toStringAsFixed(0)}%'
-      else
-        'Importing ${progress.collectionName}…',
-      if (progress.totalMessages > 0)
-        '${progress.examined} of ${progress.totalMessages} messages'
-      else if (progress.examined > 0)
-        '${progress.examined} messages read',
-      if (progress.emails > 0) '${progress.emails} imported',
-    ];
-
-    return Container(
-      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              value: fraction,
-              color: theme.colorScheme.primary,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              parts.join(' · '),
-              style: TextStyle(
-                fontSize: 12,
-                color: theme.colorScheme.onSurface,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (progress.folder != null)
-            Flexible(
-              child: Text(
-                progress.folder!,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.right,
-              ),
-            ),
-        ],
-      ),
-    );
   }
 
   Widget _buildListHeader(ThemeData theme) {
