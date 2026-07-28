@@ -3,6 +3,7 @@ import 'package:mydatastudio/modules/email/notifications/email_selected_notifica
 import 'package:mydatastudio/modules/email/notifications/email_selection_changed_notification.dart';
 import 'package:mydatastudio/modules/email/notifications/email_sort_changed_notification.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:moment_dart/moment_dart.dart';
 import 'dart:math' as math;
 
@@ -140,7 +141,70 @@ class _EmailTable extends State<EmailTable> {
         email.isSelected = select;
       }
     });
+    // Whatever row the user last picked is no longer a meaningful place to
+    // extend a range from once everything has been set at once.
+    _anchorId = null;
     EmailSelectionChangedNotification().dispatch(context);
+  }
+
+  /// The fixed end of a shift-click range: the last row checked *without*
+  /// shift.
+  ///
+  /// Held as a message id rather than a row index because the list is re-sorted
+  /// and re-paged underneath this table — an index would quietly come to mean a
+  /// different message, and the range would run to the wrong place.
+  String? _anchorId;
+
+  /// Applies [selected] to a row, or to a whole range when shift is held.
+  ///
+  /// Shift-click extending a selection is what every mail client does, and
+  /// without it marking a run of messages for deletion means clicking each one.
+  /// The value being applied is the one the clicked row is taking, so
+  /// shift-clicking a checked row clears the range instead of setting it.
+  ///
+  /// Rows outside the range are deliberately left alone: the anchor stays put
+  /// so the range can be adjusted by shift-clicking again, and silently
+  /// dropping selections the user made elsewhere would be worse than leaving
+  /// them.
+  void _applySelection(Email email, bool selected) {
+    final anchorId = _anchorId;
+    final anchorIndex =
+        anchorId == null
+            ? -1
+            : widget.emails.indexWhere((e) => e.id == anchorId);
+    final clickedIndex = widget.emails.indexWhere((e) => e.id == email.id);
+
+    // No anchor (or one that has since scrolled out of the loaded page) leaves
+    // nothing to extend from, so this falls back to a plain single-row toggle.
+    if (HardwareKeyboard.instance.isShiftPressed &&
+        anchorIndex >= 0 &&
+        clickedIndex >= 0) {
+      final start = math.min(anchorIndex, clickedIndex);
+      final end = math.max(anchorIndex, clickedIndex);
+      setState(() {
+        for (var i = start; i <= end; i++) {
+          widget.emails[i].isSelected = selected;
+        }
+      });
+      EmailSelectionChangedNotification().dispatch(context);
+      return;
+    }
+
+    setState(() => email.isSelected = selected);
+    _anchorId = email.id;
+    EmailSelectionChangedNotification().dispatch(context);
+  }
+
+  /// Handles a tap on a row's content — as opposed to its checkbox.
+  ///
+  /// Normally that opens the message. Shift-click never means "open": it is a
+  /// range gesture, and the checkbox is a small target to have to hit for it.
+  void _onCellTap(Email email) {
+    if (HardwareKeyboard.instance.isShiftPressed) {
+      _applySelection(email, !(email.isSelected ?? false));
+      return;
+    }
+    EmailSelectedNotification(email).dispatch(context);
   }
 
   List<DataColumn> getColumns(BuildContext context, double totalWidth) {
@@ -253,7 +317,7 @@ class _EmailTable extends State<EmailTable> {
                 ),
               ),
             ),
-            onTap: () => EmailSelectedNotification(email).dispatch(context),
+            onTap: () => _onCellTap(email),
           ),
           DataCell(
             SizedBox(
@@ -266,7 +330,7 @@ class _EmailTable extends State<EmailTable> {
                 ),
               ),
             ),
-            onTap: () => EmailSelectedNotification(email).dispatch(context),
+            onTap: () => _onCellTap(email),
           ),
           DataCell(
             SizedBox(
@@ -280,7 +344,7 @@ class _EmailTable extends State<EmailTable> {
                       )
                       : const SizedBox.shrink(),
             ),
-            onTap: () => EmailSelectedNotification(email).dispatch(context),
+            onTap: () => _onCellTap(email),
           ),
           DataCell(
             SizedBox(
@@ -298,7 +362,7 @@ class _EmailTable extends State<EmailTable> {
                 ),
               ),
             ),
-            onTap: () => EmailSelectedNotification(email).dispatch(context),
+            onTap: () => _onCellTap(email),
           ),
         ],
         // Only reached via the row's checkbox — every cell above has its own
@@ -306,12 +370,7 @@ class _EmailTable extends State<EmailTable> {
         // bulk action and nothing else; it used to also dispatch
         // EmailSelectedNotification, which is why ticking a checkbox opened the
         // email.
-        onSelectChanged: (bool? e) {
-          setState(() {
-            email.isSelected = e ?? false;
-          });
-          EmailSelectionChangedNotification().dispatch(context);
-        },
+        onSelectChanged: (bool? e) => _applySelection(email, e ?? false),
       );
     }).toList();
   }
