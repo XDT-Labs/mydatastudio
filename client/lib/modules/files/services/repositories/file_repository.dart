@@ -1,7 +1,14 @@
 // [ignoring loop detection]
+import 'dart:io' as io;
+
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/helpers/file_path_resolver.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
+import 'package:path/path.dart' as p;
 
 class FileDesktopRepository {
   AppLogger logger = AppLogger(null);
@@ -93,9 +100,89 @@ class FileDesktopRepository {
     return f;
   }
 
-  Future<File?> delete(File f) async {
-    await db.execute("DELETE FROM files WHERE id = ?", [f.id]);
+  Future<File?> delete(File f, {Collection? collection}) async {
+    await deleteFiles([f], collection: collection);
     return null;
+  }
+
+  /// Permanently removes [files] and every artifact derived from them: the
+  /// bytes on disk, the cached thumbnail, the embedding row and the `files`
+  /// row itself.
+  ///
+  /// The embedding goes by cascade — resqlite enables `PRAGMA foreign_keys` on
+  /// every connection, so the `ON DELETE CASCADE` on `files_embeddings` fires.
+  /// Nothing on disk cascades, which is the part that has to be done here.
+  ///
+  /// [collection] resolves each row's stored path. Every scanner except the PST
+  /// one writes a path *relative* to the collection root, so unlinking
+  /// `f.path` directly resolves against the process working directory, finds
+  /// nothing, and silently leaves the bytes behind.
+  Future<void> deleteFiles(List<File> files, {Collection? collection}) async {
+    if (files.isEmpty) return;
+
+    // Disk first, rows second: an unlink that fails is logged and the row still
+    // goes, because a file with no row is reachable again by a rescan while a
+    // row pointing at nothing is a permanent ghost in the UI.
+    for (final f in files) {
+      for (final path in _onDiskPaths(f, collection)) {
+        try {
+          final ioFile = io.File(path);
+          if (await ioFile.exists()) await ioFile.delete();
+        } catch (err) {
+          logger.e("Error deleting file at $path: $err");
+        }
+      }
+      await _deleteThumbnail(f);
+    }
+
+    final ids = files.map((f) => f.id).toList();
+    final placeholders = List.filled(ids.length, '?').join(',');
+    await db.execute("DELETE FROM files WHERE id IN ($placeholders)", ids);
+  }
+
+  /// Absolute paths this row owns on disk. Empty for a cloud row that was never
+  /// downloaded — `gdrive://…` is an identifier, not a path.
+  Iterable<String> _onDiskPaths(File f, Collection? collection) {
+    final paths = <String>{};
+
+    final local = f.localPath;
+    if (local != null && local.isNotEmpty) paths.add(local);
+
+    final resolved =
+        collection != null
+            ? FilePathResolver.absolute(f, collection)
+            : f.path;
+    if (resolved.startsWith('gdrive://')) return paths;
+    if (p.isAbsolute(resolved)) {
+      paths.add(resolved);
+    } else if (paths.isEmpty) {
+      // Relative and nothing to resolve it against: deleting would be a no-op
+      // against the working directory, so say so rather than pretend.
+      logger.w(
+        "Cannot delete '${f.path}' from disk: relative path and no collection "
+        "supplied for file ${f.id}",
+      );
+    }
+
+    return paths;
+  }
+
+  Future<void> _deleteThumbnail(File f) async {
+    final key = f.thumbnail;
+    if (!ThumbnailCache.isCacheKey(key)) return;
+
+    final root = MainApp.appDataDirectory.valueOrNull;
+    if (root == null) {
+      logger.w(
+        "Cannot delete cached thumbnail '$key': app data directory unknown",
+      );
+      return;
+    }
+    try {
+      await ThumbnailCache(root).deleteKey(key!);
+    } catch (err) {
+      logger.e("Error deleting cached thumbnail '$key': $err");
+    }
   }
 
   Future<void> markMissingAsDeleted(
@@ -196,11 +283,18 @@ class FileDesktopRepository {
     return rows.map((r) => File.fromDbMap(r)).toList();
   }
 
-  Future<List<File>> getByEmailIds(List<String> emailIds) async {
+  /// Attachments of [emailIds]. [includeDeleted] returns soft-deleted rows too,
+  /// which is what a permanent delete wants — those are precisely the rows that
+  /// would otherwise outlive the message they belong to.
+  Future<List<File>> getByEmailIds(
+    List<String> emailIds, {
+    bool includeDeleted = false,
+  }) async {
     if (emailIds.isEmpty) return [];
     final placeholders = List.filled(emailIds.length, '?').join(',');
     final rows = await db.select(
-      "SELECT * FROM files WHERE email_id IN ($placeholders) AND is_deleted = 0",
+      "SELECT * FROM files WHERE email_id IN ($placeholders)"
+      "${includeDeleted ? '' : ' AND is_deleted = 0'}",
       emailIds,
     );
     return rows.map((r) => File.fromDbMap(r)).toList();

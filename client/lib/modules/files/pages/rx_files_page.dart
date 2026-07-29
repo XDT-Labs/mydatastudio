@@ -868,17 +868,10 @@ class _RxFilesPage extends State<RxFilesPage> {
     for (var item in itemsToDelete) {
       if (item is File) {
         try {
-          // Reconstruct absolute path for filesystem delete.
-          final absPath =
-              item.localPath ?? FilePathResolver.absolute(item, collection!);
-          final ioFile = io.File(absPath);
-          if (await ioFile.exists()) {
-            await ioFile.delete();
-          }
-          // Delete from database
+          // Removes the bytes, the cached thumbnail, the embedding and the row.
           await FileDesktopRepository(
             DatabaseManager.instance.database!,
-          ).delete(item);
+          ).delete(item, collection: collection);
           deletedCount++;
         } catch (e) {
           logger.e("Error deleting ${item.path}: $e");

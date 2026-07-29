@@ -148,11 +148,12 @@ class CollectionRepository {
 
         await tx.execute("DELETE FROM files WHERE collection_id = ?", [id]);
         await tx.execute("DELETE FROM folders WHERE collection_id = ?", [id]);
-        // `emails_embeddings` declares ON DELETE CASCADE, but PRAGMA
-        // foreign_keys is never enabled, so the cascade never fires — the same
-        // reason files_embeddings is deleted explicitly above. Without this
-        // every deleted email leaves its 2048-dim vector in the index, where it
-        // keeps turning up in similarity results.
+        // Both embedding tables declare ON DELETE CASCADE and resqlite enables
+        // PRAGMA foreign_keys on every connection, so deleting the parent rows
+        // below would clear them anyway. Deleting a whole collection's vectors
+        // as one set operation beats the row-at-a-time cascade over an archive
+        // with six figures of mail, which is the only reason these two
+        // statements are still here.
         await tx.execute(
           "DELETE FROM emails_embeddings WHERE email_id IN "
           "(SELECT id FROM emails WHERE collection_id = ?)",

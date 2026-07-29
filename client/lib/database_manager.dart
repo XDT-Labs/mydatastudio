@@ -516,6 +516,82 @@ class AppDatabase {
     if (added.contains('files.is_inline')) {
       await _backfillInlineAttachments();
     }
+
+    await _reapOrphanedArtifacts();
+  }
+
+  /// One-time sweep of artifacts stranded by the delete paths before they
+  /// cleaned up after themselves.
+  ///
+  /// Thumbnails are the real target: no cascade covers the filesystem, and
+  /// until the delete paths started removing them every deleted file left its
+  /// cached jpeg behind. The embedding half is cheap insurance for archives
+  /// created before resqlite began enabling `PRAGMA foreign_keys` on every
+  /// connection, when the declared cascades genuinely did not fire.
+  ///
+  /// Gated on `PRAGMA user_version` rather than run on every open: this is a
+  /// migration, not maintenance, and the thumbnail half stats every file under
+  /// the cache directory — six figures for a large photo archive. The gate is
+  /// also what keeps it from running twice, since [create] calls [initSchema]
+  /// on two connections.
+  Future<void> _reapOrphanedArtifacts() async {
+    const reapVersion = 1;
+
+    final rows = await _db.select('PRAGMA user_version');
+    final current = rows.isEmpty ? 0 : (rows.first.values.first as int? ?? 0);
+    if (current >= reapVersion) return;
+
+    for (final table in const [
+      ('files_embeddings', 'file_id', 'files'),
+      ('emails_embeddings', 'email_id', 'emails'),
+    ]) {
+      final (child, column, parent) = table;
+      final result = await _db.execute(
+        'DELETE FROM $child WHERE $column NOT IN (SELECT id FROM $parent)',
+      );
+      if (result.affectedRows > 0) {
+        logger.i(
+          "AppDatabase: reaped ${result.affectedRows} orphaned rows from $child",
+        );
+      }
+    }
+
+    await _reapOrphanedThumbnails();
+    await _db.execute('PRAGMA user_version = $reapVersion');
+  }
+
+  /// Deletes cached thumbnails no `files` row references any more.
+  ///
+  /// Walks the cache rather than the table: a thumbnail whose row is gone can
+  /// only be found from the disk side. Keys are compared as stored — the
+  /// relative `<collectionId>/<ab>/<hash>.jpg` form (see `ThumbnailCache`).
+  Future<void> _reapOrphanedThumbnails() async {
+    final storageRoot = MainApp.appDataDirectory.valueOrNull;
+    if (storageRoot == null) return;
+
+    final rootDir = io.Directory(p.join(storageRoot, 'thumbnails'));
+    if (!await rootDir.exists()) return;
+
+    final live =
+        (await _db.select(
+          "SELECT thumbnail FROM files WHERE thumbnail IS NOT NULL",
+        )).map((r) => r['thumbnail'] as String).toSet();
+
+    var reaped = 0;
+    await for (final entity in rootDir.list(recursive: true)) {
+      if (entity is! io.File) continue;
+      final key = p.relative(entity.path, from: rootDir.path);
+      if (live.contains(key)) continue;
+      try {
+        await entity.delete();
+        reaped++;
+      } catch (e) {
+        logger.w("AppDatabase: could not delete stale thumbnail $key: $e");
+      }
+    }
+    if (reaped > 0) {
+      logger.i("AppDatabase: reaped $reaped orphaned thumbnails from disk");
+    }
   }
 
   /// Columns added to [schemaDDL] after the initial schema shipped.

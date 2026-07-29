@@ -27,6 +27,13 @@ class DatabaseRepository {
   /// Upserts the Qwen3-VL embedding for [fileId] into the `files_embeddings`
   /// table, storing values as a packed Float32 BLOB via `vector_as_f32()`.
   ///
+  /// Writes only when the `files` row still exists. The embedding isolates run
+  /// independently of deletion, so a file or collection deleted while its
+  /// embedding is in flight would otherwise write back against a row that is
+  /// gone and fail the foreign key — surfacing as a spurious error mid-scan,
+  /// and misreported by the fallback below as a missing vector extension.
+  /// A vanished file is a no-op, not a failure.
+  ///
   /// The `vector_as_f32()` call is skipped gracefully when the sqlite_vector
   /// extension is not loaded (dev/test builds without native assets).
   Future<void> upsertFileEmbedding(
@@ -42,11 +49,12 @@ class DatabaseRepository {
         await tx.execute(
           '''
           INSERT INTO files_embeddings (file_id, qwen3_vl_embedding)
-          VALUES (?, vector_as_f32(?))
+          SELECT ?, vector_as_f32(?)
+          WHERE EXISTS (SELECT 1 FROM files WHERE id = ?)
           ON CONFLICT(file_id) DO UPDATE SET
             qwen3_vl_embedding = excluded.qwen3_vl_embedding
           ''',
-          [fileId, jsonArray],
+          [fileId, jsonArray, fileId],
         );
       } catch (e) {
         // Fallback: store as raw Float32 BLOB when extension is not loaded
@@ -57,11 +65,12 @@ class DatabaseRepository {
         await tx.execute(
           '''
           INSERT INTO files_embeddings (file_id, qwen3_vl_embedding)
-          VALUES (?, ?)
+          SELECT ?, ?
+          WHERE EXISTS (SELECT 1 FROM files WHERE id = ?)
           ON CONFLICT(file_id) DO UPDATE SET
             qwen3_vl_embedding = excluded.qwen3_vl_embedding
           ''',
-          [fileId, blob],
+          [fileId, blob, fileId],
         );
       }
     });
@@ -214,6 +223,9 @@ class DatabaseRepository {
 
   /// Upserts the Qwen3-VL embedding for [emailId] into the `emails_embeddings`
   /// table, storing values as a packed Float32 BLOB via `vector_as_f32()`.
+  ///
+  /// Guarded on the `emails` row still existing, for the same reason as
+  /// [upsertFileEmbedding].
   Future<void> upsertEmailEmbedding(
     String emailId,
     List<double> embedding,
@@ -225,11 +237,12 @@ class DatabaseRepository {
         await tx.execute(
           '''
           INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding)
-          VALUES (?, vector_as_f32(?))
+          SELECT ?, vector_as_f32(?)
+          WHERE EXISTS (SELECT 1 FROM emails WHERE id = ?)
           ON CONFLICT(email_id) DO UPDATE SET
             qwen3_vl_embedding = excluded.qwen3_vl_embedding
           ''',
-          [emailId, jsonArray],
+          [emailId, jsonArray, emailId],
         );
       } catch (e) {
         logger.w('vector_as_f32 unavailable, storing raw BLOB: $e');
@@ -237,11 +250,12 @@ class DatabaseRepository {
         await tx.execute(
           '''
           INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding)
-          VALUES (?, ?)
+          SELECT ?, ?
+          WHERE EXISTS (SELECT 1 FROM emails WHERE id = ?)
           ON CONFLICT(email_id) DO UPDATE SET
             qwen3_vl_embedding = excluded.qwen3_vl_embedding
           ''',
-          [emailId, blob],
+          [emailId, blob, emailId],
         );
       }
     });

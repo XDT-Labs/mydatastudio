@@ -1,5 +1,4 @@
 // [ignoring loop detection]
-import 'dart:io' as io;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/email.dart';
@@ -166,43 +165,30 @@ class EmailRepository {
     });
   }
 
-  Future<void> deleteEmails(List<String> ids) async {
+  /// Permanently removes [ids] and everything hanging off them: each message's
+  /// attachments — bytes, cached thumbnail, row — and both embeddings.
+  ///
+  /// The embeddings go by cascade; nothing on disk does, which is why the
+  /// attachments are routed through [FileDesktopRepository.deleteFiles] rather
+  /// than deleted here with a `DELETE FROM files`.
+  ///
+  /// [collection] resolves the attachments' stored (relative) paths. Throws on
+  /// failure so callers don't report a delete that didn't happen.
+  Future<void> deleteEmails(List<String> ids, {Collection? collection}) async {
     if (ids.isEmpty) return;
 
     final fileRepo = FileDesktopRepository(database);
-    try {
-      final files = await fileRepo.getByEmailIds(ids);
+    // Deliberately not filtered by `is_deleted`: a soft-deleted attachment is
+    // exactly the row that would otherwise be stranded, pointing at an email
+    // that no longer exists.
+    final files = await fileRepo.getByEmailIds(ids, includeDeleted: true);
+    await fileRepo.deleteFiles(files, collection: collection);
 
-      for (var f in files) {
-        try {
-          final ioFile = io.File(f.path);
-          if (await ioFile.exists()) {
-            await ioFile.delete();
-          }
-        } catch (err) {
-          logger.e("Error deleting attachment file at ${f.path}: $err");
-        }
-      }
-
-      await database.transaction((tx) async {
-        if (files.isNotEmpty) {
-          final fileIds = files.map((f) => f.id).toList();
-          final placeholders = List.filled(fileIds.length, '?').join(',');
-          await tx.execute(
-            "DELETE FROM files WHERE id IN ($placeholders)",
-            fileIds,
-          );
-        }
-
-        final emailPlaceholders = List.filled(ids.length, '?').join(',');
-        await tx.execute(
-          "DELETE FROM emails WHERE id IN ($emailPlaceholders)",
-          ids,
-        );
-      });
-    } catch (err) {
-      logger.e("Error during bulk email deletion: $err");
-    }
+    final placeholders = List.filled(ids.length, '?').join(',');
+    await database.execute(
+      "DELETE FROM emails WHERE id IN ($placeholders)",
+      ids,
+    );
   }
 
   Future<void> cleanupDeletedYahoo(
@@ -233,7 +219,7 @@ class EmailRepository {
       logger.i(
         "Cleanup: Deleting ${toDeleteIds.length} emails locally that were removed from Yahoo folder $folder.",
       );
-      await deleteEmails(toDeleteIds);
+      await deleteEmails(toDeleteIds, collection: collection);
     }
   }
 
@@ -265,7 +251,7 @@ class EmailRepository {
       logger.i(
         "Cleanup: Deleting ${toDeleteIds.length} emails locally that were removed from Outlook folder $folder.",
       );
-      await deleteEmails(toDeleteIds);
+      await deleteEmails(toDeleteIds, collection: collection);
     }
   }
 }

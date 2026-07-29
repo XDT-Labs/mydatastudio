@@ -860,7 +860,7 @@ class _EmailPage extends State<EmailPage> {
 
       await EmailRepository(
         DatabaseManager.instance.database!,
-      ).deleteEmails(ids);
+      ).deleteEmails(ids, collection: collection);
 
       _refreshEmails();
       if (mounted) {

@@ -642,18 +642,12 @@ class _FileTable extends State<FileTable> {
 
   Future<void> _deleteFile(BuildContext context, File file) async {
     try {
-      // 1. Delete from file system
-      final ioFile = io.File(file.path);
-      if (await ioFile.exists()) {
-        await ioFile.delete();
-      }
-
-      // 2. Delete from database
+      // Removes the bytes, the cached thumbnail, the embedding and the row.
       await FileDesktopRepository(
         DatabaseManager.instance.database!,
-      ).delete(file);
+      ).delete(file, collection: widget.collection);
 
-      // 3. Notify parent to refresh
+      // Notify parent to refresh
       if (context.mounted) {
         const FileDeletedNotification().dispatch(context);
 

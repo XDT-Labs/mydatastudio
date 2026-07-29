@@ -423,6 +423,13 @@ class _FileDrawer extends State<FileDrawer> {
 
                   Navigator.of(dialogContext).pop();
 
+                  // Before the rows go, not after: a scanner mid-scan keeps
+                  // upserting files and folders, and anything it writes after
+                  // the delete commits is a row belonging to a collection that
+                  // no longer exists — invisible in the UI and never cleaned
+                  // up. The email drawer already does this.
+                  ScannerManager.getInstance().stopScanner(collection.id);
+
                   // Delete the collection and all related metadata (files, folders, etc.)
                   await CollectionRepository(
                     DatabaseManager.instance.database!,

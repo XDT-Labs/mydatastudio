@@ -118,7 +118,13 @@ class YahooScannerIsolate {
                 message['folder'] as String,
                 (message['uids'] as List).cast<int>(),
               )
-              .then((_) {
+              .catchError((Object err) {
+                // `deleteEmails` throws now, and this future is unawaited: a
+                // failed cleanup must not leave `isCleanupInProgress` stuck
+                // true, which would hold the scan open forever.
+                logger.e("Yahoo cleanup failed: $err");
+              })
+              .whenComplete(() {
                 isCleanupInProgress = false;
                 checkDone();
               });
