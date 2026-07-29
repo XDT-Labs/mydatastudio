@@ -4,22 +4,27 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/scanners/scan_isolate_support.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/models/tables/file.dart' as db_file;
 import 'package:mydatastudio/models/tables/folder.dart' as db_folder;
+import 'package:mydatastudio/modules/email/services/email_decoding_helper.dart';
 import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/email_repository.dart';
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
+import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
 import 'dart:io' as io;
 
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
@@ -75,6 +80,8 @@ class YahooScannerIsolate {
       'force': force,
       'appDir': appDir,
       'dbDir': dbDir,
+      // DEK so the worker can decrypt/encrypt collection tokens (AUDIT M2 ph4).
+      'vaultDek': VaultManager.instance.dek,
     };
 
     _isolate = await spawnIsolate(YahooScannerIsolateWorker.worker, args);
@@ -91,6 +98,7 @@ class YahooScannerIsolate {
     }
 
     receivePort.listen((message) {
+      if (relayIsolateLog(logger, message, '[YahooScan]')) return;
       if (message is Map) {
         if (message['type'] == 'refresh') {
           GetEmailsService.instance.invoke(
@@ -110,7 +118,13 @@ class YahooScannerIsolate {
                 message['folder'] as String,
                 (message['uids'] as List).cast<int>(),
               )
-              .then((_) {
+              .catchError((Object err) {
+                // `deleteEmails` throws now, and this future is unawaited: a
+                // failed cleanup must not leave `isCleanupInProgress` stuck
+                // true, which would hold the scan open forever.
+                logger.e("Yahoo cleanup failed: $err");
+              })
+              .whenComplete(() {
                 isCleanupInProgress = false;
                 checkDone();
               });
@@ -146,6 +160,7 @@ class YahooScannerIsolate {
       'type': 'move_to_trash',
       'appDir': appDir,
       'dbDir': dbDir,
+      'vaultDek': VaultManager.instance.dek,
     };
 
     // We use a fresh isolate for the move operation to avoid blocking or being blocked by long-running scans
@@ -172,192 +187,227 @@ class YahooScannerIsolate {
 
 class YahooScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> args) async {
-    final RootIsolateToken? token = args['token'];
-    final SendPort? clientPort = args['port'];
-    final Collection collection = args['collection'];
-    final String? folderId = args['folderId'];
-    final String type = args['type'] ?? 'sync';
-    final String? lastScanDateStr = args['lastScanDate'];
-    final DateTime? lastScanDate =
-        lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
-    final bool force = args['force'] ?? false;
-    final String appDir = args['appDir'] as String;
-    final String dbDir = args['dbDir'] as String? ?? appDir;
-    final List<int>? uidsToMove =
-        args['uids'] != null ? (args['uids'] as List).cast<int>() : null;
+    runInScanIsolateZone(() async {
+      final RootIsolateToken? token = args['token'];
+      final SendPort? clientPort = args['port'];
+      final Collection collection = args['collection'];
+      final String? folderId = args['folderId'];
+      final String type = args['type'] ?? 'sync';
+      final String? lastScanDateStr = args['lastScanDate'];
+      final DateTime? lastScanDate =
+          lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
+      final bool force = args['force'] ?? false;
+      final String appDir = args['appDir'] as String;
+      final String dbDir = args['dbDir'] as String? ?? appDir;
+      final List<int>? uidsToMove =
+          args['uids'] != null ? (args['uids'] as List).cast<int>() : null;
 
-    if (token != null) {
-      BackgroundIsolateBinaryMessenger.ensureInitialized(token);
-    }
+      // Init platform channels + install the credential vault (AUDIT M2 phase 4).
+      bootstrapScanIsolate(token, args['vaultDek'] as Uint8List?);
 
-    final AppLogger logger = AppLogger(clientPort);
-    final emailAddress = collection.userId!;
-    final appPassword = collection.accessToken!;
+      final AppLogger logger = AppLogger(clientPort);
+      final emailAddress = collection.userId!;
+      final appPassword = collection.accessToken!;
 
-    final client = ImapClient(isLogEnabled: false);
-    try {
-      logger.s("Connecting to Yahoo IMAP for $type...");
-      await client.connectToServer('imap.mail.yahoo.com', 993, isSecure: true);
-      await client.login(emailAddress, appPassword);
-
-      if (type == 'move_to_trash' &&
-          uidsToMove != null &&
-          uidsToMove.isNotEmpty) {
-        final mailboxes = await client.listMailboxes();
-        final trashMailbox =
-            mailboxes.where((m) => m.isTrash).firstOrNull ??
-            mailboxes
-                .where(
-                  (m) =>
-                      m.name.toLowerCase() == 'trash' ||
-                      m.name.toLowerCase() == 'archive',
-                )
-                .firstOrNull;
-
-        final trashPath = trashMailbox?.name ?? 'Trash';
-        final targetFolder = folderId ?? 'INBOX';
-
-        logger.s(
-          "Moving ${uidsToMove.length} messages to $trashPath from $targetFolder...",
-        );
-        await client.selectMailboxByPath(targetFolder);
-
-        final sequence = MessageSequence();
-        for (final uid in uidsToMove) {
-          sequence.add(uid);
-        }
-        try {
-          await client.uidMove(sequence, targetMailboxPath: trashPath);
-          logger.s("Cleanup: remote move to $trashPath complete.");
-        } catch (e) {
-          logger.e(
-            "Error during IMAP MOVE: $e. Attempting Copy/Delete fallback.",
-          );
-          try {
-            await client.uidCopy(sequence, targetMailboxPath: trashPath);
-            await client.uidStore(sequence, [
-              MessageFlags.deleted,
-            ], action: StoreAction.add);
-            await client.uidExpunge(sequence);
-            logger.s("Cleanup: move to Trash completed via fallback.");
-          } catch (e2) {
-            logger.e("Fallback Copy/Delete failed: $e2");
-          }
-        }
-
-        await client.logout();
-        return;
-      }
-
-      final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
-
-      final scanStartTime = DateTime.now();
-      int totalFound = 0;
-      int newEmails = 0;
-      int skipped = 0;
-
-      // 1. Sync Folders
-      logger.s("Syncing Yahoo folders...");
-      final mailboxes = await client.listMailboxes();
-      for (final mailbox in mailboxes) {
-        final folder = EmailFolder(
-          id: mailbox.name,
-          collectionId: collection.id,
-          name: mailbox.name,
-          type: _getFolderType(mailbox.name),
-        );
-        await EmailFolderUpsertService.instance.invoke(
-          EmailFolderUpsertServiceCommand(folder, appDb),
-        );
-      }
-
-      // 2. Sync Emails
-      final targetFolder = folderId ?? 'INBOX';
-      logger.s("Syncing folder: $targetFolder");
-      await client.selectMailboxByPath(targetFolder);
-
-      // Fetch UIDs for the folder
-      List<int> allUids = [];
+      final client = ImapClient(isLogEnabled: false);
       try {
-        // Build search criteria
-        String searchCriteria = 'ALL';
-        if (!force && lastScanDate != null) {
-          // IMAP SINCE query uses day-level precision (RFC 3501)
-          // We subtract 1 day to be safe around timezones/boundaries
-          final sinceDate = lastScanDate.subtract(const Duration(days: 1));
-          final monthNames = [
-            'Jan',
-            'Feb',
-            'Mar',
-            'Apr',
-            'May',
-            'Jun',
-            'Jul',
-            'Aug',
-            'Sep',
-            'Oct',
-            'Nov',
-            'Dec',
-          ];
-          final dateStr =
-              "${sinceDate.day}-${monthNames[sinceDate.month - 1]}-${sinceDate.year}";
-          searchCriteria = 'SINCE $dateStr';
-          logger.i("Yahoo: Performing incremental sync SINCE $dateStr");
-        }
-
-        final searchResult = await client.uidSearchMessages(
-          searchCriteria: searchCriteria,
+        logger.s("Connecting to Yahoo IMAP for $type...");
+        await client.connectToServer(
+          'imap.mail.yahoo.com',
+          993,
+          isSecure: true,
         );
-        allUids = searchResult.matchingSequence?.toList() ?? [];
-        totalFound = allUids.length;
+        await client.login(emailAddress, appPassword);
 
-        if (searchCriteria == 'ALL') {
-          clientPort?.send({
-            'type': 'cleanup_uids',
-            'folder': targetFolder,
-            'uids': allUids,
-          });
-        }
-      } catch (err) {
-        logger.e("Failed to fetch UIDs for folder: $err");
-      }
+        if (type == 'move_to_trash' &&
+            uidsToMove != null &&
+            uidsToMove.isNotEmpty) {
+          final mailboxes = await client.listMailboxes();
+          final trashMailbox =
+              mailboxes.where((m) => m.isTrash).firstOrNull ??
+              mailboxes
+                  .where(
+                    (m) =>
+                        m.name.toLowerCase() == 'trash' ||
+                        m.name.toLowerCase() == 'archive',
+                  )
+                  .firstOrNull;
 
-      if (allUids.isEmpty) {
-        logger.s("No new messages found in $targetFolder.");
-      } else {
-        const int batchSize = 50;
-        final reversedUids = allUids.reversed.toList();
-        logger.s(
-          "Processing ${reversedUids.length} messages in $targetFolder...",
-        );
-
-        for (int i = 0; i < reversedUids.length; i += batchSize) {
-          final end =
-              (i + batchSize < reversedUids.length)
-                  ? i + batchSize
-                  : reversedUids.length;
-          final batchUids = reversedUids.sublist(i, end);
+          final trashPath = trashMailbox?.name ?? 'Trash';
+          final targetFolder = folderId ?? 'INBOX';
 
           logger.s(
-            "Fetching batch ${(i ~/ batchSize) + 1} (${batchUids.length} messages)...",
+            "Moving ${uidsToMove.length} messages to $trashPath from $targetFolder...",
           );
+          await client.selectMailboxByPath(targetFolder);
 
           final sequence = MessageSequence();
-          for (final uid in batchUids) {
+          for (final uid in uidsToMove) {
             sequence.add(uid);
           }
-
           try {
-            final fetchResult = await client.uidFetchMessages(
-              sequence,
-              'BODY.PEEK[]',
+            await client.uidMove(sequence, targetMailboxPath: trashPath);
+            logger.s("Cleanup: remote move to $trashPath complete.");
+          } catch (e) {
+            logger.e(
+              "Error during IMAP MOVE: $e. Attempting Copy/Delete fallback.",
             );
-            logger.s(
-              "Fetched ${fetchResult.messages.length} messages in batch.",
-            );
+            try {
+              await client.uidCopy(sequence, targetMailboxPath: trashPath);
+              await client.uidStore(sequence, [
+                MessageFlags.deleted,
+              ], action: StoreAction.add);
+              await client.uidExpunge(sequence);
+              logger.s("Cleanup: move to Trash completed via fallback.");
+            } catch (e2) {
+              logger.e("Fallback Copy/Delete failed: $e2");
+            }
+          }
+
+          await client.logout();
+          return;
+        }
+
+        final appDb = await AppDatabase.create(
+          null,
+          dbDir,
+          AppConstants.dbName,
+        );
+
+        final scanStartTime = DateTime.now();
+        int totalFound = 0;
+        int newEmails = 0;
+        int skipped = 0;
+
+        // 1. Sync Folders
+        logger.s("Syncing Yahoo folders...");
+        final mailboxes = await client.listMailboxes();
+        for (final mailbox in mailboxes) {
+          final folder = EmailFolder(
+            id: mailbox.name,
+            collectionId: collection.id,
+            name: mailbox.name,
+            type: _getFolderType(mailbox.name),
+          );
+          await EmailFolderUpsertService.instance.invoke(
+            EmailFolderUpsertServiceCommand(folder, appDb),
+          );
+        }
+
+        // 2. Sync Emails
+        final targetFolder = folderId ?? 'INBOX';
+        logger.s("Syncing folder: $targetFolder");
+        await client.selectMailboxByPath(targetFolder);
+
+        // Fetch UIDs for the folder
+        List<int> allUids = [];
+        try {
+          // Build search criteria
+          String searchCriteria = 'ALL';
+          if (!force && lastScanDate != null) {
+            // IMAP SINCE query uses day-level precision (RFC 3501)
+            // We subtract 1 day to be safe around timezones/boundaries
+            final sinceDate = lastScanDate.subtract(const Duration(days: 1));
+            final monthNames = [
+              'Jan',
+              'Feb',
+              'Mar',
+              'Apr',
+              'May',
+              'Jun',
+              'Jul',
+              'Aug',
+              'Sep',
+              'Oct',
+              'Nov',
+              'Dec',
+            ];
+            final dateStr =
+                "${sinceDate.day}-${monthNames[sinceDate.month - 1]}-${sinceDate.year}";
+            searchCriteria = 'SINCE $dateStr';
+            logger.i("Yahoo: Performing incremental sync SINCE $dateStr");
+          }
+
+          final searchResult = await client.uidSearchMessages(
+            searchCriteria: searchCriteria,
+          );
+          allUids = searchResult.matchingSequence?.toList() ?? [];
+          totalFound = allUids.length;
+
+          if (searchCriteria == 'ALL') {
+            clientPort?.send({
+              'type': 'cleanup_uids',
+              'folder': targetFolder,
+              'uids': allUids,
+            });
+          }
+        } catch (err) {
+          logger.e("Failed to fetch UIDs for folder: $err");
+        }
+
+        if (allUids.isEmpty) {
+          logger.s("No new messages found in $targetFolder.");
+        } else {
+          const int batchSize = 50;
+          final reversedUids = allUids.reversed.toList();
+          logger.s(
+            "Processing ${reversedUids.length} messages in $targetFolder...",
+          );
+
+          for (int i = 0; i < reversedUids.length; i += batchSize) {
+            final end =
+                (i + batchSize < reversedUids.length)
+                    ? i + batchSize
+                    : reversedUids.length;
+            final batchUids = reversedUids.sublist(i, end);
+
+            final sequence = MessageSequence();
+            for (final uid in batchUids) {
+              sequence.add(uid);
+            }
+
+            FetchImapResult? fetchResult;
+            try {
+              fetchResult = await client.uidFetchMessages(
+                sequence,
+                'BODY.PEEK[]',
+              );
+            } catch (e) {
+              logger.w(
+                "Batch fetch starting at $i failed ($e). Retrying UIDs individually...",
+              );
+            }
+
+            final List<MimeMessage> messagesToProcess = [];
+            if (fetchResult != null) {
+              messagesToProcess.addAll(fetchResult.messages);
+            } else {
+              for (final uid in batchUids) {
+                try {
+                  final singleSeq = MessageSequence()..add(uid);
+                  final singleResult = await client.uidFetchMessages(
+                    singleSeq,
+                    'BODY.PEEK[]',
+                  );
+                  messagesToProcess.addAll(singleResult.messages);
+                } catch (singleErr) {
+                  logger.w(
+                    "Full fetch failed for UID $uid ($singleErr). Attempting header salvage...",
+                  );
+                  final salvagedMsg = await _salvageCorruptedMessage(
+                    client,
+                    uid,
+                    logger,
+                  );
+                  if (salvagedMsg != null) {
+                    messagesToProcess.add(salvagedMsg);
+                  }
+                }
+              }
+            }
 
             List<Email> emailBatch = [];
-            for (final message in fetchResult.messages) {
+            for (final message in messagesToProcess) {
               final msgDate = message.decodeDate() ?? DateTime.now();
 
               // Refine incremental check with second-level precision
@@ -390,34 +440,63 @@ class YahooScannerIsolateWorker {
               );
               clientPort?.send({'type': 'refresh'});
             }
-          } catch (e) {
-            logger.e("Failed to fetch batch starting at $i: $e");
           }
         }
-      }
 
-      logger.i(
-        "Yahoo sync complete: $totalFound found, $newEmails new, $skipped skipped.",
+        logger.i(
+          "Yahoo sync complete: $totalFound found, $newEmails new, $skipped skipped.",
+        );
+
+        // Update lastScanDate in the DB
+        final collectionRepo = CollectionRepository(appDb);
+        final col = await collectionRepo.collectionById(collection.id);
+        if (col != null) {
+          col.scanStatus = 'ready';
+          col.lastScanDate = scanStartTime;
+          await collectionRepo.updateCollection(col);
+        }
+
+        clientPort?.send({'type': 'refresh', 'status': 'done'});
+      } catch (e, stack) {
+        logger.e("Error in Yahoo Isolate: $e", error: e, stackTrace: stack);
+      } finally {
+        if (client.isLoggedIn) {
+          // A dropped socket after a long sync makes logout throw; letting that
+          // escape the finally would skip Isolate.exit, so the client never gets
+          // 'done' and the isolate stays alive. Same guard as the Outlook worker.
+          try {
+            await client.logout();
+          } catch (_) {}
+        }
+        Isolate.exit(clientPort, {'status': 'done'});
+      }
+    });
+  }
+
+  /// Attempts to fetch header-only metadata for a message whose full body
+  /// fetch threw an encoding exception, preserving Subject, From, To, Date, and ID.
+  static Future<MimeMessage?> _salvageCorruptedMessage(
+    ImapClient client,
+    int uid,
+    AppLogger logger,
+  ) async {
+    try {
+      final singleSeq = MessageSequence()..add(uid);
+      final result = await client.uidFetchMessages(
+        singleSeq,
+        'BODY.PEEK[HEADER]',
       );
-
-      // Update lastScanDate in the DB
-      final collectionRepo = CollectionRepository(appDb);
-      final col = await collectionRepo.collectionById(collection.id);
-      if (col != null) {
-        col.scanStatus = 'ready';
-        col.lastScanDate = scanStartTime;
-        await collectionRepo.updateCollection(col);
+      if (result.messages.isNotEmpty) {
+        final msg = result.messages.first;
+        logger.i(
+          "Salvaged header metadata for message UID $uid (Subject: ${msg.decodeSubject()})",
+        );
+        return msg;
       }
-
-      clientPort?.send({'type': 'refresh', 'status': 'done'});
-    } catch (e, stack) {
-      logger.e("Error in Yahoo Isolate: $e", error: e, stackTrace: stack);
-    } finally {
-      if (client.isLoggedIn) {
-        await client.logout();
-      }
-      Isolate.exit(clientPort, {'status': 'done'});
+    } catch (e) {
+      logger.w("Could not salvage header for message UID $uid: $e");
     }
+    return null;
   }
 
   /// Returns all MIME parts that have a filename (i.e. are attachments or
@@ -436,10 +515,15 @@ class YahooScannerIsolateWorker {
     required List<MimePart> parts,
     required String targetFolderPath,
     required String extractionRoot,
+    required String appDir,
     required AppLogger logger,
+    // Needed to tell an embedded image from a real attachment: the body is
+    // what says which parts it references. See `InlineAttachment`.
+    String? htmlBody,
   }) async {
     List<db_file.File> files = [];
     await io.Directory(targetFolderPath).create(recursive: true);
+    final thumbnailCache = ThumbnailCache(appDir);
 
     // SMTP Message-IDs often contain '<', '>', '@', '/' and other chars that
     // are illegal in file-system paths. Strip everything unsafe.
@@ -453,6 +537,21 @@ class YahooScannerIsolateWorker {
       if (rawFileName == null) continue;
       // Sanitize filename to prevent path traversal
       final fileName = p.basename(rawFileName).replaceAll('..', '');
+
+      // An HTML message drags in every spacer, logo and tracking pixel as a
+      // real MIME part. Flagging them here is what keeps them out of the photo
+      // grid and the embedding queue further downstream.
+      final contentId = InlineAttachment.normalizeContentId(
+        part.getHeaderValue('content-id'),
+      );
+      final isInline = InlineAttachment.isInline(
+        contentId: contentId,
+        fileName: fileName,
+        htmlBody: htmlBody,
+        dispositionInline:
+            part.getHeaderContentDisposition()?.disposition ==
+            ContentDisposition.inline,
+      );
 
       Uint8List? content;
       try {
@@ -472,13 +571,21 @@ class YahooScannerIsolateWorker {
           );
           await file.writeAsBytes(content);
 
+          final fileId = const Uuid().v5(
+            Namespace.url.value,
+            'file:email:${collection.id}:$messageId:$fileName',
+          );
+
           String? thumbnail;
           if (_mapMimeType(part.mediaType.text) ==
               FilesConstants.mimeTypeImage) {
             try {
-              thumbnail = await ThumbnailGenerator().pathImageToBase64(
+              thumbnail = await ThumbnailGenerator().generate(
+                collection.id,
+                fileId,
                 file.path,
                 FilesConstants.mimeTypeImage,
+                thumbnailCache,
               );
             } catch (e) {
               logger.w(
@@ -502,10 +609,7 @@ class YahooScannerIsolateWorker {
           }
 
           final f = db_file.File(
-            id: const Uuid().v5(
-              Namespace.url.value,
-              'file:email:${collection.id}:$messageId:$fileName',
-            ),
+            id: fileId,
             collectionId: collection.id,
             name: fileName,
             path: relPath ?? file.path,
@@ -517,6 +621,8 @@ class YahooScannerIsolateWorker {
             isDeleted: false,
             emailId: messageId,
             thumbnail: thumbnail,
+            contentId: contentId,
+            isInline: isInline,
           );
           files.add(f);
         }
@@ -626,8 +732,57 @@ class YahooScannerIsolateWorker {
           'email:yahoo:${collection.id}:$targetFolder:${uid ?? const Uuid().v4()}',
         );
 
-    final plainBody = message.decodeTextPlainPart();
-    final htmlBody = message.decodeTextHtmlPart();
+    String? plainBody;
+    try {
+      plainBody = message.decodeTextPlainPart();
+    } catch (e) {
+      logger.w("enough_mail decodeTextPlainPart error for $emailId: $e");
+    }
+
+    String? htmlBody;
+    try {
+      htmlBody = message.decodeTextHtmlPart();
+    } catch (e) {
+      logger.w("enough_mail decodeTextHtmlPart error for $emailId: $e");
+    }
+
+    if (plainBody == null) {
+      try {
+        final part = message.allPartsFlat.cast<MimePart?>().firstWhere(
+          (p) => p?.mediaType.text.toLowerCase().contains('plain') ?? false,
+          orElse: () => null,
+        );
+        if (part != null) {
+          final rawBytes = part.decodeContentBinary();
+          if (rawBytes != null && rawBytes.isNotEmpty) {
+            plainBody = EmailDecodingHelper.decodeQuotedPrintable(rawBytes);
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (htmlBody == null) {
+      try {
+        final part = message.allPartsFlat.cast<MimePart?>().firstWhere(
+          (p) => p?.mediaType.text.toLowerCase().contains('html') ?? false,
+          orElse: () => null,
+        );
+        if (part != null) {
+          final rawBytes = part.decodeContentBinary();
+          if (rawBytes != null && rawBytes.isNotEmpty) {
+            htmlBody = EmailDecodingHelper.decodeQuotedPrintable(rawBytes);
+          }
+        }
+      } catch (_) {}
+    }
+
+    String subject;
+    try {
+      subject = message.decodeSubject() ?? '(no subject)';
+    } catch (_) {
+      subject = message.getHeaderValue('Subject') ?? '(no subject)';
+    }
+
     final snippet =
         plainBody != null
             ? (plainBody.length > 200 ? plainBody.substring(0, 200) : plainBody)
@@ -644,7 +799,7 @@ class YahooScannerIsolateWorker {
       from: message.from?.first.toString() ?? 'unknown',
       to: message.to?.map((e) => e.toString()).toList() ?? [],
       cc: message.cc?.map((e) => e.toString()).toList() ?? [],
-      subject: message.decodeSubject() ?? '(no subject)',
+      subject: subject,
       snippet: snippet,
       plainBody: plainBody,
       htmlBody: htmlBody,
@@ -682,7 +837,9 @@ class YahooScannerIsolateWorker {
         parts: attachmentParts,
         targetFolderPath: absoluteYearPath,
         extractionRoot: extractionRoot,
+        appDir: appDir,
         logger: logger,
+        htmlBody: htmlBody,
       );
       emailObj.attachments = attachments;
       for (var file in attachments) {

@@ -2,6 +2,7 @@
 Unit tests for the utils module, specifically path generation, downloading, and extraction.
 """
 import pytest
+import json
 import os
 import sys
 from unittest.mock import patch, mock_open, MagicMock
@@ -12,15 +13,23 @@ from aichat.utils import (
     download_gguf_model_if_needed,
     stream_download_snapshot,
     is_snapshot_downloaded,
+    resolve_data_roots,
+    discover_app_support_dir,
 )
 
 class TestUtils:
     
     def test_get_local_path_formatting(self):
-        """Test formatting of local path creation."""
+        """The slash in a repo id becomes a dash, under the resolved models base.
+
+        The base is absolute and environment-dependent (see conftest, which pins
+        it via AICHAT_MODELS_DIR); only the leaf name is this function's job.
+        """
         path = get_local_path("bartowski/gemma-3-4b")
-        # Ensure the slash in model name is replaced by a dash
-        assert path == "./models/bartowski-gemma-3-4b-local/"
+        assert path == os.path.join(
+            os.environ["AICHAT_MODELS_DIR"], "bartowski-gemma-3-4b-local"
+        )
+        assert os.path.isabs(path)
 
     def test_get_local_zip_path_formatting(self):
         """Test formatting of local zip path creation."""
@@ -47,7 +56,8 @@ class TestUtils:
         mock_hf_download.assert_called_once_with(
             repo_id="bartowski/gemma",
             filename="gemma.gguf",
-            local_dir="/tmp/models"
+            local_dir="/tmp/models",
+            token=None,
         )
 
     @patch('aichat.utils.os.path.exists')
@@ -240,3 +250,68 @@ class TestIsSnapshotDownloaded:
     def test_ignores_unrelated_hidden_files_like_ds_store(self, tmp_path):
         (tmp_path / ".DS_Store").write_text("")
         assert is_snapshot_downloaded("org/model", str(tmp_path)) is False
+
+class TestResolveDataRoots:
+    """The allow-list behind /util/import/pst and /util/thumbnail.
+
+    Regression cover for a silent, total failure: `resolve_data_roots` read
+    APP_SUPPORT_DIR directly while `_resolve_models_base` and `_get_log_dir`
+    both fell back to probing the known bundle ids. Running the server from
+    source (no env var) therefore produced correct model and log paths while
+    every caller-supplied path failed `_assert_within_roots` — a 403 on every
+    PST import, from a server that looked healthy in every other respect.
+    """
+
+    def test_app_support_dir_env_is_used_when_set(self, tmp_path, monkeypatch):
+        support = tmp_path / "support"
+        support.mkdir()
+        monkeypatch.setenv("APP_SUPPORT_DIR", str(support))
+
+        roots = resolve_data_roots()
+
+        assert os.path.realpath(str(support)) in roots
+
+    def test_app_support_dir_is_discovered_without_the_env_var(self, tmp_path, monkeypatch):
+        """The dev workflow — `python main.py`, or an IDE run config — sets no
+        env var. The directory must still be found, or the allow-list rejects
+        the app's own data directory."""
+        support = tmp_path / "com.xdtlabs.mydatastudio.dev"
+        support.mkdir()
+        monkeypatch.delenv("APP_SUPPORT_DIR", raising=False)
+        monkeypatch.setattr(
+            "aichat.utils.discover_app_support_dir", lambda: str(support)
+        )
+
+        roots = resolve_data_roots()
+
+        assert os.path.realpath(str(support)) in roots
+
+    def test_config_json_storage_and_database_dirs_are_allowed(self, tmp_path, monkeypatch):
+        """Storage may sit on an external volume outside Application Support."""
+        support = tmp_path / "support"
+        support.mkdir()
+        external = tmp_path / "external-volume"
+        external.mkdir()
+        (support / "config.json").write_text(
+            json.dumps({"storage": str(external), "database": str(external)})
+        )
+        monkeypatch.setenv("APP_SUPPORT_DIR", str(support))
+
+        roots = resolve_data_roots()
+
+        assert os.path.realpath(str(external)) in roots
+
+    def test_discover_prefers_the_env_var_over_probing(self, tmp_path, monkeypatch):
+        support = tmp_path / "explicit"
+        support.mkdir()
+        monkeypatch.setenv("APP_SUPPORT_DIR", str(support))
+
+        assert discover_app_support_dir() == str(support)
+
+    def test_discover_ignores_an_env_var_pointing_nowhere(self, tmp_path, monkeypatch):
+        """A stale path must fall through to probing rather than be trusted."""
+        monkeypatch.setenv("APP_SUPPORT_DIR", str(tmp_path / "does-not-exist"))
+
+        result = discover_app_support_dir()
+
+        assert result != str(tmp_path / "does-not-exist")

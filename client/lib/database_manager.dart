@@ -15,6 +15,8 @@ import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:mydatastudio/modules/files/services/embedding_isolate.dart';
+import 'package:mydatastudio/modules/email/services/email_embedding_isolate.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:uuid/uuid.dart';
 
 class DatabaseManager {
@@ -35,10 +37,22 @@ class DatabaseManager {
   String? databaseDirectoryPath;
   AppDatabase? appDatabase;
   EmbeddingIsolate? _embeddingIsolate;
+  EmailEmbeddingIsolate? _emailEmbeddingIsolate;
   DatabaseRepository? _repository;
+  bool _backgroundServicesStarted = false;
+  VoidCallback? _vaultUnlockListener;
   final AppLogger logger = AppLogger(null);
 
-  DatabaseManager._();
+  DatabaseManager._() {
+    _vaultUnlockListener = () {
+      if (VaultManager.instance.unlocked.value) {
+        unawaited(startBackgroundServices());
+      } else {
+        stopBackgroundServices();
+      }
+    };
+    VaultManager.instance.unlocked.addListener(_vaultUnlockListener!);
+  }
 
   /// Returns the [DatabaseRepository] instance
   DatabaseRepository? get repository {
@@ -142,15 +156,15 @@ class DatabaseManager {
       } catch (_) {}
 
       if (mode.toLowerCase() != 'wal') {
-        print(
-          "DEBUG testPathSupportsWal: Path does not support WAL mode (returned: $mode)",
+        AppLogger(null).d(
+          "testPathSupportsWal: path does not support WAL mode (returned: $mode)",
         );
         return false;
       }
       return true;
     } catch (e) {
       // Clean up test files if created.
-      print("DEBUG testPathSupportsWal failed: $e");
+      AppLogger(null).w("testPathSupportsWal failed: $e");
       try {
         if (testDbFile.existsSync()) testDbFile.deleteSync();
         final shmFile = io.File('${testDbFile.path}-shm');
@@ -219,16 +233,56 @@ class DatabaseManager {
     // start database repository
     _repository = DatabaseRepository(appDatabase!);
 
-    if (!isTesting) {
-      // start scanners
-      await _startScanners();
+    isInitializedNotifier.value = true;
 
-      // start embedding isolate
+    // If vault is already unlocked at initialization (e.g. auto-login flow), start background services.
+    if (!isTesting && VaultManager.instance.isUnlocked) {
+      unawaited(startBackgroundServices());
+    }
+
+    return appDatabase!;
+  }
+
+  /// Bumped by every start and every stop, so a startup still working through
+  /// its staggered delays can tell it has been superseded.
+  int _startGeneration = 0;
+
+  Future<void> startBackgroundServices() async {
+    if (_backgroundServicesStarted || isTesting || appDatabase == null) return;
+    _backgroundServicesStarted = true;
+    final generation = ++_startGeneration;
+
+    logger.i("Starting background isolates and scanners (vault unlocked)...");
+
+    // 1. Start scanners
+    await _startScanners();
+
+    // The stagger below is a window in which the vault can lock and
+    // stopBackgroundServices can run. It nulls the isolate fields, but this
+    // call is still in flight — without the generation check it would go on to
+    // assign fresh isolates that nothing holds a reference to, leaving them
+    // running against a locked vault with no way to stop them.
+    // 2. Stagger background embedding isolate startup by 500ms to avoid concurrent SQLite connection opening contention
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (generation != _startGeneration) return;
+    if (appDatabase != null && _embeddingIsolate == null) {
       await _startEmbeddingIsolate(appDatabase!.path!);
     }
 
-    isInitializedNotifier.value = true;
-    return appDatabase!;
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (generation != _startGeneration) return;
+    if (appDatabase != null && _emailEmbeddingIsolate == null) {
+      await _startEmailEmbeddingIsolate(appDatabase!.path!);
+    }
+  }
+
+  void stopBackgroundServices() {
+    _backgroundServicesStarted = false;
+    _startGeneration++;
+    _embeddingIsolate?.stop();
+    _embeddingIsolate = null;
+    _emailEmbeddingIsolate?.stop();
+    _emailEmbeddingIsolate = null;
   }
 
   Future<AppDatabase> _openDatabase(String dbDir) async {
@@ -284,9 +338,35 @@ class DatabaseManager {
     );
   }
 
+  Future<void> _startEmailEmbeddingIsolate(String storagePath) async {
+    _emailEmbeddingIsolate = EmailEmbeddingIsolate();
+    await _emailEmbeddingIsolate!.start(
+      storagePath,
+      AppConstants.dbName,
+      RootIsolateToken.instance!,
+    );
+  }
+
+  void pauseEmbeddingIsolates() {
+    logger.d("Pausing embedding isolates for active scanner/import");
+    _embeddingIsolate?.pause();
+    _emailEmbeddingIsolate?.pause();
+  }
+
+  void resumeEmbeddingIsolates() {
+    logger.d(
+      "Resuming embedding isolates after active scanner/import finished",
+    );
+    _embeddingIsolate?.resume();
+    _emailEmbeddingIsolate?.resume();
+  }
+
   void dispose() {
-    _embeddingIsolate?.stop();
-    _embeddingIsolate = null;
+    if (_vaultUnlockListener != null) {
+      VaultManager.instance.unlocked.removeListener(_vaultUnlockListener!);
+      _vaultUnlockListener = null;
+    }
+    stopBackgroundServices();
 
     appDatabase?.close();
     appDatabase = null;
@@ -339,7 +419,7 @@ class AppDatabase {
     }
 
     final dbFile = io.File(p.join(finalDbDir, 'data', dbName));
-    print("DEBUG AppDatabase.create: opening db at ${dbFile.path}");
+    AppLogger(null).d("AppDatabase.create: opening db at ${dbFile.path}");
     if (!dbFile.parent.existsSync()) {
       dbFile.parent.createSync(recursive: true);
     }
@@ -357,6 +437,11 @@ class AppDatabase {
           column: 'qwen3_vl_embedding',
           dimension: 2048,
         ),
+        SqliteVectorIndex(
+          table: 'emails_embeddings',
+          column: 'qwen3_vl_embedding',
+          dimension: 2048,
+        ),
       ],
     );
 
@@ -366,6 +451,8 @@ class AppDatabase {
       dbFile.path,
       extensions: [SqliteVectorExtension()],
     );
+    await db.execute('PRAGMA busy_timeout = 5000;');
+
     final bootstrapDb = AppDatabase(db);
     bootstrapDb.path = finalDbDir;
     bootstrapDb.name = dbName;
@@ -374,6 +461,7 @@ class AppDatabase {
 
     // Step 2: Reopen with vector indexes now that files_embeddings is migrated.
     db = await Database.open(dbFile.path, extensions: [vectorExtension]);
+    await db.execute('PRAGMA busy_timeout = 5000;');
 
     final appDb = AppDatabase(db);
     appDb.path = finalDbDir;
@@ -413,6 +501,188 @@ class AppDatabase {
       await _loadInitialData(_db);
       await _seedAichatModels(_db);
       await _seedAichatSkills(_db);
+    }
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS emails_embeddings (
+        email_id TEXT PRIMARY KEY,
+        qwen3_vl_embedding BLOB,
+        FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
+      );
+    ''');
+    final added = await _addMissingColumns();
+
+    // Only on the open that introduces the column, so a large archive pays for
+    // this pass once rather than on every launch.
+    if (added.contains('files.is_inline')) {
+      await _backfillInlineAttachments();
+    }
+
+    await _reapOrphanedArtifacts();
+  }
+
+  /// One-time sweep of artifacts stranded by the delete paths before they
+  /// cleaned up after themselves.
+  ///
+  /// Thumbnails are the real target: no cascade covers the filesystem, and
+  /// until the delete paths started removing them every deleted file left its
+  /// cached jpeg behind. The embedding half is cheap insurance for archives
+  /// created before resqlite began enabling `PRAGMA foreign_keys` on every
+  /// connection, when the declared cascades genuinely did not fire.
+  ///
+  /// Gated on `PRAGMA user_version` rather than run on every open: this is a
+  /// migration, not maintenance, and the thumbnail half stats every file under
+  /// the cache directory — six figures for a large photo archive. The gate is
+  /// also what keeps it from running twice, since [create] calls [initSchema]
+  /// on two connections.
+  Future<void> _reapOrphanedArtifacts() async {
+    const reapVersion = 1;
+
+    final rows = await _db.select('PRAGMA user_version');
+    final current = rows.isEmpty ? 0 : (rows.first.values.first as int? ?? 0);
+    if (current >= reapVersion) return;
+
+    for (final table in const [
+      ('files_embeddings', 'file_id', 'files'),
+      ('emails_embeddings', 'email_id', 'emails'),
+    ]) {
+      final (child, column, parent) = table;
+      final result = await _db.execute(
+        'DELETE FROM $child WHERE $column NOT IN (SELECT id FROM $parent)',
+      );
+      if (result.affectedRows > 0) {
+        logger.i(
+          "AppDatabase: reaped ${result.affectedRows} orphaned rows from $child",
+        );
+      }
+    }
+
+    await _reapOrphanedThumbnails();
+    await _db.execute('PRAGMA user_version = $reapVersion');
+  }
+
+  /// Deletes cached thumbnails no `files` row references any more.
+  ///
+  /// Walks the cache rather than the table: a thumbnail whose row is gone can
+  /// only be found from the disk side. Keys are compared as stored — the
+  /// relative `<collectionId>/<ab>/<hash>.jpg` form (see `ThumbnailCache`).
+  Future<void> _reapOrphanedThumbnails() async {
+    final storageRoot = MainApp.appDataDirectory.valueOrNull;
+    if (storageRoot == null) return;
+
+    final rootDir = io.Directory(p.join(storageRoot, 'thumbnails'));
+    if (!await rootDir.exists()) return;
+
+    final live =
+        (await _db.select(
+          "SELECT thumbnail FROM files WHERE thumbnail IS NOT NULL",
+        )).map((r) => r['thumbnail'] as String).toSet();
+
+    var reaped = 0;
+    await for (final entity in rootDir.list(recursive: true)) {
+      if (entity is! io.File) continue;
+      final key = p.relative(entity.path, from: rootDir.path);
+      if (live.contains(key)) continue;
+      try {
+        await entity.delete();
+        reaped++;
+      } catch (e) {
+        logger.w("AppDatabase: could not delete stale thumbnail $key: $e");
+      }
+    }
+    if (reaped > 0) {
+      logger.i("AppDatabase: reaped $reaped orphaned thumbnails from disk");
+    }
+  }
+
+  /// Columns added to [schemaDDL] after the initial schema shipped.
+  ///
+  /// The DDL above only runs for a brand-new database, so an existing install
+  /// would never see them. Each add is guarded by the table's current columns,
+  /// which makes this safe to run on every open — and idempotent, which matters
+  /// because `initSchema` is called twice during [create].
+  ///
+  /// Returns the `table.column` names actually added, so a caller can run a
+  /// one-time backfill for exactly the columns that are new.
+  Future<Set<String>> _addMissingColumns() async {
+    const additions = <String, Map<String, String>>{
+      'files': {
+        // Inline images in an HTML email are referenced as `cid:<content id>`;
+        // without this the client can't tell which attachment a cid names.
+        'content_id': 'TEXT',
+        // Whether the attachment is part of the message body — a spacer, logo
+        // or tracking pixel — rather than something the sender attached.
+        'is_inline': 'INTEGER NOT NULL DEFAULT 0',
+      },
+    };
+
+    final added = <String>{};
+    for (final table in additions.entries) {
+      final existing =
+          (await _db.select(
+            "PRAGMA table_info(${table.key})",
+          )).map((r) => r['name'] as String).toSet();
+      for (final column in table.value.entries) {
+        if (existing.contains(column.key)) continue;
+        logger.i("AppDatabase: adding ${table.key}.${column.key}");
+        await _db.execute(
+          "ALTER TABLE ${table.key} ADD COLUMN ${column.key} ${column.value}",
+        );
+        added.add('${table.key}.${column.key}');
+      }
+    }
+    return added;
+  }
+
+  /// Marks already-imported attachments that the message body embeds.
+  ///
+  /// Without this, `is_inline` would only ever be right for mail scanned after
+  /// the upgrade, and every archive already on disk would keep pouring its
+  /// spacer GIFs and ad banners into the photos module until the user deleted
+  /// and re-imported it. The information needed is already in the database —
+  /// the stored HTML body says which attachments it references — so this is a
+  /// single statement rather than a re-scan.
+  ///
+  /// Matching mirrors `InlineAttachment`: content id first, then filename for
+  /// mail that predates content ids. `instr` rather than `LIKE` because a
+  /// filename containing `%` or `_` would otherwise act as a wildcard and flag
+  /// unrelated attachments; `lower()` on both sides because senders are
+  /// inconsistent about case.
+  Future<void> _backfillInlineAttachments() async {
+    logger.i("AppDatabase: flagging inline attachments in existing mail...");
+    await _db.execute('''
+      UPDATE files SET is_inline = 1
+      WHERE email_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM emails e
+          WHERE e.id = files.email_id
+            AND e.html_body IS NOT NULL
+            AND e.html_body <> ''
+            AND (
+              (files.content_id IS NOT NULL AND files.content_id <> ''
+                AND instr(lower(e.html_body),
+                          'cid:' || lower(files.content_id)) > 0)
+              OR instr(lower(e.html_body), 'cid:' || lower(files.name)) > 0
+            )
+        )
+    ''');
+
+    // Embeddings already computed for those images are now dead weight: they
+    // can never be reached through the photos module and only add spacer GIFs
+    // and ad banners to similarity results. Dropping them is safe — an
+    // embedding is a derived cache, and the isolate recomputes anything still
+    // eligible — but it is deliberately part of the same one-time pass so a
+    // pre-existing index converges on the same contents a fresh one would have.
+    final cleared = await _db.select('''
+      SELECT COUNT(*) AS c FROM files_embeddings
+      WHERE file_id IN (SELECT id FROM files WHERE is_inline = 1)
+    ''');
+    final count = cleared.isEmpty ? 0 : (cleared.first['c'] as int? ?? 0);
+    if (count > 0) {
+      logger.i("AppDatabase: dropping $count embeddings for inline images");
+      await _db.execute('''
+        DELETE FROM files_embeddings
+        WHERE file_id IN (SELECT id FROM files WHERE is_inline = 1)
+      ''');
     }
   }
 
@@ -485,7 +755,7 @@ class AppDatabase {
         'group': 'local',
         'name': 'Gemma 4 12B',
         'type': 'gguf',
-        'file': 'gemma-4-12B-it-Q4_K_M.gguf',
+        'file': 'gemma-4-12B-it-Q4_0.gguf',
         'mmproj': 'mmproj-gemma-4-12B-it-Q8_0.gguf',
         'hf_repo': 'ggml-org/gemma-4-12B-it-GGUF',
         'chat_handler': 'Gemma4ChatHandler',
@@ -904,7 +1174,9 @@ class AppDatabase {
       email_id TEXT,
       latitude REAL,
       longitude REAL,
-      local_path TEXT
+      local_path TEXT,
+      content_id TEXT,
+      is_inline INTEGER NOT NULL DEFAULT 0
     );
     ''',
     // folders
@@ -936,6 +1208,14 @@ class AppDatabase {
       file_id TEXT PRIMARY KEY,
       qwen3_vl_embedding BLOB,
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
+    ''',
+    // emails_embeddings
+    '''
+    CREATE TABLE IF NOT EXISTS emails_embeddings (
+      email_id TEXT PRIMARY KEY,
+      qwen3_vl_embedding BLOB,
+      FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
     );
     ''',
     // providers

@@ -7,16 +7,25 @@ import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/provider.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/oauth/desktop_oauth_manager.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:uuid/uuid.dart';
 import 'package:mydatastudio/database_manager.dart';
 
 // ignore: constant_identifier_names
 enum LoginProviders { google, googleDrive, azure, outlook }
+
+class GoogleUserProfile {
+  final String userId;
+  final String email;
+
+  const GoogleUserProfile({required this.userId, required this.email});
+}
 
 class ProviderConfigurationException implements Exception {
   final String message;
@@ -57,7 +66,7 @@ extension LoginProviderExtension on LoginProviders {
         return "https://accounts.google.com/o/oauth2/v2/auth";
       case LoginProviders.azure:
       case LoginProviders.outlook:
-        return "https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize";
+        return "https://login.microsoftonline.com/$tenant/oauth2/v2.0/authorize";
     }
   }
 
@@ -68,7 +77,7 @@ extension LoginProviderExtension on LoginProviders {
         return "https://oauth2.googleapis.com/token";
       case LoginProviders.azure:
       case LoginProviders.outlook:
-        return "https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token";
+        return "https://login.microsoftonline.com/$tenant/oauth2/v2.0/token";
     }
   }
 
@@ -120,7 +129,10 @@ extension LoginProviderExtension on LoginProviders {
         final provider = Provider.fromDbMap(rows.first);
         if (provider.clientSecret != null &&
             provider.clientSecret!.isNotEmpty) {
-          return provider.clientSecret!;
+          // Stored encrypted (AUDIT M2 phase 3/4). Decrypt to plaintext for the
+          // token endpoint. In worker isolates the DEK must be installed first;
+          // a locked codec throws rather than sending ciphertext to Google.
+          return CredentialCodec.decrypt(provider.clientSecret!)!;
         }
       }
     }
@@ -160,6 +172,108 @@ extension LoginProviderExtension on LoginProviders {
     }
   }
 
+  /// How long either profile lookup may take before sign-in gives up.
+  static const Duration _profileTimeout = Duration(seconds: 20);
+
+  /// Fetches Google user profile (email and userId).
+  ///
+  /// Tries Google People API first (`https://people.googleapis.com/v1/people/me`),
+  /// and if that fails (e.g., HTTP 403 when People API is not enabled in Google Cloud Console),
+  /// falls back to standard Google UserInfo API (`https://www.googleapis.com/oauth2/v2/userinfo`).
+  static Future<GoogleUserProfile?> fetchGoogleProfile(
+    String accessToken, {
+    http.Client? client,
+  }) async {
+    // A stalled Google endpoint would otherwise hang sign-in indefinitely.
+    // Both bounds are needed: connectionTimeout aborts the socket setup at the
+    // transport, and the per-request timeout below covers a connection that
+    // opens and then goes quiet.
+    final httpClient =
+        client ?? IOClient(HttpClient()..connectionTimeout = _profileTimeout);
+    final shouldCloseClient = client == null;
+
+    try {
+      // 1. Attempt People API
+      try {
+        final peopleResponse = await httpClient
+            .get(
+              Uri.parse(
+                "https://people.googleapis.com/v1/people/me?personFields=emailAddresses",
+              ),
+              headers: {"Authorization": "Bearer $accessToken"},
+            )
+            .timeout(_profileTimeout);
+
+        if (peopleResponse.statusCode == 200) {
+          final userData =
+              jsonDecode(peopleResponse.body) as Map<String, dynamic>;
+          final resourceName = userData['resourceName'] as String?;
+          final emails = userData['emailAddresses'] as List?;
+
+          if (resourceName != null && emails != null && emails.isNotEmpty) {
+            final userId = resourceName.split("/").last;
+            final primaryEmailObj = emails.firstWhere(
+              (e) => (e['metadata']?['primary'] ?? false) == true,
+              orElse: () => emails.first,
+            );
+            final email = primaryEmailObj['value'] as String?;
+
+            if (userId.isNotEmpty && email != null && email.isNotEmpty) {
+              return GoogleUserProfile(userId: userId, email: email);
+            }
+          }
+        } else {
+          AppLogger(null).w(
+            'Google People API returned status ${peopleResponse.statusCode}. Falling back to UserInfo API...',
+          );
+        }
+      } catch (e) {
+        AppLogger(null).w(
+          'Google People API request failed: $e. Falling back to UserInfo API...',
+        );
+      }
+
+      // 2. Fallback to standard UserInfo API (does not require People API enabled in GCP Console)
+      try {
+        final userInfoResponse = await httpClient
+            .get(
+              Uri.parse("https://www.googleapis.com/oauth2/v2/userinfo"),
+              headers: {"Authorization": "Bearer $accessToken"},
+            )
+            .timeout(_profileTimeout);
+
+        if (userInfoResponse.statusCode == 200) {
+          final userData =
+              jsonDecode(userInfoResponse.body) as Map<String, dynamic>;
+          final userId = userData['id'] as String?;
+          final email = userData['email'] as String?;
+
+          if (userId != null &&
+              userId.isNotEmpty &&
+              email != null &&
+              email.isNotEmpty) {
+            AppLogger(null).i(
+              'Successfully fetched Google profile via UserInfo API fallback.',
+            );
+            return GoogleUserProfile(userId: userId, email: email);
+          }
+        } else {
+          AppLogger(null).e(
+            'Google UserInfo API error (${userInfoResponse.statusCode}): ${userInfoResponse.body}',
+          );
+        }
+      } catch (e) {
+        AppLogger(null).e('Google UserInfo API request failed: $e');
+      }
+
+      return null;
+    } finally {
+      if (shouldCloseClient) {
+        httpClient.close();
+      }
+    }
+  }
+
   /// Initiates the Google Mail OAuth2 flow, fetches the user's profile,
   /// and creates a [Collection] of type `email` with scanner `email.gmail`.
   static Future<Collection?> handleGoogleMail(
@@ -190,38 +304,24 @@ extension LoginProviderExtension on LoginProviders {
 
       final client = await oauthManager.login();
 
-      // Fetch Google profile to get user email & resource name
-      final peopleResponse = await http.get(
-        Uri.parse(
-          "https://people.googleapis.com/v1/people/me?personFields=emailAddresses",
-        ),
-        headers: {"Authorization": "Bearer ${client.credentials.accessToken}"},
-      );
-
-      if (peopleResponse.statusCode != 200) {
-        AppLogger(
-          null,
-        ).e('Google People API error (${peopleResponse.statusCode})');
+      final profile = await fetchGoogleProfile(client.credentials.accessToken);
+      if (profile == null) {
+        AppLogger(null).e(
+          'Failed to fetch Google profile from both People API and UserInfo API.',
+        );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Failed to fetch Google profile. Please try again.',
+                'Failed to fetch Google profile. Ensure Google People API is enabled in your GCP Console.',
               ),
             ),
           );
         }
         return null;
       }
-
-      final userData = jsonDecode(peopleResponse.body) as Map<String, dynamic>;
-      final userId = (userData['resourceName'] as String).split("/")[1];
-      final emails = userData['emailAddresses'] as List;
-      final email =
-          emails.firstWhere(
-                (e) => (e['metadata']['primary'] ?? false) == true,
-              )['value']
-              as String;
+      final userId = profile.userId;
+      final email = profile.email;
 
       final collectionId = existing?.id ?? const Uuid().v4().toString();
       final extractionRoot = '$appDataDir/files/email/$collectionId';
@@ -309,38 +409,24 @@ extension LoginProviderExtension on LoginProviders {
 
       final client = await oauthManager.login();
 
-      // Fetch Google profile to get user email & resource name
-      final peopleResponse = await http.get(
-        Uri.parse(
-          "https://people.googleapis.com/v1/people/me?personFields=emailAddresses",
-        ),
-        headers: {"Authorization": "Bearer ${client.credentials.accessToken}"},
-      );
-
-      if (peopleResponse.statusCode != 200) {
-        AppLogger(
-          null,
-        ).e('Google People API error (${peopleResponse.statusCode})');
+      final profile = await fetchGoogleProfile(client.credentials.accessToken);
+      if (profile == null) {
+        AppLogger(null).e(
+          'Failed to fetch Google profile from both People API and UserInfo API.',
+        );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Failed to fetch Google profile. Please try again.',
+                'Failed to fetch Google profile. Ensure Google People API is enabled in your GCP Console.',
               ),
             ),
           );
         }
         return null;
       }
-
-      final userData = jsonDecode(peopleResponse.body) as Map<String, dynamic>;
-      final userId = (userData['resourceName'] as String).split("/")[1];
-      final emails = userData['emailAddresses'] as List;
-      final email =
-          emails.firstWhere(
-                (e) => (e['metadata']['primary'] ?? false) == true,
-              )['value']
-              as String;
+      final userId = profile.userId;
+      final email = profile.email;
 
       final collectionId = existing?.id ?? const Uuid().v4().toString();
 

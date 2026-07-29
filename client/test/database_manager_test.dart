@@ -168,6 +168,131 @@ void main() {
       }
     });
 
+    test(
+      'AppDatabase.create adds files.content_id to a database created before it existed',
+      () async {
+        // The DDL only runs for a brand-new database, so a column added later
+        // reaches existing installs solely through the guarded ALTER. If that
+        // stops working, every attachment write fails at runtime — on an
+        // upgraded install only, which is exactly where it would go unnoticed.
+        final supportDir = await getApplicationSupportDirectory();
+        const dbName = 'content_id_migration_test.db';
+        final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+        if (dbFile.existsSync()) dbFile.deleteSync();
+
+        var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        // Drop back to the pre-migration shape.
+        await appDb.rawDb.execute('ALTER TABLE files DROP COLUMN content_id');
+        expect(await _fileColumns(appDb), isNot(contains('content_id')));
+        await appDb.close();
+
+        // Reopening is what an upgraded install does.
+        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        expect(await _fileColumns(appDb), contains('content_id'));
+
+        // And again — the ALTER must not fire a second time and throw.
+        await appDb.close();
+        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        expect(await _fileColumns(appDb), contains('content_id'));
+
+        await appDb.close();
+        if (dbFile.existsSync()) dbFile.deleteSync();
+      },
+    );
+
+    test(
+      'adding files.is_inline backfills already-imported mail',
+      () async {
+        // Without the backfill, is_inline would only ever be right for mail
+        // scanned after the upgrade, and every archive already on disk would
+        // keep pouring spacer GIFs and ad banners into the photos module until
+        // the user deleted and re-imported it.
+        final supportDir = await getApplicationSupportDirectory();
+        const dbName = 'is_inline_backfill_test.db';
+        final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+        if (dbFile.existsSync()) dbFile.deleteSync();
+
+        var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        // Back to the pre-migration shape, so reopening runs the migration.
+        await appDb.rawDb.execute('ALTER TABLE files DROP COLUMN is_inline');
+
+        await appDb.rawDb.execute(
+          "INSERT INTO emails (id, collection_id, date, [from], [to], subject, "
+          "html_body, is_read, has_attachments, is_deleted) "
+          "VALUES ('e1', 'c1', 0, 'a@b', 'c@d', 'Newsletter', ?, 0, 1, 0)",
+          ['<html><img src="cid:logo@corp"><img src="cid:banner.gif"></html>'],
+        );
+        // A plain-text message: nothing it carries can be embedded.
+        await appDb.rawDb.execute(
+          "INSERT INTO emails (id, collection_id, date, [from], [to], subject, "
+          "html_body, is_read, has_attachments, is_deleted) "
+          "VALUES ('e2', 'c1', 0, 'a@b', 'c@d', 'Holiday', '', 0, 1, 0)",
+        );
+
+        Future<void> addFile(
+          String id,
+          String name,
+          String? contentId,
+          String emailId,
+        ) async {
+          await appDb.rawDb.execute(
+            "INSERT INTO files (id, name, path, parent, date_created, "
+            "date_last_modified, collection_id, content_type, size, "
+            "is_deleted, email_id, content_id) "
+            "VALUES (?, ?, ?, '/tmp', 0, 0, 'c1', 'application/image', 1, 0, ?, ?)",
+            [id, name, '/tmp/$name', emailId, contentId],
+          );
+        }
+
+        // Matched by content id.
+        await addFile('f1', 'logo.png', 'logo@corp', 'e1');
+        // Matched by filename — how mail with no content id writes the ref.
+        await addFile('f2', 'banner.gif', null, 'e1');
+        // Attached to the newsletter but not referenced by it: a real photo.
+        await addFile('f3', 'Sunset.jpg', null, 'e1');
+        // Same filename as an embedded one, but on a plain-text message.
+        await addFile('f4', 'logo.png', null, 'e2');
+
+        // A stale embedding for one of the images about to be flagged.
+        await appDb.rawDb.execute(
+          "INSERT INTO files_embeddings (file_id) VALUES ('f1')",
+        );
+        await appDb.rawDb.execute(
+          "INSERT INTO files_embeddings (file_id) VALUES ('f3')",
+        );
+        await appDb.close();
+
+        // Reopening is what an upgraded install does.
+        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+
+        Future<int> inlineFlag(String id) async {
+          final rows = await appDb.rawDb.select(
+            'SELECT is_inline FROM files WHERE id = ?',
+            [id],
+          );
+          return rows.first['is_inline'] as int;
+        }
+
+        expect(await inlineFlag('f1'), 1, reason: 'referenced by content id');
+        expect(await inlineFlag('f2'), 1, reason: 'referenced by filename');
+        expect(await inlineFlag('f3'), 0, reason: 'a real attachment');
+        expect(
+          await inlineFlag('f4'),
+          0,
+          reason: 'a plain-text message embeds nothing',
+        );
+
+        // Embeddings for flagged images are dropped; the real photo keeps its.
+        final remaining = await appDb.rawDb.select(
+          'SELECT file_id FROM files_embeddings ORDER BY file_id',
+        );
+        expect(remaining.map((r) => r['file_id']), ['f3']);
+
+        await appDb.close();
+        if (dbFile.existsSync()) dbFile.deleteSync();
+      },
+    );
+
     test('getRealApplicationSupportPath should return correct path even if PathProviderPlatform is overridden', () async {
       final originalSupportDir = await getApplicationSupportDirectory();
       final realPath = await DatabaseManager.getRealApplicationSupportPath();
@@ -190,5 +315,29 @@ void main() {
       // Restore platform
       PathProviderPlatform.instance = oldPlatform;
     });
+
+    test('startBackgroundServices should be deferred when vault is locked and start when unlocked', () async {
+      final supportPath = await getApplicationSupportDirectory();
+      final configFile = io.File(p.join(supportPath.path, 'config.json'));
+
+      configFile.createSync(recursive: true);
+      configFile.writeAsStringSync(jsonEncode({'path': tempDir!.path}));
+
+      await DatabaseManager.instance.initializeDatabase();
+
+      expect(DatabaseManager.instance.database, isNotNull);
+      // Background services should not throw or fail when started or stopped
+      await DatabaseManager.instance.startBackgroundServices();
+      DatabaseManager.instance.stopBackgroundServices();
+
+      configFile.deleteSync();
+      DatabaseManager.instance.dispose();
+    });
   });
+}
+
+/// Column names currently on the `files` table.
+Future<Set<String>> _fileColumns(AppDatabase db) async {
+  final rows = await db.rawDb.select('PRAGMA table_info(files)');
+  return rows.map((r) => r['name'] as String).toSet();
 }

@@ -1,6 +1,7 @@
 """
 API route handlers.
 """
+import asyncio
 import gc
 import os
 import json
@@ -8,7 +9,7 @@ import time
 import uuid
 from typing import Dict, Any, Generator, Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from PIL import Image
 
@@ -32,14 +33,27 @@ from .model_manager import (
 from .utils import (
     get_local_path, find_local_model, download_gguf_model, stream_download_gguf,
     stream_download_snapshot, is_snapshot_downloaded, _resolve_models_base,
+    resolve_data_roots,
 )
 from .state import (
     get_llm_instance, set_llm_instance,
     get_current_model_id, set_current_model_id,
     get_embedding_model, set_embedding_model,
     get_embedding_model_id, set_embedding_model_id,
-    get_locks,
-    is_stop_requested, request_stop, reset_stop,
+    get_locks, get_generation_lock,
+    is_stop_requested, request_stop, register_stream, unregister_stream,
+    active_stream_count,
+)
+
+
+# Returned as the 409 detail when the single local-model generation slot is
+# already taken. The shared llama_cpp instance has one decoder state, so
+# generations cannot overlap; this app is single-user and the client serializes
+# its own requests, so a second concurrent generation is a caller bug worth
+# reporting loudly rather than a queue worth building.
+GENERATION_BUSY_DETAIL = (
+    "A generation is already in progress. Wait for it to finish, "
+    "or POST /v1/chat/stop to cancel it."
 )
 
 
@@ -164,11 +178,11 @@ async def _handle_cloud_request(provider: str, request: "ChatCompletionRequest")
 
     if request.stream:
         def _cloud_sse_stream() -> Generator[str, None, None]:
-            reset_stop()
+            register_stream(completion_id)
             accumulated = None
             try:
                 for chunk in llm.stream(lc_messages):
-                    if is_stop_requested():
+                    if is_stop_requested(completion_id):
                         break
                     delta = chunk.content if hasattr(chunk, 'content') else str(chunk)
                     # Accumulate chunks so the final result carries usage_metadata
@@ -187,6 +201,8 @@ async def _handle_cloud_request(provider: str, request: "ChatCompletionRequest")
                 yield _sse_error_chunk(completion_id, created_at, current_model, _cloud_user_error(provider, e))
                 yield "data: [DONE]\n\n"
                 return
+            finally:
+                unregister_stream(completion_id)
 
             # Final chunk with finish_reason and token usage
             final: dict = {
@@ -447,21 +463,67 @@ async def generate_chat_completion(request: ChatCompletionRequest):
 
         if request.stream:
             current_model = get_current_model_id()
+            stop_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+            created_at = int(time.time())
+
+            # Claim the generation slot *before* the response starts. Acquiring
+            # non-blocking is what keeps the lock off the yield path: the holder
+            # may sit parked at a yield waiting on a slow client, but nobody is
+            # ever queued behind it — a second caller is refused immediately
+            # instead of hanging on a 200 whose body never arrives.
+            lock = get_generation_lock()
+            if not lock.acquire(blocking=False):
+                raise HTTPException(status_code=409, detail=GENERATION_BUSY_DETAIL)
 
             def _sse_stream() -> Generator[str, None, None]:
-                reset_stop()
-                for chunk in llm_instance.create_chat_completion(
-                    stream=True, **kwargs
-                ):
-                    if is_stop_requested():
-                        break
-                    chunk["model"] = current_model
-                    yield f"data: {json.dumps(chunk)}\n\n"
-                yield "data: [DONE]\n\n"
+                # Ownership of the lock passes to this generator; its finally is
+                # the sole release point (it also runs on GeneratorExit when the
+                # client disconnects mid-stream).
+                register_stream(stop_id)
+                try:
+                    for chunk in llm_instance.create_chat_completion(
+                        stream=True, **kwargs
+                    ):
+                        if is_stop_requested(stop_id):
+                            break
+                        # Stable id the client echoes back to target /v1/chat/stop.
+                        chunk["id"] = stop_id
+                        chunk["model"] = current_model
+                        yield f"data: {json.dumps(chunk)}\n\n"
+                    yield "data: [DONE]\n\n"
+                except Exception as e:
+                    # Same contract as the cloud path: the client always gets a
+                    # terminal event. Without this the generator just stops and
+                    # the client sees a bare connection drop with no reason.
+                    print(f"[ERROR] local generation stream failed: {e}")
+                    yield _sse_error_chunk(
+                        stop_id, created_at, current_model, "Generation failed."
+                    )
+                    yield "data: [DONE]\n\n"
+                finally:
+                    unregister_stream(stop_id)
+                    lock.release()
 
-            return StreamingResponse(_sse_stream(), media_type="text/event-stream")
+            try:
+                return StreamingResponse(_sse_stream(), media_type="text/event-stream")
+            except BaseException:
+                # Nothing between the acquire and here should raise, but a leaked
+                # generation lock would 409 every later request until restart, so
+                # it is worth the guard.
+                lock.release()
+                raise
 
-        result = llm_instance.create_chat_completion(**kwargs)
+        # Same slot, same refusal: the non-streaming path shares the lock with
+        # any active stream. Run the blocking call off the event loop.
+        lock = get_generation_lock()
+        if not lock.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail=GENERATION_BUSY_DETAIL)
+        try:
+            result = await asyncio.to_thread(
+                lambda: llm_instance.create_chat_completion(**kwargs)
+            )
+        finally:
+            lock.release()
         result["model"] = get_current_model_id() or result.get("model", "unknown")
         return result
 
@@ -474,9 +536,30 @@ async def generate_chat_completion(request: ChatCompletionRequest):
         raise HTTPException(status_code=500, detail="Failed to generate response.")
 
 
-async def stop_generation() -> Dict[str, Any]:
-    """Signal the active streaming generation to stop after the current token."""
-    request_stop()
+async def stop_generation(request: Request) -> Dict[str, Any]:
+    """Signal a streaming generation to stop after the current token.
+
+    The body may carry ``{"id": "<completion id>"}`` to target a specific
+    stream. With no id (or an unparseable body) the request is only honoured
+    when exactly one generation is registered — the unambiguous "stop the
+    active stream" case the client hits when it cancels before the first chunk
+    arrives and so has no id yet. With several streams running, an untargeted
+    stop would cancel unrelated generations, so it is refused instead.
+    """
+    gen_id: Optional[str] = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            gen_id = body.get("id")
+    except Exception:
+        gen_id = None
+
+    if gen_id is None:
+        active = active_stream_count()
+        if active != 1:
+            return {"status": "ambiguous", "active": active}
+
+    request_stop(gen_id)
     return {"status": "stopping"}
 
 
@@ -636,6 +719,34 @@ async def check_model_status(request: DownloadModelRequest) -> Dict[str, Any]:
     return {"exists": existing is not None, "model_path": existing}
 
 
+def _assert_within_roots(path: str, roots: list, label: str = "Path") -> str:
+    """Return realpath(path) if it lives inside one of `roots`, else raise 403.
+
+    `roots` are treated as trusted prefixes; the check resolves symlinks (via
+    realpath) so a symlink inside an allowed root that points elsewhere is caught.
+    A trailing os.sep is required on the prefix so `/a/b` does not match `/a/bc`.
+    """
+    real = os.path.realpath(path)
+    for root in roots:
+        if not root:
+            continue
+        real_root = os.path.realpath(root)
+        if real == real_root or real.startswith(real_root + os.sep):
+            return real
+    # Logged explicitly, not left to the access log: uvicorn's per-request line is
+    # off, and even with it on a bare "403" never said *which* path was refused or
+    # what it was checked against. A misconfigured root makes every import fail
+    # with no local trace of why.
+    # flush: this is the only trace of a refusal, and a server killed before its
+    # buffer drains would otherwise lose it — which is how it stayed invisible.
+    print(
+        f"[ERROR] {label} rejected: {real!r} is not inside any allowed root "
+        f"({[os.path.realpath(r) for r in roots if r]})",
+        flush=True,
+    )
+    raise HTTPException(status_code=403, detail=f"{label} is outside the allowed directories")
+
+
 def _assert_within_models_dir(path: str, models_dir: str, label: str = "Path") -> None:
     """Raise 400 if `path` is not strictly inside `models_dir`."""
     try:
@@ -681,21 +792,37 @@ async def delete_model(request: DeleteModelRequest) -> Dict[str, Any]:
 
 
 def generate_thumbnail(request: ThumbnailRequest) -> Dict[str, Any]:
-    """Generate a thumbnail for an image file, including RAW formats."""
-    if not os.path.exists(request.file_path):
-        raise HTTPException(status_code=404, detail="File not found")
+    """Generate a thumbnail from base64 image bytes, including RAW formats.
+
+    The client sends the source bytes (not a path), so the server never opens a
+    file off disk — this is the structural fix for AUDIT H2. RAW decoding
+    (rawpy) is selected by the client-supplied ``is_raw`` flag rather than a
+    filename extension.
+    """
+    import io
+    import base64
+
+    payload = request.image_base64
+    if payload.startswith("data:"):
+        payload = payload.split(",", 1)[1]
     try:
-        ext = os.path.splitext(request.file_path)[1].lower()
-        if ext in ['.nef', '.cr2', '.arw', '.dng', '.orf', '.sr2']:
+        raw_bytes = base64.b64decode(payload)
+    except Exception as e:
+        print(f"[ERROR] Invalid base64 image payload: {e}")
+        raise HTTPException(status_code=400, detail="Invalid image payload.")
+
+    try:
+        if request.is_raw:
             import rawpy
-            with rawpy.imread(request.file_path) as raw:
+            with rawpy.imread(io.BytesIO(raw_bytes)) as raw:
                 rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True, bright=1.0)
                 img = Image.fromarray(rgb)
         else:
-            img = Image.open(request.file_path)
+            img = Image.open(io.BytesIO(raw_bytes))
         img.thumbnail((request.width, request.height))
-        import io
-        import base64
+        # JPEG can't hold alpha/palette modes — normalize to RGB before saving.
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=85)
         return {
@@ -706,7 +833,7 @@ def generate_thumbnail(request: ThumbnailRequest) -> Dict[str, Any]:
         }
     except Exception as e:
         print(f"[ERROR] Thumbnail generation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate thumbnail: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate thumbnail.")
 
 
 async def import_pst(request: PstImportRequest):
@@ -716,7 +843,10 @@ async def import_pst(request: PstImportRequest):
         raise HTTPException(status_code=400, detail="file_path must point to a .pst file")
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=400, detail="file_path does not exist")
-    output_dir = os.path.realpath(request.output_dir)
+    # Confine attachment extraction to the app's own data dirs so a caller can't
+    # redirect writes to an arbitrary location (AUDIT M1). The parser additionally
+    # keeps every write inside this output_dir.
+    output_dir = _assert_within_roots(request.output_dir, resolve_data_roots(), "output_dir")
 
     def event_stream() -> Generator[str, None, None]:
         parser = PstParser(file_path, output_dir)

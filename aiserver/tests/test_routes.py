@@ -9,9 +9,29 @@ from aichat.routes import (
     health_check, generate_chat_completion, generate_embedding, generate_embedding_v1, delete_model,
     download_model, check_model_status,
 )
+from aichat.state import get_generation_lock
 from aichat.models import (
     ChatCompletionRequest, ChatMessage, EmbeddingRequest, EmbeddingV1Request, DeleteModelRequest, DownloadModelRequest,
 )
+
+
+
+def _registry_row(**overrides):
+    """A minimal aichat_models row for a local GGUF model.
+
+    Local model resolution reads these five columns, so a test that reaches the
+    loading path needs a row rather than just a mocked find_local_model.
+    """
+    row = {
+        "alias": "test-model",
+        "group": "local",
+        "hf_repo": "bartowski/test",
+        "file": "test-model.gguf",
+        "mmproj": "",
+        "chat_handler": None,
+    }
+    row.update(overrides)
+    return row
 
 
 class TestHealthCheck:
@@ -69,20 +89,22 @@ class TestHealthCheck:
 class TestChatCompletion:
 
     @pytest.mark.asyncio
-    async def test_chat_completion_no_model_loaded(self):
-        """Returns 503 when no model is loaded and no local file found."""
-        with patch('aichat.routes.get_llm_instance') as mock_get_llm, \
-             patch('aichat.routes.get_current_model_id') as mock_get_model_id, \
-             patch('aichat.routes.get_locks') as mock_locks, \
-             patch('aichat.routes.find_local_model') as mock_find:
+    async def test_chat_completion_unknown_model_returns_404(self):
+        """An alias with no registry row is refused before any loading.
 
-            mock_get_llm.return_value = None
-            mock_get_model_id.return_value = None
-            model_lock = AsyncMock()
-            mock_locks.return_value = (model_lock, AsyncMock())
-            mock_find.return_value = None  # model file not found locally
+        Local model resolution is driven by the aichat_models registry now, so
+        this is the shape of "no model" a client actually hits, and the message
+        has to point at where the model is added.
+        """
+        with patch('aichat.routes.get_llm_instance', return_value=None), \
+             patch('aichat.routes.get_current_model_id', return_value=None), \
+             patch('aichat.routes.get_locks') as mock_locks, \
+             patch('aichat.routes.model_registry.lookup', return_value=None):
+
+            mock_locks.return_value = (AsyncMock(), AsyncMock())
 
             request = ChatCompletionRequest(
+                model="nope/not-a-model",
                 messages=[ChatMessage(role="user", content="Hello")]
             )
 
@@ -90,7 +112,35 @@ class TestChatCompletion:
                 await generate_chat_completion(request)
 
             assert exc_info.value.status_code == 404
-            assert "not found locally" in str(exc_info.value.detail)
+            assert "not found in the model registry" in str(exc_info.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_chat_completion_no_model_loaded_returns_503(self):
+        """Guards the case where loading reported success but left no instance.
+
+        Everything downstream dereferences the instance, so this must fail with
+        a status of its own rather than an AttributeError-shaped 500.
+        """
+        with patch('aichat.routes.get_llm_instance', return_value=None), \
+             patch('aichat.routes.get_current_model_id', return_value=None), \
+             patch('aichat.routes.get_locks') as mock_locks, \
+             patch('aichat.routes.model_registry.lookup', return_value=_registry_row()), \
+             patch('aichat.routes.find_local_model', return_value="/fake/model.gguf"), \
+             patch('aichat.routes.load_local_model', return_value=Mock()), \
+             patch('aichat.routes.set_llm_instance'), \
+             patch('aichat.routes.set_current_model_id'):
+
+            mock_locks.return_value = (AsyncMock(), AsyncMock())
+
+            request = ChatCompletionRequest(
+                model="test-model",
+                messages=[ChatMessage(role="user", content="Hello")]
+            )
+
+            with pytest.raises(HTTPException) as exc_info:
+                await generate_chat_completion(request)
+
+            assert exc_info.value.status_code == 503
 
     @pytest.mark.asyncio
     @patch('aichat.routes.model_registry.lookup')
@@ -168,8 +218,7 @@ class TestChatCompletion:
     async def test_chat_completion_llama_cpp_path(self):
         """Uses llama_cpp's create_chat_completion when available."""
         mock_llm = Mock()
-        mock_llm.client = Mock()
-        mock_llm.client.create_chat_completion = Mock(return_value={
+        mock_llm.create_chat_completion = Mock(return_value={
             "id": "chatcmpl-test",
             "object": "chat.completion",
             "created": 1234567890,
@@ -196,8 +245,8 @@ class TestChatCompletion:
 
             assert result["choices"][0]["message"]["content"] == "Hi!"
             assert result["model"] == "bartowski/gemma-3-4b-it-GGUF"
-            mock_llm.client.create_chat_completion.assert_called_once()
-            call_messages = mock_llm.client.create_chat_completion.call_args[1]["messages"]
+            mock_llm.create_chat_completion.assert_called_once()
+            call_messages = mock_llm.create_chat_completion.call_args[1]["messages"]
             assert call_messages[0]["role"] == "system"
             assert call_messages[1]["role"] == "user"
 
@@ -205,8 +254,7 @@ class TestChatCompletion:
     async def test_chat_completion_passes_temperature_and_max_tokens(self):
         """Forwards temperature and max_tokens to create_chat_completion."""
         mock_llm = Mock()
-        mock_llm.client = Mock()
-        mock_llm.client.create_chat_completion = Mock(return_value={
+        mock_llm.create_chat_completion = Mock(return_value={
             "id": "chatcmpl-test", "object": "chat.completion", "created": 0,
             "model": "test", "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
             "usage": {}
@@ -223,9 +271,103 @@ class TestChatCompletion:
             )
             await generate_chat_completion(request)
 
-            kwargs = mock_llm.client.create_chat_completion.call_args[1]
+            kwargs = mock_llm.create_chat_completion.call_args[1]
             assert kwargs["temperature"] == 0.5
             assert kwargs["max_tokens"] == 100
+
+
+class TestGenerationSlot:
+    """Only one local generation may run at a time — the shared llama_cpp
+    instance has a single decoder state, so overlapping generations corrupt it.
+
+    The slot is claimed *non-blocking*: a second caller is refused with 409
+    rather than queued. That is the point. A streaming generator holds the lock
+    while parked at a `yield` waiting on the client, so anything queued behind
+    it would hang for as long as that client is slow — including the
+    non-streaming path, which shares the same lock. Refusing keeps the failure
+    immediate and legible instead of turning it into a server-wide stall.
+    """
+
+    def _mock_llm(self, stream_chunks=None):
+        mock_llm = Mock()
+        mock_llm.chat_handler = None
+        if stream_chunks is None:
+            mock_llm.create_chat_completion = Mock(return_value={
+                "id": "chatcmpl-x",
+                "model": "m",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "hi"},
+                    "finish_reason": "stop",
+                }],
+            })
+        else:
+            mock_llm.create_chat_completion = Mock(
+                return_value=iter(stream_chunks)
+            )
+        return mock_llm
+
+    def _request(self, stream=False):
+        return ChatCompletionRequest(
+            model="m",
+            messages=[ChatMessage(role="user", content="Hi")],
+            stream=stream,
+        )
+
+    @pytest.mark.asyncio
+    async def test_busy_slot_refuses_with_409(self):
+        lock = get_generation_lock()
+        assert lock.acquire(blocking=False), "lock should be free at test start"
+        try:
+            with patch('aichat.routes.get_llm_instance', return_value=self._mock_llm()), \
+                 patch('aichat.routes.get_current_model_id', return_value="m"):
+                with pytest.raises(HTTPException) as exc:
+                    await generate_chat_completion(self._request())
+            assert exc.value.status_code == 409
+        finally:
+            lock.release()
+
+    @pytest.mark.asyncio
+    async def test_busy_slot_refuses_a_streaming_request_too(self):
+        """The refusal must happen before the response starts — a 200 whose
+        body then blocks is exactly what this replaces."""
+        lock = get_generation_lock()
+        assert lock.acquire(blocking=False)
+        try:
+            with patch('aichat.routes.get_llm_instance', return_value=self._mock_llm([])), \
+                 patch('aichat.routes.get_current_model_id', return_value="m"):
+                with pytest.raises(HTTPException) as exc:
+                    await generate_chat_completion(self._request(stream=True))
+            assert exc.value.status_code == 409
+        finally:
+            lock.release()
+
+    @pytest.mark.asyncio
+    async def test_completion_releases_the_slot(self):
+        with patch('aichat.routes.get_llm_instance', return_value=self._mock_llm()), \
+             patch('aichat.routes.get_current_model_id', return_value="m"):
+            await generate_chat_completion(self._request())
+
+        lock = get_generation_lock()
+        assert lock.acquire(blocking=False), "slot leaked after a completion"
+        lock.release()
+
+    @pytest.mark.asyncio
+    async def test_stream_holds_the_slot_then_releases_it_at_the_end(self):
+        chunks = [{"choices": [{"index": 0, "delta": {"content": "a"}}]}]
+        with patch('aichat.routes.get_llm_instance', return_value=self._mock_llm(chunks)), \
+             patch('aichat.routes.get_current_model_id', return_value="m"):
+            response = await generate_chat_completion(self._request(stream=True))
+
+            # Held for the whole in-flight response, not just the generate call.
+            assert get_generation_lock().acquire(blocking=False) is False
+
+            body = [part async for part in response.body_iterator]
+
+        assert any("[DONE]" in str(part) for part in body)
+        lock = get_generation_lock()
+        assert lock.acquire(blocking=False), "slot leaked after the stream ended"
+        lock.release()
 
 
 class TestMultimodalEmbedding:
@@ -438,7 +580,7 @@ class TestDownloadModel:
 
     @pytest.mark.asyncio
     async def test_filename_set_still_routes_to_single_file_download(self):
-        request = DownloadModelRequest(model_name="ggml-org/gemma-4-12B-it-GGUF", filename="gemma-4-12B-it-Q4_K_M.gguf")
+        request = DownloadModelRequest(model_name="ggml-org/gemma-4-12B-it-GGUF", filename="gemma-4-12B-it-Q4_0.gguf")
 
         with patch('aichat.routes.get_local_path', return_value="/tmp/gemma-local"), \
              patch('aichat.routes.find_local_model', return_value=None), \
@@ -478,11 +620,35 @@ class TestCheckModelStatus:
 
     @pytest.mark.asyncio
     async def test_single_file_mode_delegates_to_find_local_model(self):
-        request = DownloadModelRequest(model_name="ggml-org/gemma-4-12B-it-GGUF", filename="gemma-4-12B-it-Q4_K_M.gguf")
+        request = DownloadModelRequest(model_name="ggml-org/gemma-4-12B-it-GGUF", filename="gemma-4-12B-it-Q4_0.gguf")
 
         with patch('aichat.routes.get_local_path', return_value="/tmp/gemma-local"), \
-             patch('aichat.routes.find_local_model', return_value="/tmp/gemma-local/gemma-4-12B-it-Q4_K_M.gguf"):
+             patch('aichat.routes.find_local_model', return_value="/tmp/gemma-local/gemma-4-12B-it-Q4_0.gguf"):
             result = await check_model_status(request)
 
-        assert result == {"exists": True, "model_path": "/tmp/gemma-local/gemma-4-12B-it-Q4_K_M.gguf"}
+        assert result == {"exists": True, "model_path": "/tmp/gemma-local/gemma-4-12B-it-Q4_0.gguf"}
+
+
+class TestGenerateEmbedding:
+    @pytest.mark.asyncio
+    async def test_generate_embedding_value_error_returns_400(self):
+        from fastapi import HTTPException
+        from aichat.routes import generate_embedding
+        from aichat.models import EmbeddingRequest
+
+        req = EmbeddingRequest(
+            model_name="Qwen/Qwen3-VL-Embedding-2B",
+            image_base64="invalid_or_eps_base64_data",
+            filename="Logo.mac"
+        )
+
+        with patch('aichat.routes._embedding_model_downloaded', return_value=True), \
+             patch('aichat.routes.get_embedding_model', return_value=(Mock(), Mock())), \
+             patch('aichat.routes.get_embedding_model_id', return_value="Qwen/Qwen3-VL-Embedding-2B"), \
+             patch('aichat.routes.gen_emb_fn', side_effect=ValueError("Invalid image_base64 format provided: Unable to locate Ghostscript on paths")):
+            with pytest.raises(HTTPException) as exc_info:
+                await generate_embedding(req)
+
+            assert exc_info.value.status_code == 400
+            assert "Ghostscript" in exc_info.value.detail
 

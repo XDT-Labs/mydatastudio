@@ -3,8 +3,10 @@ import 'dart:typed_data';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/helpers/file_path_resolver.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 
 class DatabaseRepository {
   AppDatabase db;
@@ -25,6 +27,13 @@ class DatabaseRepository {
   /// Upserts the Qwen3-VL embedding for [fileId] into the `files_embeddings`
   /// table, storing values as a packed Float32 BLOB via `vector_as_f32()`.
   ///
+  /// Writes only when the `files` row still exists. The embedding isolates run
+  /// independently of deletion, so a file or collection deleted while its
+  /// embedding is in flight would otherwise write back against a row that is
+  /// gone and fail the foreign key — surfacing as a spurious error mid-scan,
+  /// and misreported by the fallback below as a missing vector extension.
+  /// A vanished file is a no-op, not a failure.
+  ///
   /// The `vector_as_f32()` call is skipped gracefully when the sqlite_vector
   /// extension is not loaded (dev/test builds without native assets).
   Future<void> upsertFileEmbedding(
@@ -40,11 +49,12 @@ class DatabaseRepository {
         await tx.execute(
           '''
           INSERT INTO files_embeddings (file_id, qwen3_vl_embedding)
-          VALUES (?, vector_as_f32(?))
+          SELECT ?, vector_as_f32(?)
+          WHERE EXISTS (SELECT 1 FROM files WHERE id = ?)
           ON CONFLICT(file_id) DO UPDATE SET
             qwen3_vl_embedding = excluded.qwen3_vl_embedding
           ''',
-          [fileId, jsonArray],
+          [fileId, jsonArray, fileId],
         );
       } catch (e) {
         // Fallback: store as raw Float32 BLOB when extension is not loaded
@@ -55,11 +65,12 @@ class DatabaseRepository {
         await tx.execute(
           '''
           INSERT INTO files_embeddings (file_id, qwen3_vl_embedding)
-          VALUES (?, ?)
+          SELECT ?, ?
+          WHERE EXISTS (SELECT 1 FROM files WHERE id = ?)
           ON CONFLICT(file_id) DO UPDATE SET
             qwen3_vl_embedding = excluded.qwen3_vl_embedding
           ''',
-          [fileId, blob],
+          [fileId, blob, fileId],
         );
       }
     });
@@ -141,8 +152,7 @@ class DatabaseRepository {
     final excludeClause = excludeFileId != null ? 'AND e.file_id != ?' : '';
     final params = [jsonArray, limit, if (excludeFileId != null) excludeFileId];
 
-    final rows = await db.select(
-      '''
+    final rows = await db.select('''
       SELECT f.*, v.distance
       FROM files_embeddings AS e
       JOIN files AS f ON f.id = e.file_id
@@ -155,9 +165,7 @@ class DatabaseRepository {
       WHERE f.is_deleted = 0
         $excludeClause
       ORDER BY v.distance ASC
-      ''',
-      params,
-    );
+      ''', params);
 
     return rows.map((row) {
       final distance = (row['distance'] as num).toDouble();
@@ -169,6 +177,12 @@ class DatabaseRepository {
   /// Returns a list of files that do not have a corresponding entry in the
   /// `files_embeddings` table, limited to [limit] results.
   /// Filters for image content types.
+  ///
+  /// Images the message body embeds — spacers, logos, tracking pixels, ad
+  /// banners — are skipped. Embedding them costs real on-device inference time
+  /// per image and buys nothing: they are only ever looked at inside the email
+  /// they decorate, and an HTML newsletter carries a dozen apiece. Worse, they
+  /// then pollute similarity search. See `InlineAttachment`.
   Future<List<File>> getFilesWithMissingEmbeddings({int limit = 10}) async {
     final rows = await db.select(
       '''
@@ -179,26 +193,113 @@ class DatabaseRepository {
       WHERE (fe.file_id IS NULL OR fe.qwen3_vl_embedding IS NULL)
         AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
         AND f.is_deleted = 0
+        AND f.is_inline = 0
       LIMIT ?
       ''',
       [limit],
     );
-    var results = rows.map((row) {
-      final file = File.fromDbMap(row);
-      final fakeCollection = Collection(
-        id: file.collectionId,
-        name: '',
-        path: (row['col_path'] as String?) ?? '',
-        type: '',
-        scanner: (row['scanner'] as String?) ?? '',
-        scanStatus: '',
-        needsReAuth: false,
-        localCopyPath: row['local_copy_path'] as String?,
-      );
-      file.path = FilePathResolver.absolute(file, fakeCollection);
-      return file;
-    }).toList();
+    var results =
+        rows.map((row) {
+          final file = File.fromDbMap(row);
+          final fakeCollection = Collection(
+            id: file.collectionId,
+            name: '',
+            path: (row['col_path'] as String?) ?? '',
+            type: '',
+            scanner: (row['scanner'] as String?) ?? '',
+            scanStatus: '',
+            needsReAuth: false,
+            localCopyPath: row['local_copy_path'] as String?,
+          );
+          file.path = FilePathResolver.absolute(file, fakeCollection);
+          return file;
+        }).toList();
     return results;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Email Embedding Methods (sqlite_vector API)
+  // ---------------------------------------------------------------------------
+
+  /// Upserts the Qwen3-VL embedding for [emailId] into the `emails_embeddings`
+  /// table, storing values as a packed Float32 BLOB via `vector_as_f32()`.
+  ///
+  /// Guarded on the `emails` row still existing, for the same reason as
+  /// [upsertFileEmbedding].
+  Future<void> upsertEmailEmbedding(
+    String emailId,
+    List<double> embedding,
+  ) async {
+    final jsonArray = '[${embedding.join(',')}]';
+
+    await db.transaction((tx) async {
+      try {
+        await tx.execute(
+          '''
+          INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding)
+          SELECT ?, vector_as_f32(?)
+          WHERE EXISTS (SELECT 1 FROM emails WHERE id = ?)
+          ON CONFLICT(email_id) DO UPDATE SET
+            qwen3_vl_embedding = excluded.qwen3_vl_embedding
+          ''',
+          [emailId, jsonArray, emailId],
+        );
+      } catch (e) {
+        logger.w('vector_as_f32 unavailable, storing raw BLOB: $e');
+        final blob = Float32List.fromList(embedding).buffer.asUint8List();
+        await tx.execute(
+          '''
+          INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding)
+          SELECT ?, ?
+          WHERE EXISTS (SELECT 1 FROM emails WHERE id = ?)
+          ON CONFLICT(email_id) DO UPDATE SET
+            qwen3_vl_embedding = excluded.qwen3_vl_embedding
+          ''',
+          [emailId, blob, emailId],
+        );
+      }
+    });
+
+    // logger.d('upsertEmailEmbedding: emailId=$emailId dim=${embedding.length}');
+  }
+
+  /// Deletes the embedding record for [emailId] from `emails_embeddings`.
+  Future<void> deleteEmailEmbedding(String emailId) async {
+    await db.transaction((tx) async {
+      await tx.execute('DELETE FROM emails_embeddings WHERE email_id = ?', [
+        emailId,
+      ]);
+    });
+    logger.d('deleteEmailEmbedding: emailId=$emailId');
+  }
+
+  /// Fetches the Qwen3-VL embedding for [emailId].
+  /// Returns null if no embedding exists for this email.
+  Future<List<double>?> getEmailEmbedding(String emailId) async {
+    final rows = await db.select(
+      'SELECT qwen3_vl_embedding FROM emails_embeddings WHERE email_id = ? LIMIT 1',
+      [emailId],
+    );
+    if (rows.isEmpty || rows.first['qwen3_vl_embedding'] == null) return null;
+    final blob = rows.first['qwen3_vl_embedding'] as Uint8List;
+    return Float32List.view(blob.buffer).toList();
+  }
+
+  /// Returns a list of emails that do not have a corresponding entry in the
+  /// `emails_embeddings` table, limited to [limit] results.
+  Future<List<Email>> getEmailsWithMissingEmbeddings({int limit = 10}) async {
+    final rows = await db.select(
+      '''
+      SELECT e.*
+      FROM emails e
+      LEFT OUTER JOIN emails_embeddings ee ON ee.email_id = e.id
+      WHERE (ee.email_id IS NULL OR ee.qwen3_vl_embedding IS NULL)
+        AND e.is_deleted = 0
+      LIMIT ?
+      ''',
+      [limit],
+    );
+    return rows.map((row) => Email.fromDbMap(row)).toList();
   }
 
   Future<Collection?> getCollection(String id) async {
@@ -207,6 +308,14 @@ class DatabaseRepository {
       [id],
     );
     if (rows.isEmpty) return null;
-    return Collection.fromDbMap(rows.first);
+    // Decrypt OAuth tokens so the returned model holds plaintext. This runs
+    // inside worker isolates, where the DEK must have been installed at isolate
+    // entry (AUDIT M2 phase 3/4); a locked codec fails loudly rather than
+    // handing back ciphertext.
+    final c = Collection.fromDbMap(rows.first);
+    c.accessToken = CredentialCodec.decrypt(c.accessToken);
+    c.refreshToken = CredentialCodec.decrypt(c.refreshToken);
+    c.idToken = CredentialCodec.decrypt(c.idToken);
+    return c;
   }
 }

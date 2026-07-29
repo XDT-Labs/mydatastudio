@@ -7,7 +7,9 @@ def test_get_local_path_with_none():
     """Test get_local_path handles None model_id gracefully."""
     path = get_local_path(None)
     assert "unknown" in path
-    assert path.startswith("./models/")
+    # Absolute, under the resolved models base — not the './models/' relative
+    # form this returned before model storage moved to Application Support.
+    assert path == os.path.join(os.environ["AICHAT_MODELS_DIR"], "unknown-local")
 
 def test_get_local_zip_path_with_none():
     """Test get_local_zip_path handles None model_id gracefully."""

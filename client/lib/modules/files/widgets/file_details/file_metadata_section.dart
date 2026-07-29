@@ -6,9 +6,14 @@ import 'package:mydatastudio/modules/files/widgets/file_details/section_widget.d
 import 'package:path/path.dart' as p;
 
 class FileMetadataSection extends StatelessWidget {
-  const FileMetadataSection({super.key, required this.file});
+  const FileMetadataSection({
+    super.key,
+    required this.file,
+    this.resolution,
+  });
 
   final File file;
+  final String? resolution;
 
   @override
   Widget build(BuildContext context) {
@@ -29,6 +34,8 @@ class FileMetadataSection extends StatelessWidget {
           'Ext',
           p.extension(file.name).replaceFirst('.', '').toUpperCase(),
         ),
+        if (resolution != null)
+          infoRow('Resolution', resolution!),
         infoRow(
           file.path.startsWith('gdrive://') ? 'Uploaded' : 'Created',
           createdMoment.fromNow(),

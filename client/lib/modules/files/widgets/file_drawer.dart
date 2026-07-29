@@ -12,7 +12,7 @@ import 'package:mydatastudio/app_constants.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-enum AccordionSection { localFiles, cloudDrives, email, social }
+enum AccordionSection { localFiles, gdrive, dropbox, onedrive }
 
 class FileDrawer extends StatefulWidget {
   const FileDrawer({super.key});
@@ -45,6 +45,9 @@ class _FileDrawer extends State<FileDrawer> {
       if (mounted) {
         setState(() {
           collection = value;
+          if (value != null) {
+            _expandedSection = _sectionFor(value.scanner);
+          }
         });
       }
     });
@@ -64,6 +67,21 @@ class _FileDrawer extends State<FileDrawer> {
     super.dispose();
   }
 
+  AccordionSection _sectionFor(String scanner) {
+    switch (scanner) {
+      case AppConstants.scannerFileLocal:
+        return AccordionSection.localFiles;
+      case AppConstants.scannerFileGDrive:
+        return AccordionSection.gdrive;
+      case AppConstants.scannerFileDropbox:
+        return AccordionSection.dropbox;
+      case AppConstants.scannerFileOneDrive:
+        return AccordionSection.onedrive;
+      default:
+        return AccordionSection.localFiles;
+    }
+  }
+
   String _getDisplayName(Collection c) {
     if (c.scanner == AppConstants.scannerFileGDrive) {
       final parts = c.name.split(' (');
@@ -81,6 +99,41 @@ class _FileDrawer extends State<FileDrawer> {
   }
 
   AccordionSection? _expandedSection = AccordionSection.localFiles;
+
+  /// [_expandedSection] resolved against what is actually on screen.
+  ///
+  /// The default (localFiles) only renders when the user has local
+  /// collections, so someone whose only source is Google Drive used to land on
+  /// a drawer of collapsed headers and no collections at all. Computed in
+  /// [build] and read wherever expansion is drawn.
+  AccordionSection? _effectiveSection;
+
+  AccordionSection? _resolveExpanded({
+    required bool hasLocal,
+    required bool hasGdrive,
+    required bool hasDropbox,
+    required bool hasOnedrive,
+  }) {
+    switch (_expandedSection) {
+      case AccordionSection.localFiles:
+        if (hasLocal) return AccordionSection.localFiles;
+      case AccordionSection.gdrive:
+        if (hasGdrive) return AccordionSection.gdrive;
+      case AccordionSection.dropbox:
+        if (hasDropbox) return AccordionSection.dropbox;
+      case AccordionSection.onedrive:
+        if (hasOnedrive) return AccordionSection.onedrive;
+      case null:
+        // Deliberately collapsed by the user; leave it that way.
+        return null;
+    }
+    // The chosen section has nothing in it — fall back to the first that does.
+    if (hasLocal) return AccordionSection.localFiles;
+    if (hasGdrive) return AccordionSection.gdrive;
+    if (hasDropbox) return AccordionSection.dropbox;
+    if (hasOnedrive) return AccordionSection.onedrive;
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -114,6 +167,13 @@ class _FileDrawer extends State<FileDrawer> {
         filtered
             .where((c) => c.scanner == AppConstants.scannerFileOneDrive)
             .toList();
+
+    _effectiveSection = _resolveExpanded(
+      hasLocal: localFiles.isNotEmpty,
+      hasGdrive: gdriveFiles.isNotEmpty,
+      hasDropbox: dropboxFiles.isNotEmpty,
+      hasOnedrive: onedriveFiles.isNotEmpty,
+    );
 
     return SizedBox.expand(
       child: Container(
@@ -151,77 +211,91 @@ class _FileDrawer extends State<FileDrawer> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildSectionHeader("SOURCES"),
-                      _buildAccordionHeader(
-                        theme,
-                        AccordionSection.localFiles,
-                        "Local Files",
-                        Icons.folder_outlined,
-                      ),
-                      if (_expandedSection == AccordionSection.localFiles)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 16.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children:
-                                localFiles
-                                    .map(
-                                      (c) => _buildCollectionTile(
-                                        context,
-                                        theme,
-                                        c,
-                                      ),
-                                    )
-                                    .toList(),
-                          ),
+                      if (localFiles.isNotEmpty) ...[
+                        _buildAccordionHeader(
+                          theme,
+                          AccordionSection.localFiles,
+                          "Local Drive",
+                          Icons.folder_outlined,
                         ),
-                      _buildAccordionHeader(
-                        theme,
-                        AccordionSection.cloudDrives,
-                        "Cloud Drives",
-                        Icons.cloud_outlined,
-                      ),
-                      if (_expandedSection == AccordionSection.cloudDrives) ...[
-                        _buildSectionHeader("GOOGLE DRIVE", leftPadding: 32.0),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 24.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children:
-                                gdriveFiles
-                                    .map(
-                                      (c) => _buildCollectionTile(
-                                        context,
-                                        theme,
-                                        c,
-                                      ),
-                                    )
-                                    .toList(),
-                          ),
-                        ),
-                        _buildSectionHeader(
-                          "DROPBOX (FUTURE)",
-                          leftPadding: 32.0,
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 24.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children:
-                                dropboxFiles
-                                    .map(
-                                      (c) => _buildCollectionTile(
-                                        context,
-                                        theme,
-                                        c,
-                                      ),
-                                    )
-                                    .toList(),
-                          ),
-                        ),
-                        if (onedriveFiles.isNotEmpty) ...[
-                          _buildSectionHeader("ONEDRIVE", leftPadding: 32.0),
+                        if (_effectiveSection == AccordionSection.localFiles)
                           Padding(
-                            padding: const EdgeInsets.only(left: 24.0),
+                            padding: const EdgeInsets.only(left: 16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children:
+                                  localFiles
+                                      .map(
+                                        (c) => _buildCollectionTile(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
+                            ),
+                          ),
+                      ],
+                      if (gdriveFiles.isNotEmpty) ...[
+                        _buildAccordionHeader(
+                          theme,
+                          AccordionSection.gdrive,
+                          "Google Drive",
+                          Icons.cloud_outlined,
+                        ),
+                        if (_effectiveSection == AccordionSection.gdrive)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children:
+                                  gdriveFiles
+                                      .map(
+                                        (c) => _buildCollectionTile(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
+                            ),
+                          ),
+                      ],
+                      if (dropboxFiles.isNotEmpty) ...[
+                        _buildAccordionHeader(
+                          theme,
+                          AccordionSection.dropbox,
+                          "Dropbox",
+                          Icons.cloud_outlined,
+                        ),
+                        if (_effectiveSection == AccordionSection.dropbox)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children:
+                                  dropboxFiles
+                                      .map(
+                                        (c) => _buildCollectionTile(
+                                          context,
+                                          theme,
+                                          c,
+                                        ),
+                                      )
+                                      .toList(),
+                            ),
+                          ),
+                      ],
+                      if (onedriveFiles.isNotEmpty) ...[
+                        _buildAccordionHeader(
+                          theme,
+                          AccordionSection.onedrive,
+                          "OneDrive",
+                          Icons.cloud_outlined,
+                        ),
+                        if (_effectiveSection == AccordionSection.onedrive)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children:
@@ -236,7 +310,6 @@ class _FileDrawer extends State<FileDrawer> {
                                       .toList(),
                             ),
                           ),
-                        ],
                       ],
                     ],
                   ),
@@ -281,10 +354,13 @@ class _FileDrawer extends State<FileDrawer> {
     return AccordionHeaderWidget(
       title: title,
       icon: icon,
-      isExpanded: _expandedSection == section,
+      isExpanded: _effectiveSection == section,
       onTap:
           () => setState(() {
-            if (_expandedSection == section) {
+            // Compared against what is drawn, not the stored preference, so
+            // tapping a section that only looks expanded via the fallback
+            // collapses it instead of appearing to do nothing.
+            if (_effectiveSection == section) {
               _expandedSection = null;
             } else {
               _expandedSection = section;
@@ -346,6 +422,13 @@ class _FileDrawer extends State<FileDrawer> {
                   final messenger = ScaffoldMessenger.of(context);
 
                   Navigator.of(dialogContext).pop();
+
+                  // Before the rows go, not after: a scanner mid-scan keeps
+                  // upserting files and folders, and anything it writes after
+                  // the delete commits is a row belonging to a collection that
+                  // no longer exists — invisible in the UI and never cleaned
+                  // up. The email drawer already does this.
+                  ScannerManager.getInstance().stopScanner(collection.id);
 
                   // Delete the collection and all related metadata (files, folders, etc.)
                   await CollectionRepository(

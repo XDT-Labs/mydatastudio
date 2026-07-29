@@ -1,11 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:genui/genui.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/app_router.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/modules/aichat/services/local_llm_content_generator.dart';
 import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/services/model_download_manager.dart';
@@ -13,18 +14,9 @@ import 'package:mydatastudio/models/tables/aichat_model.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 import 'package:mydatastudio/repositories/aichat_repository.dart';
 import 'package:mydatastudio/repositories/aichat_skills_repository.dart';
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:async';
-
-// Dark theme colors
-const _bgColor = Color(0xFF000000);
-const _inputBgColor = Color(0xFF1C1C1E);
-const _inputBorderColor = Color(0xFF3A3A3C);
-const _userBubbleColor = Color(0xFF2C2C2E);
-const _hintColor = Color(0xFF636366);
-const _mutedColor = Color(0xFF8E8E93);
-const _sendEnabledBg = Color(0xFFFFFFFF);
-const _sendDisabledBg = Color(0xFF3A3A3C);
 
 class AichatPage extends StatefulWidget {
   const AichatPage({super.key});
@@ -49,7 +41,13 @@ class TextMessageItem extends ChatItem {
   final String? model;
   final List<Uint8List> images;
   final Map<String, int>? usage;
-  TextMessageItem({required this.role, required this.text, this.model, this.images = const [], this.usage});
+  TextMessageItem({
+    required this.role,
+    required this.text,
+    this.model,
+    this.images = const [],
+    this.usage,
+  });
 }
 
 class GenUiSurfaceItem extends ChatItem {
@@ -58,6 +56,24 @@ class GenUiSurfaceItem extends ChatItem {
 }
 
 class _AichatPage extends State<AichatPage> with RouteAware {
+  // Theme-derived palette (AUDIT I1 follow-up). The chat page previously used a
+  // fixed iOS-style dark palette; each role now maps to a ColorScheme token so
+  // the page follows the app theme (and light mode, if it is ever enabled)
+  // instead of hardcoding a look that only reads correctly on black.
+  ColorScheme get _cs => Theme.of(context).colorScheme;
+  Color get _bgColor => _cs.surface;
+  Color get _inputBgColor => _cs.surfaceContainerHigh;
+  Color get _inputBorderColor => _cs.outlineVariant;
+  Color get _userBubbleColor => _cs.surfaceContainerHighest;
+  Color get _hintColor => _cs.outline;
+  Color get _mutedColor => _cs.onSurfaceVariant;
+  Color get _sendEnabledBg => _cs.primary;
+  Color get _sendDisabledBg => _cs.surfaceContainerHighest;
+  Color get _textColor => _cs.onSurface;
+  Color get _sendIconColor => _cs.onPrimary;
+  Color get _codeBgColor => _cs.surfaceContainerHighest;
+  Color get _codeBlockBgColor => _cs.surfaceContainer;
+
   AppLogger logger = AppLogger(null);
   bool _isLLMServiceRunning = PythonManager.isLLMServiceRunning.value;
   bool _modelsReady = ModelDownloadManager.isReady.value;
@@ -148,12 +164,14 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     _contentGenerator.textResponseStream.listen((text) {
       if (mounted) {
         setState(() {
-          _chatItems.add(TextMessageItem(
-            role: 'assistant',
-            text: text,
-            model: _contentGenerator.lastResponseModel,
-            usage: _contentGenerator.lastUsage,
-          ));
+          _chatItems.add(
+            TextMessageItem(
+              role: 'assistant',
+              text: text,
+              model: _contentGenerator.lastResponseModel,
+              usage: _contentGenerator.lastUsage,
+            ),
+          );
           _streamingText = null;
         });
         AichatPage.isStreaming.value = false;
@@ -266,7 +284,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
           value: '__header_$group',
           child: Text(
             label.toUpperCase(),
-            style: const TextStyle(
+            style: TextStyle(
               color: _hintColor,
               fontSize: 11,
               fontWeight: FontWeight.w600,
@@ -279,17 +297,15 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       for (final m in groupModels) {
         final Widget textWidget = Text(
           m.name,
-          style: const TextStyle(color: _mutedColor, fontSize: 13),
+          style: TextStyle(color: _mutedColor, fontSize: 13),
         );
         items.add(
           DropdownMenuItem<String>(
             value: m.alias,
-            child: (m.description != null && m.description!.isNotEmpty)
-                ? Tooltip(
-                    message: m.description!,
-                    child: textWidget,
-                  )
-                : textWidget,
+            child:
+                (m.description != null && m.description!.isNotEmpty)
+                    ? Tooltip(message: m.description!, child: textWidget)
+                    : textWidget,
           ),
         );
       }
@@ -331,10 +347,13 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     String conversationName = '';
 
     for (final m in messages) {
-      final usage = (m.tokenCount != null && m.tokenCount! > 0)
-          ? {'total_tokens': m.tokenCount!}
-          : null;
-      chatItems.add(TextMessageItem(role: m.role, text: m.content, usage: usage));
+      final usage =
+          (m.tokenCount != null && m.tokenCount! > 0)
+              ? {'total_tokens': m.tokenCount!}
+              : null;
+      chatItems.add(
+        TextMessageItem(role: m.role, text: m.content, usage: usage),
+      );
       llmHistory.add({'role': m.role, 'content': m.content});
     }
 
@@ -484,7 +503,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     }
 
     setState(() {
-      _chatItems.add(TextMessageItem(role: 'user', text: message, images: attachmentBytes));
+      _chatItems.add(
+        TextMessageItem(role: 'user', text: message, images: attachmentBytes),
+      );
       _pendingFiles.clear();
     });
 
@@ -514,12 +535,33 @@ class _AichatPage extends State<AichatPage> with RouteAware {
           'SELECT api_key FROM providers WHERE service = ? LIMIT 1',
           [group],
         );
-        if (rows.isNotEmpty) apiKey = rows.first['api_key'] as String?;
+        if (rows.isNotEmpty) {
+          // Decrypt the cloud provider key (AUDIT M2 phase 3/4). A locked vault
+          // throws rather than sending ciphertext as the API key — caught here
+          // because _sendMessage is called fire-and-forget, so an escaping
+          // throw would leave the user's message sitting in the list with no
+          // request sent and nothing reported.
+          try {
+            apiKey = CredentialCodec.decrypt(rows.first['api_key'] as String?);
+          } catch (e) {
+            logger.e('Could not decrypt the $group API key: $e');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('API key unavailable — unlock required.'),
+                ),
+              );
+            }
+            return;
+          }
+        }
       }
     }
     _contentGenerator.apiKey = apiKey;
 
-    _genUiConversation.sendRequest(UserMessage.text(llmMessage.isEmpty ? message : llmMessage));
+    _genUiConversation.sendRequest(
+      UserMessage.text(llmMessage.isEmpty ? message : llmMessage),
+    );
     _textController.clear();
     _focusNode.requestFocus();
     _scrollToBottom();
@@ -529,7 +571,11 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.enter &&
         !HardwareKeyboard.instance.isShiftPressed) {
-      _sendMessage(_textController.text);
+      // Only send when there's something to send and no response is in flight —
+      // matches the on-screen button, which swaps to Stop while streaming.
+      if (_canSend && !_contentGenerator.isProcessing.value) {
+        _sendMessage(_textController.text);
+      }
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -560,26 +606,24 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                     spacing: 6,
                     runSpacing: 6,
                     alignment: WrapAlignment.end,
-                    children: images
-                        .map(
-                          (bytes) => ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.memory(
-                              bytes,
-                              width: 120,
-                              height: 120,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                        )
-                        .toList(),
+                    children:
+                        images
+                            .map(
+                              (bytes) => ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.memory(
+                                  bytes,
+                                  width: 120,
+                                  height: 120,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            )
+                            .toList(),
                   ),
                 ),
               if (text.isNotEmpty)
-                Text(
-                  text,
-                  style: const TextStyle(color: Colors.white, fontSize: 15),
-                ),
+                Text(text, style: TextStyle(color: _textColor, fontSize: 15)),
             ],
           ),
         ),
@@ -587,7 +631,11 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     );
   }
 
-  Widget _buildAssistantBubble(String text, {bool streaming = false, String? model}) {
+  Widget _buildAssistantBubble(
+    String text, {
+    bool streaming = false,
+    String? model,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Align(
@@ -600,7 +648,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
                   model,
-                  style: const TextStyle(color: _hintColor, fontSize: 11),
+                  style: TextStyle(color: _hintColor, fontSize: 11),
                 ),
               ),
             ConstrainedBox(
@@ -610,50 +658,45 @@ class _AichatPage extends State<AichatPage> with RouteAware {
               child: MarkdownBody(
                 data: streaming ? '$text▋' : text,
                 styleSheet: MarkdownStyleSheet(
-                  p: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    height: 1.5,
-                  ),
+                  p: TextStyle(color: _textColor, fontSize: 15, height: 1.5),
                   code: TextStyle(
-                    backgroundColor: const Color(0xFF2C2C2E),
-                    color: const Color(0xFFE5E5EA),
+                    backgroundColor: _codeBgColor,
+                    color: _textColor,
                     fontFamily: 'monospace',
                     fontSize: 13,
                   ),
                   codeblockDecoration: BoxDecoration(
-                    color: const Color(0xFF1C1C1E),
+                    color: _codeBlockBgColor,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: _inputBorderColor),
                   ),
                   blockquoteDecoration: BoxDecoration(
-                    color: const Color(0xFF1C1C1E),
-                    border: Border(left: BorderSide(color: _mutedColor, width: 3)),
+                    color: _codeBlockBgColor,
+                    border: Border(
+                      left: BorderSide(color: _mutedColor, width: 3),
+                    ),
                   ),
-                  h1: const TextStyle(
-                    color: Colors.white,
+                  h1: TextStyle(
+                    color: _textColor,
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                   ),
-                  h2: const TextStyle(
-                    color: Colors.white,
+                  h2: TextStyle(
+                    color: _textColor,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
-                  h3: const TextStyle(
-                    color: Colors.white,
+                  h3: TextStyle(
+                    color: _textColor,
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                   ),
-                  listBullet: const TextStyle(color: Colors.white),
-                  strong: const TextStyle(
-                    color: Colors.white,
+                  listBullet: TextStyle(color: _textColor),
+                  strong: TextStyle(
+                    color: _textColor,
                     fontWeight: FontWeight.bold,
                   ),
-                  em: const TextStyle(
-                    color: Color(0xFFE5E5EA),
-                    fontStyle: FontStyle.italic,
-                  ),
+                  em: TextStyle(color: _textColor, fontStyle: FontStyle.italic),
                 ),
               ),
             ),
@@ -673,7 +716,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
   Widget _buildTitleBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: _bgColor,
         border: Border(
           bottom: BorderSide(color: _inputBorderColor, width: 0.5),
@@ -681,12 +724,12 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       ),
       child: TextField(
         controller: _titleController,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: _textColor,
           fontSize: 16,
           fontWeight: FontWeight.w500,
         ),
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           hintText: 'New conversation',
           hintStyle: TextStyle(
             color: _hintColor,
@@ -712,8 +755,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
   }
 
   Widget _buildModelDownloadGate() {
-    final hasError =
-        _downloadItems.any((i) => i.status == ModelDownloadStatus.error);
+    final hasError = _downloadItems.any(
+      (i) => i.status == ModelDownloadStatus.error,
+    );
 
     return ColoredBox(
       color: _bgColor,
@@ -724,17 +768,17 @@ class _AichatPage extends State<AichatPage> with RouteAware {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
+              Text(
                 'Setting up AI Chat',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.white,
+                  color: _textColor,
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 'Downloading models for the first time. This only happens once.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: _mutedColor, fontSize: 13),
@@ -766,9 +810,10 @@ class _AichatPage extends State<AichatPage> with RouteAware {
         statusText = 'Checking…';
         break;
       case ModelDownloadStatus.downloading:
-        statusText = item.totalMb > 0
-            ? '${item.downloadedMb.toStringAsFixed(0)} MB / ${item.totalMb.toStringAsFixed(0)} MB'
-            : 'Starting download…';
+        statusText =
+            item.totalMb > 0
+                ? '${item.downloadedMb.toStringAsFixed(0)} MB / ${item.totalMb.toStringAsFixed(0)} MB'
+                : 'Starting download…';
         break;
       case ModelDownloadStatus.complete:
         statusText = 'Ready';
@@ -790,7 +835,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
               Expanded(
                 child: Text(
                   item.label,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  style: TextStyle(color: _textColor, fontSize: 14),
                 ),
               ),
             ],
@@ -805,9 +850,10 @@ class _AichatPage extends State<AichatPage> with RouteAware {
           Text(
             statusText,
             style: TextStyle(
-              color: item.status == ModelDownloadStatus.error
-                  ? Colors.redAccent
-                  : _mutedColor,
+              color:
+                  item.status == ModelDownloadStatus.error
+                      ? _cs.error
+                      : _mutedColor,
               fontSize: 12,
             ),
           ),
@@ -819,25 +865,29 @@ class _AichatPage extends State<AichatPage> with RouteAware {
   Widget _buildDownloadStatusIcon(ModelDownloadStatus status) {
     switch (status) {
       case ModelDownloadStatus.complete:
-        return const Icon(Icons.check_circle, color: Colors.greenAccent, size: 18);
+        return const Icon(
+          Icons.check_circle,
+          color: Colors.greenAccent,
+          size: 18,
+        );
       case ModelDownloadStatus.error:
-        return const Icon(Icons.error_outline, color: Colors.redAccent, size: 18);
+        return Icon(Icons.error_outline, color: _cs.error, size: 18);
       case ModelDownloadStatus.downloading:
       case ModelDownloadStatus.checking:
-        return const SizedBox(
+        return SizedBox(
           width: 16,
           height: 16,
           child: CircularProgressIndicator(strokeWidth: 2, color: _mutedColor),
         );
       case ModelDownloadStatus.pending:
-        return const Icon(Icons.schedule, color: _mutedColor, size: 18);
+        return Icon(Icons.schedule, color: _mutedColor, size: 18);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     if (!_isLLMServiceRunning) {
-      return const ColoredBox(
+      return ColoredBox(
         color: _bgColor,
         child: Center(
           child: Text(
@@ -861,45 +911,45 @@ class _AichatPage extends State<AichatPage> with RouteAware {
           _buildTitleBar(),
           Expanded(
             child: SelectionArea(
-             child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.only(
-                bottom: 20,
-                left: 24,
-                right: 24,
-                top: 24,
+              child: ListView.builder(
+                controller: _scrollController,
+                padding: const EdgeInsets.only(
+                  bottom: 20,
+                  left: 24,
+                  right: 24,
+                  top: 24,
+                ),
+                itemCount: itemCount,
+                itemBuilder: (context, index) {
+                  if (index == _chatItems.length && _streamingText != null) {
+                    return _buildAssistantBubble(
+                      _streamingText!,
+                      streaming: true,
+                    );
+                  }
+
+                  final item = _chatItems[index];
+
+                  if (item is TextMessageItem) {
+                    return item.role == 'user'
+                        ? _buildUserBubble(item.text, images: item.images)
+                        : _buildAssistantBubble(item.text, model: item.model);
+                  }
+
+                  if (item is GenUiSurfaceItem) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: GenUiSurface(
+                        host: _genUiConversation.host,
+                        surfaceId: item.surfaceId,
+                      ),
+                    );
+                  }
+
+                  return const SizedBox.shrink();
+                },
               ),
-              itemCount: itemCount,
-              itemBuilder: (context, index) {
-                if (index == _chatItems.length && _streamingText != null) {
-                  return _buildAssistantBubble(
-                    _streamingText!,
-                    streaming: true,
-                  );
-                }
-
-                final item = _chatItems[index];
-
-                if (item is TextMessageItem) {
-                  return item.role == 'user'
-                      ? _buildUserBubble(item.text, images: item.images)
-                      : _buildAssistantBubble(item.text, model: item.model);
-                }
-
-                if (item is GenUiSurfaceItem) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: GenUiSurface(
-                      host: _genUiConversation.host,
-                      surfaceId: item.surfaceId,
-                    ),
-                  );
-                }
-
-                return const SizedBox.shrink();
-              },
             ),
-           ),
           ),
           Container(
             color: _bgColor,
@@ -912,7 +962,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                     padding: const EdgeInsets.fromLTRB(0, 6, 4, 4),
                     child: Text(
                       '${_formatTokens(_sessionTotalTokens)} total tokens',
-                      style: const TextStyle(color: _mutedColor, fontSize: 11),
+                      style: TextStyle(color: _mutedColor, fontSize: 11),
                     ),
                   )
                 else
@@ -923,159 +973,200 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: _inputBorderColor, width: 1),
                   ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Focus(
-                    focusNode: _focusNode,
-                    onKeyEvent: _handleKeyEvent,
-                    child: TextField(
-                      controller: _textController,
-                      keyboardType: TextInputType.multiline,
-                      minLines: 1,
-                      maxLines: 10,
-                      style: const TextStyle(fontSize: 15, color: Colors.white),
-                      decoration: const InputDecoration(
-                        hintText: "Ask a question",
-                        hintStyle: TextStyle(color: _hintColor, fontSize: 15),
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 14.0,
-                          vertical: 14.0,
-                        ),
-                        border: InputBorder.none,
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                  if (_pendingFiles.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 8, top: 4),
-                      child: Wrap(
-                        spacing: 6,
-                        children:
-                            _pendingFiles.map((f) {
-                              return Chip(
-                                label: Text(
-                                  f.name,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                backgroundColor: const Color(0xFF3A3A3C),
-                                deleteIcon: const Icon(
-                                  Icons.close,
-                                  size: 14,
-                                  color: _mutedColor,
-                                ),
-                                onDeleted:
-                                    () =>
-                                        setState(() => _pendingFiles.remove(f)),
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                              );
-                            }).toList(),
-                      ),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(6, 4, 8, 8),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: const Icon(
-                            Icons.add,
-                            color: _mutedColor,
-                            size: 20,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Focus(
+                        focusNode: _focusNode,
+                        onKeyEvent: _handleKeyEvent,
+                        child: TextField(
+                          controller: _textController,
+                          keyboardType: TextInputType.multiline,
+                          minLines: 1,
+                          maxLines: 10,
+                          style: TextStyle(fontSize: 15, color: _textColor),
+                          decoration: InputDecoration(
+                            hintText: "Ask a question",
+                            hintStyle: TextStyle(
+                              color: _hintColor,
+                              fontSize: 15,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14.0,
+                              vertical: 14.0,
+                            ),
+                            border: InputBorder.none,
+                            isDense: true,
                           ),
-                          onPressed: () async {
-                            FilePickerResult? result = await FilePicker.platform
-                                .pickFiles(allowMultiple: true);
-                            if (result != null) {
-                              setState(
-                                () => _pendingFiles.addAll(result.files),
-                              );
-                            }
-                          },
                         ),
-                        const SizedBox(width: 12),
-                        Theme(
-                          data: Theme.of(context).copyWith(
-                            hoverColor: Colors.transparent,
-                            splashColor: Colors.transparent,
+                      ),
+                      if (_pendingFiles.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8, top: 4),
+                          child: Wrap(
+                            spacing: 6,
+                            children:
+                                _pendingFiles.map((f) {
+                                  return Chip(
+                                    label: Text(
+                                      f.name,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: _textColor,
+                                      ),
+                                    ),
+                                    backgroundColor:
+                                        _cs.surfaceContainerHighest,
+                                    deleteIcon: Icon(
+                                      Icons.close,
+                                      size: 14,
+                                      color: _mutedColor,
+                                    ),
+                                    onDeleted:
+                                        () => setState(
+                                          () => _pendingFiles.remove(f),
+                                        ),
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                    ),
+                                  );
+                                }).toList(),
                           ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: _buildModelItems().any((i) => i.value == _selectedModel) ? _selectedModel : null,
-                              dropdownColor: const Color(0xFF2C2C2E),
-                              icon: const Padding(
-                                padding: EdgeInsets.only(left: 4.0),
-                                child: Icon(
-                                  Icons.keyboard_arrow_up,
-                                  size: 16,
-                                  color: _mutedColor,
-                                ),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(6, 4, 8, 8),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 24,
+                                minHeight: 24,
                               ),
-                              elevation: 2,
-                              onChanged: (String? newValue) {
-                                if (newValue != null) {
-                                  setState(() {
-                                    _selectedModel = newValue;
-                                  });
+                              tooltip: 'Attach files',
+                              icon: Icon(
+                                Icons.add,
+                                color: _mutedColor,
+                                size: 20,
+                              ),
+                              onPressed: () async {
+                                FilePickerResult? result = await FilePicker
+                                    .platform
+                                    .pickFiles(allowMultiple: true);
+                                if (result != null) {
+                                  setState(
+                                    () => _pendingFiles.addAll(result.files),
+                                  );
                                 }
                               },
-                              items: _buildModelItems(),
                             ),
-                          ),
+                            const SizedBox(width: 12),
+                            Theme(
+                              data: Theme.of(context).copyWith(
+                                hoverColor: Colors.transparent,
+                                splashColor: Colors.transparent,
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value:
+                                      _buildModelItems().any(
+                                            (i) => i.value == _selectedModel,
+                                          )
+                                          ? _selectedModel
+                                          : null,
+                                  dropdownColor: _cs.surfaceContainerHigh,
+                                  icon: Padding(
+                                    padding: const EdgeInsets.only(left: 4.0),
+                                    child: Icon(
+                                      Icons.keyboard_arrow_up,
+                                      size: 16,
+                                      color: _mutedColor,
+                                    ),
+                                  ),
+                                  elevation: 2,
+                                  onChanged: (String? newValue) {
+                                    if (newValue != null) {
+                                      setState(() {
+                                        _selectedModel = newValue;
+                                      });
+                                    }
+                                  },
+                                  items: _buildModelItems(),
+                                ),
+                              ),
+                            ),
+                            const Spacer(),
+                            if (_streamingText != null)
+                              AccessibleTap(
+                                label: 'Stop generating',
+                                borderRadius: BorderRadius.circular(22),
+                                onPressed:
+                                    () => _contentGenerator.cancelStream(),
+                                child: SizedBox(
+                                  width: 44,
+                                  height: 44,
+                                  child: Center(
+                                    child: Container(
+                                      width: 30,
+                                      height: 30,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: _sendEnabledBg,
+                                      ),
+                                      child: Icon(
+                                        Icons.stop_rounded,
+                                        color: _sendIconColor,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              AccessibleTap(
+                                enabled: _canSend,
+                                label: 'Send message',
+                                borderRadius: BorderRadius.circular(22),
+                                onPressed:
+                                    _canSend
+                                        ? () =>
+                                            _sendMessage(_textController.text)
+                                        : null,
+                                child: SizedBox(
+                                  width: 44,
+                                  height: 44,
+                                  child: Center(
+                                    child: Container(
+                                      width: 30,
+                                      height: 30,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color:
+                                            _canSend
+                                                ? _sendEnabledBg
+                                                : _sendDisabledBg,
+                                      ),
+                                      child: Icon(
+                                        Icons.arrow_upward_rounded,
+                                        color:
+                                            _canSend
+                                                ? _sendIconColor
+                                                : _mutedColor,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
-                        const Spacer(),
-                        if (_streamingText != null)
-                          GestureDetector(
-                            onTap: () => _contentGenerator.cancelStream(),
-                            child: Container(
-                              width: 30,
-                              height: 30,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _sendEnabledBg,
-                              ),
-                              child: const Icon(
-                                Icons.stop_rounded,
-                                color: Colors.black,
-                                size: 18,
-                              ),
-                            ),
-                          )
-                        else
-                          GestureDetector(
-                            onTap: _canSend
-                                ? () => _sendMessage(_textController.text)
-                                : null,
-                            child: Container(
-                              width: 30,
-                              height: 30,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _canSend ? _sendEnabledBg : _sendDisabledBg,
-                              ),
-                              child: Icon(
-                                Icons.arrow_upward_rounded,
-                                color: _canSend ? Colors.black : _mutedColor,
-                                size: 18,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
+                ),
               ],
             ),
           ),

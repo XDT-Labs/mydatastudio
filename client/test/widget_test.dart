@@ -16,7 +16,7 @@ void main() {
     // Use pumpAndSettle to handle any redirects or animations
     await tester.pumpAndSettle();
 
-    expect(find.text('MyData Studio'), findsOneWidget);
+    expect(find.text('My Data Studio'), findsOneWidget);
 
     // Reset the size after the test
     tester.view.resetPhysicalSize();

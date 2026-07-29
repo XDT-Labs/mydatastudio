@@ -2,21 +2,19 @@ import 'dart:async';
 
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/app_constants.dart';
-import 'package:mydatastudio/main.dart';
-import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/modules/email/widgets/email_drawer/email_folder_tile_widget.dart';
+import 'package:mydatastudio/modules/email/widgets/email_drawer/email_folder_tree.dart';
 import 'package:mydatastudio/modules/email/pages/email_page.dart';
 import 'package:mydatastudio/modules/email/services/get_email_folders_service.dart';
-import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
 import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
 import 'package:mydatastudio/modules/files/widgets/file_drawer/collection_tile_widget.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 enum _EmailAccordionSection { gmail, yahoo, outlook, other }
@@ -361,6 +359,9 @@ class _EmailDrawer extends State<EmailDrawer> {
             EmailPage.selectedFolder.add(null);
             context.go('/email');
           },
+          // A PST is an immutable, one-shot import — never re-synced. Hide Sync
+          // for it; re-importing means delete the collection and re-add the file.
+          showSync: col.scanner != AppConstants.scannerEmailOutlookPst,
           onSync: () => _syncAccount(context, col),
           onDelete: () => _showDeleteConfirmationDialog(context, col),
         ),
@@ -382,35 +383,10 @@ class _EmailDrawer extends State<EmailDrawer> {
   }
 
   Future<void> _syncAccount(BuildContext context, Collection col) async {
-    if (col.scanner == AppConstants.scannerEmailOutlookPst) {
-      final serverUrl = MainApp.llmServiceUrl.valueOrNull;
-      final appDataDir = MainApp.appDataDirectory.valueOrNull;
-
-      if (serverUrl != null && appDataDir != null) {
-        final pstIsolate = OutlookPstScannerIsolate(
-          token: RootIsolateToken.instance,
-          appDir: appDataDir,
-          dbDir: DatabaseManager.instance.databaseDirectoryPath!,
-          serverUrl: serverUrl,
-        );
-        ScannerManager.getInstance().pstScanners[col.id] = pstIsolate;
-        await pstIsolate.start(col, force: true);
-      } else {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Cannot start PST sync: services or directory not ready',
-              ),
-            ),
-          );
-        }
-      }
-    } else {
-      ScannerManager.getInstance()
-          .getScanner(col)
-          ?.start(col, null, true, true);
-    }
+    // Live email providers (Gmail/Outlook/Yahoo) re-sync from the server. PST
+    // archives are imported once and never re-synced, so the Sync action is
+    // hidden for them (see CollectionTileWidget.showSync) and never reaches here.
+    ScannerManager.getInstance().getScanner(col)?.start(col, null, true, true);
   }
 
   void _showDeleteConfirmationDialog(
@@ -519,11 +495,38 @@ class _EmailFolderListState extends State<_EmailFolderList> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    // A PST is a static archive, and its folder tree comes straight from the
+    // file — so it routinely contains folders holding nothing at all (stock
+    // Deleted Items/Outbox that were never used, containers whose mail lives in
+    // subfolders). Hiding those keeps the sidebar to folders worth clicking.
+    //
+    // Scoped to PST on purpose: `messages_total` is NOT NULL and only Gmail
+    // populates it, so every Outlook/Yahoo folder currently stores 0. Applying
+    // this filter to live accounts would empty their sidebars.
+    //
+    // The second condition guards the same hazard for PSTs imported *before*
+    // the scanner started writing counts: those rows are all 0 too, and there
+    // is no schema migration to backfill them. If nothing in this collection
+    // has a count, the counts are absent rather than genuinely zero — so show
+    // everything, which is the pre-existing behaviour, instead of blanking the
+    // sidebar of an archive that has mail in it. Re-importing the PST populates
+    // the counts and the filter starts applying on its own.
+    final hasFolderCounts = folders.any((f) => (f.messagesTotal ?? 0) > 0);
+    final hideEmptyFolders =
+        widget.collection.scanner == AppConstants.scannerEmailOutlookPst &&
+        hasFolderCounts;
+    bool isEmpty(EmailFolder f) =>
+        hideEmptyFolders && (f.messagesTotal ?? 0) == 0;
+
     EmailFolder? inbox;
     EmailFolder? sent;
+    EmailFolder? drafts;
+    EmailFolder? trash;
+    EmailFolder? spam;
     final List<EmailFolder> otherFolders = [];
 
     for (var f in folders) {
+      if (isEmpty(f)) continue;
       final normalizedId = f.id.toUpperCase();
       final normalizedName = f.name.toUpperCase();
 
@@ -531,7 +534,21 @@ class _EmailFolderListState extends State<_EmailFolderList> {
         inbox = f;
       } else if (normalizedId == 'SENT' || normalizedName == 'SENT') {
         sent = f;
+      } else if (normalizedId == 'DRAFT' || normalizedId == 'DRAFTS' || normalizedName == 'DRAFT' || normalizedName == 'DRAFTS') {
+        drafts = f;
+      } else if (normalizedId == 'TRASH' || normalizedId == 'DELETED' || normalizedName == 'TRASH' || normalizedName == 'DELETED' || normalizedName == 'DELETED ITEMS') {
+        trash = f;
+      } else if (normalizedId == 'SPAM' || normalizedId == 'JUNK' || normalizedName == 'SPAM' || normalizedName == 'JUNK') {
+        spam = f;
       } else {
+        // Filter out internal Gmail system categories/labels that shouldn't show up as folders
+        if (normalizedId == 'UNREAD' ||
+            normalizedId == 'STARRED' ||
+            normalizedId == 'IMPORTANT' ||
+            normalizedId == 'CHAT' ||
+            normalizedId.startsWith('CATEGORY_')) {
+          continue;
+        }
         otherFolders.add(f);
       }
     }
@@ -539,6 +556,8 @@ class _EmailFolderListState extends State<_EmailFolderList> {
     otherFolders.sort(
       (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
     );
+
+    final nestedFolders = buildEmailFolderTree(otherFolders);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -559,50 +578,88 @@ class _EmailFolderListState extends State<_EmailFolderList> {
             isSelected: widget.selectedFolderId == sent.id,
             onTap: () => widget.onFolderTap(sent!.id),
           ),
+        if (drafts != null)
+          EmailFolderTileWidget(
+            folder: drafts,
+            label: 'Drafts',
+            icon: Icons.drafts_outlined,
+            isSelected: widget.selectedFolderId == drafts.id,
+            onTap: () => widget.onFolderTap(drafts!.id),
+          ),
+        if (trash != null)
+          EmailFolderTileWidget(
+            folder: trash,
+            label: 'Trash',
+            icon: Icons.delete_outline,
+            isSelected: widget.selectedFolderId == trash.id,
+            onTap: () => widget.onFolderTap(trash!.id),
+          ),
+        if (spam != null)
+          EmailFolderTileWidget(
+            folder: spam,
+            label: 'Spam',
+            icon: Icons.report_outlined,
+            isSelected: widget.selectedFolderId == spam.id,
+            onTap: () => widget.onFolderTap(spam!.id),
+          ),
         if (otherFolders.isNotEmpty) ...[
-          InkWell(
-            onTap: () => setState(() => _showAllFolders = !_showAllFolders),
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  Icon(
-                    _showAllFolders
-                        ? Icons.keyboard_arrow_down
-                        : Icons.keyboard_arrow_right,
-                    size: 16,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'All Folders',
-                    style: TextStyle(
-                      fontSize: 12,
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              vertical: 2.0,
+              horizontal: 8.0,
+            ),
+            child: AccessibleTap(
+              expanded: _showAllFolders,
+              label: 'All Folders',
+              onPressed:
+                  () => setState(() => _showAllFolders = !_showAllFolders),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.only(
+                  left: 40.0,
+                  top: 8.0,
+                  bottom: 8.0,
+                  right: 8.0,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _showAllFolders
+                          ? Icons.keyboard_arrow_down
+                          : Icons.keyboard_arrow_right,
+                      size: 18,
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 6),
+                    Text(
+                      'All Folders',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
           if (_showAllFolders)
-            Padding(
-              padding: const EdgeInsets.only(left: 8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children:
-                    otherFolders
-                        .map(
-                          (f) => EmailFolderTileWidget(
-                            folder: f,
-                            label: f.name,
-                            isSelected: widget.selectedFolderId == f.id,
-                            onTap: () => widget.onFolderTap(f.id),
-                          ),
-                        )
-                        .toList(),
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children:
+                  nestedFolders
+                      .map(
+                        (entry) => EmailFolderTileWidget(
+                          folder: entry.folder,
+                          label: entry.folder.name,
+                          indent: 72.0 + entry.depth * 12.0,
+                          fontSize: 12.0,
+                          isSelected:
+                              widget.selectedFolderId == entry.folder.id,
+                          onTap: () => widget.onFolderTap(entry.folder.id),
+                        ),
+                      )
+                      .toList(),
             ),
         ],
       ],

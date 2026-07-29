@@ -27,6 +27,16 @@ class File implements FileAsset {
   double? longitude;
   String? localPath;
 
+  /// MAPI/MIME content id, set only for an attachment an HTML body embeds as
+  /// `<img src="cid:...">`. Null for an ordinary file attachment.
+  String? contentId;
+
+  /// True when this attachment is part of the message body rather than
+  /// something the sender attached — a spacer, logo, tracking pixel or ad
+  /// banner. Set by the scanners via `InlineAttachment`, and the reason the
+  /// photos module and the embedding isolate can ignore that traffic.
+  bool isInline;
+
   File({
     required this.id,
     required this.name,
@@ -45,6 +55,8 @@ class File implements FileAsset {
     this.latitude,
     this.longitude,
     this.localPath,
+    this.contentId,
+    this.isInline = false,
   });
 
   factory File.fromDbMap(Map<String, dynamic> map) {
@@ -79,6 +91,8 @@ class File implements FileAsset {
               ? (map['longitude'] as num).toDouble()
               : null,
       localPath: map['local_path'] as String?,
+      contentId: map['content_id'] as String?,
+      isInline: (map['is_inline'] as int? ?? 0) != 0,
     );
   }
 
@@ -101,6 +115,8 @@ class File implements FileAsset {
       'latitude': latitude,
       'longitude': longitude,
       'local_path': localPath,
+      'content_id': contentId,
+      'is_inline': isInline ? 1 : 0,
     };
   }
 }

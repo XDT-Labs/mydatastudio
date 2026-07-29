@@ -8,8 +8,6 @@ class AppConstants {
   static const bool shouldDeleteIfMigrationNeeded = true;
 
   /// Secure Storage Keys
-  static const String securePassword = "password";
-  static const String secureRememberMe = "remember-me";
   static const String securePrivateKey = "private-key";
   static const String securePublicKey = "public-key";
   static const String secureStorageLocation = "storage-location";

@@ -11,11 +11,14 @@ import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart'
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 
 class EmbeddingIsolate {
   Isolate? _isolate;
   ReceivePort? _receivePort;
   SendPort? _controlPort;
+  VoidCallback? _vaultListener;
 
   Future<void> start(
     String storagePath,
@@ -48,6 +51,13 @@ class EmbeddingIsolate {
             MainApp.llmServiceUrl.valueOrNull != null) {
           updateUrl(MainApp.llmServiceUrl.valueOrNull!);
         }
+        // Push the vault DEK now (if already unlocked) and on every later unlock.
+        // The isolate spawns at app boot, before login unlocks the vault, so the
+        // DEK arrives over the control port — the same channel as the aiserver
+        // token (AUDIT M2 phase 4).
+        _sendVaultDek();
+        _vaultListener = _sendVaultDek;
+        VaultManager.instance.unlocked.addListener(_vaultListener!);
       } else if (data is Map) {
         final type = data['type'];
         final msg = data['message'];
@@ -93,7 +103,35 @@ class EmbeddingIsolate {
   }
 
   void updateUrl(String url) {
-    _controlPort?.send({'type': 'url', 'url': url});
+    // Ship the bearer token alongside the URL — it's fixed per server spawn and
+    // the worker isolate can't read MainApp statics directly.
+    _controlPort?.send({
+      'type': 'url',
+      'url': url,
+      'token': MainApp.llmServiceToken.valueOrNull,
+    });
+  }
+
+  void pause() {
+    _controlPort?.send({'type': 'pause'});
+  }
+
+  void resume() {
+    _controlPort?.send({'type': 'resume'});
+  }
+
+  /// Send the unwrapped DEK to the worker so it can decrypt collection tokens
+  /// when embedding Google Drive files. A null DEK (vault still locked) is not
+  /// sent — the worker keeps failing loudly on secret access until it arrives.
+  void _sendVaultDek() {
+    final dek = VaultManager.instance.dek;
+    if (dek == null) {
+      // Locked. Tell the worker explicitly — it cannot observe the lock
+      // itself, and left alone it would keep decrypting with a stale DEK.
+      _controlPort?.send({'type': 'vaultLocked'});
+      return;
+    }
+    _controlPort?.send({'type': 'vaultDek', 'dek': dek});
   }
 
   static Future<void> _isolateEntry(Map<String, dynamic> cfg) async {
@@ -111,10 +149,30 @@ class EmbeddingIsolate {
     cfg['replyTo'].send(controlPort.sendPort);
 
     String? serviceUrl;
+    String? serviceToken;
+    bool isPaused = false;
+
     controlPort.listen((message) {
-      if (message is Map && message['type'] == 'url') {
-        serviceUrl = message['url'];
-        logger.d("Python service URL updated: $serviceUrl");
+      if (message is Map) {
+        if (message['type'] == 'url') {
+          serviceUrl = message['url'];
+          serviceToken = message['token'];
+          logger.d("Python service URL updated: $serviceUrl");
+        } else if (message['type'] == 'vaultDek') {
+          // Install the credential vault so _processGDriveFile can decrypt the
+          // collection's tokens (AUDIT M2 phase 4).
+          CredentialCodec.installIsolateVault(message['dek'] as Uint8List?);
+          logger.d("Credential vault DEK installed in embedding isolate");
+        } else if (message['type'] == 'vaultLocked') {
+          CredentialCodec.clearIsolateVault();
+          logger.d("Credential vault DEK cleared in embedding isolate");
+        } else if (message['type'] == 'pause') {
+          isPaused = true;
+          logger.d("EmbeddingIsolate paused during active sync");
+        } else if (message['type'] == 'resume') {
+          isPaused = false;
+          logger.d("EmbeddingIsolate resumed after sync completion");
+        }
       }
     });
 
@@ -128,6 +186,11 @@ class EmbeddingIsolate {
 
     while (true) {
       try {
+        if (isPaused) {
+          await Future.delayed(const Duration(seconds: 10));
+          continue;
+        }
+
         if (serviceUrl == null) {
           logger.d("Waiting for Python service URL...");
           await Future.delayed(const Duration(seconds: 10));
@@ -137,7 +200,7 @@ class EmbeddingIsolate {
         // Skip the batch entirely (no point reading/resizing/base64-encoding
         // files) while the embedding model is still downloading — the server
         // rejects these requests until it's ready anyway.
-        if (!await _isEmbeddingModelReady(serviceUrl!, logger)) {
+        if (!await _isEmbeddingModelReady(serviceUrl!, serviceToken, logger)) {
           logger.d("Embedding model not downloaded yet. Sleeping...");
           await Future.delayed(const Duration(seconds: 30));
           continue;
@@ -147,7 +210,7 @@ class EmbeddingIsolate {
         final files = await repo.getFilesWithMissingEmbeddings(limit: 10);
 
         if (files.isEmpty) {
-          logger.d("No files with missing embeddings found. Sleeping...");
+          //logger.d("No files with missing embeddings found. Sleeping...");
           await Future.delayed(const Duration(minutes: 1));
           continue;
         }
@@ -163,10 +226,16 @@ class EmbeddingIsolate {
                 file,
                 repo,
                 serviceUrl!,
+                serviceToken,
                 logger,
               );
             } else {
-              embedding = await _processLocalFile(file, serviceUrl!, logger);
+              embedding = await _processLocalFile(
+                file,
+                serviceUrl!,
+                serviceToken,
+                logger,
+              );
             }
             final duration = DateTime.now().difference(start);
             logger.d("Processed file ${file.path} in $duration");
@@ -174,13 +243,15 @@ class EmbeddingIsolate {
             if (embedding != null) {
               await repo.upsertFileEmbedding(file.id, embedding);
               logger.d("Saved embedding for file: ${file.path}");
+            } else {
+              await repo.upsertFileEmbedding(file.id, []);
+              logger.w("Skipped unprocessable file: ${file.path}");
             }
             // Batch complete
           } catch (e) {
             logger.e("Error processing file ${file.path}: $e");
           }
         }
-        
       } catch (e, stack) {
         logger.e(
           "Error in EmbeddingIsolate loop: $e",
@@ -191,7 +262,7 @@ class EmbeddingIsolate {
       }
 
       // Heartbeat sleep
-      await Future.delayed(const Duration(seconds: 5));
+      await Future.delayed(const Duration(seconds: 10));
     }
   }
 
@@ -199,13 +270,17 @@ class EmbeddingIsolate {
   /// just reports whether the embedding model snapshot is already present.
   static Future<bool> _isEmbeddingModelReady(
     String serviceUrl,
+    String? serviceToken,
     AppLogger logger,
   ) async {
     try {
       final response = await http
           .post(
             Uri.parse('$serviceUrl/util/model-status'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(serviceToken),
+            },
             body: jsonEncode({
               'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
               'filename': null,
@@ -224,6 +299,7 @@ class EmbeddingIsolate {
   static Future<List<double>?> _processLocalFile(
     File file,
     String serviceUrl,
+    String? serviceToken,
     AppLogger logger,
   ) async {
     final ioFile = io.File(file.path);
@@ -233,13 +309,20 @@ class EmbeddingIsolate {
     }
 
     final bytes = await ioFile.readAsBytes();
-    return await _generateEmbedding(bytes, file.name, serviceUrl, logger);
+    return await _generateEmbedding(
+      bytes,
+      file.name,
+      serviceUrl,
+      serviceToken,
+      logger,
+    );
   }
 
   static Future<List<double>?> _processGDriveFile(
     File file,
     DatabaseRepository repo,
     String serviceUrl,
+    String? serviceToken,
     AppLogger logger,
   ) async {
     final collection = await repo.getCollection(file.collectionId);
@@ -290,7 +373,13 @@ class EmbeddingIsolate {
               )
               as drive.Media;
       final bytes = await http.ByteStream(media.stream).toBytes();
-      return await _generateEmbedding(bytes, file.name, serviceUrl, logger);
+      return await _generateEmbedding(
+        bytes,
+        file.name,
+        serviceUrl,
+        serviceToken,
+        logger,
+      );
     } catch (e) {
       logger.e("Error downloading GDrive file: $e");
       return null;
@@ -301,6 +390,7 @@ class EmbeddingIsolate {
     List<int> bytes,
     String filename,
     String serviceUrl,
+    String? serviceToken,
     AppLogger logger,
   ) async {
     final base64Image = base64Encode(bytes);
@@ -308,7 +398,10 @@ class EmbeddingIsolate {
     try {
       final response = await http.post(
         Uri.parse("$serviceUrl/util/embedding"),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          ...aiServerAuthHeaders(serviceToken),
+        },
         body: jsonEncode({
           'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
           'filename': filename,
@@ -333,6 +426,10 @@ class EmbeddingIsolate {
   }
 
   void stop() {
+    if (_vaultListener != null) {
+      VaultManager.instance.unlocked.removeListener(_vaultListener!);
+      _vaultListener = null;
+    }
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
     _receivePort?.close();

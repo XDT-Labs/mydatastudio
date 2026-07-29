@@ -201,7 +201,13 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
     """
     print(f"[EMBEDDING] Loading Transformers model: {model_id} from {local_dir}")
     
-    device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
+    # MPS (Metal Performance Shaders) on Apple Silicon has PyTorch memory allocation
+    # bugs with Qwen-VL 3D position embeddings (mrope), causing "RuntimeError: Invalid buffer size: XX GiB".
+    # Use CUDA if available, otherwise CPU.
+    if torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
     print(f"[EMBEDDING] Using device: {device}")
 
     # The Makefile downloads the full repo into models/<org>/<model_name>/
@@ -233,15 +239,15 @@ def generate_embedding(
     """
     Universal embedding generator that handles both LlamaCpp and Transformers.
     """
+    # Which route is taken is a property of the loaded model, not of the call,
+    # so it was logging the same line thousands of times per import.
     if hasattr(model, 'client') and hasattr(model.client, 'embed'):
         # LlamaCpp path (Text only)
-        print("[EMBEDDING] Route: LlamaCpp")
         if image_base64:
             raise ValueError("LlamaCpp does not support image embeddings in this implementation.")
         return generate_text_embedding(text, model, processor)
-    
+
     # Transformers path
-    print(f"[EMBEDDING] Route: Transformers (Multimodal)")
     return generate_transformers_multimodal_embedding(model, processor, text, image_base64, filename)
 
 
@@ -259,10 +265,9 @@ def generate_transformers_multimodal_embedding(
     
     content = []
     if image_base64:
-        # Normalize base64 to data URI or just use bytes
-        if not image_base64.startswith("data:image"):
-            image_base64 = f"data:image/jpeg;base64,{image_base64}"
-        content.append({"type": "image", "image": image_base64})
+        # Decode and validate base64 image into a loaded PIL Image
+        pil_image = decode_base64_image(image_base64, filename)
+        content.append({"type": "image", "image": pil_image})
     
     if text:
         content.append({"type": "text", "text": text})
@@ -283,19 +288,29 @@ def generate_transformers_multimodal_embedding(
         return_tensors="pt"
     ).to(device)
     
-    with torch.no_grad():
-        print(f"[EMBEDDING] Performing inference on device: {device}")
-        outputs = model(**inputs)
-        # Last Token Pooling ([EOS]) as per research
-        # Qwen3-VL-Embedding returns the embedding in the last hidden state of the [EOS] token
-        embeddings = outputs.last_hidden_state[:, -1, :]
-        print(f"[EMBEDDING] Raw embedding shape: {embeddings.shape}")
-        
-        # Normalize the embedding
-        embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-        print(f"[EMBEDDING] Normalized embedding head: {embeddings[0, :5].tolist()}...")
-        
-    return embeddings[0].tolist()
+    try:
+        with torch.no_grad():
+            outputs = model(**inputs)
+            # Last Token Pooling ([EOS]) as per research
+            # Qwen3-VL-Embedding returns the embedding in the last hidden state of the [EOS] token
+            embeddings = outputs.last_hidden_state[:, -1, :]
+
+            # Normalize the embedding
+            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+
+        return embeddings[0].tolist()
+    except Exception as e:
+        if "buffer size" in str(e).lower() or "out of memory" in str(e).lower() or "mps" in str(e).lower():
+            print(f"[EMBEDDING] Device error on {device} ({e}). Falling back to CPU...")
+            cpu_device = torch.device("cpu")
+            model.to(cpu_device)
+            inputs_cpu = {k: (v.to(cpu_device) if isinstance(v, torch.Tensor) else v) for k, v in inputs.items()}
+            with torch.no_grad():
+                outputs = model(**inputs_cpu)
+                embeddings = outputs.last_hidden_state[:, -1, :]
+                embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+            return embeddings[0].tolist()
+        raise
 
 
 def generate_text_embedding(text: str, model: Any, processor: Any) -> List[float]:
@@ -304,16 +319,15 @@ def generate_text_embedding(text: str, model: Any, processor: Any) -> List[float
     """
     # If using LlamaCpp directly (from LangChain's LLM), we can use the underlying client
     if hasattr(model, 'client') and hasattr(model.client, 'embed'):
-        print(f"[EMBEDDING] Generating text embedding (LlamaCpp) for: {text[:50]}...")
+        # No per-call logging here. This runs once per embedded item — a PST
+        # import puts thousands through it — and echoing `text` printed the head
+        # of every email's HTML body to the client's console.
         result = model.client.embed(text)
         if isinstance(result, list) and len(result) > 0:
             if isinstance(result[0], list):
-                print(f"[EMBEDDING] result[0] is list, len={len(result[0])}")
                 return result[0]
             elif hasattr(result[0], 'embedding'):
-                print(f"[EMBEDDING] result[0] has .embedding, len={len(result[0].embedding)}")
                 return result[0].embedding
-        print(f"[EMBEDDING] result type: {type(result)} len={len(result)}")
         return result
     else:
         raise ValueError("Provided model does not support LlamaCpp embedding generation correctly")
@@ -328,8 +342,8 @@ def decode_base64_image(image_base64: str, filename: Optional[str] = None) -> Im
     import io
     from PIL import Image
 
-    if image_base64.startswith("data:image"):
-        image_base64 = image_base64.split(",")[1]
+    if image_base64.startswith("data:"):
+        image_base64 = image_base64.split(",", 1)[1]
     try:
         image_bytes = base64.b64decode(image_base64)
         
@@ -352,7 +366,9 @@ def decode_base64_image(image_base64: str, filename: Optional[str] = None) -> Im
                     except:
                         pass
 
-        return Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img = Image.open(io.BytesIO(image_bytes))
+        img.load()
+        return img.convert("RGB")
     except Exception as e:
         print(f"[EMBEDDING] Failed to parse image_base64: {e}")
         raise ValueError(f"Invalid image_base64 format provided: {e}")

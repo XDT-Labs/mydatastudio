@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 
 /// Local-only checks (`/util/model-status`) should return near-instantly —
@@ -68,7 +69,7 @@ class ModelDownloadManager {
       alias: 'gemma4:12b',
       label: 'Gemma 4 12B (chat model)',
       hfRepo: 'ggml-org/gemma-4-12B-it-GGUF',
-      filename: 'gemma-4-12B-it-Q4_K_M.gguf',
+      filename: 'gemma-4-12B-it-Q4_0.gguf',
       mmprojFilename: 'mmproj-gemma-4-12B-it-Q8_0.gguf',
     ),
     ModelDownloadItem(
@@ -97,7 +98,9 @@ class ModelDownloadManager {
   /// per-item in [items] instead.
   Future<void> start() async {
     if (_running) {
-      _logger.d('[ModelDownload] start() called while already running — skipping.');
+      _logger.d(
+        '[ModelDownload] start() called while already running — skipping.',
+      );
       return;
     }
     _running = true;
@@ -111,7 +114,11 @@ class ModelDownloadManager {
     } catch (e, stack) {
       // Guarantees no item is left stuck silently in pending/checking forever —
       // surface it as a per-item error with a working Retry button instead.
-      _logger.e('[ModelDownload] Unexpected failure in _runPending: $e', error: e, stackTrace: stack);
+      _logger.e(
+        '[ModelDownload] Unexpected failure in _runPending: $e',
+        error: e,
+        stackTrace: stack,
+      );
       for (final item in items.value) {
         if (item.status != ModelDownloadStatus.complete) {
           item.status = ModelDownloadStatus.error;
@@ -139,13 +146,17 @@ class ModelDownloadManager {
   Future<void> _runPending() async {
     final serviceUrl = MainApp.llmServiceUrl.valueOrNull;
     if (serviceUrl == null) {
-      _logger.w('[ModelDownload] AI service URL not available yet — aborting this run.');
+      _logger.w(
+        '[ModelDownload] AI service URL not available yet — aborting this run.',
+      );
       return;
     }
 
     final db = DatabaseManager.instance.database;
     if (db == null) {
-      _logger.w('[ModelDownload] Database not available yet — aborting this run.');
+      _logger.w(
+        '[ModelDownload] Database not available yet — aborting this run.',
+      );
       return;
     }
     final repo = AichatModelRepository(db);
@@ -155,7 +166,9 @@ class ModelDownloadManager {
     try {
       for (final item in items.value) {
         if (item.status == ModelDownloadStatus.complete) continue;
-        _logger.i('[ModelDownload] Resolving ${item.alias} (${item.hfRepo})...');
+        _logger.i(
+          '[ModelDownload] Resolving ${item.alias} (${item.hfRepo})...',
+        );
         await _resolveItem(client, serviceUrl, hfToken, repo, item);
       }
     } finally {
@@ -257,7 +270,11 @@ class ModelDownloadManager {
       type: item.filename == null ? 'transformers' : 'gguf',
     );
     if (item.filename != null) {
-      await repo.setLocalPath(model.id, item.resolvedModelPath!, item.resolvedMmprojPath);
+      await repo.setLocalPath(
+        model.id,
+        item.resolvedModelPath!,
+        item.resolvedMmprojPath,
+      );
     } else {
       await repo.setEnabled(model.id, true);
     }
@@ -268,11 +285,27 @@ class ModelDownloadManager {
 
   Future<String?> _lookupHfToken(AppDatabase db) async {
     final rows = await db
-        .select("SELECT api_key FROM providers WHERE service = 'huggingface' LIMIT 1")
+        .select(
+          "SELECT api_key FROM providers WHERE service = 'huggingface' LIMIT 1",
+        )
         .timeout(_statusCheckTimeout);
     if (rows.isEmpty) return null;
-    final key = (rows.first['api_key'] as String? ?? '').trim();
-    return key.isEmpty ? null : key;
+    // The HF token is stored encrypted (AUDIT M2 phase 3/4). Model downloads
+    // are fire-and-forget from app startup, before the user logs in and the
+    // vault unlocks, so a locked vault degrades to an anonymous download (the
+    // token is optional) rather than blocking — but we never send ciphertext.
+    String? key;
+    try {
+      key = CredentialCodec.decrypt(rows.first['api_key'] as String?)?.trim();
+    } on VaultLockedException {
+      return null;
+    } on CredentialFormatException {
+      // A row written outside the codec. The token is optional, so degrade to
+      // an anonymous download rather than let _runPending turn one malformed
+      // providers row into a failure for every queued model.
+      return null;
+    }
+    return (key == null || key.isEmpty) ? null : key;
   }
 
   /// Returns the resolved local path if already downloaded, else null.
@@ -287,19 +320,26 @@ class ModelDownloadManager {
       final response = await client
           .post(
             Uri.parse('$serviceUrl/util/model-status'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+            },
             body: jsonEncode({'model_name': hfRepo, 'filename': filename}),
           )
           .timeout(_statusCheckTimeout);
       if (response.statusCode != 200) {
-        _logger.w('[ModelDownload] model-status for $hfRepo/$filename returned ${response.statusCode}');
+        _logger.w(
+          '[ModelDownload] model-status for $hfRepo/$filename returned ${response.statusCode}',
+        );
         return null;
       }
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (data['exists'] == true) return data['model_path'] as String?;
       return null;
     } catch (e) {
-      _logger.w('[ModelDownload] model-status check failed for $hfRepo/$filename: $e');
+      _logger.w(
+        '[ModelDownload] model-status check failed for $hfRepo/$filename: $e',
+      );
       return null;
     }
   }
@@ -320,24 +360,33 @@ class ModelDownloadManager {
       Uri.parse('$serviceUrl/util/download-model'),
     );
     request.headers['Content-Type'] = 'application/json';
+    request.headers.addAll(
+      aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+    );
     request.body = jsonEncode({
       'model_name': hfRepo,
       'filename': filename,
       if (hfToken != null) 'hf_token': hfToken,
     });
 
-    _logger.i('[ModelDownload] Requesting download: $hfRepo/${filename ?? '(snapshot)'}');
+    _logger.i(
+      '[ModelDownload] Requesting download: $hfRepo/${filename ?? '(snapshot)'}',
+    );
 
     final http.StreamedResponse streamed;
     try {
       streamed = await client.send(request).timeout(_downloadConnectTimeout);
     } catch (e) {
-      _logger.e('[ModelDownload] Could not reach AI service for $hfRepo/$filename: $e');
+      _logger.e(
+        '[ModelDownload] Could not reach AI service for $hfRepo/$filename: $e',
+      );
       item.error = 'Could not reach AI service: $e';
       return null;
     }
     if (streamed.statusCode != 200) {
-      _logger.e('[ModelDownload] Download request for $hfRepo/$filename failed with ${streamed.statusCode}');
+      _logger.e(
+        '[ModelDownload] Download request for $hfRepo/$filename failed with ${streamed.statusCode}',
+      );
       item.error = 'Download failed (${streamed.statusCode})';
       return null;
     }
@@ -365,10 +414,16 @@ class ModelDownloadManager {
           } else if (status == 'complete') {
             resultPath = event['model_path'] as String? ?? '';
             if (resultPath!.isEmpty) resultPath = null;
-            _logger.i('[ModelDownload] Completed $hfRepo/$filename -> $resultPath');
+            _logger.i(
+              '[ModelDownload] Completed $hfRepo/$filename -> $resultPath',
+            );
           } else if (status == 'error') {
-            item.error = event['message'] as String? ?? 'Download failed';
-            _logger.e('[ModelDownload] Server reported error for $hfRepo/$filename: ${item.error}');
+            // Carry the server's reason across; without this the log said
+            // `null` and the UI had nothing to show for the failure.
+            item.error = event['message'] as String?;
+            _logger.e(
+              '[ModelDownload] Server reported error for $hfRepo/$filename: ${item.error}',
+            );
           }
         }
       });

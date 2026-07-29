@@ -6,7 +6,10 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/scanners/scan_isolate_support.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
+import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
@@ -15,6 +18,7 @@ import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
+import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
@@ -22,41 +26,135 @@ import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:http/http.dart' as http;
+import 'package:rxdart/rxdart.dart';
+
+/// A snapshot of an in-flight PST import, for the UI to render.
+///
+/// A multi-gigabyte archive takes long enough that an unannotated spinner is
+/// indistinguishable from a hang, so the parser reports its message total up
+/// front and the worker relays its position against it.
+class PstImportProgress {
+  const PstImportProgress({
+    required this.collectionId,
+    required this.collectionName,
+    this.totalMessages = 0,
+    this.examined = 0,
+    this.emails = 0,
+    this.folder,
+    this.done = false,
+  });
+
+  final String collectionId;
+  final String collectionName;
+
+  /// Messages the parser expects to examine, or 0 when it could not read the
+  /// folder tree well enough to say — in which case there is no percentage and
+  /// the UI falls back to an indeterminate bar.
+  final int totalMessages;
+  final int examined;
+
+  /// Messages actually imported. Lower than [examined], because a PST folder
+  /// also holds non-mail items the parser skips.
+  final int emails;
+
+  /// PST path of the folder being read, for a "what is it doing" line.
+  final String? folder;
+  final bool done;
+
+  /// Fraction complete in 0..1, or null when the total is unknown.
+  double? get fraction {
+    if (totalMessages <= 0) return null;
+    return (examined / totalMessages).clamp(0.0, 1.0);
+  }
+
+  PstImportProgress copyWith({
+    int? totalMessages,
+    int? examined,
+    int? emails,
+    String? folder,
+    bool? done,
+  }) {
+    return PstImportProgress(
+      collectionId: collectionId,
+      collectionName: collectionName,
+      totalMessages: totalMessages ?? this.totalMessages,
+      examined: examined ?? this.examined,
+      emails: emails ?? this.emails,
+      folder: folder ?? this.folder,
+      done: done ?? this.done,
+    );
+  }
+}
 
 /// [OutlookPstScannerIsolate] is the client-side manager for the Outlook PST
-/// scanning background isolate. It handles spawning the worker, which calls
-/// the Python FastAPI service to parse the PST file and stream results back.
+/// scanning background isolate. It spawns the worker, which calls the Python
+/// FastAPI service to parse the PST file and stream results back.
 ///
-/// Synchronization Rules:
-/// 1. [Registration-Only Startup] Scanners MUST only register on startup.
-/// 2. [Force Safety Gate] start() MUST return immediately if force is false.
-/// 3. [Manual Sync] User-initiated syncs MUST call start(force: true).
-/// 4. [Discovery vs Sync] Discover items quickly, sync heavy metadata incrementally.
-/// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
-///    syncs (path == null) and targeted folder scans (path != null).
+/// **PST is the exception to the standard scanner contract.** Unlike the live
+/// email providers (Gmail/Outlook/Yahoo), a `.pst` is a local file this app
+/// neither owns nor watches — there is no change feed to poll. Outlook may
+/// still write to the file, so rather than try to reconcile that, each selected
+/// PST is treated as a **one-shot snapshot**: imported whole when the user
+/// picks it, never refreshed afterwards. Consequently PST:
+///
+///   * is a **one-shot import**, run exactly once when the collection is added
+///     (see `NewEmailPage._import`), and is **not** registered in
+///     `ScannerManager` (it throws there by design);
+///   * has **no re-sync and no targeted folder scan** — those affordances are
+///     intentionally hidden in the UI (the folder Refresh icon and the account
+///     "Sync" menu item), so the generic `path == null` / `path != null`
+///     contract does not apply here;
+///   * is re-imported only by **deleting the collection and re-selecting the
+///     file** — there is no incremental update path.
+///
+/// Because there is no second chance, the single import pass tracks a
+/// completion summary and marks the collection `complete` only when the
+/// parser's end-of-walk summary arrives with zero errors; otherwise it is left
+/// `incomplete` for the UI to surface (see the worker below). See the
+/// "targeted PST-folder scanning" resolution in AUDIT.md.
 class OutlookPstScannerIsolate {
   final RootIsolateToken? token;
   final String appDir;
   final String serverUrl;
+  final String? serverToken;
   Isolate? _isolate;
   final AppLogger logger = AppLogger(null);
 
   final String dbDir;
+
+  /// The import currently running, or null when none is. The import is started
+  /// from the setup page but has to be reported on the email page, which is
+  /// where the user lands as soon as it begins — hence a broadcast subject
+  /// rather than a callback.
+  static final BehaviorSubject<PstImportProgress?> importProgress =
+      BehaviorSubject<PstImportProgress?>.seeded(null);
+
+  /// Running totals per collection.
+  ///
+  /// [importProgress] only holds the most recent event, so it cannot be the
+  /// place an import's own counters accumulate: with two archives importing at
+  /// once, each report would `copyWith` onto whichever collection happened to
+  /// report last. Keyed here instead, so interleaved imports stay independent.
+  static final Map<String, PstImportProgress> _progressByCollection = {};
+
+  /// The collection this instance is importing, so [stop] can close out its
+  /// progress. Set by [start].
+  String? _collectionId;
 
   OutlookPstScannerIsolate({
     this.token,
     required this.appDir,
     required this.dbDir,
     required this.serverUrl,
+    this.serverToken,
   });
 
-  /// Spawns the PST background worker isolate.
+  /// Spawns the PST background worker isolate to import [collection] once.
   ///
-  /// [collection] The PST collection to synchronize.
-  /// [force] If false, returns immediately (Rule 2).
-  ///
-  /// Note: PST scanners currently default to a **Full Sync** of the entire
-  /// archive. Targeted scanning of specific PST folders is not yet implemented.
+  /// [force] guards against an accidental no-op call; the sole caller
+  /// (`NewEmailPage._import`) passes `force: true`. There is deliberately no
+  /// folder/path parameter — a PST archive is imported whole, one time, and is
+  /// never re-synced or folder-targeted (see the class doc).
   Future<void> start(Collection collection, {bool force = false}) async {
     if (!force) {
       logger.i("Registration-only mode: skipping scan for ${collection.name}");
@@ -72,17 +170,44 @@ class OutlookPstScannerIsolate {
       'appDir': appDir,
       'dbDir': dbDir,
       'serverUrl': serverUrl,
+      'serverToken': serverToken,
+      // DEK so the worker can decrypt/encrypt collection tokens (AUDIT M2 ph4).
+      'vaultDek': VaultManager.instance.dek,
     };
+
+    _collectionId = collection.id;
+    final initial = PstImportProgress(
+      collectionId: collection.id,
+      collectionName: collection.name,
+    );
+    _progressByCollection[collection.id] = initial;
+    importProgress.add(initial);
 
     _isolate = await Isolate.spawn(OutlookPstScannerIsolateWorker.worker, args);
 
     receivePort.listen((message) {
+      if (relayIsolateLog(logger, message, '[PstScan]')) return;
       if (message is Map) {
         if (message['type'] == 'refresh') {
           // Trigger UI refresh
           GetEmailsService.instance.invoke(
             EmailServiceCommand(collection, sortColumn: "date", sortAsc: false),
           );
+        } else if (message['type'] == 'progress') {
+          // Accumulate onto *this* collection's snapshot. Basing it on the
+          // last globally-emitted value instead would drop every report from
+          // the first import as soon as a second one started.
+          final current = _progressByCollection[collection.id];
+          if (current == null) return;
+          final next = current.copyWith(
+            totalMessages: (message['totalMessages'] as int?),
+            examined: (message['examined'] as int?),
+            emails: (message['emails'] as int?),
+            folder: message['folder'] as String?,
+            done: message['done'] as bool?,
+          );
+          _progressByCollection[collection.id] = next;
+          importProgress.add(next);
         }
       }
     });
@@ -92,6 +217,18 @@ class OutlookPstScannerIsolate {
   void stop() {
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
+
+    // The worker is gone, so the `done` the UI is waiting for will never
+    // arrive. Emit it here — otherwise a cancelled import leaves the progress
+    // bar and the empty-list placeholder stalled on their last snapshot for
+    // the rest of the session. `exitIncomplete` does the same for failures.
+    final id = _collectionId;
+    if (id == null) return;
+    final current = _progressByCollection[id];
+    if (current == null || current.done) return;
+    final finished = current.copyWith(done: true);
+    _progressByCollection[id] = finished;
+    importProgress.add(finished);
   }
 }
 
@@ -101,194 +238,444 @@ class OutlookPstScannerIsolate {
 /// FastAPI service via HTTP to parse the PST file.
 class OutlookPstScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> workerArgs) async {
-    final RootIsolateToken? token = workerArgs['token'];
-    final SendPort clientPort = workerArgs['port'];
-    final Collection collection = workerArgs['collection'];
-    final String appDir = workerArgs['appDir'];
-    final String dbDir = workerArgs['dbDir'] ?? appDir;
-    final String? serverUrl = workerArgs['serverUrl'];
+    runInScanIsolateZone(() async {
+      final RootIsolateToken? token = workerArgs['token'];
+      final SendPort clientPort = workerArgs['port'];
+      final Collection collection = workerArgs['collection'];
+      final String appDir = workerArgs['appDir'];
+      final String dbDir = workerArgs['dbDir'] ?? appDir;
+      final String? serverUrl = workerArgs['serverUrl'];
+      final String? serverToken = workerArgs['serverToken'];
 
-    if (token != null) {
-      BackgroundIsolateBinaryMessenger.ensureInitialized(token);
-    }
+      // Init platform channels + install the credential vault (AUDIT M2 phase 4).
+      bootstrapScanIsolate(token, workerArgs['vaultDek'] as Uint8List?);
 
-    final AppLogger logger = AppLogger(clientPort);
+      final AppLogger logger = AppLogger(clientPort);
 
-    // 1. Prepare extraction root for attachments
-    final extractionRoot = p.join(appDir, 'files', 'email', collection.id);
-    if (!io.Directory(extractionRoot).existsSync()) {
-      io.Directory(extractionRoot).createSync(recursive: true);
-    }
+      // 1. Prepare extraction root for attachments
+      final extractionRoot = p.join(appDir, 'files', 'email', collection.id);
+      if (!io.Directory(extractionRoot).existsSync()) {
+        io.Directory(extractionRoot).createSync(recursive: true);
+      }
 
-    logger.i(
-      "PST Scanner: Started parsing ${collection.path} -> $extractionRoot",
-    );
+      logger.i(
+        "PST Scanner: Started parsing ${collection.path} -> $extractionRoot",
+      );
 
-    if (serverUrl == null) {
-      logger.e("PST Scanner: serverUrl is missing!");
-      Isolate.exit(clientPort, {'error': 'missing_server_url'});
-    }
+      // Opened before the request so every exit path — including the failures
+      // below — can record a terminal status. A PST is never re-synced, so a
+      // collection left at its initial 'pending' would stay that way forever.
+      final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
 
-    // 2. Call FastAPI endpoint
-    logger.i("PST Scanner: Calling AI Chat API for PST import");
+      Future<void> markStatus(String status) async {
+        final repo = CollectionRepository(appDb);
+        final col = await repo.collectionById(collection.id);
+        if (col != null) {
+          col.scanStatus = status;
+          col.lastScanDate = DateTime.now();
+          await repo.updateCollection(col);
+        }
+      }
 
-    final client = http.Client();
-    final request = http.Request('POST', Uri.parse("$serverUrl/util/import/pst"));
-    request.headers['Content-Type'] = 'application/json';
-    request.body = jsonEncode({
-      'file_path': collection.path,
-      'output_dir': extractionRoot,
-    });
+      Future<Never> exitIncomplete(String error) async {
+        await markStatus('incomplete');
+        // Without this the progress banner would sit at 0% forever on a failure
+        // that never reached the stream at all.
+        clientPort.send({'type': 'progress', 'done': true});
+        clientPort.send({'type': 'refresh'});
+        Isolate.exit(clientPort, {'error': error});
+      }
 
-    final response = await client.send(request);
+      if (serverUrl == null) {
+        logger.e("PST Scanner: serverUrl is missing!");
+        await exitIncomplete('missing_server_url');
+      }
 
-    if (response.statusCode != 200) {
-      logger.e("PST Scanner: API failed with status ${response.statusCode}");
-      Isolate.exit(clientPort, {'error': 'api_failed'});
-    }
+      // 2. Call FastAPI endpoint
+      logger.i("PST Scanner: Calling AI Chat API for PST import");
 
-    final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
+      final client = http.Client();
+      final request = http.Request(
+        'POST',
+        Uri.parse("$serverUrl/util/import/pst"),
+      );
+      request.headers['Content-Type'] = 'application/json';
+      request.headers.addAll(aiServerAuthHeaders(serverToken));
+      request.body = jsonEncode({
+        'file_path': collection.path,
+        'output_dir': extractionRoot,
+      });
 
-    // Keep track of internal IDs
-    final Map<String, String> folderPathToId = {};
-    // Track directories already emitted as Folder records for the file module.
-    final Set<String> emittedFolderPaths = {};
-    int count = 0;
-
-    // 3. Listen to stream output — use await-for to support async service calls
-    await for (final line in response.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())) {
+      // A refused/dropped connection is the same class of failure as a non-200:
+      // the import never ran, and the collection must not be left pending.
+      final http.StreamedResponse response;
       try {
-        if (line.trim().isEmpty) continue;
-        final data = jsonDecode(line);
+        response = await client.send(request);
+      } catch (e) {
+        logger.e("PST Scanner: request to the aiserver failed: $e");
+        await exitIncomplete('api_failed');
+      }
 
-        if (data['type'] == 'folder') {
-          final folderId = const Uuid().v4();
-          folderPathToId[data['path']] = folderId;
+      if (response.statusCode != 200) {
+        logger.e("PST Scanner: API failed with status ${response.statusCode}");
+        await exitIncomplete('api_failed');
+      }
 
-          logger.d(
-            "PST Folder: ${data['name']} (Path: ${data['path']}, Messages: ${data['count']})",
-          );
+      // Keep track of internal IDs
+      final Map<String, String> folderPathToId = {};
+      // Every folder record as it was first upserted, keyed by PST path, so the
+      // second pass below can rewrite it with a message count.
+      final Map<String, EmailFolder> foldersByPath = {};
+      // Emails actually imported per folder path. Deliberately *not* the parser's
+      // `count`: that is the raw sub-message tally, which includes the free/busy
+      // blocks and view definitions the parser skips. Only what we persisted
+      // should decide whether a folder reads as empty in the UI.
+      final Map<String, int> emailCountByPath = {};
+      // Track directories already emitted as Folder records for the file module.
+      final Set<String> emittedFolderPaths = {};
+      int count = 0;
+      // Completion tracking. PST is a one-shot import with no re-sync, so we only
+      // mark the collection 'complete' when the parser's end-of-walk summary
+      // arrived AND nothing failed; otherwise it's 'incomplete' and the user is
+      // told to delete + re-add (see status update below).
+      int errorCount = 0;
+      int summaryErrors = 0;
+      bool sawSummary = false;
+      bool streamFailed = false;
+      // Messages the parser said it would examine, from its opening 'start'
+      // record. 0 means it couldn't read the tree; the UI shows an indeterminate
+      // bar rather than a wrong percentage.
+      int totalMessages = 0;
 
-          final folder = EmailFolder(
-            id: folderId,
-            collectionId: collection.id,
-            name: data['name'],
-            type: 'user',
-            parentId:
-                p.dirname(data['path']) == "" || p.dirname(data['path']) == "."
-                    ? null
-                    : folderPathToId[p.dirname(data['path'])],
-          );
+      // 3. Listen to stream output — use await-for to support async service calls
+      try {
+        await for (final line in response.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())) {
+          try {
+            if (line.trim().isEmpty) continue;
+            final data = jsonDecode(line);
 
-          await EmailFolderUpsertService.instance.invoke(
-            EmailFolderUpsertServiceCommand(folder, appDb),
-          );
-        } else if (data['type'] == 'email') {
-          final emailId = const Uuid().v4();
-          final folderId = folderPathToId[data['folder']] ?? 'INBOX';
-
-          final email = Email(
-            id: emailId,
-            collectionId: collection.id,
-            date: DateTime.tryParse(data['date'] ?? "") ?? DateTime.now(),
-            from: data['sender'] ?? "Unknown",
-            to: (data['to'] as List?)?.map((e) => e.toString()).toList() ?? [],
-            cc: (data['cc'] as List?)?.map((e) => e.toString()).toList() ?? [],
-            subject: data['subject'] ?? "(No Subject)",
-            plainBody: data['body'] ?? "",
-            htmlBody: data['html_body'] ?? "",
-            folderId: folderId,
-            isRead: true,
-            hasAttachments: (data['attachments'] as List?)?.isNotEmpty ?? false,
-            isDeleted: false,
-          );
-
-          await EmailUpsertService.instance.invoke(
-            EmailUpsertServiceCommand([email], appDb),
-          );
-
-          // Process attachments — also emit Folder records so the file module
-          // can navigate the directory tree (e.g., INBOX → 2010 → files).
-          for (var att in data['attachments']) {
-            final fileId = const Uuid().v4();
-            final attPath = att['path'] as String? ?? '';
-
-            // Validate path stays within extraction root
-            if (attPath.isNotEmpty &&
-                !p
-                    .canonicalize(attPath)
-                    .startsWith(p.canonicalize(extractionRoot))) {
-              logger.w(
-                'PST Scanner: Skipping attachment with path outside extraction root',
+            if (data['type'] == 'start') {
+              // Arrives before any folder or email, so the UI can show a real
+              // percentage from the first update instead of switching partway.
+              totalMessages = (data['total_messages'] as num?)?.toInt() ?? 0;
+              clientPort.send({
+                'type': 'progress',
+                'totalMessages': totalMessages,
+                'examined': 0,
+                'emails': 0,
+              });
+            } else if (data['type'] == 'progress') {
+              clientPort.send({
+                'type': 'progress',
+                'totalMessages': totalMessages,
+                'examined': (data['examined'] as num?)?.toInt() ?? 0,
+                // Emails the *client* persisted, not the parser's tally: a record
+                // that failed to apply below is not in the archive the user ends
+                // up with, and the count sits next to the progress bar.
+                'emails': count,
+                'folder': data['folder'] as String?,
+              });
+            } else if (data['type'] == 'folder') {
+              final folderId = const Uuid().v5(
+                Namespace.url.value,
+                'folder:pst:${collection.id}:${data['path']}',
               );
-              continue;
-            }
+              folderPathToId[data['path']] = folderId;
 
-            // Ensure every directory level from extractionRoot down to the
-            // attachment's parent has a Folder record in the file module DB.
-            if (attPath.isNotEmpty) {
-              await _ensureFolderPath(
-                attPath: attPath,
-                extractionRoot: extractionRoot,
+              logger.d(
+                "PST Folder: ${data['name']} (Path: ${data['path']}, Messages: ${data['count']})",
+              );
+
+              final folder = EmailFolder(
+                id: folderId,
                 collectionId: collection.id,
-                emailDate: email.date,
-                emittedFolderPaths: emittedFolderPaths,
-                appDb: appDb,
+                name: data['name'],
+                type: 'user',
+                parentId:
+                    p.dirname(data['path']) == "" ||
+                            p.dirname(data['path']) == "."
+                        ? null
+                        : folderPathToId[p.dirname(data['path'])],
+              );
+
+              foldersByPath[data['path']] = folder;
+              await EmailFolderUpsertService.instance.invoke(
+                EmailFolderUpsertServiceCommand(folder, appDb),
+              );
+            } else if (data['type'] == 'email') {
+              final rawId = data['id'] as String? ?? 'unknown';
+              final emailId = const Uuid().v5(
+                Namespace.url.value,
+                'email:pst:${collection.id}:$rawId',
+              );
+              final folderId = folderPathToId[data['folder']] ?? 'INBOX';
+
+              final plainBody = data['body'] as String? ?? "";
+              final snippet =
+                  plainBody.length > 200
+                      ? plainBody.substring(0, 200)
+                      : plainBody;
+
+              final email = Email(
+                id: emailId,
+                collectionId: collection.id,
+                date: DateTime.tryParse(data['date'] ?? "") ?? DateTime.now(),
+                from: data['sender'] ?? "Unknown",
+                to:
+                    (data['to'] as List?)?.map((e) => e.toString()).toList() ??
+                    [],
+                cc:
+                    (data['cc'] as List?)?.map((e) => e.toString()).toList() ??
+                    [],
+                subject: data['subject'] ?? "(No Subject)",
+                snippet: snippet,
+                plainBody: plainBody,
+                htmlBody: data['html_body'] ?? "",
+                folderId: folderId,
+                isRead: true,
+                hasAttachments:
+                    (data['attachments'] as List?)?.isNotEmpty ?? false,
+                isDeleted: false,
+              );
+
+              await EmailUpsertService.instance.invoke(
+                EmailUpsertServiceCommand([email], appDb),
+              );
+
+              final emailFolderPath = data['folder'] as String?;
+              if (emailFolderPath != null) {
+                emailCountByPath[emailFolderPath] =
+                    (emailCountByPath[emailFolderPath] ?? 0) + 1;
+              }
+
+              // Process attachments — also emit Folder records so the file module
+              // can navigate the directory tree (e.g., INBOX → 2010 → files).
+              for (var att in data['attachments']) {
+                final fileId = const Uuid().v5(
+                  Namespace.url.value,
+                  'file:pst:${collection.id}:$emailId:${att['name']}',
+                );
+                final attPath = att['path'] as String? ?? '';
+
+                // Validate path stays within extraction root
+                if (attPath.isNotEmpty &&
+                    !p
+                        .canonicalize(attPath)
+                        .startsWith(p.canonicalize(extractionRoot))) {
+                  logger.w(
+                    'PST Scanner: Skipping attachment with path outside extraction root',
+                  );
+                  continue;
+                }
+
+                // Ensure every directory level from extractionRoot down to the
+                // attachment's parent has a Folder record in the file module DB.
+                if (attPath.isNotEmpty) {
+                  await _ensureFolderPath(
+                    attPath: attPath,
+                    extractionRoot: extractionRoot,
+                    collectionId: collection.id,
+                    emailDate: email.date,
+                    emittedFolderPaths: emittedFolderPaths,
+                    appDb: appDb,
+                  );
+                }
+
+                final file = File(
+                  id: fileId,
+                  name: att['name'],
+                  path: attPath,
+                  parent:
+                      attPath.isNotEmpty ? p.dirname(attPath) : extractionRoot,
+                  dateCreated: email.date,
+                  dateLastModified: email.date,
+                  collectionId: collection.id,
+                  contentType: _mapMimeType(
+                    att['contentType'] as String? ?? 'application/octet-stream',
+                  ),
+                  size: (att['size'] as num).toInt(),
+                  isDeleted: false,
+                  emailId: emailId,
+                  // Empty for an ordinary attachment; set only when the HTML body
+                  // embeds this file as `<img src="cid:...">`.
+                  contentId: InlineAttachment.normalizeContentId(
+                    att['contentId'] as String?,
+                  ),
+                  // Decided here rather than in the parser so all four scanners
+                  // share one rule. MAPI has no Content-Disposition, so a PST
+                  // attachment is inline exactly when the body references it.
+                  isInline: InlineAttachment.isInline(
+                    contentId: att['contentId'] as String?,
+                    fileName: att['name'] as String?,
+                    htmlBody: email.htmlBody,
+                  ),
+                );
+                await FileUpsertService.instance.invoke(
+                  FileUpsertServiceCommand(file, appDb),
+                );
+              }
+
+              count++;
+              if (count % 50 == 0) {
+                clientPort.send({'type': 'refresh'});
+              }
+            } else if (data['type'] == 'debug') {
+              final msg = data['message']?.toString() ?? '';
+              logger.d(
+                "PST Parser Debug: ${msg.length > 200 ? '${msg.substring(0, 200)}...' : msg}",
+              );
+            } else if (data['type'] == 'error') {
+              errorCount++;
+              final msg = data['message']?.toString() ?? '';
+              logger.e(
+                "PST Parser Error: ${msg.length > 200 ? '${msg.substring(0, 200)}...' : msg}",
+              );
+            } else if (data['type'] == 'summary') {
+              sawSummary = true;
+              // Cross-check against our own tally: the parser's count is
+              // authoritative for errors it hit, ours for lines we failed to
+              // apply. Either being non-zero means the import isn't whole.
+              summaryErrors = (data['errors'] as num?)?.toInt() ?? 0;
+              logger.i(
+                "PST Parser Summary: folders=${data['folders']} "
+                "emails=${data['emails']} errors=${data['errors']}",
               );
             }
-
-            final file = File(
-              id: fileId,
-              name: att['name'],
-              path: attPath,
-              parent: attPath.isNotEmpty ? p.dirname(attPath) : extractionRoot,
-              dateCreated: email.date,
-              dateLastModified: email.date,
-              collectionId: collection.id,
-              contentType: _mapMimeType(
-                att['contentType'] as String? ?? 'application/octet-stream',
-              ),
-              size: (att['size'] as num).toInt(),
-              isDeleted: false,
-              emailId: emailId,
-            );
-            await FileUpsertService.instance.invoke(
-              FileUpsertServiceCommand(file, appDb),
-            );
+          } catch (e) {
+            // A line we couldn't decode/persist is lost data — count it so the
+            // import is flagged incomplete rather than silently truncated.
+            errorCount++;
+            // Never log the line itself: it is a whole parsed email, HTML body and
+            // all, and a run where many fail (a stretch of SQLITE_BUSY, say) dumped
+            // megabytes into the console — at error level, so each one also carried
+            // a stack trace. Identify the message instead; the id is what you would
+            // use to find it in the archive anyway.
+            logger.e("PST Isolate: ${_describeLine(line)}. Error: $e");
           }
-
-          count++;
-          if (count % 50 == 0) {
-            clientPort.send({'type': 'refresh'});
-          }
-        } else if (data['type'] == 'debug') {
-          logger.d("PST Parser Debug: ${data['message']}");
-        } else if (data['type'] == 'error') {
-          logger.e("PST Parser Error: ${data['message']}");
         }
       } catch (e) {
-        logger.e("PST Isolate: Failed to parse line: $line. Error: $e");
+        // The HTTP stream itself failed partway (dropped connection, server
+        // died). Whatever was upserted persists, but the import didn't finish.
+        streamFailed = true;
+        logger.e("PST Isolate: Stream failed mid-import: $e");
       }
+
+      // 4. Second pass: stamp each folder with the number of emails it holds,
+      // counting its whole subtree. This can only run once the stream is done,
+      // because a folder's children stream in after the folder itself.
+      //
+      // The rollup is what makes "empty" mean the right thing in the sidebar. A
+      // PST archive routinely has container folders that hold no mail directly
+      // but parent everything that does (in mnimer_digitalchef.pst, all 1181
+      // emails sit under a `non-Allaire Email` folder with zero of its own).
+      // Counting only direct messages would hide exactly the folders the user
+      // needs to navigate through.
+      await _writeFolderCounts(
+        foldersByPath: foldersByPath,
+        emailCountByPath: emailCountByPath,
+        appDb: appDb,
+      );
+
+      // 5. Cleanup. A PST import is only 'complete' when the parser's end-of-walk
+      // summary arrived AND nothing failed; anything else is 'incomplete'.
+      final clean =
+          sawSummary && !streamFailed && errorCount == 0 && summaryErrors == 0;
+      logger.i(
+        "PST Scanner: Finished. Processed $count emails "
+        "(errors=$errorCount, parserErrors=$summaryErrors, "
+        "sawSummary=$sawSummary, streamFailed=$streamFailed) "
+        "→ ${clean ? 'complete' : 'incomplete'}.",
+      );
+
+      // Update collection status. 'incomplete' is terminal for a PST — there is
+      // no re-sync — so the UI surfaces it and the user re-imports by deleting the
+      // collection and selecting the file again.
+      await markStatus(clean ? 'complete' : 'incomplete');
+
+      // Sent before the refresh so the UI drops the progress banner in the same
+      // frame it repaints the list, rather than flashing a stalled bar over it.
+      clientPort.send({
+        'type': 'progress',
+        'totalMessages': totalMessages,
+        'examined': totalMessages,
+        'emails': count,
+        'done': true,
+      });
+      clientPort.send({'type': 'refresh'});
+      Isolate.exit(clientPort, {'done': true});
+    });
+  }
+
+  /// Describes a stream line for an error message, without quoting its content.
+  ///
+  /// An email record carries the full plain-text *and* HTML body, so logging
+  /// the raw line is what turned a run of failures into megabytes of console
+  /// output. The identifying fields are bounded in size and are what you would
+  /// actually search the archive by; the byte length stands in when the line
+  /// isn't decodable JSON at all.
+  static String _describeLine(String line) {
+    try {
+      final data = jsonDecode(line);
+      if (data is Map) {
+        final type = data['type'] ?? 'unknown';
+        if (type == 'email') {
+          return "failed to apply email id=${data['id']} in '${data['folder']}'";
+        }
+        if (type == 'folder') {
+          return "failed to apply folder '${data['path']}'";
+        }
+        return "failed to apply a '$type' record";
+      }
+    } catch (_) {
+      // Falls through: an undecodable line is exactly the case where there are
+      // no fields to name.
     }
+    return "failed to decode a ${line.length}-byte line";
+  }
 
-    // 4. Cleanup
-    logger.i(
-      "PST Scanner: Finished processing stream. Processed $count emails.",
-    );
+  /// Re-upserts every imported folder with `messagesTotal` set to the number of
+  /// emails in that folder **and all of its descendants**.
+  ///
+  /// A folder's subtree is identified by path prefix rather than by walking
+  /// `parentId`, because the paths are what the parser streams and they are
+  /// already the key both maps are built on. Folder counts are in the tens, so
+  /// the nested scan costs nothing.
+  static Future<void> _writeFolderCounts({
+    required Map<String, EmailFolder> foldersByPath,
+    required Map<String, int> emailCountByPath,
+    required AppDatabase appDb,
+  }) async {
+    for (final entry in foldersByPath.entries) {
+      final path = entry.key;
+      final folder = entry.value;
 
-    // Update collection status
-    final collectionRepo = CollectionRepository(appDb);
-    final col = await collectionRepo.collectionById(collection.id);
-    if (col != null) {
-      col.scanStatus = 'complete';
-      col.lastScanDate = DateTime.now();
-      await collectionRepo.updateCollection(col);
+      // `path + separator` matters: without it, a sibling folder named
+      // `Inbox2` would be counted as part of `Inbox`.
+      final prefix = '$path${p.separator}';
+      int total = 0;
+      emailCountByPath.forEach((emailPath, count) {
+        if (emailPath == path || emailPath.startsWith(prefix)) {
+          total += count;
+        }
+      });
+
+      await EmailFolderUpsertService.instance.invoke(
+        EmailFolderUpsertServiceCommand(
+          EmailFolder(
+            id: folder.id,
+            collectionId: folder.collectionId,
+            name: folder.name,
+            type: folder.type,
+            messagesTotal: total,
+            messagesUnread: folder.messagesUnread,
+            parentId: folder.parentId,
+          ),
+          appDb,
+        ),
+      );
     }
-
-    clientPort.send({'type': 'refresh'});
-    Isolate.exit(clientPort, {'done': true});
   }
 
   /// Maps a standard MIME type (e.g. "image/jpeg") to the internal

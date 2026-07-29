@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/aichat_model.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 
 // ─── Cloud model definitions ──────────────────────────────────────────────────
 
@@ -116,7 +118,7 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     );
     final providerKeys = {
       for (final r in providerRows)
-        r['service'] as String: r['api_key'] as String? ?? '',
+        r['service'] as String: _safeDecrypt(r['api_key'] as String?),
     };
 
     final hfKey = providerKeys['huggingface'] ?? '';
@@ -145,17 +147,42 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
+  /// Decrypt a stored provider key for display/use, degrading to an empty string
+  /// if the vault is locked. These are optional API keys loaded into a settings
+  /// UI (and an anonymous HuggingFace download still works), so a locked vault
+  /// should leave the field blank rather than crash — but we never emit the raw
+  /// ciphertext as if it were the key (AUDIT M2 phase 3/4).
+  String _safeDecrypt(String? stored) {
+    try {
+      return CredentialCodec.decrypt(stored) ?? '';
+    } catch (e) {
+      AppLogger(null).e('Could not decrypt stored provider key: $e');
+      return '';
+    }
+  }
+
   List<AichatModel> _byGroup(String group) =>
       _models.where((m) => m.group == group).toList();
 
   Future<void> _saveHfKey() async {
     final key = _hfApiKeyController.text.trim();
     if (key.isEmpty) return;
+    // encrypt() throws when the vault is locked, and this runs from an
+    // un-awaited debounce Timer — unguarded, the key is silently never saved
+    // and the user is told nothing.
+    final String? stored;
+    try {
+      stored = CredentialCodec.encrypt(key);
+    } catch (e) {
+      AppLogger(null).e('Could not encrypt HuggingFace key: $e');
+      _showSnack('Unlock required before saving API keys');
+      return;
+    }
     await DatabaseManager.instance.database!.execute(
       'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
       'VALUES (?, \'\', \'\', ?, \'model\') '
       'ON CONFLICT(service) DO UPDATE SET api_key = excluded.api_key',
-      ['huggingface', key],
+      ['huggingface', stored],
     );
     _showSnack('HuggingFace API key saved');
   }
@@ -181,11 +208,19 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
   Future<void> _saveCloudApiKey(String group) async {
     final key = _apiKeyControllers[group]?.text.trim() ?? '';
     if (key.isEmpty) return;
+    final String? stored;
+    try {
+      stored = CredentialCodec.encrypt(key);
+    } catch (e) {
+      AppLogger(null).e('Could not encrypt $group API key: $e');
+      _showSnack('Unlock required before saving API keys');
+      return;
+    }
     await DatabaseManager.instance.database!.execute(
       'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
       'VALUES (?, \'\', \'\', ?, \'model\') '
       'ON CONFLICT(service) DO UPDATE SET api_key = excluded.api_key',
-      [group, key],
+      [group, stored],
     );
     // Enable all models in that group that aren't yet enabled
     for (final m in _byGroup(group)) {
@@ -199,7 +234,8 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     final url = _ollamaUrlController.text.trim();
     final existing = _byGroup('ollama');
     if (url.isEmpty) {
-      if (existing.isNotEmpty && (existing.first.baseUrl?.isNotEmpty ?? false)) {
+      if (existing.isNotEmpty &&
+          (existing.first.baseUrl?.isNotEmpty ?? false)) {
         await _repo.setBaseUrl(existing.first.id, '');
         await _repo.setEnabled(existing.first.id, false);
         _showSnack('Ollama disabled');
@@ -237,6 +273,9 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
       Uri.parse('$serviceUrl/util/download-model'),
     );
     request.headers['Content-Type'] = 'application/json';
+    request.headers.addAll(
+      aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+    );
     request.body = jsonEncode({
       'model_name': hfRepo,
       'filename': filename,
@@ -314,7 +353,7 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     );
     final hfToken =
         hfRows.isNotEmpty
-            ? (hfRows.first['api_key'] as String? ?? '').trim()
+            ? _safeDecrypt(hfRows.first['api_key'] as String?).trim()
             : '';
 
     final client = http.Client();
@@ -398,12 +437,15 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
       try {
         await http.post(
           Uri.parse('$serviceUrl/util/delete-model'),
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            ...aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+          },
           body: jsonEncode({'model_path': model.file}),
         );
       } catch (e) {
         // Server unreachable — log and continue so the DB row is still removed
-        debugPrint('delete-model server call failed: $e');
+        AppLogger(null).e('delete-model server call failed: $e');
       }
     }
 
@@ -497,12 +539,14 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
   // ── Hugging Face download card ──────────────────────────────────────────────
 
   Widget _localLlmCard() {
-    final downloadable = _byGroup('local')
-        .where((m) => !m.enabled && (m.hfRepo ?? '').isNotEmpty)
-        .toList();
-    final downloaded = _byGroup('local')
-        .where((m) => m.alias != 'gemma4:12b' && m.enabled)
-        .toList();
+    final downloadable =
+        _byGroup(
+          'local',
+        ).where((m) => !m.enabled && (m.hfRepo ?? '').isNotEmpty).toList();
+    final downloaded =
+        _byGroup(
+          'local',
+        ).where((m) => m.alias != 'gemma4:12b' && m.enabled).toList();
 
     return Card(
       child: Padding(
@@ -546,14 +590,17 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
                 child: DropdownButton<AichatModel>(
                   value: _selectedModel,
                   isExpanded: true,
-                  items: downloadable
-                      .map(
-                        (m) => DropdownMenuItem(value: m, child: Text(m.name)),
-                      )
-                      .toList(),
-                  onChanged: _isDownloading
-                      ? null
-                      : (v) => setState(() => _selectedModel = v),
+                  items:
+                      downloadable
+                          .map(
+                            (m) =>
+                                DropdownMenuItem(value: m, child: Text(m.name)),
+                          )
+                          .toList(),
+                  onChanged:
+                      _isDownloading
+                          ? null
+                          : (v) => setState(() => _selectedModel = v),
                 ),
               ),
             ),
@@ -712,17 +759,18 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(model.name),
-      subtitle: (model.description != null && model.description!.isNotEmpty)
-          ? Text(
-              model.description!,
-              style: Theme.of(context).textTheme.bodySmall,
-            )
-          : (model.group == 'local'
+      subtitle:
+          (model.description != null && model.description!.isNotEmpty)
               ? Text(
-                  model.file ?? model.name,
-                  style: Theme.of(context).textTheme.bodySmall,
-                )
-              : null),
+                model.description!,
+                style: Theme.of(context).textTheme.bodySmall,
+              )
+              : (model.group == 'local'
+                  ? Text(
+                    model.file ?? model.name,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  )
+                  : null),
       trailing:
           isDefault
               ? null

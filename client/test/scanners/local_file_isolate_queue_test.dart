@@ -22,14 +22,16 @@ void main() {
   setUp(() {
     mockDb = MockAppDatabase();
     mockPort = MockSendPort();
+    tempDir = io.Directory.systemTemp.createTempSync('thumb_queue_test').path;
+    // Use tempDir as the storage root so cached thumbnails land under
+    // tempDir/thumbnails and get cleaned up in tearDown.
     worker = LocalFileIsolateWorker(
       null,
       mockPort,
-      '/tmp',
+      tempDir,
       'test.db',
       mockPort,
     );
-    tempDir = io.Directory.systemTemp.createTempSync('thumb_queue_test').path;
   });
 
   tearDown(() {
@@ -49,6 +51,7 @@ void main() {
     // Enqueue the thumbnail job
     worker.enqueueThumbnailJobForTesting(
       mockDb,
+      'test-collection-id',
       'test-file-id',
       path,
       FilesConstants.mimeTypeImage,

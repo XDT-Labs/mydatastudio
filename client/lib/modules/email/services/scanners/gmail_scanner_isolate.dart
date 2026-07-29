@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:isolate';
@@ -8,15 +9,19 @@ import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/scanners/scan_isolate_support.dart';import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/email/services/email_decoding_helper.dart';
 import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/email_repository.dart';
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
@@ -73,6 +78,9 @@ class GmailScannerIsolate {
       'force': force,
       'appDir': appDir,
       'dbDir': dbDir,
+      // DEK for the credential vault so in-isolate collection reads/writes and
+      // token refresh can decrypt/encrypt secrets (AUDIT M2 phase 4).
+      'vaultDek': VaultManager.instance.dek,
     };
 
     _isolate = await spawnIsolate(GmailScannerIsolateWorker.worker, args);
@@ -82,6 +90,9 @@ class GmailScannerIsolate {
       if (statusPort != null) {
         statusPort.send(message);
       }
+
+      // Replayed after the forward above so statusPort still sees every message.
+      if (relayIsolateLog(logger, message, '[GmailScan]')) return;
 
       if (message is Map) {
         if (message['type'] == 'refresh') {
@@ -124,7 +135,8 @@ class GmailScannerIsolate {
 /// and writes results directly via upsert services.
 class GmailScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> args) async {
-    final RootIsolateToken? token = args['token'];
+    runInScanIsolateZone(() async {
+      final RootIsolateToken? token = args['token'];
     final SendPort clientPort = args['port'];
     final Collection collection = args['collection'];
     final String? folderId = args['folderId'];
@@ -135,9 +147,10 @@ class GmailScannerIsolateWorker {
     final String appDir = args['appDir'];
     final String dbDir = args['dbDir'] ?? appDir;
 
-    if (token != null) {
-      BackgroundIsolateBinaryMessenger.ensureInitialized(token);
-    }
+    // Init platform channels + install the credential vault (AUDIT M2 phase 4)
+    // so in-isolate collection reads/writes and token refresh can decrypt
+    // secrets. Without the vault, decrypting the collection tokens fails.
+    bootstrapScanIsolate(token, args['vaultDek'] as Uint8List?);
 
     final AppLogger logger = AppLogger(clientPort);
 
@@ -178,7 +191,10 @@ class GmailScannerIsolateWorker {
     try {
       // 1. Sync Labels (Folders)
       logger.s("Syncing Gmail labels...");
-      final labelsResponse = await gmailApi.users.labels.list('me');
+      final labelsResponse = await _retryNetworkOp(
+        () => gmailApi.users.labels.list('me'),
+        logger,
+      );
       final labels = labelsResponse.labels ?? [];
 
       for (var label in labels) {
@@ -251,6 +267,7 @@ class GmailScannerIsolateWorker {
     } finally {
       Isolate.exit(clientPort, {'status': 'done'});
     }
+    });
   }
 
   static Future<Map<String, int>> _pullEmails(
@@ -279,12 +296,15 @@ class GmailScannerIsolateWorker {
       logger.i("Gmail: Performing incremental sync ($query)");
     }
 
-    final response = await gmailApi.users.messages.list(
-      'me',
-      q: query,
-      labelIds: labelId != null ? [labelId] : null,
-      pageToken: pageToken,
-      maxResults: 50, // Small batch for responsiveness
+    final response = await _retryNetworkOp(
+      () => gmailApi.users.messages.list(
+        'me',
+        q: query,
+        labelIds: labelId != null ? [labelId] : null,
+        pageToken: pageToken,
+        maxResults: 50, // Small batch for responsiveness
+      ),
+      logger,
     );
 
     final messages = response.messages ?? [];
@@ -292,19 +312,38 @@ class GmailScannerIsolateWorker {
       return {'total': 0, 'new': 0, 'skipped': 0};
     }
 
+    final messageIds = messages.map((m) => m.id).whereType<String>().toList();
+    final existingEmails = await EmailRepository(appDb).getAllById(messageIds);
+    final existingIds = existingEmails.map((e) => e.id).toSet();
+
     List<Email> emailBatch = [];
 
-    final labelsResponse = await gmailApi.users.labels.list('me');
+    final labelsResponse = await _retryNetworkOp(
+      () => gmailApi.users.labels.list('me'),
+      logger,
+    );
     final labelMap = {
       for (var l in labelsResponse.labels ?? []) l.id!: l.name ?? 'unknown',
     };
 
     for (var msgRef in messages) {
       try {
-        final m = await gmailApi.users.messages.get(
-          'me',
-          msgRef.id!,
-          format: 'full',
+        final id = msgRef.id;
+        if (id == null) continue;
+
+        // Skip downloading full body and upserting if email is already in local DB
+        if (existingIds.contains(id) && !force) {
+          skippedCount++;
+          continue;
+        }
+
+        final m = await _retryNetworkOp(
+          () => gmailApi.users.messages.get(
+            'me',
+            id,
+            format: 'full',
+          ),
+          logger,
         );
 
         DateTime msgDate = DateTime.fromMillisecondsSinceEpoch(
@@ -317,11 +356,8 @@ class GmailScannerIsolateWorker {
         String? ccRaw = _getHeader(m.payload?.headers, 'cc');
         String? messageId = _getHeader(m.payload?.headers, 'message-id');
 
-        String? plainBody = _parseBodyParts(
-          m.payload?.parts ?? [],
-          'text/plain',
-        );
-        String? htmlBody = _parseBodyParts(m.payload?.parts ?? [], 'text/html');
+        String? plainBody = _extractBody(m.payload, 'text/plain');
+        String? htmlBody = _extractBody(m.payload, 'text/html');
 
         // Note: Gmail API doesn't provide a simple "hasAttachments" flag in list view.
         // We check if there are parts with attachmentId or if mimeType is multipart/mixed.
@@ -372,10 +408,6 @@ class GmailScannerIsolateWorker {
             p.join(rootPathNormalized, relativeYearPath),
           );
 
-          logger.s(
-            "GmailScanner: Processing email ${email.id} with attachments. Target: $absoluteYearPath",
-          );
-
           // 1. Ensure folder hierarchy (Collection -> Label -> Year)
           await _ensureFolderHierarchy(
             appDb: appDb,
@@ -395,6 +427,7 @@ class GmailScannerIsolateWorker {
             [m.payload!],
             targetFolderPath: absoluteYearPath,
             logger: logger,
+            htmlBody: htmlBody,
           );
           email.attachments = attachments;
 
@@ -451,15 +484,44 @@ class GmailScannerIsolateWorker {
     }
   }
 
-  static String? _parseBodyParts(List<MessagePart> parts, String mimeType) {
-    for (var part in parts) {
-      if (part.mimeType == mimeType && part.body?.data != null) {
-        return utf8.decode(base64Url.decode(part.body!.data!));
+  static String? _extractBody(MessagePart? part, String mimeType) {
+    if (part == null) return null;
+
+    if (part.mimeType == mimeType && part.body?.data != null) {
+      final rawBytes = EmailDecodingHelper.safeBase64Decode(part.body!.data!);
+      if (rawBytes != null && rawBytes.isNotEmpty) {
+        final encoding =
+            _headerValue(part, 'content-transfer-encoding')?.toLowerCase();
+        if (encoding == 'quoted-printable') {
+          return EmailDecodingHelper.decodeQuotedPrintable(rawBytes);
+        }
+        try {
+          return utf8.decode(rawBytes, allowMalformed: true);
+        } catch (_) {
+          return EmailDecodingHelper.decodeQuotedPrintable(rawBytes);
+        }
       }
-      if (part.parts != null) {
-        final result = _parseBodyParts(part.parts!, mimeType);
+    }
+
+    if (part.parts != null) {
+      for (var subPart in part.parts!) {
+        final result = _extractBody(subPart, mimeType);
         if (result != null) return result;
       }
+    }
+
+    return null;
+  }
+
+  /// First value of [name] in a Gmail part's header list, case-insensitively.
+  ///
+  /// The Gmail API hands back headers as an unparsed name/value list, so
+  /// anything enough_mail would have parsed for the IMAP scanners has to be
+  /// looked up by hand here.
+  static String? _headerValue(MessagePart part, String name) {
+    final wanted = name.toLowerCase();
+    for (final header in part.headers ?? const <MessagePartHeader>[]) {
+      if (header.name?.toLowerCase() == wanted) return header.value;
     }
     return null;
   }
@@ -483,6 +545,9 @@ class GmailScannerIsolateWorker {
     List<MessagePart> parts, {
     String? targetFolderPath,
     AppLogger? logger,
+    // Needed to tell an embedded image from a real attachment: the body is
+    // what says which parts it references. See `InlineAttachment`.
+    String? htmlBody,
   }) async {
     List<File> files = [];
     final sep = io.Platform.pathSeparator;
@@ -496,13 +561,34 @@ class GmailScannerIsolateWorker {
     for (var part in parts) {
       if (part.body?.attachmentId != null) {
         try {
-          final attachment = await gmailApi.users.messages.attachments.get(
-            'me',
-            messageId,
-            part.body!.attachmentId!,
+          final attachment = await _retryNetworkOp(
+            () => gmailApi.users.messages.attachments.get(
+              'me',
+              messageId,
+              part.body!.attachmentId!,
+            ),
+            logger ?? AppLogger(null),
           );
 
           final originalFileName = part.filename ?? 'unnamed_attachment';
+          // An HTML message drags in every spacer, logo and tracking pixel as
+          // a real MIME part. Flagging them here keeps them out of the photo
+          // grid and the embedding queue. Gmail exposes the headers as a flat
+          // name/value list rather than parsed, hence the lookup.
+          final contentId = InlineAttachment.normalizeContentId(
+            _headerValue(part, 'content-id'),
+          );
+          final isInline = InlineAttachment.isInline(
+            contentId: contentId,
+            fileName: originalFileName,
+            htmlBody: htmlBody,
+            dispositionInline:
+                _headerValue(
+                  part,
+                  'content-disposition',
+                )?.trim().toLowerCase().startsWith('inline') ??
+                false,
+          );
           // Use prefix to avoid collisions in the flat Year folder
           final fileName = '${messageId}_$originalFileName';
           final file = io.File(p.join(effectiveFolderPath, fileName));
@@ -523,6 +609,8 @@ class GmailScannerIsolateWorker {
             contentType: part.mimeType ?? 'application/octet-stream',
             isDeleted: false,
             emailId: messageId,
+            contentId: contentId,
+            isInline: isInline,
           );
 
           logger?.s(
@@ -544,6 +632,7 @@ class GmailScannerIsolateWorker {
             part.parts!,
             targetFolderPath: effectiveFolderPath,
             logger: logger,
+            htmlBody: htmlBody,
           ),
         );
       }
@@ -618,4 +707,12 @@ class GmailScannerIsolateWorker {
       messagesUnread: label.messagesUnread,
     );
   }
+
+  // Thin delegate to the shared helper (scan_isolate_support.dart) so call
+  // sites are unchanged; the retry logic lives in one place now.
+  static Future<T> _retryNetworkOp<T>(
+    Future<T> Function() operation,
+    AppLogger logger,
+  ) =>
+      retryNetworkOp(operation, logger: logger);
 }

@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/repositories/user_repository.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:mydatastudio/widgets/login_form.dart';
 import 'package:password_dart/password_dart.dart';
 import 'package:uuid/uuid.dart';
@@ -33,6 +36,8 @@ void main() {
   });
 
   tearDown(() async {
+    VaultManager.instance.lock();
+    MainApp.appDataDirectory.add(null);
     databaseManager.dispose();
     if (tempDir.existsSync()) {
       try {
@@ -60,14 +65,22 @@ void main() {
       localStoragePath: tempPath,
     );
 
-    // Create dummy keys
+    // The private key is now stored encrypted at rest (AUDIT M2 phase 4), and
+    // LoginForm unlocks the vault (from the typed password) before reading it.
+    // Set up that world: point appDataDirectory at the storage root, create a
+    // real vault, write an ENCRYPTED private.pem, then lock — login re-unlocks.
     final keyDir = Directory('$tempPath/keys');
     keyDir.createSync(recursive: true);
     File('${keyDir.path}/public.pem').writeAsStringSync('public-key');
-    File('${keyDir.path}/private.pem').writeAsStringSync('private-key');
 
-    // Run database insert in runAsync since it uses ports/isolates
+    MainApp.appDataDirectory.add(tempPath);
     await tester.runAsync(() async {
+      await VaultManager.instance.createAndUnlock(keyDir.path, password);
+      File('${keyDir.path}/private.pem')
+          .writeAsStringSync(CredentialCodec.encrypt('private-key')!);
+      VaultManager.instance.lock();
+
+      // Insert the user (runAsync because it uses ports/isolates).
       final userRepo = UserRepository(databaseManager.database!);
       await userRepo.saveUser(user);
     });
@@ -90,12 +103,11 @@ void main() {
     await tester.enterText(find.byType(TextField), password);
     await tester.pump();
 
-    // 4. Tap login button
-    await tester.tap(find.text('Login'));
-    await tester.pump();
-
-    // Run the async event loop to let the password hashing and DB select execute
+    // 4. Tap login and let the real-async handler finish: PBKDF2 hashing, the
+    // Argon2 vault unlock, and the DB lookup all run on real timers/I/O, so the
+    // tap must happen inside runAsync for them to complete deterministically.
     await tester.runAsync(() async {
+      await tester.tap(find.text('Login'));
       await Future.delayed(const Duration(seconds: 2));
     });
     await tester.pumpAndSettle();
@@ -143,11 +155,10 @@ void main() {
     await tester.enterText(find.byType(TextField), password);
     await tester.pump();
 
-    // 4. Tap login button
-    await tester.tap(find.text('Login'));
-    await tester.pump();
-
+    // 4. Tap login inside runAsync so the real-async handler (hash + vault
+    // unlock + the failing key read) completes deterministically.
     await tester.runAsync(() async {
+      await tester.tap(find.text('Login'));
       await Future.delayed(const Duration(seconds: 2));
     });
     await tester.pumpAndSettle();
@@ -163,6 +174,42 @@ void main() {
     );
 
     // Wait for FToast timers to finish
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('LoginForm never mints a vault for an unverified password', (
+    WidgetTester tester,
+  ) async {
+    // Why this matters: the vault is created once, by the setup wizard, from a
+    // password the user confirmed. If login could create one, a typo at the
+    // prompt would wrap a fresh DEK under the wrong password — the real password
+    // could never unlock it again, and any credential written in that session
+    // would be keyed to the typo. Login unlocks; it must never create.
+    final String tempPath =
+        '${tempDir.path}/mydatastudio_test_novault_${const Uuid().v4()}';
+    Directory('$tempPath/keys').createSync(recursive: true);
+    MainApp.appDataDirectory.add(tempPath);
+
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: LoginForm(onLoginSuccessful: () {}))),
+    );
+
+    await tester.enterText(find.byType(TextField), 'a-typo-not-my-password');
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Login'));
+      await Future.delayed(const Duration(seconds: 2));
+    });
+    await tester.pumpAndSettle();
+
+    expect(
+      File('$tempPath/keys/${VaultManager.vaultFileName}').existsSync(),
+      isFalse,
+      reason: 'An unverified password must not create a vault descriptor',
+    );
+    expect(VaultManager.instance.isUnlocked, isFalse);
+
     await tester.pump(const Duration(seconds: 5));
   });
 

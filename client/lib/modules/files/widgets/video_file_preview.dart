@@ -4,6 +4,11 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 class VideoFilePreview extends StatefulWidget {
   final String path;
@@ -67,12 +72,12 @@ class _VideoFilePreviewState extends State<VideoFilePreview> {
       String mediaPath;
 
       if (widget.isGDrive && widget.onDownloadGDrive != null) {
-        debugPrint('VideoFilePreview: Downloading GDrive file...');
+        _logger.d('VideoFilePreview: Downloading GDrive file...');
         final bytes = await widget.onDownloadGDrive!();
         if (bytes == null || bytes.isEmpty) {
           throw Exception('Failed to download video from Google Drive (empty response)');
         }
-        debugPrint('VideoFilePreview: Downloaded ${bytes.length} bytes');
+        _logger.d('VideoFilePreview: Downloaded ${bytes.length} bytes');
         final tempDir = await getTemporaryDirectory();
         final ext = p.extension(widget.path).isNotEmpty
             ? p.extension(widget.path)
@@ -81,7 +86,7 @@ class _VideoFilePreviewState extends State<VideoFilePreview> {
         _tempFile = File(p.join(tempDir.path, fileName));
         await _tempFile!.writeAsBytes(bytes, flush: true);
         mediaPath = _tempFile!.path;
-        debugPrint('VideoFilePreview: Written to temp: $mediaPath');
+        _logger.d('VideoFilePreview: Written to temp: $mediaPath');
       } else {
         final file = File(widget.path);
         if (!await file.exists()) {
@@ -90,7 +95,7 @@ class _VideoFilePreviewState extends State<VideoFilePreview> {
         mediaPath = widget.path;
       }
 
-      debugPrint('VideoFilePreview: Opening media: $mediaPath');
+      _logger.d('VideoFilePreview: Opening media: $mediaPath');
       await _player.open(Media(mediaPath), play: false);
 
       // Wait for the player to have the duration populated,
@@ -109,7 +114,7 @@ class _VideoFilePreviewState extends State<VideoFilePreview> {
 
       if (mounted) setState(() => _loading = false);
     } catch (e, stack) {
-      debugPrint('VideoFilePreview error: $e\n$stack');
+      _logger.e('VideoFilePreview error: $e', error: e, stackTrace: stack);
       if (mounted) {
         setState(() {
           _error = e.toString().replaceAll('Exception: ', '');

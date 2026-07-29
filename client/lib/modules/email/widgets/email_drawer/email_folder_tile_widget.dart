@@ -10,6 +10,7 @@ class EmailFolderTileWidget extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     this.indent = 48.0,
+    this.fontSize = 13.0,
   });
 
   final EmailFolder folder;
@@ -18,6 +19,7 @@ class EmailFolderTileWidget extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
   final double indent;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +40,7 @@ class EmailFolderTileWidget extends StatelessWidget {
         title: Text(
           label,
           style: TextStyle(
-            fontSize: 13,
+            fontSize: fontSize,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
           ),
         ),

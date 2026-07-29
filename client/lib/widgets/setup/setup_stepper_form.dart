@@ -11,6 +11,7 @@ import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/repositories/user_repository.dart';
 import 'package:mydatastudio/services/get_user_service.dart';
 import 'package:mydatastudio/services/model_download_manager.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 
 import 'package:mydatastudio/widgets/setup/setup_step1.dart';
 import 'package:mydatastudio/widgets/setup/setup_step2.dart';
@@ -173,7 +174,31 @@ class _SetupStepperFormState extends State<SetupStepperForm> {
         u.privateKey = appUser!.privateKey;
         u.publicKey = appUser!.publicKey;
 
-        //save user to database
+        // Create the credential vault from the chosen password FIRST, so a fresh
+        // install is fully set up and every secret is encrypted from its first
+        // write (AUDIT M2 — no migration). This must precede saveUser, which now
+        // writes keys/private.pem encrypted with the vault DEK. The plaintext
+        // password is used once here and then dropped.
+        final plaintextPassword = appUser!.plaintextPassword;
+        if (plaintextPassword != null && plaintextPassword.isNotEmpty) {
+          try {
+            await VaultManager.instance.createAndUnlock(
+              p.join(appUser!.localStoragePath, 'keys'),
+              plaintextPassword,
+            );
+            // Only once the vault exists — dropping it on the failure path
+            // would leave a retry with no password to build the vault from.
+            appUser!.plaintextPassword = null;
+          } catch (e) {
+            // Fatal: saveUser below writes private.pem through the vault, and
+            // login later refuses to create one. Continuing here produced a
+            // half-set-up install that could never be unlocked.
+            logger.e('Failed to create credential vault during setup: $e');
+            rethrow;
+          }
+        }
+
+        //save user to database (writes private.pem encrypted via the vault)
         final savedUser = await UserRepository(
           DatabaseManager.instance.database!,
         ).saveUser(u);

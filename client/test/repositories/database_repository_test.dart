@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/repositories/user_repository.dart';
@@ -66,6 +67,7 @@ void main() {
       expect(tableNames.contains('files'), isTrue);
       expect(tableNames.contains('folders'), isTrue);
       expect(tableNames.contains('files_embeddings'), isTrue);
+      expect(tableNames.contains('emails_embeddings'), isTrue);
     });
 
     test('UserRepository CRUD Integration', () async {
@@ -236,6 +238,120 @@ void main() {
       await dbRepo.deleteFileEmbedding(fileId);
       rows = await db.select('SELECT * FROM files_embeddings WHERE file_id = ?', [fileId]);
       expect(rows, isEmpty);
+    });
+
+    test('DatabaseRepository Email Embeddings Routing & Queries', () async {
+      final db = databaseManager.database!;
+      final dbRepo = DatabaseRepository(db);
+
+      final colId = const Uuid().v4();
+      final emailId = const Uuid().v4();
+
+      // Insert dummy email record into database
+      await db.execute(
+        '''
+        INSERT INTO emails (
+          id, collection_id, date, "from", "to", cc, subject, plain_body, is_deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+        ''',
+        [
+          emailId,
+          colId,
+          DateTime.now().millisecondsSinceEpoch,
+          'sender@example.com',
+          'recipient@example.com',
+          'cc@example.com',
+          'Test Email Subject',
+          'Test email body text',
+        ],
+      );
+
+      // Initially, the email has missing embeddings
+      var missing = await dbRepo.getEmailsWithMissingEmbeddings(limit: 10);
+      expect(missing.any((e) => e.id == emailId), isTrue);
+
+      // Upsert embedding
+      final embedding = List<double>.filled(2048, 0.1);
+      await dbRepo.upsertEmailEmbedding(emailId, embedding);
+
+      // Check database to ensure qwen3_vl_embedding is populated
+      var rows = await db.select(
+        'SELECT qwen3_vl_embedding FROM emails_embeddings WHERE email_id = ?',
+        [emailId],
+      );
+      expect(rows, isNotEmpty);
+      expect(rows.first['qwen3_vl_embedding'], isNotNull);
+
+      // Now the embedding is present, so getEmailsWithMissingEmbeddings should NOT return it
+      missing = await dbRepo.getEmailsWithMissingEmbeddings(limit: 10);
+      expect(missing.any((e) => e.id == emailId), isFalse);
+
+      // Get email embedding back
+      final retrieved = await dbRepo.getEmailEmbedding(emailId);
+      expect(retrieved, isNotNull);
+      expect(retrieved!.length, equals(2048));
+
+      // Clean up/delete email embedding
+      await dbRepo.deleteEmailEmbedding(emailId);
+      rows = await db.select('SELECT * FROM emails_embeddings WHERE email_id = ?', [emailId]);
+      expect(rows, isEmpty);
+    });
+
+    test('embedding queue skips images embedded in an email body', () async {
+      // Every HTML newsletter carries a dozen spacers, logos and tracking
+      // pixels as real image attachments. Embedding them costs on-device
+      // inference time per image, buys nothing — they are only ever seen
+      // inside the email they decorate — and pollutes similarity search.
+      final db = databaseManager.database!;
+      final dbRepo = DatabaseRepository(db);
+      final colRepo = CollectionRepository(db);
+      final fileRepo = FileDesktopRepository(db);
+
+      final colId = const Uuid().v4();
+      await colRepo.addCollection(
+        Collection(
+          id: colId,
+          name: 'Mail',
+          path: '/mail',
+          type: 'email',
+          scanner: 'gmail',
+          needsReAuth: false,
+          scanStatus: 'idle',
+        ),
+      );
+
+      Future<String> addImage({required bool isInline, required String name}) async {
+        final id = const Uuid().v4();
+        await fileRepo.create(
+          File(
+            id: id,
+            name: name,
+            path: name,
+            parent: '/mail',
+            dateCreated: DateTime.now(),
+            dateLastModified: DateTime.now(),
+            collectionId: colId,
+            contentType: 'application/image',
+            size: 2048,
+            isDeleted: false,
+            isInline: isInline,
+          ),
+        );
+        return id;
+      }
+
+      final photoId = await addImage(isInline: false, name: 'Sunset.jpg');
+      final spacerId = await addImage(isInline: true, name: 'spacer.gif');
+
+      final missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 50);
+      final ids = missing.map((f) => f.id);
+
+      expect(ids, contains(photoId), reason: 'a real attachment still queues');
+      expect(
+        ids,
+        isNot(contains(spacerId)),
+        reason: 'an image the message body embeds must never be embedded',
+      );
     });
 
     test('AichatModelRepository Ollama model initialization and update', () async {

@@ -1,6 +1,12 @@
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/services/rx_service.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 class GetCollectionsService
     extends RxService<GetCollectionsServiceCommand, List<Collection>> {
@@ -13,6 +19,12 @@ class GetCollectionsService
   @override
   Future<List<Collection>> invoke(GetCollectionsServiceCommand command) async {
     currentCommand = command;
+    if (DatabaseManager.instance.database == null) {
+      _logger.d(
+        'GetCollectionsService.invoke: database is null, skipping DB query',
+      );
+      return sink.valueOrNull ?? [];
+    }
     CollectionRepository repo = CollectionRepository();
 
     // Always push all collections to the sink.
@@ -22,7 +34,7 @@ class GetCollectionsService
     // UI sections to show loading spinners (e.g., FileDrawer showing
     // a spinner when only Gmail login triggered a refresh).
     final allCollections = await repo.collections();
-    print(
+    _logger.d(
       'GetCollectionsService.invoke: found ${allCollections.length} collections',
     );
     sink.add(allCollections);

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
@@ -52,7 +53,7 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
         'client_id = excluded.client_id, '
         'client_secret = excluded.client_secret, '
         'api_key = excluded.api_key',
-        ['azure', clientId, clientSecret, ''],
+        ['azure', clientId, CredentialCodec.encrypt(clientSecret), ''],
       );
 
       widget.onConfigured();
@@ -95,20 +96,22 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
           ),
         ),
         const SizedBox(height: 8),
-        InkWell(
-          onTap:
-              () => launchUrl(
-                Uri.parse(
-                  'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
-                ),
+        Semantics(
+          link: true,
+          child: InkWell(
+            onTap: () => launchUrl(
+              Uri.parse(
+                'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
               ),
-          child: const Text(
-            'Get Credentials from Microsoft Azure Portal',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.blue,
-              decoration: TextDecoration.underline,
+            ),
+            child: const Text(
+              'Get Credentials from Microsoft Azure Portal',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.blue,
+                decoration: TextDecoration.underline,
+              ),
             ),
           ),
         ),

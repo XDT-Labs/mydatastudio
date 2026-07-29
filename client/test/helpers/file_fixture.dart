@@ -21,6 +21,7 @@ File makeTestFile({
   DateTime? dateCreated,
   DateTime? dateLastModified,
   DateTime? lastScannedDate,
+  String? contentId,
 }) {
   final now = DateTime(2024, 1, 1);
   return File(
@@ -40,6 +41,7 @@ File makeTestFile({
     dateCreated: dateCreated ?? now,
     dateLastModified: dateLastModified ?? now,
     lastScannedDate: lastScannedDate,
+    contentId: contentId,
   );
 }
 

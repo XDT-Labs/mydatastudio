@@ -1,12 +1,13 @@
-import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:flutter/material.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/helpers/file_path_resolver.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/widgets/accessible_tap.dart';
 
 class SimilarFilesTab extends StatefulWidget {
   const SimilarFilesTab({
@@ -110,6 +111,7 @@ class _SimilarFilesTabState extends State<SimilarFilesTab> {
                   padding: const EdgeInsets.all(8),
                   child: IconButton(
                     icon: const Icon(Icons.close, color: Colors.white),
+                    tooltip: 'Close preview',
                     style: IconButton.styleFrom(
                       backgroundColor: Colors.black54,
                     ),
@@ -123,13 +125,9 @@ class _SimilarFilesTabState extends State<SimilarFilesTab> {
   }
 
   Widget _lightboxContent(File file) {
-    if (file.thumbnail != null) {
-      try {
-        if (file.thumbnail!.startsWith('http')) {
-          return Image.network(file.thumbnail!, fit: BoxFit.contain);
-        }
-        return Image.memory(base64Decode(file.thumbnail!), fit: BoxFit.contain);
-      } catch (_) {}
+    final provider = ThumbnailResolver.providerFor(file.thumbnail);
+    if (provider != null) {
+      return Image(image: provider, fit: BoxFit.contain);
     }
     if (file.path.startsWith('/')) {
       final ioFile = io.File(file.path);
@@ -310,8 +308,10 @@ class _SimilarImageCell extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: GestureDetector(
-            onTap: onTap,
+          child: AccessibleTap(
+            label: 'Preview ${file.name}',
+            borderRadius: BorderRadius.circular(4),
+            onPressed: onTap,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: Stack(
@@ -355,21 +355,33 @@ class _SimilarImageCell extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            Tooltip(
-              message: 'Go to folder',
-              child: GestureDetector(
-                onTap: onNavigate,
-                child: const Icon(Icons.folder_open_outlined, size: 14),
+            AccessibleTap(
+              tooltip: 'Go to folder',
+              label: 'Go to folder',
+              borderRadius: BorderRadius.circular(6),
+              onPressed: onNavigate,
+              child: const SizedBox(
+                width: 24,
+                height: 24,
+                child: Center(
+                  child: Icon(Icons.folder_open_outlined, size: 14),
+                ),
               ),
             ),
-            Tooltip(
-              message: 'Delete',
-              child: GestureDetector(
-                onTap: onDelete,
-                child: const Icon(
-                  Icons.delete_outline,
-                  size: 14,
-                  color: Colors.redAccent,
+            AccessibleTap(
+              tooltip: 'Delete',
+              label: 'Delete',
+              borderRadius: BorderRadius.circular(6),
+              onPressed: onDelete,
+              child: const SizedBox(
+                width: 24,
+                height: 24,
+                child: Center(
+                  child: Icon(
+                    Icons.delete_outline,
+                    size: 14,
+                    color: Colors.redAccent,
+                  ),
                 ),
               ),
             ),
@@ -380,22 +392,13 @@ class _SimilarImageCell extends StatelessWidget {
   }
 
   Widget _buildImage() {
-    final thumb = file.thumbnail;
-    if (thumb != null) {
-      try {
-        if (thumb.startsWith('http')) {
-          return Image.network(
-            thumb,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => _placeholder(),
-          );
-        }
-        return Image.memory(
-          base64Decode(thumb),
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => _placeholder(),
-        );
-      } catch (_) {}
+    final provider = ThumbnailResolver.providerFor(file.thumbnail);
+    if (provider != null) {
+      return Image(
+        image: provider,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => _placeholder(),
+      );
     }
     return _placeholder();
   }

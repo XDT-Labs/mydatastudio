@@ -53,6 +53,10 @@ class LocalLlmContentGenerator implements ContentGenerator {
   http.Client? _activeClient;
   bool _cancelled = false;
 
+  // Completion id of the active stream (from the SSE chunks). Sent to
+  // /v1/chat/stop so the server cancels only this generation.
+  String? _activeCompletionId;
+
   @override
   Stream<A2uiMessage> get a2uiMessageStream => _a2uiMessageController.stream;
 
@@ -77,8 +81,18 @@ class LocalLlmContentGenerator implements ContentGenerator {
     try {
       final url = MainApp.llmServiceUrl.valueOrNull;
       if (url != null) {
+        final headers = aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull);
+        final completionId = _activeCompletionId;
         await http
-            .post(Uri.parse('$url/v1/chat/stop'))
+            .post(
+              Uri.parse('$url/v1/chat/stop'),
+              headers: completionId != null
+                  ? {...headers, 'Content-Type': 'application/json'}
+                  : headers,
+              body: completionId != null
+                  ? jsonEncode({'id': completionId})
+                  : null,
+            )
             .timeout(const Duration(seconds: 2));
       }
     } catch (_) {}
@@ -86,6 +100,10 @@ class LocalLlmContentGenerator implements ContentGenerator {
 
   @override
   void dispose() {
+    // Close any in-flight streaming connection so it doesn't leak past disposal.
+    _cancelled = true;
+    _activeClient?.close();
+    _activeClient = null;
     _a2uiMessageController.close();
     _textResponseController.close();
     _errorController.close();
@@ -99,8 +117,12 @@ class LocalLlmContentGenerator implements ContentGenerator {
     A2UiClientCapabilities? clientCapabilities,
     Iterable<ChatMessage>? history,
   }) async {
+    // Guard against re-entrancy: a second send while one is already streaming
+    // would overwrite _activeClient and interleave writes into _messages.
+    if (_isProcessing.value) return;
     _isProcessing.value = true;
     _cancelled = false;
+    _activeCompletionId = null;
     try {
       final String? llmServiceUrl = MainApp.llmServiceUrl.valueOrNull;
       if (llmServiceUrl == null || llmServiceUrl.isEmpty) {
@@ -143,6 +165,9 @@ class LocalLlmContentGenerator implements ContentGenerator {
         Uri.parse('$llmServiceUrl/v1/chat/completions'),
       );
       request.headers['Content-Type'] = 'application/json; charset=UTF-8';
+      request.headers.addAll(
+        aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+      );
       request.body = jsonEncode({
         'model': model ?? '',
         if (modelPath != null && modelPath!.isNotEmpty) 'model_path': modelPath,
@@ -161,8 +186,14 @@ class LocalLlmContentGenerator implements ContentGenerator {
 
         if (streamedResponse.statusCode != 200) {
           final body = await streamedResponse.stream.bytesToString();
+          // 409 means the server's single generation slot is taken. The UI
+          // already guards this via isProcessing, so reaching it means two
+          // senders raced — say so plainly rather than dumping the JSON body.
           _errorController.add(ContentGeneratorError(
-            'Failed to get response: ${streamedResponse.statusCode} — $body',
+            streamedResponse.statusCode == 409
+                ? 'The model is already generating a response. '
+                    'Wait for it to finish, or press stop.'
+                : 'Failed to get response: ${streamedResponse.statusCode} — $body',
             StackTrace.current,
           ));
           return;
@@ -182,6 +213,7 @@ class LocalLlmContentGenerator implements ContentGenerator {
             try {
               final parsed = jsonDecode(data) as Map<String, dynamic>;
               lastResponseModel ??= parsed['model'] as String?;
+              _activeCompletionId ??= parsed['id'] as String?;
               final choices = parsed['choices'] as List?;
               if (choices != null && choices.isNotEmpty) {
                 final delta =

@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/provider.dart';
+import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -11,9 +15,11 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  final AppLogger logger = AppLogger(null);
   final Map<String, TextEditingController> _clientIdControllers = {};
   final Map<String, TextEditingController> _clientSecretControllers = {};
   final Map<String, TextEditingController> _apiKeyControllers = {};
+  final Map<String, Timer?> _debounceTimers = {};
   bool _isLoading = true;
 
   final List<String> _supportedProviders = [
@@ -38,6 +44,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
+    for (final timer in _debounceTimers.values) {
+      timer?.cancel();
+    }
     for (final controller in _clientIdControllers.values) {
       controller.dispose();
     }
@@ -62,8 +71,17 @@ class _SettingsPageState extends State<SettingsPage> {
       if (rows.isNotEmpty) {
         final provider = Provider.fromDbMap(rows.first);
         _clientIdControllers[service]?.text = provider.clientId ?? '';
-        _clientSecretControllers[service]?.text = provider.clientSecret ?? '';
-        _apiKeyControllers[service]?.text = provider.apiKey ?? '';
+        // Decrypt the stored secrets for display (AUDIT M2 phase 3/4). If the
+        // vault is locked, leave the fields blank rather than crash the settings
+        // page — this is a display load, not a secret being emitted anywhere.
+        try {
+          _clientSecretControllers[service]?.text =
+              CredentialCodec.decrypt(provider.clientSecret) ?? '';
+          _apiKeyControllers[service]?.text =
+              CredentialCodec.decrypt(provider.apiKey) ?? '';
+        } catch (e) {
+          logger.e('Could not decrypt stored provider secret for $service: $e');
+        }
       }
     }
 
@@ -72,26 +90,61 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
+  void _onFieldChanged(String service) {
+    _debounceTimers[service]?.cancel();
+    _debounceTimers[service] = Timer(
+      const Duration(milliseconds: 600),
+      () => _saveProvider(service),
+    );
+  }
+
   Future<void> _saveProvider(String service) async {
+    // When the vault is locked, _loadProviders left the secret fields blank
+    // (it could not decrypt them). Saving now would write those blanks over
+    // the stored ciphertext — encrypt() passes empty strings through — and the
+    // credential would be gone with nothing reported. Editing the Client ID
+    // alone is enough to trigger it, because this writes all three columns.
+    if (!CredentialCodec.isUnlocked) {
+      logger.w(
+        'Vault is locked; not saving $service — the stored secrets would be '
+        'overwritten with blanks.',
+      );
+      _showMessage('Unlock required before provider settings can be saved');
+      return;
+    }
+
     final clientId = _clientIdControllers[service]?.text.trim() ?? '';
     final clientSecret = _clientSecretControllers[service]?.text.trim() ?? '';
     final apiKey = _apiKeyControllers[service]?.text.trim() ?? '';
 
-    await DatabaseManager.instance.database!.execute(
-      'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
-      'VALUES (?, ?, ?, ?, \'collection\') '
-      'ON CONFLICT(service) DO UPDATE SET '
-      'client_id = excluded.client_id, '
-      'client_secret = excluded.client_secret, '
-      'api_key = excluded.api_key',
-      [service, clientId, clientSecret, apiKey],
-    );
-
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Saved $service configuration')));
+    try {
+      await DatabaseManager.instance.database!.execute(
+        'INSERT INTO providers (service, client_id, client_secret, api_key, type) '
+        'VALUES (?, ?, ?, ?, \'collection\') '
+        'ON CONFLICT(service) DO UPDATE SET '
+        'client_id = excluded.client_id, '
+        'client_secret = excluded.client_secret, '
+        'api_key = excluded.api_key',
+        [
+          service,
+          clientId,
+          CredentialCodec.encrypt(clientSecret),
+          CredentialCodec.encrypt(apiKey),
+        ],
+      );
+    } catch (e) {
+      // Runs from an un-awaited debounce Timer, so anything escaping here is
+      // an unhandled async error the user never sees.
+      logger.e('Failed to save provider $service: $e');
+      _showMessage('Could not save $service settings');
     }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -148,8 +201,42 @@ class _SettingsPageState extends State<SettingsPage> {
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
+            if (service == 'google') ...[
+              const Text(
+                'To connect to Google services, you must provide your own OAuth Client ID and Client Secret. Ensure your OAuth consent screen is configured with the following scopes:\n'
+                '• https://www.googleapis.com/auth/userinfo.email\n'
+                '• https://www.googleapis.com/auth/userinfo.profile\n'
+                '• https://www.googleapis.com/auth/drive\n'
+                '• https://www.googleapis.com/auth/user.emails.read\n'
+                '• https://www.googleapis.com/auth/gmail.readonly\n\n'
+                'Note: Ensure that the Google People API, Google Drive API, and Gmail API are enabled in your Google Cloud Console project.',
+                style: TextStyle(fontSize: 14, height: 1.4),
+              ),
+              const SizedBox(height: 8),
+              Semantics(
+                link: true,
+                child: InkWell(
+                  onTap:
+                      () => launchUrl(
+                        Uri.parse(
+                          'https://console.cloud.google.com/apis/credentials',
+                        ),
+                      ),
+                  child: const Text(
+                    'Get Credentials from Google Cloud Console',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.blue,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             TextField(
               controller: _clientIdControllers[service],
+              onChanged: (val) => _onFieldChanged(service),
               decoration: const InputDecoration(
                 labelText: 'Client ID',
                 border: OutlineInputBorder(),
@@ -158,29 +245,25 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 12),
             TextField(
               controller: _clientSecretControllers[service],
+              onChanged: (val) => _onFieldChanged(service),
               decoration: const InputDecoration(
                 labelText: 'Client Secret',
                 border: OutlineInputBorder(),
               ),
               obscureText: true,
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _apiKeyControllers[service],
-              decoration: const InputDecoration(
-                labelText: 'API Key (Optional)',
-                border: OutlineInputBorder(),
+            if (service != 'google') ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _apiKeyControllers[service],
+                onChanged: (val) => _onFieldChanged(service),
+                decoration: const InputDecoration(
+                  labelText: 'API Key (Optional)',
+                  border: OutlineInputBorder(),
+                ),
+                obscureText: true,
               ),
-              obscureText: true,
-            ),
-            const SizedBox(height: 16),
-            Align(
-              alignment: Alignment.centerRight,
-              child: ElevatedButton(
-                onPressed: () => _saveProvider(service),
-                child: const Text('Save'),
-              ),
-            ),
+            ],
           ],
         ),
       ),

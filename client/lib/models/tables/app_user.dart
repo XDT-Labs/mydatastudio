@@ -7,6 +7,11 @@ class AppUser {
   String? privateKey;
   String? publicKey;
 
+  /// Transient, in-memory only (never in [toDbMap], never persisted): the
+  /// plaintext password entered during setup, used once to create the credential
+  /// vault at setup completion (AUDIT M2). Cleared immediately after.
+  String? plaintextPassword;
+
   AppUser({
     required this.id,
     required this.name,
@@ -15,6 +20,7 @@ class AppUser {
     required this.localStoragePath,
     this.privateKey,
     this.publicKey,
+    this.plaintextPassword,
   });
 
   factory AppUser.fromDbMap(Map<String, dynamic> map) {

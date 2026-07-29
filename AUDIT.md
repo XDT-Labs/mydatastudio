@@ -1,0 +1,393 @@
+# Application Audit — My Data Studio Desktop
+
+> Comprehensive audit covering security, reliability, concurrency, accessibility, UI
+> consistency, and module completeness. Findings are grouped by severity with checkboxes
+> so work can be tracked across multiple sessions.
+>
+> **How to use this file:** Each finding has a `- [ ]` checkbox. Tick it when fixed, and
+> add a note (commit SHA / date) under the finding. Nothing here has been modified in the
+> codebase yet — this is a report only.
+
+**Audit date:** 2026-07-10
+**Branch:** `claude/audit-application-6aa50c`
+
+---
+
+## Scope reviewed
+
+- **Python AI server (`aiserver/`)** end-to-end: routes, global state, utils (downloads/file I/O), PST parser, Pydantic models.
+- **Flutter client security surface:** OAuth managers, encryption helper, credential storage, subprocess (`PythonManager`), DB layer.
+- **AI-chat streaming flow** (client `LocalLlmContentGenerator` ⇄ server SSE).
+- **Scanners** (isolate concurrency, dedup).
+- **UI / accessibility** across the five feature modules: aichat, email, files, photos, social.
+
+**Method:** Traced the two runtime components and their trust boundary (Flutter ⇄ localhost HTTP) end-to-end. No code was modified.
+
+---
+
+## Overall posture
+
+The **path-traversal defenses on model loading/deletion are genuinely good** (`_assert_within_models_dir`, `_safe_repo_path`, tar-member validation) and **all SQL is parameterized** (no injection found — every raw query uses `?` placeholders). The real weaknesses are:
+
+1. The localhost server has **no authentication** while exposing file-read and file-write primitives.
+2. **Third-party credentials are stored in plaintext** (OAuth refresh tokens, cloud API keys, OAuth client secrets).
+3. A **chat double-submit race** via the Enter key corrupts conversation state.
+
+Accessibility was essentially unimplemented at audit time (zero `Semantics` widgets) — since remediated; see M4. Two modules (social, photos) are stubs.
+
+> **Note:** items 1–3 above describe the posture **as originally audited (2026-07-10)**. All three are now fixed (H1, M2, M3); see the individual findings and the release recommendation for current state.
+
+---
+
+## Findings index
+
+| ID | Severity | Category | Title |
+|----|----------|----------|-------|
+| H1 | High | Security | Local AI server exposes file read/write with no authentication |
+| H2 | High | Security | Arbitrary local file read via `/util/thumbnail` |
+| M1 | Medium | Security | Arbitrary directory creation / file write via `/util/import/pst` |
+| M2 | Medium | Security | Third-party credentials stored in plaintext SQLite |
+| M3 | Medium | Race Condition | Chat double-submit race via the Enter key |
+| M4 | Medium | Accessibility | No screen-reader / semantic layer |
+| L1 | Low | Security | Exception text leaked to client (thumbnail) |
+| L2 | Low | Race Condition | Global stop flag is process-wide |
+| L3 | Low | Reliability | Single global `llm_instance`, not concurrency-safe |
+| L4 | Low | Reliability | PID-file kill can target a reused PID |
+| L5 | Low | Reliability | `dispose()` doesn't cancel in-flight request |
+| I1 | Info | Visual | Hardcoded colors bypass the theme |
+| I2 | Info | Security | CORS `allow_headers=["*"]` broader than needed |
+| I3 | Info | Reliability | Stale `//todo` env wiring in PythonManager |
+
+---
+
+## HIGH
+
+### - [x] H1 — Local AI server exposes file read/write with no authentication
+- **Category:** Security · **Confidence:** Confirmed
+- **Location:** `aiserver/src/aichat/main.py:126-158` (no auth dependency on any route); binds `127.0.0.1:0` at `main.py:202`
+- **Issue:** The server accepts any request to `127.0.0.1:<port>` with no token, API key, or origin enforcement for non-browser clients. CORS (`allow_origins` localhost) only constrains browsers; any other local process that discovers the port has full access.
+- **Impact:** Combined with H2/M1, any local process (or malware running as the user) can read arbitrary image files and write files to arbitrary directories through this server. The port is discoverable (printed to stderr; any process can scan localhost).
+- **Evidence:** No `Depends(...)` auth guard anywhere in `main.py`; `HF_TOKEN`/`GOOGLE_API_KEY` are passed empty and the server trusts request bodies fully.
+- **Recommended fix:** Generate a random bearer token at spawn time, pass it to the subprocess via env (e.g. `AISERVER_TOKEN`), require it on every route via a FastAPI dependency, and have the Flutter client attach it (`python_manager.dart` env map + `local_llm_content_generator.dart` headers). Single highest-leverage fix — closes H2/M1's exploitability.
+- **Notes:** DONE 2026-07-10. Server: new `aiserver/src/aichat/auth.py` (`require_token` dependency, constant-time compare, disabled when `AISERVER_TOKEN` unset for dev/tests), applied app-wide via `dependencies=[Depends(require_token)]` in `main.py`. Client: `PythonManager` generates 32-byte CSPRNG hex token, passes it via `AISERVER_TOKEN` env, and broadcasts it on `MainApp.llmServiceToken`; a shared `aiServerAuthHeaders(token)` helper (main.dart) attaches `Authorization: Bearer` at every call site — chat completions/stop, embeddings, model status/download/delete, thumbnail, and PST import. Worker isolates (embedding, local-file scan, PST) receive the token through their spawn args / control messages the same way they already receive the URL. Added `tests/test_auth.py` (6 passing). `flutter analyze` clean on all touched Dart files (only pre-existing lints remain). This shrinks H2/M1 exposure from "any local process" to "only the paired client" — but does **not** by itself fix the path-traversal primitives (H2/M1 still open).
+
+### - [x] H2 — Arbitrary local file read via `/util/thumbnail`
+- **Category:** Security · **Confidence:** Confirmed
+- **Location:** `aiserver/src/aichat/routes.py:683-709`
+- **Issue:** `request.file_path` is passed straight to `os.path.exists` / `Image.open` / `rawpy.imread` with no restriction to an allowed directory. Returns the image base64-encoded.
+- **Impact:** Any caller (see H1) can exfiltrate the contents of any image file the app user can read (`~/Pictures`, screenshots, other apps' caches).
+- **Reproduction:** `POST /util/thumbnail {"file_path":"/Users/<user>/some/private.png","width":9999,"height":9999}` → response `thumbnail` field is the rendered file.
+- **Recommended fix:** Constrain `file_path` to the configured collection/storage roots via the same `realpath` + `commonpath` pattern already used in `_assert_within_models_dir` (`routes.py:639-646`).
+- **Notes:** DONE 2026-07-22. `generate_thumbnail` now confines `file_path` (via new `_assert_within_roots`, which realpaths first so symlink escapes are caught, and requires a trailing `os.sep` so `/a/b` can't be escaped via `/a/bc`) to the union of `resolve_data_roots()` (app-support + storage/database from `config.json` + models dir — all server-derived) **and** a client-declared `allowed_root`. The local-file scanner now passes the collection `rootPath` as `allowed_root` (threaded `local_file_isolate → ThumbnailGenerator.pathImageToBase64 → request body`), so in-place external collections (e.g. `~/Pictures`) still get RAW thumbnails with **no regression**. Tests: `tests/test_path_confinement.py` (inside/outside/sibling-prefix/symlink/empty-roots). **Interim caveat (now moot):** the `allowed_root` confinement was a client-supplied band-aid. **Superseded 2026-07-25** by the thumbnail-cache refactor: `/util/thumbnail` now takes image **bytes** (`image_base64`), not a path, so it can't read arbitrary files at all. The `allowed_root` field and the `_assert_within_roots` call in `generate_thumbnail` are removed. H2 is fully closed.
+
+---
+
+## MEDIUM
+
+### - [x] M1 — Arbitrary directory creation / file write via `/util/import/pst`
+- **Category:** Security · **Confidence:** Confirmed
+- **Location:** `aiserver/src/aichat/routes.py:712-731`; writes at `aiserver/src/aichat/pst_parser.py:310-335`
+- **Issue:** `output_dir` is caller-controlled and unrestricted. `os.makedirs(attachment_folder, exist_ok=True)` (`pst_parser.py:311`) runs **before** the containment check, and `folder_path` derives from attacker-controllable PST folder names. The final write is guarded by `real_path.startswith(real_output)` (line 328), but `startswith` is a prefix test (`/a/b` matches `/a/bc`) and the directory is created regardless of that check.
+- **Impact:** A caller can create directories anywhere the process can write; a crafted PST combined with an attacker-chosen `output_dir` can write attachment files outside the intended tree.
+- **Recommended fix:** Restrict `output_dir` to an allowed base (as in H2); apply the containment check to `attachment_folder` **before** `makedirs`; replace `startswith(base)` with `startswith(base + os.sep)` (already done correctly in `_safe_repo_path` in `utils.py` — reuse it).
+- **Notes:** DONE 2026-07-22. Three fixes: (1) `import_pst` now confines `output_dir` to `resolve_data_roots()` (server-derived app-support + storage/database dirs) via `_assert_within_roots` — strong, no client trust needed, and PST output legitimately lives under `<storage>/files/email/` so no regression. (2) In `pst_parser.py` the `attachment_folder` containment check now runs **before** `os.makedirs` (a hostile PST folder name that would escape `output_dir` skips creation entirely). (3) Both the folder and per-file checks now use `startswith(real_output + os.sep)` instead of a bare prefix. Covered by `tests/test_path_confinement.py` (`_assert_within_roots` + `resolve_data_roots` from `config.json`).
+
+### - [x] M2 — Third-party credentials stored in plaintext SQLite  ✅ FIXED (M2 phases 1–4 landed)
+- **Category:** Security · **Confidence:** Confirmed
+- **Location:**
+  - OAuth tokens: `client/lib/database_manager.dart:833-834` (`access_token`, `refresh_token`), written by `client/lib/repositories/collection_repository.dart:48-90`.
+  - Cloud API keys + OAuth client secrets: `providers` table (`client/lib/database_manager.dart:947`), written by `client/lib/modules/aichat/pages/aichat_models_settings_page.dart:154-189`.
+  - DB opened with no SQLCipher/encryption: `client/lib/database_manager.dart:234-267`.
+- **Issue:** Long-lived Gmail/Drive/Outlook/Yahoo **refresh tokens**, cloud LLM **API keys** (Claude/OpenAI/Gemini/Grok/HuggingFace), and OAuth **client secrets** are all persisted in cleartext. `flutter_secure_storage` (Keychain) is used only for the app's own login secret (`client/lib/widgets/login_form.dart:35`), not for these.
+- **Impact:** Any process running as the user, a Time Machine/backup, or a synced folder exposes credentials that grant standing access to the user's email and cloud accounts. Directly undercuts the app's "local-first / private" positioning.
+- **Recommended fix:** Also affects the RSA `private.pem` at `<storage>/keys/private.pem`, which is stored in cleartext with the same exposure. Chosen approach: **app-level envelope encryption with a password-protected vault file in the storage dir** (random DEK wrapped by a password-derived KEK; encrypts the credentials + the private key at rest) — **no OS keychain**, for identical cross-platform behaviour and folder portability. See the **"Credential encryption (M2) — design record"** section below for the full rationale.
+- **Notes:** **All four phases landed 2026-07-22/23 — M2 is complete.** Design settled 2026-07-22. SQLCipher rejected (resqlite has no SQLCipher support; the Python server reads the DB via `model_registry.py`; full-DB crypto would encrypt GBs of non-secret embeddings to protect KBs of secrets). OS keychain rejected (not portable, inconsistent on Linux, needs platform channels in isolates). Chosen: pure-Dart file vault (`pointycastle` Argon2id + AES-256-GCM), DEK passed into isolates like the H1 token. See plan below. **Phase 1 landed 2026-07-22:** standalone `client/lib/services/secure_vault.dart` (DEK/KEK envelope, `create`/`unlock`/`rewrap`/`fromDek`, `encryptString`/`decryptString`) + `client/test/secure_vault_test.dart` (13 passing: round-trip, unique nonce, tamper-detection, wrong-password, JSON persistence, no-plaintext-key, password-change-preserves-data, isolate hand-off). **Phase 2 landed 2026-07-22:** `client/lib/services/vault_manager.dart` (owns the unlocked vault + `<storage>/keys/vault.json`; `createAndUnlock`/`unlock`/`changePassword`/`lock`; DEK exposed for isolates) + `vault_manager_test.dart` (9 passing). **Phase 2b landed 2026-07-22:** `login_form.dart` unlocks the vault from the plaintext login password before entering the app (best-effort, never blocks login). **Phase 2c landed 2026-07-22:** (a) **"remember me" removed** — the password is never persisted; the user types it on every launch to unlock the vault (removed the `flutter_secure_storage` password read/write in `login_form.dart` + the logout write in `collapsing_drawer.dart`, which now calls `VaultManager.lock()`; dropped the `securePassword`/`secureRememberMe` constants). (b) **Vault created at setup** so a fresh install is fully set up: the plaintext password is carried in a transient `AppUser.plaintextPassword` (in-memory only, never in `toDbMap`) from `setup_step1` to `setup_stepper_form` completion, which calls `createAndUnlock` and then drops it. Decisions recorded: **password-entry-only unlock, no keychain**; **no migration** (0 existing users — fresh installs only, secrets encrypted from first write); **no change-password flow exists** — if one is added it MUST call `VaultManager.changePassword`. **Phase 3 landed 2026-07-23:** `client/lib/services/credential_codec.dart` — the encrypt-on-write / decrypt-on-read boundary (`CredentialCodec.encrypt`/`decrypt`, ambient key: `VaultManager.instance.vault` on the main isolate, or a DEK-installed `SecureVault` on workers via `installIsolateVault`). Null/empty pass through, writes are idempotent, and there is **no plaintext fallback** — a locked vault or a non-`v1:` stored value throws (`VaultLockedException` / `CredentialFormatException`) rather than emitting ciphertext/plaintext. `credential_codec_test.dart` (8 passing). Applied to: `collections.access/refresh/id_token` (encrypt in `CollectionRepository` add/update; decrypt in its reads + `DatabaseRepository.getCollection`); `providers.client_secret`/`api_key` (encrypt at all writers — the three `*_configure_view.dart`, `settings.dart`, `aichat_models_settings_page.dart`; decrypt at readers — `LoginProviders.clientSecret`, `aichat_page.dart` api_key, HF token). Display-load and boot-time (model-download) reads degrade to blank on a locked vault; functional paths fail loud. **Phase 4 landed 2026-07-23:** DEK threaded into every worker isolate that reads/writes a collection or refreshes a token — short-lived scanners (`gmail`, `outlook` IMAP, `outlook` PST, `yahoo`, `google_file_scanner`) via `vaultDek` spawn args + `installIsolateVault` at worker entry; the long-lived `embedding_isolate` via a control-port push on `VaultManager.unlocked` (it spawns at boot before login). `local_file_isolate` left untouched (token-less collections). `keys/private.pem` now encrypted at rest: `UserRepository.saveUser` encrypts / `user()` decrypts (public key stays cleartext); setup creates the vault **before** `saveUser`, and login unlocks the vault **before** loading the user, so the DEK is present at the read/write. **Decisions:** no migration (fresh installs only — a legacy cleartext secret/pem is rejected, not read as plaintext); the `login_form` unlock stays best-effort but now precedes the user load; a corrupt/wrong vault fails login loudly (its DB tokens would be unreadable anyway). `flutter analyze` clean (only pre-existing infos); `flutter test` 319 passing, 1 pre-existing unrelated failure (`widget_test` SetupPage text, also fails on the foundation branch).
+
+**Read-site map (gathered 2026-07-22 — the crux of Phase 3/4).** Which secrets are read where determines that encryption is *inseparable* from isolate DEK-threading:
+  - `providers.api_key` — **main isolate only** (`aichat_page.dart:520` → `LocalLlmContentGenerator.apiKey`). Encryptable without isolates.
+  - `providers.client_secret` — **read in isolates**: `google_auth_service.refreshTokens` (`google_auth_service.dart:96`) runs the token-refresh path inside scanner isolates; also main-isolate OAuth (`desktop_oauth_manager.dart:35`, the `*_configure_view.dart` writers, `new_email_page.dart`, `new_file_collection_page.dart`). Writer: `google_drive_configure_view.dart:56`, `outlook_configure_view.dart:55`, `gmail_configure_view.dart` → `INSERT INTO providers`.
+  - `client_id` — not secret (public OAuth client id); leave plaintext.
+  - `collections.access_token/refresh_token/id_token` — **read in isolates**: `embedding_isolate.dart:280-292` (`_processGDriveFile`), `google_file_scanner.dart:112-113/297`, `gmail_scanner_isolate.dart:147`, plus main-isolate services. Write: `collection_repository.dart:48-90`; created from OAuth in `login_providers.dart:238/358/522`.
+  - **Implication:** the DEK must be passed into every scanner/embedding isolate spawn (same pattern as the H1 aiserver token), and a `SecureVault.fromDek(dek)` used to decrypt just-loaded token/secret fields. In-memory model objects hold plaintext; only DB columns hold `v1:` ciphertext. **No plaintext fallback** — if the vault is locked in a context that needs a secret, fail the operation loudly rather than read/emit ciphertext. Suggested boundary: a small `CredentialCodec` used by both the main-isolate repositories (via `VaultManager.instance.vault`) and isolate code (via a `SecureVault` built from the passed-in DEK).
+
+### - [x] M3 — Chat double-submit race via the Enter key  ✅ FIXED (quick-win pass)
+- **Category:** Race Condition / Reliability · **Confidence:** Confirmed
+- **Location:** `client/lib/modules/aichat/pages/aichat_page.dart:528-535` (`_handleKeyEvent`); guard `_canSend` at `aichat_page.dart:94-95`; no re-entrancy guard in `client/lib/modules/aichat/services/local_llm_content_generator.dart:96-104`.
+- **Issue:** The on-screen button correctly swaps to a Stop button while streaming, but the Enter key handler calls `_sendMessage` unconditionally. `_canSend` checks only that text/attachments exist — **not** whether a response is already streaming. `sendRequest` has no guard: a second call overwrites `_activeClient`, appends a second user message to `_messages` mid-stream, and both streams write to the same controllers.
+- **Impact:** Pressing Enter (or holding it) during generation corrupts conversation history, orphans the first HTTP connection, and produces interleaved/garbled output. The persisted conversation and in-memory `_messages` diverge.
+- **Reproduction:** Send a prompt that yields a long response; while it streams, type in the field and press Enter.
+- **Recommended fix:** Gate `_handleKeyEvent` on `!_contentGenerator.isProcessing.value && _canSend`, and add an early-return guard at the top of `sendRequest` (`if (_isProcessing.value) return;`).
+- **Notes:** Fixed — `_handleKeyEvent` now checks `_canSend && !_contentGenerator.isProcessing.value` (`aichat_page.dart`), and `sendRequest` returns early if already processing (`local_llm_content_generator.dart`). `flutter analyze` clean.
+
+### - [x] M4 — No screen-reader / semantic layer  ✅ IMPLEMENTATION COMPLETE (live VoiceOver pass deferred)
+- **Category:** Accessibility · **Confidence:** Confirmed
+- **Location:** App-wide — `grep` for `Semantics(` returns **0** matches across `client/lib/`. Send control is a bare `GestureDetector` at `client/lib/modules/aichat/pages/aichat_page.dart:1055-1072`.
+- **Issue:** Icon-only `IconButton`s (14) rely on tooltips (18) that VoiceOver reads inconsistently; the primary send/stop control is a `GestureDetector` with no accessible name, no focus semantics, and a 30×30 hit target (above the **24×24** minimum of WCAG 2.2 **AA** 2.5.8, but below the **44×44** of **AAA** 2.5.5 — the size this app adopts for primary controls). Custom controls are invisible to macOS VoiceOver.
+- **Impact:** Not operable via assistive technology; fails WCAG 2.2 AA — 4.1.2 (Name/Role/Value), 2.5.8 (Target Size, **24×24** at AA), 2.4.7 (Focus Visible).
+- **Recommended fix:** Replace custom tap targets with `IconButton`/`InkWell` wrapped in `Semantics(button: true, label: ...)`, enforce the ≥24×24 AA target floor (44×44 for primary controls, the AAA figure), and add `Semantics` labels to icon-only actions.
+- **Notes:** **Pass 1 (2026-07-23) — interactive controls, not yet complete.** Focused on the headline gaps: named/roled the custom tap targets and closed the icon-only-button label holes.
+  - **aichat send/stop control** (`aichat_page.dart`) — the audit's headline `GestureDetector`: now wrapped in `Semantics(button: true, enabled: _canSend, label: 'Send message' / 'Stop generating')` and given a **44×44** hit target (`HitTestBehavior.opaque` + a centered 30px visual circle, so appearance is unchanged). The bottom input row grows to 44px tall.
+  - **Icon-only `IconButton`s lacking any accessible name** — added `tooltip:` (which VoiceOver reads as the name): `aichat_page.dart` attach-files (+), `similar_files_tab.dart` close-preview, `new_email_page.dart` browse, `pdf_preview_widget.dart` prev/next page. (Audit-wide sweep found most IconButtons already had tooltips — these four were the only gaps.)
+  - **Custom `GestureDetector` controls given button role/label** via `Semantics`: delete-conversation `X` (`aichat_drawer.dart`, icon-only → `label: 'Delete conversation'`), new-conversation button (`aichat_drawer.dart`, `enabled: !streaming`), social nav tile (`social_drawer.dart`, `selected: isSelected`), accordion header (`accordion_header_widget.dart`, `expanded: isExpanded`), email attachment thumbnail (`attachment_thumbnail_widget.dart`, `label: 'Open attachment <name>'`).
+  - **`similar_files_tab.dart`** — the three custom `GestureDetector`s: preview thumbnail (`label: 'Preview <name>'`) and the icon-only go-to-folder / delete actions (`button: true` + labels, `Tooltip` kept for pointer users). Plus the close-preview `IconButton` got a `tooltip`.
+  - **Expand toggles + external links.** `email_drawer.dart` "All Folders" `InkWell` → `Semantics(button: true, expanded: _showAllFolders)` (consistent with the accordion). The four "Get Credentials from …" `InkWell` text links (`google_drive_configure_view`, `gmail_configure_view`, `outlook_configure_view`, `settings.dart`) → `Semantics(link: true)`.
+  - **Verification:** `dart format` + `flutter analyze lib` — 19 issues before and after (all pre-existing; **zero** new). `flutter test` — 320 passing, 1 pre-existing unrelated failure (`widget_test` SetupPage, confirmed failing on the base branch with these changes stashed). No VoiceOver run yet.
+  - **`_ConversationTile`** (`aichat_drawer.dart`) — the nested-control case, now done (2026-07-23 pass 2): the tile's select `GestureDetector` is wrapped in `Semantics(button: true, selected: isActive, label: '<name>, <date>')`, and the title/date `Column` is wrapped in `ExcludeSemantics` so the name isn't announced twice; the delete `X` keeps its own separate `Semantics(button, label: 'Delete conversation')` node (not swallowed). Two distinct buttons announced per row.
+  - **Left as framework-managed (intentional):** `file_table.dart` / `email_table.dart` rows use `DataTable`/`DataCell` and their icon actions are real `IconButton`s with tooltips — Flutter supplies row/cell/button semantics, so no manual `Semantics` was added. `login.dart`'s background `GestureDetector` is a keyboard-dismiss gesture, not a control — left unwrapped.
+  - **`photos` module assessed (no M4 change):** `photo_card.dart` is **non-interactive** (no `onTap` anywhere; the grid in `photos_app.dart` doesn't wrap cards in a tap target) and already shows a visible filename caption that AT reads — so there is no interactive-control gap. Separately, the two `photos_app.dart` AppBar `IconButton`s have **mismatched** tooltips (the `filter_list` icon is labeled "Download File(s)", the `search` icon "Delete File(s)", while their handlers say "show filter"/"show search") — a wrong-accessible-name bug, but it's ambiguous whether the icon or the tooltip is the placeholder in this stub module, so it's deferred to the **"bring photos to parity"** module task rather than guessed at here.
+  - **Target-size pass (2026-07-23 pass 3).** Enlarged the sub-24px hit targets to **≥24×24** (WCAG 2.5.8 AA) while keeping icon visuals unchanged — transparent hit-area expansion only: delete-conversation `X` and the two similar-files folder/delete icons (14px icons) now sit in 24×24 opaque tap areas (`HitTestBehavior.opaque` + a min-24 `Container`/`SizedBox`+`Center`); the three `IconButton`s that used `constraints: BoxConstraints()` (~20px — aichat attach, pdf prev/next) now use `BoxConstraints(minWidth: 24, minHeight: 24)`. (The send/stop control was already at 44×44 in pass 1.) `flutter analyze lib` clean (19 pre-existing, zero new); `flutter test` 320 passing, 1 pre-existing failure.
+  - **Keyboard operability + focus-visible (2026-07-25 pass 4) — the button refactor.** Added a reusable `AccessibleTap` widget (`client/lib/widgets/accessible_tap.dart`) that replaces the `Semantics(button:true) + GestureDetector` pattern and supplies what a bare `GestureDetector` can't: keyboard focus + Enter/Space/NumpadEnter activation (**2.1.1**, via `FocusableActionDetector` with an explicit `ActivateIntent` shortcut/action map) and a keyboard-only focus ring (**2.4.7**, drawn as a 2px `colorScheme.primary` border via `Container.foregroundDecoration`, toggled by `onShowFocusHighlight` — so it appears on Tab focus, not mouse hover, and adds no layout shift). It carries the existing `Semantics` flags (`button`/`enabled`/`selected`/`expanded`/`label`), an optional pointer `tooltip`, and `mergeSemantics:false` for the one nested-control case. Deliberately **not** `InkWell`: no Material ink ripple, so every control looks identical to today until focused. Migrated all 8 custom controls (10 tap targets) from pass 1/3 to it: aichat send/stop (`aichat_page.dart`), new-conversation + delete-`X` + `_ConversationTile` select (`aichat_drawer.dart`, the tile uses `mergeSemantics:false` so its nested delete stays a separate node), social nav tile (`social_drawer.dart`), accordion header (`accordion_header_widget.dart`), email attachment thumbnail (`attachment_thumbnail_widget.dart`), and similar-files preview + go-to-folder + delete (`similar_files_tab.dart`, whose `Tooltip`s folded into the widget's `tooltip:` param). Container `margin`s were relocated to an outer `Padding` on four controls so the focus ring hugs the visible box. The `email_drawer.dart` "All Folders" toggle and the four "Get Credentials" links were already `InkWell`s (keyboard-focusable) so they needed no change. Verified: `flutter analyze` — 25 pre-existing info-lints, **zero** new (the only one in a touched file is social_drawer's long-standing `meta.dart` `unnecessary_import`, left per surgical-change rule); `flutter test` — 320 passing, 1 pre-existing unrelated failure (`widget_test` SetupPage), byte-for-byte the baseline.
+  - **Intentionally left as barrier-dismiss gestures (not controls):** `login.dart`'s background tap and `rx_files_page.dart:1232`'s lightbox scrim tap — both dismiss overlays rather than acting as labeled buttons (a modal scrim's keyboard affordance is Escape / the explicit close button), so neither was made a focusable control. Breadcrumb items in `rx_files_page.dart` use the third-party `BreadCrumbItem.onTap` (not an app `GestureDetector`) and are out of M4's scope.
+  - **Review-fix pass (2026-07-26).** Two follow-ups from PR review. (a) **The target floor moved into the widget:** `AccessibleTap` gained `minSize` (default **24**, the 2.5.8 AA figure — *not* 44, which is 2.5.5 AAA), applied as a minimum constraint on the focus-ring `Container`, so a future call site can't ship an undersized target by forgetting to wrap its child. It is a *floor*, not a size: verified a no-op on all 10 existing call sites (the smallest are already exactly 24; send/stop stay 44). The one exactly-duplicate hand-rolled `BoxConstraints(min 24)` on the delete-`X` was removed; the explicit `SizedBox`es stay (they double as `Center` wrappers / deliberate AAA targets). First tests for the widget: `client/test/widgets/accessible_tap_test.dart` (3 passing). (b) **`email_drawer.dart` "All Folders"** migrated from `Semantics + InkWell` to `AccessibleTap`, so no hand-rolled instance of the pattern remains in that file. Note the pass-4 claim that the `InkWell`s "needed no change" was *right about keyboard operability* (`InkWell` is focusable and already maps `ActivateIntent`) — what the migration actually buys is the strong 2px focus ring in place of the theme's subtle low-contrast `focusColor`. Accepted tradeoff: that toggle no longer ripples, while the `EmailFolderTileWidget` `ListTile`s beneath it still do. The four "Get Credentials" links were left as `Semantics(link: true) + InkWell` — they are links, not buttons, and `AccessibleTap` hard-codes `button: true`.
+  - **Still open (tracked elsewhere, not blocking M4):** (a) a live macOS **VoiceOver** pass to validate announcements + focus order — **descoped by request** for this round (needs the app running under assistive tech). This is the *only* outstanding M4 item; all code work is complete. (b) The mismatched photos AppBar tooltips — deferred to the **"bring photos to parity"** module task.
+
+---
+
+## LOW
+
+### - [x] L1 — Exception text leaked to client (thumbnail)  ✅ FIXED (quick-win pass)
+- **Category:** Security · **Confidence:** Confirmed
+- **Location:** `aiserver/src/aichat/routes.py:709`
+- **Issue:** Returns `detail=f"Failed to generate thumbnail: {e}"`, leaking filesystem paths / library internals. Other handlers correctly return generic messages.
+- **Recommended fix:** Return a generic message; log the detail server-side only. Make consistent with the other route handlers.
+- **Notes:** Fixed — `detail` is now `"Failed to generate thumbnail."`; the exception is still logged via `print(...)` server-side (`routes.py`).
+
+### - [x] L2 — Global stop flag is process-wide
+- **Category:** Race Condition · **Confidence:** Confirmed
+- **Location:** `aiserver/src/aichat/state.py:150-160`; used at `aiserver/src/aichat/routes.py:167` and `routes.py:452`.
+- **Issue:** A single `threading.Event`. `reset_stop()` fires at each stream start, and `request_stop()` sets it globally. A stop from one request halts all active streams; a new stream clears another's pending stop.
+- **Impact:** Low for a single-user desktop app, but latent if concurrent streams ever happen.
+- **Recommended fix:** Track stop state per request/generation id rather than a single global event.
+- **Notes:** DONE 2026-07-25. Replaced the single `_stop_event` with a per-generation registry in `state.py` (`_stop_events: dict[str, threading.Event]` under a `_stop_lock`): `register_stream(id)` / `unregister_stream(id)` / `is_stop_requested(id)` / `request_stop(id=None)`. Both stream paths in `routes.py` now register their completion id, check `is_stop_requested(id)`, and unregister in a `finally`; the local path stamps `chunk["id"] = stop_id` so the id the client sees matches the registry (the cloud path already used `completion_id`). `stop_generation` now reads an optional `{"id": ...}` from the body — a specific id stops just that stream, **no id stops all active streams** (backward-compatible with the old no-arg call, and with `reset_stop` gone a new stream can no longer clear another's pending stop). Client (`local_llm_content_generator.dart`) captures `parsed['id']` from the SSE chunks and sends it on `cancelStream()` so the stop is targeted. Tests: `tests/test_state.py::TestStopRegistry` (6 — isolation, no-cross-clear, stop-all, unregister). Verified: `pytest tests/` 12 pre-existing failures unchanged (byte-for-byte identical set before/after) + 6 new passing; `flutter analyze` clean on the touched Dart file.
+
+### - [x] L3 — Single global `llm_instance`, not concurrency-safe
+- **Category:** Reliability · **Confidence:** High Confidence
+- **Location:** `aiserver/src/aichat/routes.py:425-464`; state in `aiserver/src/aichat/state.py`.
+- **Issue:** `llama_cpp.Llama.create_chat_completion` is not safe for concurrent calls; streaming runs outside `model_lock`. Two concurrent chats to the same model would corrupt decoder state.
+- **Impact:** Single-window UI makes this unlikely today; would surface with multi-window or programmatic concurrent use.
+- **Recommended fix:** Serialize generation (per-model lock/queue) or pool instances if concurrency is desired.
+- **Notes:** DONE 2026-07-25. Added `generation_lock` (a `threading.Lock`, not the asyncio load locks — the streaming generator holds it off the event loop in a threadpool) + `get_generation_lock()` in `state.py`. The local streaming path now wraps the whole `create_chat_completion(stream=True)` loop in `with get_generation_lock():`, so only one stream runs on the shared model at a time; on client disconnect `StreamingResponse` closes the generator and the `with` releases the lock. The local non-streaming path now runs under the same lock via `asyncio.to_thread(_locked_completion)` — serializing it with any active stream **and** moving the previously event-loop-blocking call off the loop. Cloud (langchain) paths are stateless per call and are left unlocked. Lock ordering is safe: `generation_lock` is only ever acquired before the brief `_stop_lock`, never the reverse, so no deadlock with the L2 registry. Tests: `tests/test_state.py::TestGenerationLock` (singleton + a 3-thread mutual-exclusion test asserting max concurrency stays 1). Verified: `pytest tests/` failing set byte-for-byte identical to baseline (12 pre-existing) + 2 new passing; the pre-existing `test_chat_completion_llama_cpp_path` still fails for the same `Mock`-item-assignment reason (unchanged code path), confirming the `to_thread` change introduced no behavior regression.
+
+### - [x] L4 — PID-file kill can target a reused PID
+- **Category:** Reliability · **Confidence:** Needs Verification
+- **Location:** `client/lib/python_manager.dart:104-119`
+- **Issue:** `Process.killPid(oldPid, sigkill)` trusts a stale PID file; the OS may have recycled that PID to an unrelated process.
+- **Recommended fix:** Validate process identity before killing (e.g. check the process name/command), or only SIGKILL after a liveness + identity check.
+- **Notes:** DONE 2026-07-25. The PID file now stores `"<pid>\n<executablePath>"` (was PID-only); on the next launch, before `Process.killPid`, a new `_isAiserverProcess(pid, storedPath)` verifies identity via `ps -p <pid> -o command=` (macOS/Linux) or `tasklist /FI "PID eq <pid>"` (Windows) and only kills when the running command matches the **stored executable path** (strong identity), falling back to the `aiserver` basename so a legacy PID-only file still works. **Fails closed** — if identity can't be established (process gone, `ps`/`tasklist` error), it does **not** kill. Reader handles both the new two-line and legacy one-line formats; the writer and the shutdown-delete path are updated/unaffected. No unit test (the path spawns/inspects real OS processes and `python_manager_test.dart` only covers `urlRegex`); verified via `flutter analyze` (clean) and `flutter test` (320 passing, 1 pre-existing failure).
+
+### - [x] L5 — `dispose()` doesn't cancel in-flight request  ✅ FIXED (quick-win pass)
+- **Category:** Reliability · **Confidence:** Confirmed
+- **Location:** `client/lib/modules/aichat/services/local_llm_content_generator.dart:88-94`
+- **Issue:** Closes controllers but not `_activeClient`; navigating away mid-stream leaks the connection until the server finishes.
+- **Recommended fix:** Close `_activeClient` and optionally POST `/v1/chat/stop` in `dispose()`.
+- **Notes:** Fixed — `dispose()` now sets `_cancelled = true` and closes/nulls `_activeClient` before closing controllers (`local_llm_content_generator.dart`).
+
+---
+
+## INFORMATIONAL / VISUAL CONSISTENCY
+
+### - [x] I1 — Hardcoded colors bypass the theme  ✅ FIXED where it was a real bug (quick-win pass)
+- **Category:** Visual Consistency
+- **Location:** `client/lib/modules/aichat/pages/aichat_page.dart:1049,1068`; `client/lib/modules/files/widgets/file_collection_setup/coming_soon_tab_view.dart`; `client/lib/modules/photos/widgets/photo_card.dart`.
+- **Issue:** `Colors.black`, `Colors.grey.shade300` used directly instead of `Theme.of(context).colorScheme` tokens — render poorly / illegibly in dark mode.
+- **Recommended fix:** Swap literal colors for `colorScheme` tokens.
+- **Notes / scope correction after closer review:**
+  - **`coming_soon_tab_view.dart` — FIXED.** This renders on a normal themed surface; grey-on-dark was genuinely low-contrast. Now uses `colorScheme.onSurfaceVariant` (with 0.4 alpha for the icon).
+  - **`photo_card.dart` — NOT a bug, left as-is.** The `Colors.black` letterbox and white-on-`Colors.black26` caption are intentional image-presentation colors that must stay fixed regardless of app theme (they sit over arbitrary photo content). Swapping to theme tokens would *reduce* legibility.
+  - **`aichat_page.dart` send button — deliberately hardcoded-dark component, left as-is.** The whole page uses a fixed dark palette (`_sendEnabledBg`, `_mutedColor`, `Color(0xFF2C2C2E)`, etc.). The `Colors.black` icon is black-on-light-button by design; an isolated token swap risks an invisible icon. Retheming this page is a **separate, non-quick-win task** — tracked below.
+
+### - [x] I2 — CORS `allow_headers=["*"]` broader than needed
+- **Category:** Security
+- **Location:** `aiserver/src/aichat/main.py:138`
+- **Recommended fix:** Tighten allowed headers once auth (H1) lands.
+- **Notes:** DONE 2026-07-25. `allow_headers=["*"]` → `["Authorization", "Content-Type"]` — the only two headers the client sends to the aiserver (`Authorization: Bearer` from `aiServerAuthHeaders`, `Content-Type: application/json`). `allow_methods=["POST", "GET"]` left as-is (matches usage). **Context / scope note:** CORS is a *browser-only* mechanism, and our sole client is the native Flutter **desktop** app (no `Origin` header, no preflight), so `CORSMiddleware` never governs the real client — the actual gate is the H1 bearer token on a loopback-bound server (`uvicorn ... host="127.0.0.1"`). This change is therefore pure defense-in-depth with **zero regression risk** (no browser client exists; `docs_url`/`redoc_url` are disabled). Left `allow_origins` unchanged — note it is effectively vestigial (the entries lack a port, so they wouldn't match a real browser origin `scheme://host:PORT` on the random port); tightening/removing it is a separate, non-I2 decision. Verified: `pytest tests/` failing set byte-for-byte identical to baseline (12 pre-existing), no CORS tests exist to update.
+
+### - [x] I3 — Stale `//todo` env wiring in PythonManager  ✅ FIXED (quick-win pass)
+- **Category:** Reliability
+- **Location:** `client/lib/python_manager.dart:155-158`
+- **Issue:** `HF_TOKEN`/`GOOGLE_API_KEY` are passed empty; keys actually flow per-request. Dead env vars are misleading.
+- **Recommended fix:** Remove the unused env entries.
+- **Notes:** Fixed — removed both empty env entries, replaced with a comment pointing at the per-request key flow. Verified safe: the server reads `GOOGLE_API_KEY` only via `os.environ.get(...)` with an `or` fallback (`model_manager.py:37`), so empty-string vs absent is behaviorally identical.
+
+---
+
+## Missing / inconsistent functionality by module
+
+| Module | State | Gap |
+|--------|-------|-----|
+| **files** (52 files, ~8.8k LOC) | Mature | Google Drive + local FS work; other providers show `ComingSoonTabView` (`client/lib/modules/files/widgets/file_collection_setup/coming_soon_tab_view.dart`). |
+| **email** (35 files, ~6.8k LOC) | Mature | Gmail/Yahoo/Outlook/PST scanners present. Targeted PST-folder scanning **resolved won't-implement (by design)** — each PST is treated as a one-shot snapshot import, not re-synced; the effort went into import correctness instead (see the PST module-task entry below). |
+| **aichat** (5 files, ~2.7k LOC) | Functional | Works. Carried the M3 race and the M4 a11y gaps — both now fixed. |
+| **photos** (5 files, ~413 LOC) | Minimal | Basic list/card only; two `// TODO: disable if no files are checked` (`client/lib/modules/photos/photos_app.dart:68,78`); no album/dedup/search parity with files. |
+| **social** (5 files, ~531 LOC) | **Stub** | Facebook/Twitter/Instagram pages render a literal `Text("Facebook Page")` (`client/lib/modules/social/pages/facebook_page.dart:19-21`) — no ingestion, storage, or display. |
+
+### - [ ] Module task: implement the social module (Facebook / Twitter / Instagram)
+Currently placeholder pages only. Needs ingestion, storage (Drift tables), and display, ideally on the shared scanner base below.
+
+### - [ ] Module task: bring photos to parity with files
+Add album/dedup/search; resolve the two `TODO: disable if no files are checked` in `photos_app.dart`.
+
+### - [x] Module task: targeted PST-folder scanning — resolved WON'T-IMPLEMENT (by design)
+**Decision (2026-07-25):** not implemented, deliberately. The other scanners support targeted folder re-scans because their source is **live and mutable** and the app is the thing that discovers changes (new mail arrives on the server between scans). A `.pst` is a **local file the app does not own and does not watch**. Outlook can of course still write to it — a PST is not inherently immutable — so the decision is a *product* one: **each selected PST is treated as a one-shot snapshot**, imported whole at the moment the user picks it and never reconciled afterwards. There is no change feed to poll and no ownership of the file, so a targeted folder re-scan has nothing reliable to act on.
+
+Instead PST was made a clean **one-shot snapshot import** and the work went where it mattered — getting the single pass right (there is no re-sync safety net):
+- **Import actually runs once.** `new_email_page.dart` called `start(collection)` without `force`, and the isolate returns early when `!force` — so the only import path was a no-op. Now passes `force: true` (the sole import site).
+- **Parser hardened.** `pst_parser.py` guards the folder-level reads (`get_name`, `get_number_of_sub_messages`, `get_number_of_sub_folders`) and splits recursion into `_recurse_subfolders`, so one corrupt folder yields an error event and is still descended into instead of discarding its subtree. `walk()` ends with a `{"type":"summary", folders, emails, errors}` event. (`TestWalkResilience`, 5 tests, drives this over an in-memory fake tree — no real PST needed.)
+- **Honest completion.** The isolate counts errors, notes whether the summary arrived, wraps the stream in try/catch, and marks the collection `complete` only when the summary arrived AND nothing failed — otherwise `incomplete` (previously it always wrote `complete`, hiding truncated imports).
+- **Review-fix pass (2026-07-26).** Three follow-ups. (a) **A folder whose name couldn't be read was silently emptied:** the `except` around `get_name()` fell back to `"Root"`, which is in `WRAPPER_FOLDER_NAMES` — so the folder was treated as a transparent wrapper, which `return`s after recursing and therefore **skipped all of its own messages**. It now falls back to `UNREADABLE_FOLDER_NAME` (`"(unreadable folder)"`), deliberately absent from both name sets; the empty-name → `"Root"` path is unchanged, since the real PST root *should* be a wrapper. Two regression tests, one of them asserting the placeholder stays out of both sets. (b) **Every exit path now records a terminal status.** `missing_server_url`, a non-200, *and* a thrown `client.send` (connection refused) previously called `Isolate.exit` without touching `scanStatus`, leaving a brand-new collection at `pending` **forever** — there is no re-sync to correct it. The DB now opens before the request so all three write `incomplete`. (c) The parser summary's own `errors` count is folded into the `complete` decision as a cross-check alongside the isolate's tally.
+- **Re-scan affordances removed.** The folder Refresh icon (`email_page.dart`) and the account "Sync" menu item (`collection_tile_widget.dart` `showSync` / `email_drawer.dart`) are hidden for PST; the dead PST branch in `_syncAccount` was removed.
+- **File lifecycle confirmed:** no copy, no temp staging, no deletion. The picker returns the user's original path in place; the co-located Python subprocess reads it directly (no upload). The app is **not** App-Sandboxed (entitlements carry no `com.apple.security.app-sandbox`), so background read-in-place is fine.
+- **Re-import path:** delete the collection and re-select the file. There is intentionally no incremental update.
+
+### - [ ] Convergence: unify the scanner pattern across modules
+`email` and `files` each re-implement the same isolate-scanner + upsert + embedding pattern (`*_scanner_isolate.dart`, `batch_file_upsert_service`, `folder_upsert_service`). `photos` and `social` should be built on a shared `CollectionScanner` base rather than additional variants.
+
+**Approach decided (2026-07-25): two phases, no over-eager base.** Close inspection showed the duplication is narrower than the headline — the batch-flush loops and the isolate message protocols (`{'status':'done'}` vs `{'type':'scan_complete'}`) are genuinely *divergent* per source (different record types, upsert services, incremental strategies), so folding them into a controlling base would create exactly the leaky abstraction we want to avoid. The scanners keep their own control flow and source-specific code; only the mechanically identical bits become shared **opt-in utilities they call**.
+
+- **Phase A — DONE 2026-07-25.** New `client/lib/scanners/scan_isolate_support.dart` with two standalone helpers: `retryNetworkOp` (was 2 identical ~28-line copies in gmail + Drive; migrated via thin 1-line delegates so call sites are unchanged) and `bootstrapScanIsolate` (the `ensureInitialized` + `installIsolateVault` M2-phase-4 preamble, was 4 copies in gmail/outlook/yahoo/pst). Removed the now-dead `credential_codec` imports. `flutter analyze` 25 pre-existing / zero new; `flutter test` 320 pass, 1 pre-existing failure.
+- **Phase B — DEFERRED (gated on the feature work).** The full `discover → dedup → upsert → embed` lifecycle with per-source hooks, plus photos/social on the shared base. Decisions locked with the owner: **embed stays decoupled** (scanners upsert; the `EmbeddingIsolate` runs separately — do not couple it in); **very little model unification** (email keeps its own tables, attachments use the `File` tables); **photos is a planned full rebuild** (aggregates files + email attachments + social images into one gallery) so it's out of scope here; **social will get its own post tables with an FK link to `files`**. Do Phase B only when social (#1) is greenlit — that's the payoff that justifies the blast radius.
+
+---
+
+## Prioritized remediation plan
+
+1. ~~**H1 — Add a bearer token to the local server**~~ ✅ DONE 2026-07-10 (env-passed per-spawn secret + FastAPI dependency + client headers). See H1 notes.
+2. ~~**H2 / M1 — Confine `/util/thumbnail` and `/util/import/pst` paths**~~ ✅ DONE 2026-07-22 (`_assert_within_roots` + `resolve_data_roots`; PST containment moved before `makedirs`; client passes collection root as `allowed_root`). See H2/M1 notes.
+3. ~~**M2 — Encrypt tokens + API keys + `private.pem` at rest**~~ ✅ DONE 2026-07-22/23 (password-derived `SecureVault` envelope encryption, DEK threaded into worker isolates; fresh installs only, no migration). See M2 notes.
+4. ~~**M3 — Guard chat re-entrancy**~~ ✅ DONE (Enter-key gated on `isProcessing` + `sendRequest` early return). See M3 notes.
+5. ~~**M4 — Accessibility pass** on interactive controls~~ ✅ CODE COMPLETE 2026-07-23/26 (semantic buttons, labels, 24×24 AA target floor, keyboard activation + focus ring via `AccessibleTap`). **Only a live VoiceOver validation pass remains** — descoped by request. See M4 notes.
+6. **L1–L5, I1–I3** — cleanup. All closed except where noted in each entry.
+
+## Quick wins (low regression risk) — ✅ DONE 2026-07-10
+- [x] **M3** guard: `_handleKeyEvent` condition + `sendRequest` early return.
+- [x] **L1**: generic thumbnail error message.
+- [x] **I1**: `colorScheme` tokens in `coming_soon_tab_view.dart`. (photo_card & aichat send button intentionally left — see I1 notes.)
+- [x] **L5**: close `_activeClient` in `dispose()`.
+- [x] **I3**: delete the dead `HF_TOKEN`/`GOOGLE_API_KEY` env entries.
+
+All five verified **as of 2026-07-10, static analysis only and scoped to that day's five quick-win diffs**: `flutter analyze` clean on the four touched Dart files; `routes.py` passes an `ast.parse` syntax check. No tests were run in that pass — a manual smoke test of the chat send/stop flow is still worth doing before shipping. (Later passes in this document do report full-suite runs — 320→326 Flutter tests passing with one pre-existing `widget_test` failure — so this line reflects only the 2026-07-10 quick-win batch, not the current state of the branch.)
+
+### - [x] Follow-up (not a quick win): retheme `aichat_page.dart` to `colorScheme` tokens
+The chat page uses a fixed hardcoded-dark palette (`_sendEnabledBg`, `_mutedColor`, `Color(0xFF2C2C2E)`, `Colors.black` icons). Converting it to theme tokens so it honors light/dark mode is a page-wide refactor with real regression surface — do it deliberately, not as a quick win.
+- **Notes:** DONE 2026-07-25. The 8 top-level `const` colors are now instance getters on `_AichatPage` derived from `Theme.of(context).colorScheme`, keeping the same names so reference sites were unchanged (only `const` had to be dropped where a getter is now used). Role→token mapping: bg→`surface`, inputBg→`surfaceContainerHigh`, border→`outlineVariant`, userBubble→`surfaceContainerHighest`, hint→`outline`, muted→`onSurfaceVariant`, sendEnabled→`primary` (icon→`onPrimary`), sendDisabled→`surfaceContainerHighest`; body/heading text→`onSurface`; code bg→`surfaceContainerHighest`, codeblock/blockquote bg→`surfaceContainer`; error accents→`error`. **Two deliberate exceptions left as literals:** `Colors.greenAccent` (download-complete success icon — the scheme has no semantic success token; must read as green regardless of theme, same rationale as the `photo_card` note under I1) and `Colors.transparent` (hover/splash suppression). **Behavioral effect:** the app is currently locked to `themeMode: ThemeMode.dark` (`family_dam_app.dart`), so this both (a) future-proofs the page for light mode and (b) immediately shifts its dark look from the pure-black iOS palette to the app's Material-3 dark surfaces (a purple-tinted near-black) — matching every other screen. The shift is small (iOS grays ≈ M3 dark containers, both near-black) but visible; a manual smoke-test of the chat page is worth a look. Verified: `flutter analyze` clean on the file (whole-project analyze shows only pre-existing info-lints elsewhere); diff is a surgical +68/−60, no format churn.
+
+## Requires deeper work / architectural change
+- ~~**H1 token scheme**~~ ✅ DONE 2026-07-10 (touched spawn, all routes, and every client call site + worker isolates).
+- ~~**H2/M1 path confinement**~~ ✅ DONE 2026-07-22; **H2 fully closed 2026-07-25** by the thumbnail-cache refactor (client sends bytes → server never opens a path; `allowed_root` and the thumbnail `_assert_within_roots` call removed). M1/PST still uses the confinement helper.
+- ~~**M2 credential storage**~~ ✅ DONE 2026-07-22/23 (file-based `SecureVault`; fresh installs only, no migration). See M2 notes.
+- ~~**M4 accessibility** (systematic, every module)~~ ✅ CODE COMPLETE 2026-07-23/26 (four passes + a review-fix pass: semantics, 24×24 AA targets, `AccessibleTap` keyboard activation + focus ring across all 10 custom tap targets). Outstanding: a live macOS **VoiceOver** validation pass only. See M4 notes.
+- ~~**L2/L3 server concurrency**~~ ✅ DONE 2026-07-25 (per-generation stop registry + `generation_lock` serializing local generation). See L2/L3 notes.
+- ~~**`generation_lock` held across SSE yields**~~ ✅ **FIXED 2026-07-26** (raised in PR review). **The bug:** `routes.py::_sse_stream` wrapped its whole `yield` loop in `with get_generation_lock():`. A Python generator suspends at `yield` without unwinding the `with`, so the lock stayed held while the generator sat parked waiting for Starlette to write each chunk to the socket. A client that stays *connected but stops reading* (TCP zero-window) therefore blocked **all** local generation — including the non-streaming path, which shares the lock. Scope was the local llama_cpp path only; the cloud stream takes no lock. It self-healed on a real disconnect (`GeneratorExit` unwinds the `with`), so the trigger was narrow: a wedged-but-open localhost client.
+
+  **Chosen fix — refuse concurrent generation instead of queueing it.** The lock is now claimed with `acquire(blocking=False)` in the handler *before* the response starts; a caller that finds it taken gets **409** (`GENERATION_BUSY_DETAIL`) immediately. The streaming holder may still be parked at a `yield`, but that no longer matters: **nobody is ever queued behind it**, so a slow client can't stall the server. Ownership passes to the generator, whose `finally` is the sole release point (and runs on `GeneratorExit`, so a mid-stream disconnect frees the slot). The non-streaming path takes the same slot with the same refusal. A leaked lock would 409 every later request until restart, so the small window between `acquire` and returning the response is guarded.
+
+  **Why this over a producer/consumer buffer:** the alternative (generate on a worker thread into a queue, release the lock before yielding) has an internal tension — a *bounded* queue merely relocates the stall, since the producer then blocks on `put` while still holding the lock, while an unbounded one trades a liveness bug for a memory one. Making it correct needs a bounded queue **plus** a `put` timeout that abandons the generation, i.e. two tuned constants and a rewrite of the core streaming path. Refusal is ~5 lines, has nothing to tune, and matches the product: this is a single-user desktop app whose client already serializes on `isProcessing`, so a second concurrent generation is a caller bug worth reporting loudly, not a queue worth building. **Behaviour change:** a caller that previously waited its turn now gets a 409 — `local_llm_content_generator.dart` maps it to "The model is already generating a response." rather than dumping the raw body. Covered by `TestGenerationSlot` (4 tests: refusal on both paths, release after a completion, and lock-held-in-flight-then-released for a stream).
+- **social/photos modules** — net-new feature work on a shared scanner base.
+
+---
+
+## Refactor: on-disk thumbnail cache  ✅ DONE 2026-07-25
+
+**Status.** Implemented. Thumbnails now live on disk under
+`<storagePath>/thumbnails/<collectionId>/<ab>/<sha1(fileId)>.jpg`; the DB
+`files.thumbnail` column holds the relative **key** (or an `http` Drive URL, or
+— transitionally — a legacy base64 blob), never bytes. The RAW server call is
+now **bytes-in/bytes-out** (`image_base64` + `is_raw`), so `/util/thumbnail`
+never opens a filesystem path — **H2 is structurally closed** and the
+`allowed_root` field + the `_assert_within_roots` call inside `generate_thumbnail`
+have been removed (the helper remains, guarding PST/M1 only).
+
+Notes on the delivered design vs. the plan below:
+- **JPEG, not WebP** — the bundled Dart `image` package (4.8.0) can decode WebP
+  but can't encode it; JPEG is what the client already produced and what the
+  server returns.
+- **fileId is hashed (SHA-1)** for the on-disk name — the raw DB id is
+  `<collectionId>:<relPath>`, which isn't filesystem-safe.
+- **Format detection at render** is three-way and unambiguous: `http…` → URL,
+  `…​.jpg` → on-disk key, else → legacy base64 (`ThumbnailResolver`).
+- **Render UX:** `ImageCache` ceiling raised to 300 MB (`main.dart`) so scrolling
+  large grids keeps a bigger working set resident; `photo_card` already used a
+  `ProgressiveImage` placeholder. Deferred (additive, only if network-drive
+  scroll UX proves bad): a two-tier local read-through cache.
+- **New/changed:** `thumbnail_cache.dart`, `thumbnail_resolver.dart` (new);
+  `thumbnail_generator.dart`, `local_file_isolate.dart`,
+  `outlook_scanner_isolate.dart`, `yahoo_scanner_isolate.dart`,
+  `collection_repository.dart` (cache cleanup on delete), the three render
+  widgets, `main.dart`; server `routes.py` + `models.py`. Tests:
+  `thumbnail_generator_test.dart` (cache-key/write/delete), the queue test,
+  and `aiserver/tests/test_thumbnail.py` (bytes contract, H2 regression guard).
+
+---
+
+## Planned refactor: on-disk thumbnail cache (original notes)
+
+**Why.** Thumbnails are currently stored **as base64 text inline in the SQLite `files.thumbnail` column** for local files and email attachments (no on-disk cache), and as a **remote Google URL** for Google Drive (fetched live at render time). Two problems: (1) base64 is ~33% larger than the raw bytes and rides along on every `SELECT` of the `files` table — for a 100k-photo archive that's several GB of blobs bloating the DB and slowing queries; (2) the Google Drive path makes live network calls to Google at render time (against the local-first ethos) and those `thumbnailLink` URLs are auth-scoped and expire.
+
+**Target design.**
+- Store generated thumbnails on disk at `<app storage>/thumbnails/<collectionId>/<fileId>.webp` (use collection **id** and file **id**, not names — stable and path-safe; optionally shard by the first 2 chars of the file id to avoid 100k entries in one dir).
+- The DB `files.thumbnail` column holds a short **relative** key (or just a "generated" flag), never bytes — so moving the storage dir doesn't break it, and `SELECT`s stay cheap.
+- Render with `Image.file` for local, keep `Image.network` only for the (optional) Drive case.
+
+**Pipeline changes.**
+- Non-RAW local + email attachments: `ThumbnailGenerator` writes the resized WebP/JPEG to the cache dir (client-side, no server) and records the key.
+- RAW local: **switch the server call from sending a `file_path` to sending the image bytes** (mirrors the existing `/util/embedding` `image_base64` contract). The server decodes from the buffer and returns bytes; it never opens a path. **This structurally eliminates H2** — the interim `allowed_root` confinement (and the whole `_assert_within_roots` call in `generate_thumbnail`) can then be removed. Cost: base64-POSTing a 20–50 MB RAW per image on the background scan.
+- Google Drive: keep the `thumbnailLink` URL for now; optionally, later, download+cache into the same `thumbnails/` dir for a fully-local, consistent model.
+
+**Edge cases to handle.**
+- **Invalidation:** regenerate when the source file's `dateLastModified` (or a content hash) changes; delete cached thumbnails when the file or its collection is deleted.
+- **Missing-file fallback:** DB says "has thumbnail" but the file is gone → regenerate on demand.
+- **Network / removable storage:** the storage dir can be a network volume (see the WAL-probe logic in `database_manager.dart`); thousands of tiny files on a network mount are slow — consider a local fast-path or batching.
+- **Migration:** simplest is lazy — ignore existing base64 rows and regenerate to disk on the next scan/view, rather than a one-time bulk convert.
+
+**Scope (touches):** `models/tables/file.dart` + the `files` table DDL/migration in `database_manager.dart`; `thumbnail_generator.dart`; `local_file_isolate.dart`; the render widgets (`file_table.dart`, `thumbnail_widget.dart`, `photo_card.dart`); the aiserver `/util/thumbnail` handler (bytes in, bytes out) and `models.py`. Bigger than the surgical H2/M1 patches — plan and test deliberately.
+
+---
+
+## Credential encryption (M2) — design record ✅ IMPLEMENTED
+
+> **Status:** this section is **historical design context**, kept for the rationale and the rejected alternatives. All four phases shipped 2026-07-22/23 — see the M2 entry above for what actually landed. Nothing here is outstanding.
+
+**Goal.** Get long-lived secrets out of cleartext at rest: OAuth **access/refresh/id tokens** (`collections`), cloud LLM **API keys** + OAuth **client secrets** (`providers`), and the RSA **`private.pem`** in `<storage>/keys/` — which today has the exact same plaintext exposure and must be fixed in the same pass.
+
+**Approach chosen (decided 2026-07-22): app-level envelope encryption with a password-protected vault file in the storage dir — no OS keychain.** The product targets **macOS, Windows, and (maybe) Linux**, so the mechanism must behave identically on all three and travel with the storage folder. An OS secret store (Keychain / DPAPI / libsecret, via `flutter_secure_storage`) is explicitly **not** used: its items don't move with the folder, and Linux keyring support is inconsistent. Everything is **pure-Dart crypto** (`pointycastle` + `encrypt`, already deps) so it works the same cross-platform *and* inside background isolates (no platform channels).
+
+**Why not the alternatives:**
+- **SQLCipher (full-DB):** the DB layer is **resqlite**/`resqlite_vector` with no SQLCipher support (would mean forking/replacing the DB stack); the **Python** server reads the DB (`model_registry.py`) so it would also need to decrypt; and it would encrypt gigabytes of non-secret embeddings to protect kilobytes of secrets. Rejected.
+- **OS keychain per-secret:** not portable (items don't travel with the folder on any platform), inconsistent on Linux, needs platform-channel access from background isolates, and can't protect `private.pem`. Rejected.
+
+**Two-tier key design (key wrapping — the FileVault/1Password pattern).** Never encrypt data directly with a password-derived key; wrap a random key instead, so a password change doesn't re-encrypt everything:
+- **DEK (Data Encryption Key):** 32 random bytes from `Random.secure()`, generated **once**. Encrypts every secret with **AES-256-GCM** (fresh random 12-byte nonce per value, authenticated). Never changes.
+- **KEK (Key Encryption Key):** derived from the user's app password via **Argon2id** (preferred — `pointycastle` ships it; params e.g. 64 MiB / t=3 / p=1) with a random salt; **PBKDF2-HMAC-SHA256 at ≥600k iterations** as a fallback. Used only to wrap (encrypt) the DEK. Must use a **separate salt** from the login auth-hash — never reuse the `password_dart` login hash (which is only 10k iterations) as an encryption key.
+- **Vault file** `<storage>/keys/vault.json` (travels with the folder): `{ version, kdf: {algo, salt, params}, wrappedDek: <GCM(KEK, DEK)>, dekCheck: <MAC/known-plaintext to detect wrong password> }`. Contains **no plaintext key**.
+
+**Unlock / session model.**
+- The user already enters their password at **login** → derive the KEK there, unwrap the DEK, hold the **DEK in memory only** for the session. No extra prompt, no OS keychain.
+- **Password change** = derive new KEK from new password, **re-wrap the same DEK**, overwrite `vault.json` (a few hundred bytes). No credential ciphertext is touched. Requires the *current* password / an unlocked session (needed to unwrap the DEK first) — hook into the existing change-password flow.
+- **Optional recovery wrap:** also store the DEK wrapped under a one-time **recovery code** shown to the user at setup (second `wrappedDek` entry). Lets them recover if the password is forgotten; without it, forgotten password = unrecoverable secrets → re-auth.
+- **Auto-unlock tension (no keychain):** unlocking from the login password needs no stored secret. Any "stay signed in" feature must persist *something* to skip login — on a keychain-free design that means a secret on disk, which weakens protection to "as strong as that on-disk secret." Recommendation: unlock the vault from the login password and **don't** persist it; if a remember-me is kept, document that it trades live-process protection for convenience (same tradeoff as today's remember-me). Net posture: strong against **offline theft** (backups, synced/copied folders), weaker against live same-user malware — a coherent target for a local-first app.
+
+**What gets encrypted.** `collections.access_token/refresh_token/id_token`, `providers.api_key/client_secret` → GCM ciphertext blobs in the DB, decrypted only in memory; `keys/private.pem` → rewritten encrypted with the DEK (fixes the plaintext-private-key bug). Public key stays cleartext.
+
+**Isolate plumbing.** The DEK is unwrapped once in the **main isolate** and passed into worker isolates via their existing spawn args / control messages — exactly the pattern used for the aiserver token (H1). All crypto is pure-Dart, so it runs in isolates with no platform channels. Token-*refresh* writes (`embedding_isolate`, scanners) encrypt with the passed-in DEK before persisting.
+
+**Migration (one-time, on first authenticated launch after the change).** ⚠️ **Superseded — no migration was built.** With 0 existing users the decision was fresh-installs-only: secrets are encrypted from the first write and a legacy cleartext value is **rejected, not read as plaintext** (no GCM-failure fallback, which would have been a downgrade path). The original plan is kept below for the reasoning. ~~Create the DEK + `vault.json`; for each row with a non-empty plaintext secret, encrypt-in-place and rewrite; read `keys/private.pem`, rewrite it encrypted. Guard with a vault-version flag so it runs once. Keep a read fallback that treats a value as plaintext if GCM auth fails (so a half-migrated DB still works), removed after the migration window.~~
+
+**Edge cases / risks.**
+- **Python side:** `model_registry.py` reads only `aichat_models` (no secrets) — unaffected, stays on the plaintext-readable DB. Confirm no future Python reader needs an encrypted column (if one ever does, it would need the DEK — avoid).
+- **File hardening:** set `0600` on `vault.json` and `keys/` (macOS/Linux); on Windows rely on the password-wrap as the primary control (ACLs as defense-in-depth). The storage dir may be a network/removable volume — fine, the vault travels with it.
+- **Crypto correctness:** unique nonce per encryption, authenticated mode (GCM) so tampering is detected, constant-time compares, no secrets in logs/errors (ties back to L1). Unit-test round-trip, wrong-password rejection, tamper-detection, and password-change re-wrap.
+- **Backup feature synergy:** this also protects the RSA key used by the future backup-server upload flow, so the private key is no longer plaintext on disk.
+
+**Scope (touches):** new `SecureVault` (pure-Dart AES-GCM + Argon2id/PBKDF2, DEK wrap/unwrap, `vault.json` I/O); unlock hook in the login flow (`login_form.dart`) + change-password re-wrap; `collection_repository.dart` (encrypt on upsert / decrypt on read); `aichat_models_settings_page.dart` (provider key save/load); `user_repository.dart` + `keys/` handling for `private.pem`; every isolate spawn that carries a collection/token (`embedding_isolate.dart`, `google_file_scanner.dart`, `gmail_scanner_isolate.dart`, `outlook_pst_scanner_isolate.dart`, `new_email_page.dart`, `email_drawer.dart`); one-time migration in `database_manager.dart`. Substantial — implement behind the version flag and test the migration on a populated DB before shipping.
+
+**Sub-decisions — all resolved as implemented:** **Argon2id** (not PBKDF2); the optional recovery-code wrap was **not** shipped in v1 (forgotten password = re-auth); **no "stay signed in"** — remember-me was removed outright, so the password is typed each launch and never persisted.
+
+---
+
+## Release recommendation
+
+**Ship with known risks — for the current single-user, local-only, trusted-machine deployment.**
+
+**H1 is fixed** (2026-07-10): the local server requires a per-spawn bearer token, so the file endpoints aren't reachable by an arbitrary co-resident process — only by the paired client (or malware that reads the process env). **H2 and M1 are now fixed** (2026-07-22): `/util/thumbnail` reads and `/util/import/pst` writes are confined to the app's own data roots (plus, for thumbnails, the client-declared collection root), and the PST containment check now precedes `makedirs` with a correct separator. **H2 is now fully closed** (2026-07-25): `/util/thumbnail` takes image bytes, not a path, so it can no longer read arbitrary files; the interim `allowed_root` model and the thumbnail-side `_assert_within_roots` call are removed (the helper still guards PST/M1). **M3 (double-submit) is fixed.** **M2 (credential encryption) is fixed** (phases 1–4 landed 2026-07-22/23): OAuth access/refresh/id tokens, provider API keys + client secrets, and the RSA `private.pem` are now envelope-encrypted at rest via the password-derived `SecureVault`, with the DEK threaded into every worker isolate.
+
+**M4 (accessibility) is code-complete** (2026-07-23/26, four passes plus a review-fix pass): semantics on every custom control, the 24×24 AA target floor enforced inside `AccessibleTap`, and keyboard activation + a visible focus ring across all 10 custom tap targets. The remaining M4 work is a **live macOS VoiceOver validation pass** — descoped by request, and the last thing to do before claiming WCAG 2.2 AA conformance rather than "implemented to spec."

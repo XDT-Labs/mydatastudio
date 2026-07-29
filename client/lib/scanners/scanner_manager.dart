@@ -46,7 +46,49 @@ class ScannerManager {
     //_instance.startScanners();
   }
 
+  int _activeScanCount = 0;
+  final Map<String, StreamSubscription> _scannerScanSubs = {};
+  StreamSubscription? _pstProgressSub;
+
+  /// Collections whose PST import is currently counted in [_activeScanCount].
+  final Set<String> _activePstImports = {};
+
+  void _listenToPstProgress() {
+    _pstProgressSub ??= OutlookPstScannerIsolate.importProgress.listen((
+      progress,
+    ) {
+      if (progress == null) return;
+      // Routed through the same counter as every other scanner. Resuming
+      // directly on `done` would restart the embedding isolates while a
+      // Gmail/Drive/local scan was still running, because the two owners of
+      // the pause flag knew nothing about each other.
+      final counted = _activePstImports.contains(progress.collectionId);
+      if (!progress.done && !counted) {
+        _activePstImports.add(progress.collectionId);
+        _onScannerStateChanged(true);
+      } else if (progress.done && counted) {
+        _activePstImports.remove(progress.collectionId);
+        _onScannerStateChanged(false);
+      }
+    });
+  }
+
+  void _onScannerStateChanged(bool scanning) {
+    if (scanning) {
+      _activeScanCount++;
+      DatabaseManager.instance.pauseEmbeddingIsolates();
+    } else {
+      _activeScanCount--;
+      if (_activeScanCount <= 0) {
+        _activeScanCount = 0;
+        DatabaseManager.instance.resumeEmbeddingIsolates();
+      }
+    }
+  }
+
   Future<void> startScanners() async {
+    _listenToPstProgress();
+
     // Delay scanner startup to let the app UI finish initializing and prevent startup lockups
     await Future.delayed(const Duration(seconds: 5));
 
@@ -91,10 +133,18 @@ class ScannerManager {
   }
 
   void stopScanner(String collectionId) {
+    // Read before the subscription goes away: `stop()` emits isScanning=false,
+    // but the listener that would decrement `_activeScanCount` is cancelled
+    // here, so a scanner stopped mid-scan would leave the count permanently
+    // above zero and the embedding isolates paused for the rest of the session.
+    final wasScanning = scanners[collectionId]?.isScanning.valueOrNull == true;
+    _scannerScanSubs[collectionId]?.cancel();
+    _scannerScanSubs.remove(collectionId);
     if (scanners.containsKey(collectionId)) {
       logger.i("Stopping scanner for collection: $collectionId");
       scanners[collectionId]?.stop();
       scanners.remove(collectionId);
+      if (wasScanning) _onScannerStateChanged(false);
     }
     if (pstScanners.containsKey(collectionId)) {
       logger.i("Stopping PST scanner for collection: $collectionId");
@@ -144,7 +194,9 @@ class ScannerManager {
   }
 
   Future<CollectionScanner> registerScanner(Collection c) async {
-    print("DEBUG registerScanner: scanners keys = ${scanners.keys.toList()}, futures keys = ${_registrationFutures.keys.toList()}");
+    logger.d(
+      "registerScanner: scanners keys = ${scanners.keys.toList()}, futures keys = ${_registrationFutures.keys.toList()}",
+    );
     if (scanners.containsKey(c.id)) return scanners[c.id]!;
 
     // If registration is already in progress, return the existing future
@@ -237,6 +289,10 @@ class ScannerManager {
       }
 
       scanners[c.id] = scanner;
+      _scannerScanSubs[c.id]?.cancel();
+      _scannerScanSubs[c.id] = scanner.isScanning.distinct().listen((scanning) {
+        _onScannerStateChanged(scanning);
+      });
       _pendingScanners.remove(c.id)?.complete(scanner);
       return scanner;
     } finally {

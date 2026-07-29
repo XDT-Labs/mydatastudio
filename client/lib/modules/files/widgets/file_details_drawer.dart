@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
 
@@ -23,6 +24,11 @@ import 'package:mydatastudio/modules/files/widgets/file_details/file_type_icon_w
 import 'package:mydatastudio/modules/files/widgets/file_details/pdf_preview_widget.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/stl_preview_widget.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/text_preview_widget.dart';
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 class FileDetailsDrawer extends StatefulWidget {
   const FileDetailsDrawer({
@@ -51,11 +57,13 @@ class FileDetailsDrawer extends StatefulWidget {
 class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
   Map<String, IfdTag>? _exifData;
   bool _loadingExif = false;
+  String? _resolution;
 
   @override
   void initState() {
     super.initState();
     _loadExif();
+    _loadResolution();
   }
 
   @override
@@ -63,7 +71,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.asset.path != widget.asset.path) {
       _exifData = null;
+      _resolution = null;
       _loadExif();
+      _loadResolution();
     }
   }
 
@@ -81,10 +91,77 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
       final ioFile = io.File(_resolvedPath(file));
       if (await ioFile.exists()) {
         final exif = await readExifFromFile(ioFile);
-        if (mounted) setState(() => _exifData = exif);
+        if (mounted) {
+          setState(() {
+            _exifData = exif;
+            if (_resolution == null) {
+              final widthTag = exif['EXIF ExifImageWidth'] ?? exif['Image ImageWidth'];
+              final heightTag = exif['EXIF ExifImageLength'] ?? exif['Image ImageLength'];
+              if (widthTag != null && heightTag != null) {
+                final w = widthTag.printable.trim();
+                final h = heightTag.printable.trim();
+                if (w.isNotEmpty && h.isNotEmpty) {
+                  _resolution = '${w}x${h}';
+                }
+              }
+            }
+          });
+        }
       }
     } catch (_) {}
     if (mounted) setState(() => _loadingExif = false);
+  }
+
+  Future<void> _loadResolution() async {
+    if (widget.asset is! File) return;
+    final file = widget.asset as File;
+    if (!_isImage(file)) return;
+
+    final resolved = _resolvedPath(file);
+    if (resolved.startsWith('gdrive://')) {
+      return;
+    }
+
+    try {
+      final ioFile = io.File(resolved);
+      if (await ioFile.exists()) {
+        final completer = Completer<Size>();
+        final provider = FileImage(ioFile);
+        final stream = provider.resolve(const ImageConfiguration());
+        late ImageStreamListener listener;
+        listener = ImageStreamListener(
+          (ImageInfo info, bool _) {
+            if (!completer.isCompleted) {
+              completer.complete(Size(
+                info.image.width.toDouble(),
+                info.image.height.toDouble(),
+              ));
+            }
+          },
+          onError: (exception, stackTrace) {
+            if (!completer.isCompleted) {
+              completer.completeError(exception, stackTrace);
+            }
+          },
+        );
+        stream.addListener(listener);
+
+        try {
+          final size = await completer.future.timeout(
+            const Duration(seconds: 3),
+          );
+          if (mounted) {
+            setState(() {
+              _resolution = '${size.width.toInt()}x${size.height.toInt()}';
+            });
+          }
+        } finally {
+          stream.removeListener(listener);
+        }
+      }
+    } catch (e) {
+      _logger.e('Error getting image resolution: $e');
+    }
   }
 
   Future<List<int>?> _getGDriveFileBytes(File file) async {
@@ -120,7 +197,7 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         return response.bodyBytes;
       }
     } catch (e) {
-      debugPrint('Error downloading GDrive file for preview: $e');
+      _logger.e('Error downloading GDrive file for preview: $e');
     }
     return null;
   }
@@ -225,7 +302,10 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                     _buildPreviewSection(),
                     const SizedBox(height: 16),
                     if (widget.asset is File) ...[
-                      FileMetadataSection(file: widget.asset as File),
+                      FileMetadataSection(
+                        file: widget.asset as File,
+                        resolution: _resolution,
+                      ),
                       const SizedBox(height: 16),
                       TabbedMetadataSection(
                         file: widget.asset as File,
@@ -444,7 +524,7 @@ class _TextPreviewLoaderState extends State<_TextPreviewLoader> {
         }
       }
     } catch (e) {
-      debugPrint('Error loading text content: $e');
+      _logger.e('Error loading text content: $e');
     }
     if (mounted) setState(() => _loading = false);
   }

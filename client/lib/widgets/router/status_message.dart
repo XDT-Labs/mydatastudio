@@ -1,6 +1,9 @@
 import 'package:mydatastudio/app_logger.dart';
 import 'package:flutter/material.dart';
 
+/// Module logger. AppLogger reaches the session log file; print() does not.
+final AppLogger _logger = AppLogger(null);
+
 class StatusMessage extends StatelessWidget {
   const StatusMessage({super.key});
 
@@ -9,7 +12,7 @@ class StatusMessage extends StatelessWidget {
     return StreamBuilder<String>(
       stream: AppLogger.statusSubject,
       builder: (BuildContext context, AsyncSnapshot<String> msg) {
-        print('[StatusMessage] ${msg.data}');
+        _logger.d('[StatusMessage] ${msg.data}');
         final text = msg.data ?? '';
         return Text(
           text.toUpperCase(),

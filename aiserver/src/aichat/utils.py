@@ -4,10 +4,17 @@ Utility functions for file operations, path management, and archive handling.
 This module provides helper functions for managing model files, including
 path generation, archive extraction, and model downloading from Hugging Face Hub.
 """
+import json
 import os
 import tarfile
 import urllib.request
-from typing import Optional
+from typing import List, Optional
+
+# Written into a snapshot's local_path only once every file has downloaded
+# successfully. Its presence — not "directory is non-empty" — is what
+# is_snapshot_downloaded() checks, so a snapshot interrupted partway through
+# is correctly treated as incomplete and resumed rather than skipped.
+_SNAPSHOT_COMPLETE_MARKER = '.mydatastudio_download_complete'
 
 # Written into a snapshot's local_path only once every file has downloaded
 # successfully. Its presence — not "directory is non-empty" — is what
@@ -52,6 +59,90 @@ def _resolve_models_base() -> str:
                     return sandbox_dir
 
     return os.path.join(os.getcwd(), 'models')
+
+
+def discover_app_support_dir() -> Optional[str]:
+    """The app's Application Support directory, or None if it can't be found.
+
+    Prefers APP_SUPPORT_DIR, which PythonManager sets when it spawns the bundled
+    binary. Falls back to probing the known bundle ids, because the server is
+    *also* run straight from source during development — `python main.py`, or an
+    IDE run configuration — and nothing sets that variable then.
+
+    That fallback is not a nicety. `_resolve_models_base()` and `_get_log_dir()`
+    each grew their own copy of this probe, so models and logs resolve correctly
+    with or without the env var; `resolve_data_roots()` did not, and returned
+    only the models dir when the variable was missing. Every caller-supplied path
+    then failed `_assert_within_roots`, so a source-run server answered 403 to
+    every PST import while looking healthy in every other respect. Shared here so
+    the three can't drift apart again.
+    """
+    support_dir = os.environ.get('APP_SUPPORT_DIR')
+    if support_dir and os.path.isdir(support_dir):
+        return support_dir
+
+    home = os.path.expanduser('~')
+    for bundle_id in ('com.xdtlabs.mydatastudio.dev', 'com.xdtlabs.mydatastudio'):
+        candidate = os.path.join(home, 'Library', 'Application Support', bundle_id)
+        if os.path.isdir(candidate):
+            return candidate
+
+        # Sandboxed builds keep it under Containers (with and without the
+        # bundle-id suffix), matching _get_log_dir's probe.
+        sandbox_base = os.path.join(
+            home, 'Library', 'Containers', bundle_id, 'Data', 'Library', 'Application Support'
+        )
+        for sandbox_cand in (os.path.join(sandbox_base, bundle_id), sandbox_base):
+            if os.path.isdir(sandbox_cand):
+                return sandbox_cand
+
+    return None
+
+
+def resolve_data_roots() -> List[str]:
+    """Absolute, realpath'd directories the server is allowed to touch on behalf
+    of caller-supplied paths (thumbnail reads, PST attachment writes).
+
+    These are the app's own data locations: the macOS Application Support dir,
+    the user-selected storage and database dirs read from config.json (which may
+    live on a different/external volume), and the models dir. Used by the
+    thumbnail and PST endpoints to reject paths that point outside the app's
+    data — see AUDIT.md H2/M1.
+    """
+    roots: List[str] = []
+
+    support_dir = discover_app_support_dir()
+    if support_dir:
+        roots.append(support_dir)
+        config_path = os.path.join(support_dir, 'config.json')
+        if os.path.exists(config_path):
+            try:
+                with open(config_path) as f:
+                    config = json.load(f)
+                for key in ('storage', 'database', 'path'):
+                    val = config.get(key)
+                    if val:
+                        roots.append(val)
+            except Exception:
+                pass
+
+    try:
+        roots.append(_resolve_models_base())
+    except Exception:
+        pass
+
+    # Normalize and de-duplicate.
+    out: List[str] = []
+    seen = set()
+    for r in roots:
+        try:
+            rp = os.path.realpath(r)
+        except Exception:
+            continue
+        if rp not in seen:
+            seen.add(rp)
+            out.append(rp)
+    return out
 
 
 def get_local_path(model_id: str) -> str:

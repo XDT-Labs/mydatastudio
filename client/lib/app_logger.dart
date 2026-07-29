@@ -28,9 +28,7 @@ class ConcisePrinter extends LogPrinter {
 
   @override
   List<String> log(LogEvent event) {
-    if (event.level == Level.error ||
-        event.level == Level.warning ||
-        event.level == Level.fatal) {
+    if (event.level == Level.error || event.level == Level.fatal) {
       return _errorPrinter.log(event);
     }
 
@@ -89,16 +87,55 @@ class CustomLogOutput extends LogOutput {
     await super.init();
   }
 
+  static const int _maxConsoleLineLength = 300;
+  static const int _maxConsoleLineCount = 10;
+
+  // Errors get a far larger budget than the flood-control defaults above.
+  //
+  // PrettyPrinter renders an error as a box holding the stack trace *first* and
+  // the message *after* it — around 14 lines. The 10-line cap therefore cut off
+  // precisely the message, and a PST import that lost two emails recorded two
+  // stack traces with no statement of what went wrong. Diagnosing it took an id
+  // diff against the database.
+  //
+  // The floods this truncation exists to stop are HTML bodies and payload dumps
+  // logged at debug/info; errors are rare, so keeping them whole costs nothing.
+  // They stay bounded — just generously — so a pathological exception still
+  // can't fill the disk.
+  static const int _maxErrorLineLength = 2000;
+  static const int _maxErrorLineCount = 60;
+
   @override
   void output(OutputEvent event) {
-    consoleOutput.output(event);
+    final level = event.origin.level;
+    final isError = level == Level.error || level == Level.fatal;
+    final maxLineCount = isError ? _maxErrorLineCount : _maxConsoleLineCount;
+    final maxLineLength = isError ? _maxErrorLineLength : _maxConsoleLineLength;
+
+    // 1. Cap vertical line count to prevent multi-line HTML string flooding
+    List<String> lines = event.lines;
+    if (lines.length > maxLineCount) {
+      final truncatedCount = lines.length - maxLineCount;
+      lines = lines.sublist(0, maxLineCount)
+        ..add('... [truncated $truncatedCount remaining lines]');
+    }
+
+    // 2. Cap horizontal line length
+    final truncatedLines = lines.map((l) {
+      if (l.length > maxLineLength) {
+        return '${l.substring(0, maxLineLength)}... [truncated ${l.length - maxLineLength} chars]';
+      }
+      return l;
+    }).toList();
+
+    consoleOutput.output(OutputEvent(event.origin, truncatedLines));
 
     try {
       _ensureLogFile();
 
       if (_logFile != null) {
-        // Strip ANSI color codes
-        final parsedLines = event.lines
+        // Strip ANSI color codes and write bounded lines to file sink as well
+        final parsedLines = truncatedLines
             .map((l) => l.replaceAll(RegExp(r'\x1B\[[0-?]*[ -/]*[@-~]'), ''))
             .join('\n');
         final text = '$parsedLines\n';

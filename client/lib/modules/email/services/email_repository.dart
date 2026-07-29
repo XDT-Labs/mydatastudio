@@ -1,7 +1,7 @@
 // [ignoring loop detection]
-import 'dart:io' as io;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/helpers/sql_chunks.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/models/tables/collection.dart';
@@ -37,8 +37,12 @@ class EmailRepository {
     List<dynamic> args = [collectionId];
 
     if (folderId != null) {
-      query += "AND folder_id = ? ";
+      // instr(), not LIKE: Gmail label ids routinely contain '_' (Label_12),
+      // which LIKE reads as "any single character" — so a folder filter could
+      // match a different label differing only at that position.
+      query += "AND (folder_id = ? OR instr(',' || labels || ',', ?) > 0) ";
       args.add(folderId);
+      args.add(',$folderId,');
     }
 
     if (search != null && search.isNotEmpty) {
@@ -48,13 +52,23 @@ class EmailRepository {
       args.add('%$search%');
     }
 
-    String colName = 'date';
+    // Sorting is done here, in SQL, over the whole folder — never over the page
+    // already in memory, which would only order the hundred rows loaded so far.
+    // COLLATE NOCASE on the text columns because SQLite's default BINARY
+    // collation orders by byte, which files every lowercase sender after every
+    // uppercase one.
+    String orderBy = 'date';
     if (sortColumn == 'from') {
-      colName = '[from]';
+      orderBy = '[from] COLLATE NOCASE';
     } else if (sortColumn == 'subject') {
-      colName = 'subject';
+      orderBy = 'subject COLLATE NOCASE';
     }
-    query += "ORDER BY $colName ${sortAsc ? 'ASC' : 'DESC'} ";
+    // `id` breaks ties. Without it SQLite is free to return rows sharing a sort
+    // value in a different order per execution, and this query is paged with
+    // LIMIT/OFFSET — so a bulk import that stamps thousands of messages with
+    // the same date could show one of them twice and hide another entirely as
+    // the user scrolls.
+    query += "ORDER BY $orderBy ${sortAsc ? 'ASC' : 'DESC'}, id ASC ";
 
     if (limit > 0) {
       query += "LIMIT ? OFFSET ? ";
@@ -157,43 +171,34 @@ class EmailRepository {
     });
   }
 
-  Future<void> deleteEmails(List<String> ids) async {
+  /// Permanently removes [ids] and everything hanging off them: each message's
+  /// attachments — bytes, cached thumbnail, row — and both embeddings.
+  ///
+  /// The embeddings go by cascade; nothing on disk does, which is why the
+  /// attachments are routed through [FileDesktopRepository.deleteFiles] rather
+  /// than deleted here with a `DELETE FROM files`.
+  ///
+  /// [collection] resolves the attachments' stored (relative) paths. Throws on
+  /// failure so callers don't report a delete that didn't happen.
+  Future<void> deleteEmails(List<String> ids, {Collection? collection}) async {
     if (ids.isEmpty) return;
 
     final fileRepo = FileDesktopRepository(database);
-    try {
-      final files = await fileRepo.getByEmailIds(ids);
+    // Deliberately not filtered by `is_deleted`: a soft-deleted attachment is
+    // exactly the row that would otherwise be stranded, pointing at an email
+    // that no longer exists.
+    final files = await fileRepo.getByEmailIds(ids, includeDeleted: true);
+    await fileRepo.deleteFiles(files, collection: collection);
 
-      for (var f in files) {
-        try {
-          final ioFile = io.File(f.path);
-          if (await ioFile.exists()) {
-            await ioFile.delete();
-          }
-        } catch (err) {
-          logger.e("Error deleting attachment file at ${f.path}: $err");
-        }
-      }
-
-      await database.transaction((tx) async {
-        if (files.isNotEmpty) {
-          final fileIds = files.map((f) => f.id).toList();
-          final placeholders = List.filled(fileIds.length, '?').join(',');
-          await tx.execute(
-            "DELETE FROM files WHERE id IN ($placeholders)",
-            fileIds,
-          );
-        }
-
-        final emailPlaceholders = List.filled(ids.length, '?').join(',');
+    await database.transaction((tx) async {
+      for (final chunk in sqlChunks(ids)) {
+        final placeholders = List.filled(chunk.length, '?').join(',');
         await tx.execute(
-          "DELETE FROM emails WHERE id IN ($emailPlaceholders)",
-          ids,
+          "DELETE FROM emails WHERE id IN ($placeholders)",
+          chunk,
         );
-      });
-    } catch (err) {
-      logger.e("Error during bulk email deletion: $err");
-    }
+      }
+    });
   }
 
   Future<void> cleanupDeletedYahoo(
@@ -224,7 +229,7 @@ class EmailRepository {
       logger.i(
         "Cleanup: Deleting ${toDeleteIds.length} emails locally that were removed from Yahoo folder $folder.",
       );
-      await deleteEmails(toDeleteIds);
+      await deleteEmails(toDeleteIds, collection: collection);
     }
   }
 
@@ -256,7 +261,7 @@ class EmailRepository {
       logger.i(
         "Cleanup: Deleting ${toDeleteIds.length} emails locally that were removed from Outlook folder $folder.",
       );
-      await deleteEmails(toDeleteIds);
+      await deleteEmails(toDeleteIds, collection: collection);
     }
   }
 }

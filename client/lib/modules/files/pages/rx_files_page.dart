@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/image_preview_widget.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/pdf_preview_widget.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/stl_preview_widget.dart';
@@ -219,10 +219,23 @@ class _RxFilesPage extends State<RxFilesPage> {
     ScannerManager.getInstance()
         .getScannerAsync(col)
         .then((scanner) {
-          if (scanner.isScanning.value) {
-            return;
+          if (scanner.isScanning.value &&
+              col.scanner != AppConstants.scannerFileGDrive) {
+            return Future<void>.value();
           }
-          scanner.start(col, absPath, false, true);
+          // Returned, not fire-and-forget: otherwise a failing scan escapes
+          // the .catchError below and surfaces as an unhandled async error.
+          return scanner.start(col, absPath, false, true).then((_) {
+            if (mounted && collection?.id == col.id && path == targetPath) {
+              _filesAndFoldersService?.invoke(
+                GetFileAndFoldersServiceCommand(
+                  col,
+                  targetPath,
+                  refreshOnly: true,
+                ),
+              );
+            }
+          });
         })
         .catchError((e) {
           logger.e("Error triggering shallow scan: $e");
@@ -271,7 +284,7 @@ class _RxFilesPage extends State<RxFilesPage> {
       _showLightbox = false;
     }
     final theme = Theme.of(context);
-    print(
+    logger.d(
       'RxFilesPage.build: collections.length = ${collections.length}, collection = $collection',
     );
     if (collections.isEmpty) {
@@ -605,13 +618,17 @@ class _RxFilesPage extends State<RxFilesPage> {
                         // collections.
                         var targetCollection = collection!;
                         if (file.collectionId != collection!.id) {
-                          final found = await DatabaseManager.instance.repository
+                          final found = await DatabaseManager
+                              .instance
+                              .repository
                               ?.getCollection(file.collectionId);
                           if (!mounted) return;
                           if (found == null) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Could not find collection for this file'),
+                                content: Text(
+                                  'Could not find collection for this file',
+                                ),
                               ),
                             );
                             return;
@@ -760,10 +777,12 @@ class _RxFilesPage extends State<RxFilesPage> {
     final parts = folderPath.split('/').where((s) => s.isNotEmpty).toList();
     final trail = <_BreadcrumbEntry>[];
     for (int i = 0; i < parts.length; i++) {
-      trail.add(_BreadcrumbEntry(
-        name: parts[i],
-        path: parts.sublist(0, i + 1).join('/'),
-      ));
+      trail.add(
+        _BreadcrumbEntry(
+          name: parts[i],
+          path: parts.sublist(0, i + 1).join('/'),
+        ),
+      );
     }
     return trail;
   }
@@ -849,16 +868,10 @@ class _RxFilesPage extends State<RxFilesPage> {
     for (var item in itemsToDelete) {
       if (item is File) {
         try {
-          // Reconstruct absolute path for filesystem delete.
-          final absPath = item.localPath ?? FilePathResolver.absolute(item, collection!);
-          final ioFile = io.File(absPath);
-          if (await ioFile.exists()) {
-            await ioFile.delete();
-          }
-          // Delete from database
+          // Removes the bytes, the cached thumbnail, the embedding and the row.
           await FileDesktopRepository(
             DatabaseManager.instance.database!,
-          ).delete(item);
+          ).delete(item, collection: collection);
           deletedCount++;
         } catch (e) {
           logger.e("Error deleting ${item.path}: $e");
@@ -1063,7 +1076,7 @@ class _RxFilesPage extends State<RxFilesPage> {
         return response.bodyBytes;
       }
     } catch (e) {
-      debugPrint('Error downloading GDrive file for preview: $e');
+      logger.e('Error downloading GDrive file for preview: $e');
     }
     return null;
   }
@@ -1082,7 +1095,7 @@ class _RxFilesPage extends State<RxFilesPage> {
         }
       }
     } catch (e) {
-      debugPrint('Error loading lightbox text preview: $e');
+      logger.e('Error loading lightbox text preview: $e');
     }
     return 'Could not load file content.';
   }
@@ -1127,6 +1140,7 @@ class _RxFilesPage extends State<RxFilesPage> {
         content = ImagePreviewWidget(
           file: asset,
           resolvedPath: _resolvedPath(asset),
+          showOriginal: true,
         );
       } else if (_isText(asset)) {
         content = Container(
@@ -1234,9 +1248,8 @@ class _RxFilesPage extends State<RxFilesPage> {
         // Content Area
         Center(
           child: Padding(
-            padding: const EdgeInsets.all(48.0),
+            padding: const EdgeInsets.all(24.0),
             child: Container(
-              constraints: const BoxConstraints(maxWidth: 1200, maxHeight: 900),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 color: Colors.transparent,

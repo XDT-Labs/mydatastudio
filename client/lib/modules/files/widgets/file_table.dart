@@ -1,11 +1,11 @@
 // Copyright 2019 The Flutter team. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:math';
 
 import 'package:mydatastudio/helpers/file_path_resolver.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/file_asset.dart';
@@ -642,18 +642,12 @@ class _FileTable extends State<FileTable> {
 
   Future<void> _deleteFile(BuildContext context, File file) async {
     try {
-      // 1. Delete from file system
-      final ioFile = io.File(file.path);
-      if (await ioFile.exists()) {
-        await ioFile.delete();
-      }
-
-      // 2. Delete from database
+      // Removes the bytes, the cached thumbnail, the embedding and the row.
       await FileDesktopRepository(
         DatabaseManager.instance.database!,
-      ).delete(file);
+      ).delete(file, collection: widget.collection);
 
-      // 3. Notify parent to refresh
+      // Notify parent to refresh
       if (context.mounted) {
         const FileDeletedNotification().dispatch(context);
 
@@ -675,14 +669,10 @@ class _FileTable extends State<FileTable> {
 
   Widget getImageComponent(File file) {
     try {
-      final ImageProvider provider;
-      if (file.thumbnail != null) {
-        provider =
-            file.thumbnail!.startsWith('http')
-                ? NetworkImage(file.thumbnail!)
-                : MemoryImage(base64Decode(file.thumbnail!));
-      } else {
-        // Use the resolver to handle relative paths (e.g., from email attachments)
+      ImageProvider? provider = ThumbnailResolver.providerFor(file.thumbnail);
+      if (provider == null) {
+        // No cached thumbnail: render the source file directly. Use the
+        // resolver to handle relative paths (e.g., from email attachments).
         final collection = widget.collection;
         if (collection != null) {
           final absPath = FilePathResolver.absoluteFromPath(

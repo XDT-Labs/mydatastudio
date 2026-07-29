@@ -105,10 +105,20 @@ class DeleteModelRequest(BaseModel):
 
 
 class ThumbnailRequest(BaseModel):
-    """Request to generate a thumbnail for an image file."""
-    file_path: str = Field(..., description="Absolute path to the image file")
+    """Request to generate a thumbnail from raw image bytes.
+
+    The client sends the source image as base64 (``image_base64``); the server
+    decodes it from an in-memory buffer and never opens a filesystem path. This
+    is what structurally closes AUDIT H2 (the endpoint is no longer an
+    arbitrary-local-file read oracle).
+    """
+    image_base64: str = Field(..., description="Base64-encoded source image bytes")
     width: int = Field(default=320, description="Target width")
     height: int = Field(default=240, description="Target height")
+    is_raw: bool = Field(
+        default=False,
+        description="Decode with rawpy (camera RAW: NEF/CR2/ARW/DNG/…) instead of PIL",
+    )
 
 
 class PstImportRequest(BaseModel):

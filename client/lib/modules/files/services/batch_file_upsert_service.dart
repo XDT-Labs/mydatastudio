@@ -3,13 +3,34 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 
 import 'package:mydatastudio/services/rx_service.dart';
-import 'package:flutter/material.dart';
+import 'package:mydatastudio/services/sqlite_retry.dart';
+import 'package:mydatastudio/app_logger.dart';
+
+/// Module logger. AppLogger writes to the session log file as well as the
+/// console; a bare print() only reaches the console.
+final AppLogger _logger = AppLogger(null);
 
 class BatchFileUpsertService
     extends RxService<BatchFileUpsertServiceCommand, List<File>> {
   static final BatchFileUpsertService _singleton = BatchFileUpsertService();
   static BatchFileUpsertService get instance => _singleton;
 
+  /// Upserts a batch of files, retrying transient lock contention.
+  ///
+  /// `upsertAll` writes the batch inside `database.transaction(...)`, so a
+  /// competing writer surfaces as `ResqliteTransactionException: database is
+  /// locked` — see [retryOnLock]. The whole transaction is retried rather than
+  /// falling back to row-by-row: the lock is held against the connection, not a
+  /// row, so 100 individual writes would simply fail 100 times, and splitting
+  /// the batch would give up the all-or-nothing property the transaction exists
+  /// for.
+  ///
+  /// **Throws on failure.** This used to catch everything, log a line, and
+  /// return `command.files` as though the write had succeeded — so a scan could
+  /// silently lose a 100-file batch and still report success. Worse, the files
+  /// in a lost batch never get their `last_scanned_date` bumped, so the cleanup
+  /// pass that follows marks records that are still on disk as deleted. The
+  /// caller has to know, so the error now propagates.
   @override
   Future<List<File>> invoke(BatchFileUpsertServiceCommand command) async {
     isLoading.add(true);
@@ -17,14 +38,20 @@ class BatchFileUpsertService
     FileDesktopRepository repo = FileDesktopRepository(command.database);
 
     try {
-      await repo.upsertAll(command.files);
+      await retryOnLock(
+        () => repo.upsertAll(command.files),
+        label: 'BatchFileUpsertService',
+      );
       sink.add(command.files);
+      return command.files;
     } catch (err) {
-      debugPrint("Batch upsert failed: ${err.toString()}");
+      _logger.e(
+        'Batch upsert failed for ${command.files.length} files: $err',
+      );
+      rethrow;
+    } finally {
+      isLoading.add(false);
     }
-
-    isLoading.add(false);
-    return Future(() => command.files);
   }
 }
 
