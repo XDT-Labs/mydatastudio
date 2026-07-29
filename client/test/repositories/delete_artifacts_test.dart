@@ -40,10 +40,10 @@ void main() {
       const MethodChannel channel = MethodChannel(
         'plugins.flutter.io/path_provider',
       );
-      // ignore: deprecated_member_use
-      channel.setMockMethodCallHandler((MethodCall methodCall) async {
-        return tempDir.path;
-      });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+            return tempDir.path;
+          });
 
       databaseManager = DatabaseManager.instance;
       await databaseManager.initializeDatabase();
@@ -121,6 +121,42 @@ void main() {
       final rows = await db.select(sql, args);
       return rows.length;
     }
+
+    test('a delete larger than one parameter batch still clears', () async {
+      // SQLite caps a statement at 32766 bound parameters, so an id list
+      // expanded into `IN (?, ?, …)` cannot be unbounded — a folder resync
+      // that finds tens of thousands of messages gone hands exactly that to
+      // one delete. Crossing the batch boundary is what this asserts; the
+      // ceiling itself is too large to reach in a test cheaply.
+      final col = await makeCollection('file', p.join(tempDir.path, 'bulk'));
+      final files = <File>[];
+      for (var i = 0; i < 1201; i++) {
+        final file = File(
+          id: 'bulk-$i',
+          name: 'f$i.jpg',
+          path: 'f$i.jpg',
+          parent: '',
+          dateCreated: DateTime.now(),
+          dateLastModified: DateTime.now(),
+          collectionId: col.id,
+          contentType: 'image/jpeg',
+          size: 1,
+          isDeleted: false,
+        );
+        await FileDesktopRepository(db).create(file);
+        files.add(file);
+      }
+
+      await FileDesktopRepository(db).deleteFiles(files, collection: col);
+
+      expect(
+        await countWhere('SELECT 1 FROM files WHERE collection_id = ?', [
+          col.id,
+        ]),
+        0,
+        reason: 'every batch must be applied, not just the first',
+      );
+    });
 
     test('deleting a file takes its embedding, thumbnail and bytes', () async {
       final col = await makeCollection('file', p.join(tempDir.path, 'photos'));

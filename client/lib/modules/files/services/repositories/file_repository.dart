@@ -4,6 +4,7 @@ import 'dart:io' as io;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/helpers/file_path_resolver.dart';
+import 'package:mydatastudio/helpers/sql_chunks.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -135,9 +136,19 @@ class FileDesktopRepository {
       await _deleteThumbnail(f);
     }
 
+    // One transaction, many statements: the id list can exceed SQLite's bound
+    // parameter ceiling (see [sqlChunks]), and the rows still have to go as a
+    // unit — a half-applied delete is the ghost this method exists to prevent.
     final ids = files.map((f) => f.id).toList();
-    final placeholders = List.filled(ids.length, '?').join(',');
-    await db.execute("DELETE FROM files WHERE id IN ($placeholders)", ids);
+    await db.transaction((tx) async {
+      for (final chunk in sqlChunks(ids)) {
+        final placeholders = List.filled(chunk.length, '?').join(',');
+        await tx.execute(
+          "DELETE FROM files WHERE id IN ($placeholders)",
+          chunk,
+        );
+      }
+    });
   }
 
   /// Absolute paths this row owns on disk. Empty for a cloud row that was never
@@ -291,13 +302,17 @@ class FileDesktopRepository {
     bool includeDeleted = false,
   }) async {
     if (emailIds.isEmpty) return [];
-    final placeholders = List.filled(emailIds.length, '?').join(',');
-    final rows = await db.select(
-      "SELECT * FROM files WHERE email_id IN ($placeholders)"
-      "${includeDeleted ? '' : ' AND is_deleted = 0'}",
-      emailIds,
-    );
-    return rows.map((r) => File.fromDbMap(r)).toList();
+    final files = <File>[];
+    for (final chunk in sqlChunks(emailIds)) {
+      final placeholders = List.filled(chunk.length, '?').join(',');
+      final rows = await db.select(
+        "SELECT * FROM files WHERE email_id IN ($placeholders)"
+        "${includeDeleted ? '' : ' AND is_deleted = 0'}",
+        chunk,
+      );
+      files.addAll(rows.map((r) => File.fromDbMap(r)));
+    }
+    return files;
   }
 
   Future<List<File>> getFilesToDownload(String collectionId) async {

@@ -1,6 +1,7 @@
 // [ignoring loop detection]
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/helpers/sql_chunks.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/models/tables/collection.dart';
@@ -62,7 +63,12 @@ class EmailRepository {
     } else if (sortColumn == 'subject') {
       orderBy = 'subject COLLATE NOCASE';
     }
-    query += "ORDER BY $orderBy ${sortAsc ? 'ASC' : 'DESC'} ";
+    // `id` breaks ties. Without it SQLite is free to return rows sharing a sort
+    // value in a different order per execution, and this query is paged with
+    // LIMIT/OFFSET — so a bulk import that stamps thousands of messages with
+    // the same date could show one of them twice and hide another entirely as
+    // the user scrolls.
+    query += "ORDER BY $orderBy ${sortAsc ? 'ASC' : 'DESC'}, id ASC ";
 
     if (limit > 0) {
       query += "LIMIT ? OFFSET ? ";
@@ -184,11 +190,15 @@ class EmailRepository {
     final files = await fileRepo.getByEmailIds(ids, includeDeleted: true);
     await fileRepo.deleteFiles(files, collection: collection);
 
-    final placeholders = List.filled(ids.length, '?').join(',');
-    await database.execute(
-      "DELETE FROM emails WHERE id IN ($placeholders)",
-      ids,
-    );
+    await database.transaction((tx) async {
+      for (final chunk in sqlChunks(ids)) {
+        final placeholders = List.filled(chunk.length, '?').join(',');
+        await tx.execute(
+          "DELETE FROM emails WHERE id IN ($placeholders)",
+          chunk,
+        );
+      }
+    });
   }
 
   Future<void> cleanupDeletedYahoo(
