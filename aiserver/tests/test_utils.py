@@ -20,10 +20,16 @@ from aichat.utils import (
 class TestUtils:
     
     def test_get_local_path_formatting(self):
-        """Test formatting of local path creation."""
+        """The slash in a repo id becomes a dash, under the resolved models base.
+
+        The base is absolute and environment-dependent (see conftest, which pins
+        it via AICHAT_MODELS_DIR); only the leaf name is this function's job.
+        """
         path = get_local_path("bartowski/gemma-3-4b")
-        # Ensure the slash in model name is replaced by a dash
-        assert path == "./models/bartowski-gemma-3-4b-local/"
+        assert path == os.path.join(
+            os.environ["AICHAT_MODELS_DIR"], "bartowski-gemma-3-4b-local"
+        )
+        assert os.path.isabs(path)
 
     def test_get_local_zip_path_formatting(self):
         """Test formatting of local zip path creation."""
@@ -50,7 +56,8 @@ class TestUtils:
         mock_hf_download.assert_called_once_with(
             repo_id="bartowski/gemma",
             filename="gemma.gguf",
-            local_dir="/tmp/models"
+            local_dir="/tmp/models",
+            token=None,
         )
 
     @patch('aichat.utils.os.path.exists')

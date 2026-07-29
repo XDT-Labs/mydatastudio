@@ -15,6 +15,25 @@ from aichat.models import (
 )
 
 
+
+def _registry_row(**overrides):
+    """A minimal aichat_models row for a local GGUF model.
+
+    Local model resolution reads these five columns, so a test that reaches the
+    loading path needs a row rather than just a mocked find_local_model.
+    """
+    row = {
+        "alias": "test-model",
+        "group": "local",
+        "hf_repo": "bartowski/test",
+        "file": "test-model.gguf",
+        "mmproj": "",
+        "chat_handler": None,
+    }
+    row.update(overrides)
+    return row
+
+
 class TestHealthCheck:
 
     @pytest.mark.asyncio
@@ -70,20 +89,22 @@ class TestHealthCheck:
 class TestChatCompletion:
 
     @pytest.mark.asyncio
-    async def test_chat_completion_no_model_loaded(self):
-        """Returns 503 when no model is loaded and no local file found."""
-        with patch('aichat.routes.get_llm_instance') as mock_get_llm, \
-             patch('aichat.routes.get_current_model_id') as mock_get_model_id, \
-             patch('aichat.routes.get_locks') as mock_locks, \
-             patch('aichat.routes.find_local_model') as mock_find:
+    async def test_chat_completion_unknown_model_returns_404(self):
+        """An alias with no registry row is refused before any loading.
 
-            mock_get_llm.return_value = None
-            mock_get_model_id.return_value = None
-            model_lock = AsyncMock()
-            mock_locks.return_value = (model_lock, AsyncMock())
-            mock_find.return_value = None  # model file not found locally
+        Local model resolution is driven by the aichat_models registry now, so
+        this is the shape of "no model" a client actually hits, and the message
+        has to point at where the model is added.
+        """
+        with patch('aichat.routes.get_llm_instance', return_value=None), \
+             patch('aichat.routes.get_current_model_id', return_value=None), \
+             patch('aichat.routes.get_locks') as mock_locks, \
+             patch('aichat.routes.model_registry.lookup', return_value=None):
+
+            mock_locks.return_value = (AsyncMock(), AsyncMock())
 
             request = ChatCompletionRequest(
+                model="nope/not-a-model",
                 messages=[ChatMessage(role="user", content="Hello")]
             )
 
@@ -91,7 +112,35 @@ class TestChatCompletion:
                 await generate_chat_completion(request)
 
             assert exc_info.value.status_code == 404
-            assert "not found locally" in str(exc_info.value.detail)
+            assert "not found in the model registry" in str(exc_info.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_chat_completion_no_model_loaded_returns_503(self):
+        """Guards the case where loading reported success but left no instance.
+
+        Everything downstream dereferences the instance, so this must fail with
+        a status of its own rather than an AttributeError-shaped 500.
+        """
+        with patch('aichat.routes.get_llm_instance', return_value=None), \
+             patch('aichat.routes.get_current_model_id', return_value=None), \
+             patch('aichat.routes.get_locks') as mock_locks, \
+             patch('aichat.routes.model_registry.lookup', return_value=_registry_row()), \
+             patch('aichat.routes.find_local_model', return_value="/fake/model.gguf"), \
+             patch('aichat.routes.load_local_model', return_value=Mock()), \
+             patch('aichat.routes.set_llm_instance'), \
+             patch('aichat.routes.set_current_model_id'):
+
+            mock_locks.return_value = (AsyncMock(), AsyncMock())
+
+            request = ChatCompletionRequest(
+                model="test-model",
+                messages=[ChatMessage(role="user", content="Hello")]
+            )
+
+            with pytest.raises(HTTPException) as exc_info:
+                await generate_chat_completion(request)
+
+            assert exc_info.value.status_code == 503
 
     @pytest.mark.asyncio
     @patch('aichat.routes.model_registry.lookup')
@@ -169,8 +218,7 @@ class TestChatCompletion:
     async def test_chat_completion_llama_cpp_path(self):
         """Uses llama_cpp's create_chat_completion when available."""
         mock_llm = Mock()
-        mock_llm.client = Mock()
-        mock_llm.client.create_chat_completion = Mock(return_value={
+        mock_llm.create_chat_completion = Mock(return_value={
             "id": "chatcmpl-test",
             "object": "chat.completion",
             "created": 1234567890,
@@ -197,8 +245,8 @@ class TestChatCompletion:
 
             assert result["choices"][0]["message"]["content"] == "Hi!"
             assert result["model"] == "bartowski/gemma-3-4b-it-GGUF"
-            mock_llm.client.create_chat_completion.assert_called_once()
-            call_messages = mock_llm.client.create_chat_completion.call_args[1]["messages"]
+            mock_llm.create_chat_completion.assert_called_once()
+            call_messages = mock_llm.create_chat_completion.call_args[1]["messages"]
             assert call_messages[0]["role"] == "system"
             assert call_messages[1]["role"] == "user"
 
@@ -206,8 +254,7 @@ class TestChatCompletion:
     async def test_chat_completion_passes_temperature_and_max_tokens(self):
         """Forwards temperature and max_tokens to create_chat_completion."""
         mock_llm = Mock()
-        mock_llm.client = Mock()
-        mock_llm.client.create_chat_completion = Mock(return_value={
+        mock_llm.create_chat_completion = Mock(return_value={
             "id": "chatcmpl-test", "object": "chat.completion", "created": 0,
             "model": "test", "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
             "usage": {}
@@ -224,7 +271,7 @@ class TestChatCompletion:
             )
             await generate_chat_completion(request)
 
-            kwargs = mock_llm.client.create_chat_completion.call_args[1]
+            kwargs = mock_llm.create_chat_completion.call_args[1]
             assert kwargs["temperature"] == 0.5
             assert kwargs["max_tokens"] == 100
 

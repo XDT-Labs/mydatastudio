@@ -1,6 +1,7 @@
 """
 Unit tests for model loading and embedding extraction using LlamaCpp and Gemini.
 """
+import inspect
 import pytest
 import os
 from unittest.mock import Mock, patch
@@ -37,11 +38,25 @@ class TestModelManager:
         result = load_gemini_model()
         
         assert result == mock_instance
+        # The default comes from load_gemini_model's own signature rather than
+        # being restated here, so bumping the default model is a one-line change
+        # in the source and does not silently break an unrelated assertion.
+        default_model = inspect.signature(
+            load_gemini_model
+        ).parameters["model_id"].default
         mock_genai.assert_called_once_with(
-            model="gemini-3.1-pro-preview",
+            model=default_model,
             google_api_key="fake_key",
             temperature=0.7
         )
+
+    @patch.dict(os.environ, {"GOOGLE_API_KEY": "fake_key"})
+    @patch('aichat.model_manager.ChatGoogleGenerativeAI')
+    def test_load_gemini_model_passes_explicit_model_id(self, mock_genai):
+        """An explicitly requested model id reaches the client unchanged."""
+        load_gemini_model(model_id="gemini-1.5-pro")
+
+        assert mock_genai.call_args[1]["model"] == "gemini-1.5-pro"
         
     @patch.dict(os.environ, clear=True)
     def test_load_claude_model_no_key(self):
@@ -128,22 +143,54 @@ class TestModelManager:
             temperature=0.7
         )
 
-    @patch('aichat.model_manager.LlamaCpp')
+    # load_local_model imports llama_cpp inside the function and calls
+    # llama_cpp.Llama directly. Patching aichat.model_manager.LlamaCpp (the
+    # langchain wrapper, used only by load_embedding_model) left the real
+    # loader running, which failed on the fake path rather than testing
+    # anything.
+    @patch('llama_cpp.Llama')
     def test_load_local_model_success(self, mock_llamacpp):
-        """Test successful local LlamaCpp model loading."""
+        """Test successful local GGUF model loading."""
         mock_instance = Mock()
         mock_llamacpp.return_value = mock_instance
-        
+
         result = load_local_model("bartowski/gemma", "/fake/path/model.gguf")
         
         assert result == mock_instance
         
-        # Verify LlamaCpp initialization parameters
+        # Verify construction parameters. temperature/max_tokens are no longer
+        # among them: they are per-generation options passed to
+        # create_chat_completion, not fixed at load time.
         init_kwargs = mock_llamacpp.call_args[1]
         assert init_kwargs["model_path"] == "/fake/path/model.gguf"
-        assert init_kwargs["temperature"] == 0.7
-        assert init_kwargs["max_tokens"] == 512
         assert init_kwargs["n_gpu_layers"] == -1
+        assert init_kwargs["n_ctx"] == 32768
+        # Text-only unless an mmproj path is supplied.
+        assert init_kwargs["chat_handler"] is None
+
+    @patch('llama_cpp.llama_chat_format')
+    @patch('llama_cpp.Llama')
+    def test_load_local_model_vision_uses_chat_handler(
+        self, mock_llamacpp, mock_chat_format
+    ):
+        """An mmproj path switches the model into vision mode.
+
+        Without a handler the mmproj is ignored and image parts are silently
+        tokenized as text, which is the failure this guards.
+        """
+        handler_instance = Mock()
+        mock_chat_format.Gemma4ChatHandler.return_value = handler_instance
+
+        load_local_model(
+            "bartowski/gemma",
+            "/fake/path/model.gguf",
+            clip_model_path="/fake/path/mmproj.gguf",
+        )
+
+        assert mock_llamacpp.call_args[1]["chat_handler"] is handler_instance
+        mock_chat_format.Gemma4ChatHandler.assert_called_once_with(
+            clip_model_path="/fake/path/mmproj.gguf", verbose=False
+        )
 
     @patch('aichat.model_manager.find_local_model')
     @patch('aichat.model_manager.download_gguf_model')
