@@ -45,8 +45,11 @@ for pkg in ['langchain_google_genai', 'langchain_openai', 'langchain_anthropic']
     except Exception as e:
         print(f"Warning: Failed to copy metadata for {pkg}: {e}")
 
-# Include the pre-downloaded GGUF models directory mapping to the bundle root
-datas.append(('models/*', 'models'))
+# Models are deliberately NOT bundled. They live beside the extracted server
+# (Application Support/models, via AICHAT_MODELS_DIR) so that re-extracting
+# aiserver/ on an app upgrade leaves the multi-gigabyte downloads untouched.
+# Bundling them here also meant a local `make models` before `make build-python`
+# silently produced a multi-gigabyte zip.
 
 
 a = Analysis(

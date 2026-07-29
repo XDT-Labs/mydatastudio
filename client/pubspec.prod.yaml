@@ -84,6 +84,7 @@ dependencies:
   plugin_platform_interface: ^2.1.8
   uuid: ^4.6.0
   intl: ^0.20.2
+  package_info_plus: ^8.1.1
   desktop_window: ^0.4.4
   window_manager: ^0.5.2
   screen_retriever: ^0.2.2
