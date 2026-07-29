@@ -76,11 +76,16 @@ void main() {
     });
 
     test('descriptor contains no plaintext key material', () {
-      final created = SecureVault.create('pw');
+      // The password needle has to be long and distinctive. The descriptor is
+      // mostly base64 of random bytes (salt + wrapped DEK), so a short needle
+      // like 'pw' shows up in it by chance in ~2% of runs — that flakes on the
+      // salt, not on a leak.
+      const password = 'descriptor-leak-canary-pw';
+      final created = SecureVault.create(password);
       final dekB64 = base64.encode(created.vault.dek);
       final serialized = jsonEncode(created.descriptor);
       expect(serialized.contains(dekB64), isFalse);
-      expect(serialized.contains('pw'), isFalse);
+      expect(serialized.contains(password), isFalse);
     });
   });
 
