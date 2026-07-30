@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 
 class PythonManager {
@@ -24,6 +25,13 @@ class PythonManager {
   String? _pythonDir;
   static ValueNotifier<bool> isLLMServiceRunning = ValueNotifier(false);
   static ValueNotifier<String> startupProgress = ValueNotifier('Starting...');
+
+  /// Written inside the extracted `aiserver/` directory, holding the app
+  /// version that extracted it. The client and the bundled aiserver zip ship
+  /// together, so a stamp that doesn't match the running app means the
+  /// extracted service was left behind by a previous version.
+  @visibleForTesting
+  static const versionStampName = '.installed_version';
 
   final AppLogger logger = AppLogger(null);
   Completer<void>? _startupCompleter;
@@ -84,6 +92,49 @@ class PythonManager {
   Stream<String> get stderrLines => _stderrController.stream;
 
   bool get isRunning => _pythonProc != null;
+
+  /// Absolute path to the GGUF model store. Deliberately a sibling of
+  /// `aiserver/` rather than a child: an app upgrade deletes and re-extracts
+  /// `aiserver/`, and the models are multi-gigabyte downloads that must
+  /// survive that. Passed to the subprocess as `AICHAT_MODELS_DIR`, which
+  /// wins over every fallback in the service's own path resolution.
+  static String modelsDirFor(String supportPath) =>
+      p.join(supportPath, 'models');
+
+  /// The running app's version as `<version>+<build>` — the value stamped into
+  /// the extracted aiserver directory.
+  static Future<String> currentAppVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    return '${info.version}+${info.buildNumber}';
+  }
+
+  /// Move models out of the old in-`aiserver/` location and into
+  /// [modelsDirFor]. No-op once the old directory is gone, so it is safe to
+  /// call on every launch.
+  ///
+  /// Never overwrites: model files are named for the model they hold, so an
+  /// entry that already exists at the destination is the copy the app has been
+  /// using and the legacy one is a duplicate. This only matters if an older
+  /// build ran after the migration and re-downloaded into the old path.
+  @visibleForTesting
+  static void migrateModelsDir(String supportPath, {AppLogger? log}) {
+    final legacy = Directory(p.join(supportPath, 'aiserver', 'models'));
+    if (!legacy.existsSync()) return;
+
+    final target = Directory(modelsDirFor(supportPath));
+    target.createSync(recursive: true);
+
+    for (final entity in legacy.listSync()) {
+      final dest = p.join(target.path, p.basename(entity.path));
+      if (FileSystemEntity.typeSync(dest) != FileSystemEntityType.notFound) {
+        log?.d('[python] `$dest` already exists; dropping legacy copy');
+        continue;
+      }
+      entity.renameSync(dest);
+    }
+    legacy.deleteSync(recursive: true);
+    log?.i('[python] Migrated models to `${target.path}`');
+  }
 
   /// Whether the OS process [pid] is still one of our aiserver processes.
   ///
@@ -223,7 +274,7 @@ class PythonManager {
           'MODEL_DOWNLOAD_URL':
               'https://gcs-file-downloader-10805446439.us-central1.run.app', // todo get from remote config
           'APP_SUPPORT_DIR': supportPath,
-          'AICHAT_MODELS_DIR': p.join(_pythonDir!, 'models'),
+          'AICHAT_MODELS_DIR': modelsDirFor(supportPath),
           'AISERVER_LOG_LEVEL': MainApp.logLevel,
           'AISERVER_TOKEN': token,
         },
@@ -296,18 +347,47 @@ class PythonManager {
   }
 
   /// Ensure the bundled aiserver zip is unzipped into Application Support/aiserver.
-  /// If the destination directory already exists, this is a no-op.
-  Future<void> ensureAiserverUnzipped() async {
+  ///
+  /// Re-extracts whenever the extracted copy was left by a different app
+  /// version. The client and the bundled zip ship as a unit, so running a new
+  /// client against an aiserver extracted by an older release is version skew
+  /// — new endpoints and changed request schemas fail with no obvious cause.
+  /// [appVersion] defaults to the running app's version and exists so tests can
+  /// drive the staleness check without a platform channel.
+  Future<void> ensureAiserverUnzipped({String? appVersion}) async {
     try {
       var supportPath = await DatabaseManager.getRealApplicationSupportPath();
       final destDir = Directory(p.join(supportPath, 'aiserver'));
+      final version = appVersion ?? await currentAppVersion();
+
+      // Models used to live inside aiserver/, which this method now deletes on
+      // upgrade. Move them clear before anything touches that directory.
+      migrateModelsDir(supportPath, log: logger);
+
+      final stampFile = File(p.join(destDir.path, versionStampName));
+      // Drives the splash copy: extracting ~250 MB takes long enough that the
+      // user needs to know an upgrade is why the first launch is slow.
+      var isUpgrade = false;
 
       if (destDir.existsSync()) {
-        _stdoutController.add(
-          'aiserver directory already exists; skipping unzip.',
+        final installed = stampFile.existsSync()
+            ? stampFile.readAsStringSync().trim()
+            : null;
+        if (installed == version) {
+          _stdoutController.add(
+            'aiserver $installed is current; skipping unzip.',
+          );
+          PythonManager.startupProgress.value = 'Starting AI service...';
+          return;
+        }
+        // Either an install predating the stamp or one from an earlier
+        // release. Replace it rather than run the new client against it.
+        logger.i(
+          '[python] aiserver is stale (extracted by: ${installed ?? 'unknown'},'
+          ' running: $version) — reinstalling',
         );
-        PythonManager.startupProgress.value = 'Starting AI service...';
-        return;
+        isUpgrade = true;
+        destDir.deleteSync(recursive: true);
       }
 
       String zipName = 'aiserver.zip';
@@ -388,8 +468,9 @@ class PythonManager {
 
       if (Platform.isWindows) {
         // On Windows, use PowerShell to expand the archive
-        PythonManager.startupProgress.value =
-            'Extracting AI Chat service (this may take a few minutes)...';
+        PythonManager.startupProgress.value = isUpgrade
+            ? 'Updating AI service (this may take a few minutes)...'
+            : 'Extracting AI Chat service (this may take a few minutes)...';
         final proc = await Process.start('powershell', [
           '-command',
           'Expand-Archive -Path "$zipPath" -DestinationPath "${tempDir.path}" -Force',
@@ -425,7 +506,9 @@ class PythonManager {
         }
       } else {
         // Use system extractor for macOS/Linux
-        PythonManager.startupProgress.value = 'Unzipping AI Chat service...';
+        PythonManager.startupProgress.value = isUpgrade
+            ? 'Updating AI service...'
+            : 'Unzipping AI Chat service...';
         final Process proc;
         if (Platform.isMacOS) {
           // Use macOS ditto to support Zip64 (>4GB zip files) and preserve resource forks/symlinks
@@ -503,6 +586,12 @@ class PythonManager {
         _stdoutController.add('Moving `${tempDir.path}` to `${destDir.path}`');
         tempDir.renameSync(destDir.path);
       }
+
+      // Written last, once the directory is fully in place: a crash partway
+      // through extraction leaves no stamp, so the next launch re-extracts
+      // rather than trusting a half-populated directory.
+      stampFile.writeAsStringSync(version);
+      _stdoutController.add('Stamped aiserver install as $version');
     } catch (e) {
       final msg = 'Exception while unzipping aiserver bundle: $e';
       _stderrController.add(msg);

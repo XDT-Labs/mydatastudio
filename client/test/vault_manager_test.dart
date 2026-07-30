@@ -45,11 +45,14 @@ void main() {
   });
 
   test('descriptor on disk is valid JSON with no plaintext key', () async {
-    await vm.createAndUnlock(keysDir, 'pw');
+    // Distinctive password, not 'pw': the descriptor is base64 of random bytes,
+    // which contains a 2-char needle by chance in ~2% of runs.
+    const password = 'on-disk-leak-canary-pw';
+    await vm.createAndUnlock(keysDir, password);
     final raw = File(vm.vaultPath(keysDir)).readAsStringSync();
     final json = jsonDecode(raw) as Map<String, dynamic>;
     expect(json['wrappedDek'], isA<String>());
-    expect(raw.contains('pw'), isFalse);
+    expect(raw.contains(password), isFalse);
   });
 
   test('unlock with the correct password re-opens across a fresh manager', () async {
