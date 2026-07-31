@@ -17,6 +17,18 @@ class PhotosRepository {
   /// the photo grid. See `InlineAttachment`.
   static const String _excludeInline = " AND f.is_inline = 0";
 
+  /// Both spellings of "this is an image" have to be matched.
+  ///
+  /// Gmail is the only scanner that records the real MIME type on the row
+  /// (`image/jpeg`); the local, Drive, Yahoo, Outlook and PST scanners all
+  /// store the app's coarse category (`application/image`). Matching the
+  /// category alone — which is what this did — silently kept every Gmail image
+  /// attachment out of the grid, whether or not it had a thumbnail. Mirrors the
+  /// filter `getFilesWithMissingEmbeddings` already uses, so the photo grid and
+  /// the embedding queue agree on what counts as a picture.
+  static const String _isImage =
+      " (f.content_type = ? OR f.content_type LIKE 'image/%')";
+
   Future<List<File>> photos() async {
     AppDatabase? db = DatabaseManager.instance.database;
     if (db == null) return [];
@@ -25,7 +37,7 @@ class PhotosRepository {
       "SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner"
       " FROM files f"
       " JOIN collections c ON f.collection_id = c.id"
-      " WHERE f.content_type = ?$_excludeInline"
+      " WHERE$_isImage$_excludeInline"
       " ORDER BY f.date_created DESC",
       [FilesConstants.mimeTypeImage],
     );
@@ -42,7 +54,7 @@ class PhotosRepository {
       "SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner"
       " FROM files f"
       " JOIN collections c ON f.collection_id = c.id"
-      " WHERE f.content_type = ?$_excludeInline"
+      " WHERE$_isImage$_excludeInline"
       " ORDER BY f.date_created ASC",
       [FilesConstants.mimeTypeImage],
     );

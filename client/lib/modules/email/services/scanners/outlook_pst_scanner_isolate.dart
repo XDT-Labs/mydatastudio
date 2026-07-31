@@ -22,6 +22,8 @@ import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
 
@@ -258,6 +260,8 @@ class OutlookPstScannerIsolateWorker {
         io.Directory(extractionRoot).createSync(recursive: true);
       }
 
+      final thumbnailCache = ThumbnailCache(appDir);
+
       logger.i(
         "PST Scanner: Started parsing ${collection.path} -> $extractionRoot",
       );
@@ -483,6 +487,31 @@ class OutlookPstScannerIsolateWorker {
                   );
                 }
 
+                final attContentType = _mapMimeType(
+                  att['contentType'] as String? ?? 'application/octet-stream',
+                );
+
+                // The parser has already written the attachment to disk inside
+                // extractionRoot, so this reads the extracted copy rather than
+                // going back to the archive.
+                String? thumbnail;
+                if (attContentType == FilesConstants.mimeTypeImage &&
+                    attPath.isNotEmpty) {
+                  try {
+                    thumbnail = await ThumbnailGenerator().generate(
+                      collection.id,
+                      fileId,
+                      attPath,
+                      FilesConstants.mimeTypeImage,
+                      thumbnailCache,
+                    );
+                  } catch (e) {
+                    logger.w(
+                      'PST Scanner: Failed to generate thumbnail for $attPath: $e',
+                    );
+                  }
+                }
+
                 final file = File(
                   id: fileId,
                   name: att['name'],
@@ -492,12 +521,11 @@ class OutlookPstScannerIsolateWorker {
                   dateCreated: email.date,
                   dateLastModified: email.date,
                   collectionId: collection.id,
-                  contentType: _mapMimeType(
-                    att['contentType'] as String? ?? 'application/octet-stream',
-                  ),
+                  contentType: attContentType,
                   size: (att['size'] as num).toInt(),
                   isDeleted: false,
                   emailId: emailId,
+                  thumbnail: thumbnail,
                   // Empty for an ordinary attachment; set only when the HTML body
                   // embeds this file as `<img src="cid:...">`.
                   contentId: InlineAttachment.normalizeContentId(

@@ -8,6 +8,8 @@ import 'package:mydatastudio/family_dam_app.dart';
 import 'package:mydatastudio/pages/splash.dart';
 import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/services/model_download_manager.dart';
+import 'package:mydatastudio/services/update_checker.dart';
+import 'package:mydatastudio/widgets/update_available_dialog.dart';
 
 import 'package:mydatastudio/repositories/watchers/database_change_watcher.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
@@ -249,7 +251,20 @@ class MainAppState extends State<MainApp>
           _isSetupComplete = MainApp.databaseManager != null;
         });
       }
+
+      // 4. Fire-and-forget: ask GitHub whether a newer release exists. Self-
+      // throttling to once a day, and silent on every failure — the app is
+      // fully usable without it, so it must never delay or block startup.
+      unawaited(_checkForUpdate());
     }
+  }
+
+  Future<void> _checkForUpdate() async {
+    final update = await UpdateChecker.check();
+    if (update == null) return;
+    final context = AppRouter.rootNavigatorKey.currentContext;
+    if (context == null || !context.mounted) return;
+    await showUpdateAvailableDialog(context, update);
   }
 
   // Initialize a global Dialog Manager so any screen can launch global dialogs, such as oauth expired alerts
