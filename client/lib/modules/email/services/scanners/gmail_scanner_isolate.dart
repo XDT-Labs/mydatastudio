@@ -20,9 +20,12 @@ import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.
 import 'package:mydatastudio/modules/email/services/email_repository.dart';
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
+import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:uuid/uuid.dart';
@@ -558,6 +561,8 @@ class GmailScannerIsolateWorker {
     // Ensure folder exists on disk
     await io.Directory(effectiveFolderPath).create(recursive: true);
 
+    final thumbnailCache = ThumbnailCache(appDir);
+
     for (var part in parts) {
       if (part.body?.attachmentId != null) {
         try {
@@ -594,11 +599,34 @@ class GmailScannerIsolateWorker {
           final file = io.File(p.join(effectiveFolderPath, fileName));
           await file.writeAsBytes(base64Url.decode(attachment.data!));
 
+          final fileId = const Uuid().v5(
+            Namespace.url.value,
+            'file:email:${collection.id}:$messageId:$fileName',
+          );
+
+          // Gmail is the one scanner that keeps the real MIME type on the row;
+          // the others store the app's coarse category. ThumbnailGenerator
+          // dispatches on the coarse one, so that is what gets handed to it
+          // here regardless of what the row ends up recording.
+          String? thumbnail;
+          if ((part.mimeType ?? '').startsWith('image/')) {
+            try {
+              thumbnail = await ThumbnailGenerator().generate(
+                collection.id,
+                fileId,
+                file.path,
+                FilesConstants.mimeTypeImage,
+                thumbnailCache,
+              );
+            } catch (e) {
+              logger?.w(
+                'GmailScanner: Failed to generate thumbnail for ${file.path}: $e',
+              );
+            }
+          }
+
           final f = File(
-            id: const Uuid().v5(
-              Namespace.url.value,
-              'file:email:${collection.id}:$messageId:$fileName',
-            ),
+            id: fileId,
             collectionId: collection.id,
             name: originalFileName,
             path: file.path,
@@ -609,6 +637,7 @@ class GmailScannerIsolateWorker {
             contentType: part.mimeType ?? 'application/octet-stream',
             isDeleted: false,
             emailId: messageId,
+            thumbnail: thumbnail,
             contentId: contentId,
             isInline: isInline,
           );

@@ -49,6 +49,15 @@ import 'package:mydatastudio/services/sqlite_retry.dart';
 class CloudFileIsolate extends CollectionScanner {
   final SendPort? loggerIsolatePort;
   final String? storagePath;
+
+  /// The user's storage root (`DatabaseManager.storagePath`), where downloaded
+  /// local copies belong. Distinct from [storagePath] above, which is the
+  /// *database* directory — the two diverge when the chosen storage location
+  /// can't run SQLite in WAL mode and the db is redirected to Application
+  /// Support. Downloads have to follow the storage root the user picked, or
+  /// enabling "download local copy" on a large Drive silently fills the boot
+  /// volume instead of the drive they chose.
+  final String? appDir;
   final String? dbName;
 
   /// Every isolate this scanner has spawned, recursive and shallow alike.
@@ -61,8 +70,12 @@ class CloudFileIsolate extends CollectionScanner {
   AppLogger? _logger;
   int _activeScanningCount = 0;
 
-  CloudFileIsolate(this.loggerIsolatePort, {this.storagePath, this.dbName})
-    : super() {
+  CloudFileIsolate(
+    this.loggerIsolatePort, {
+    this.storagePath,
+    this.appDir,
+    this.dbName,
+  }) : super() {
     _logger = AppLogger(loggerIsolatePort);
   }
 
@@ -110,6 +123,7 @@ class CloudFileIsolate extends CollectionScanner {
       'token': token,
       'port': p.sendPort,
       'storagePath': storagePath,
+      'appDir': appDir,
       'dbName': dbName,
       'loggerPort': p.sendPort, // Send logs back through our own ReceivePort
       'collectionId': collection.id,
@@ -311,7 +325,9 @@ class CloudFileIsolateWorker {
     final lastScanDateStr = args['lastScanDate'] as String?;
     final lastScanDate =
         lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
-    final storagePath = args['storagePath'] as String?;
+    // Storage root for downloaded copies. `storagePath` in args is the database
+    // directory and is only used to open the db above — see [CloudFileIsolate.appDir].
+    final appDir = args['appDir'] as String? ?? args['storagePath'] as String?;
     final downloadLocalCopy = args['downloadLocalCopy'] as bool? ?? false;
     final isFullScan = args['isFullScan'] as bool? ?? false;
     final recursive = args['recursive'] as bool? ?? true;
@@ -438,7 +454,7 @@ class CloudFileIsolateWorker {
       _isScanning = false;
       (args['port'] as SendPort).send({'type': 'scan_complete'});
 
-      if (downloadLocalCopy && storagePath != null) {
+      if (downloadLocalCopy && appDir != null) {
         // Query DB for files with null localPath
         logger.i('CloudFileIsolate: querying DB for files needing download...');
         final List<File> allFilesNeedingDownload = await FileDesktopRepository(
@@ -458,7 +474,7 @@ class CloudFileIsolateWorker {
         );
         await _processQueue(
           driveApi,
-          storagePath,
+          appDir,
           collectionName,
           collectionPath,
         );
@@ -759,7 +775,7 @@ class CloudFileIsolateWorker {
 
   Future<void> _processQueue(
     drive.DriveApi driveApi,
-    String storagePath,
+    String appDir,
     String collectionName,
     String collectionPath,
   ) async {
@@ -778,7 +794,7 @@ class CloudFileIsolateWorker {
         final task = _downloadFile(
           driveApi,
           file,
-          storagePath,
+          appDir,
           collectionName,
           collectionPath,
         );
@@ -813,7 +829,7 @@ class CloudFileIsolateWorker {
   Future<void> _downloadFile(
     drive.DriveApi driveApi,
     File file,
-    String storagePath,
+    String appDir,
     String collectionName,
     String collectionPath,
   ) async {
@@ -826,7 +842,7 @@ class CloudFileIsolateWorker {
         final driveId = file.path.replaceFirst('gdrive://', '');
         final relativePath = _reconstructPath(file.parent, collectionPath);
         final destDir = p.join(
-          storagePath,
+          appDir,
           'files',
           'gdrive',
           collectionName,

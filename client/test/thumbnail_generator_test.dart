@@ -91,6 +91,45 @@ void main() {
     expect(key, isNull);
   });
 
+  // The generator dispatches on the app's coarse category, not on a real MIME
+  // type — a real one falls through and produces nothing at all.
+  //
+  // This matters because the scanners disagree about what they put on the row.
+  // Gmail records the true MIME type (`image/jpeg`); the PST, Yahoo and Outlook
+  // scanners record the coarse category. Both therefore have to pass the
+  // category *here* regardless of what they store, and handing `part.mimeType`
+  // straight through — the obvious-looking simplification — silently stops
+  // generating thumbnails for every Gmail attachment. Nothing throws; the
+  // column just stays null and the UI falls back to a placeholder forever.
+  test('dispatches on the coarse category, not a real MIME type', () async {
+    final image = img.Image(width: 400, height: 300);
+    img.fill(image, color: img.ColorRgb8(0, 0, 255));
+    final path = p.join(tempDir, 'attachment.jpg');
+    io.File(path).writeAsBytesSync(img.encodeJpg(image));
+
+    expect(
+      await generator.generate(
+        collectionId,
+        'file:real-mime',
+        path,
+        'image/jpeg',
+        cache,
+      ),
+      isNull,
+      reason: 'a real MIME type is not what the generator matches on',
+    );
+
+    final key = await generator.generate(
+      collectionId,
+      'file:coarse-category',
+      path,
+      FilesConstants.mimeTypeImage,
+      cache,
+    );
+    expect(key, isNotNull);
+    expect(cache.fileForKey(key!).existsSync(), isTrue);
+  });
+
   group('ThumbnailCache', () {
     test('key is stable, sharded, and path-safe for unsafe file ids', () {
       // File ids are `<collectionId>:<relPath>` — full of `:` and `/`.
