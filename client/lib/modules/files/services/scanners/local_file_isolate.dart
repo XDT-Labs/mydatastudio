@@ -35,12 +35,24 @@ class LocalFileIsolate extends CollectionScanner {
   RootIsolateToken? token;
   SendPort? loggerIsolatePort;
   String? storagePath;
+
+  /// The user's storage root (`DatabaseManager.storagePath`), which is where
+  /// thumbnails are cached. Distinct from [storagePath] above, which is the
+  /// *database* directory — the two diverge when the chosen storage location
+  /// can't run SQLite in WAL mode and the db is redirected to Application
+  /// Support. The UI resolves `files.thumbnail` against the storage root, so
+  /// the scanner has to write there too.
+  String? appDir;
   String? dbName;
   Isolate? isolate;
   AppLogger? logger;
 
-  LocalFileIsolate(this.loggerIsolatePort, {this.storagePath, this.dbName})
-    : super() {
+  LocalFileIsolate(
+    this.loggerIsolatePort, {
+    this.storagePath,
+    this.appDir,
+    this.dbName,
+  }) : super() {
     logger = AppLogger(loggerIsolatePort);
   }
 
@@ -93,6 +105,7 @@ class LocalFileIsolate extends CollectionScanner {
       storagePath!,
       dbName!,
       loggerIsolatePort,
+      appDir: appDir,
     );
     logger?.i('Spawning local file scanner isolate for $path');
     try {
@@ -170,6 +183,10 @@ class LocalFileIsolateWorker {
   RootIsolateToken? token;
   SendPort receiverPort;
   String storagePath;
+
+  /// Storage root for the thumbnail cache. See [LocalFileIsolate.appDir] — this
+  /// is *not* [storagePath], which points at the database directory.
+  String? appDir;
   String dbName;
   SendPort? loggerPort;
   AppLogger? logger;
@@ -187,17 +204,23 @@ class LocalFileIsolateWorker {
     this.receiverPort,
     this.storagePath,
     this.dbName,
-    this.loggerPort,
-  );
+    this.loggerPort, {
+    this.appDir,
+  });
 
   final List<Future<void> Function()> _thumbnailQueue = [];
   int _activeThumbnailJobs = 0;
   static const int _maxConcurrentThumbnails = 4;
   Completer<void>? _thumbnailCompleter;
 
-  // Thumbnails are cached on disk under <storagePath>/thumbnails; the DB only
-  // holds the relative key.
-  late final ThumbnailCache _thumbnailCache = ThumbnailCache(storagePath);
+  // Thumbnails are cached on disk under <appDir>/thumbnails; the DB only holds
+  // the relative key. It has to be the storage root and not the database
+  // directory: ThumbnailResolver reads them back through
+  // MainApp.appDataDirectory, which is the storage root. Falls back to
+  // storagePath so tests can pass a single temp dir.
+  late final ThumbnailCache _thumbnailCache = ThumbnailCache(
+    appDir ?? storagePath,
+  );
 
   void _enqueueThumbnailJob(
     AppDatabase appDb,

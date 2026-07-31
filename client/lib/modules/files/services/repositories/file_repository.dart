@@ -254,7 +254,16 @@ class FileDesktopRepository {
           "last_scanned_date = excluded.last_scanned_date, "
           "size = excluded.size, "
           "content_type = excluded.content_type, "
-          "thumbnail = excluded.thumbnail, "
+          // COALESCE, not a plain overwrite: scanners enqueue thumbnail
+          // generation as a background job that writes the key with its own
+          // `UPDATE files SET thumbnail = ?`, but the row itself doesn't land
+          // until the surrounding 100-file batch flushes. Whichever order those
+          // two race in, a plain `excluded.thumbnail` loses the key — the batch
+          // carries null for any file whose thumbnail hasn't been generated yet.
+          // Safe because the cache key is a hash of the file id, so a
+          // regenerated thumbnail always reuses the same key and overwrites the
+          // same path; keeping the old value can never leave a stale pointer.
+          "thumbnail = COALESCE(excluded.thumbnail, files.thumbnail), "
           "download_url = excluded.download_url, "
           "email_id = excluded.email_id, "
           "content_id = excluded.content_id, "
