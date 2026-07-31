@@ -224,6 +224,7 @@ class ScannerManager {
           scanner = LocalFileIsolate(
             null,
             storagePath: DatabaseManager.instance.databaseDirectoryPath!,
+            appDir: DatabaseManager.instance.storagePath!,
             dbName: AppConstants.dbName,
           );
           break;
@@ -233,6 +234,7 @@ class ScannerManager {
           scanner = CloudFileIsolate(
             null,
             storagePath: DatabaseManager.instance.databaseDirectoryPath!,
+            appDir: DatabaseManager.instance.storagePath!,
             dbName: AppConstants.dbName,
           );
           break;

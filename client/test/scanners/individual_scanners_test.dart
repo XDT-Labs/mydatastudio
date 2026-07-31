@@ -28,8 +28,13 @@ class TestLocalFileIsolate extends LocalFileIsolate {
 }
 
 class TestCloudFileIsolate extends CloudFileIsolate {
-  TestCloudFileIsolate(SendPort? loggerPort)
-    : super(loggerPort, storagePath: '/tmp', dbName: 'test.db');
+  TestCloudFileIsolate(SendPort? loggerPort, {String? storagePath, String? appDir})
+    : super(
+        loggerPort,
+        storagePath: storagePath ?? '/tmp',
+        appDir: appDir,
+        dbName: 'test.db',
+      );
 
   Map<String, dynamic>? lastSpawnArgs;
   Isolate? mockIsolateToReturn;
@@ -193,6 +198,28 @@ void main() {
       await scanner.start(collection, null, true, true);
 
       expect(scanner.lastSpawnArgs?['force'], isTrue);
+    });
+
+    // The scanner is handed two roots and they are not interchangeable.
+    // `storagePath` is the database directory, which exists only to open the
+    // db; downloaded local copies belong under the storage root the user chose.
+    // The two diverge whenever that location can't run SQLite in WAL mode,
+    // because the db is then redirected to Application Support — and sending
+    // downloads along with it means enabling "download local copy" on a large
+    // Drive quietly fills the boot volume instead of the drive that was picked
+    // for exactly this data. Nothing errors when that happens: `local_path`
+    // stores an absolute path, so the files still open.
+    test('CloudFileIsolate downloads to the storage root, not the db directory',
+        () async {
+      final scanner = TestCloudFileIsolate(
+        null,
+        storagePath: '/db-dir',
+        appDir: '/storage-root',
+      );
+      await scanner.start(collection, null, true, true);
+
+      expect(scanner.lastSpawnArgs?['appDir'], '/storage-root');
+      expect(scanner.lastSpawnArgs?['storagePath'], '/db-dir');
     });
 
     test(
