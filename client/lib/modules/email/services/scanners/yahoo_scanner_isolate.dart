@@ -13,20 +13,18 @@ import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/models/tables/file.dart' as db_file;
 import 'package:mydatastudio/models/tables/folder.dart' as db_folder;
 import 'package:mydatastudio/modules/email/services/email_decoding_helper.dart';
-import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/email_repository.dart';
-import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
-import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
-import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
 import 'dart:io' as io;
 
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/services/scan_write_relay.dart';
+import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:uuid/uuid.dart';
 
 /// [YahooScannerIsolate] is the client-side manager for the Yahoo scanning
@@ -97,9 +95,24 @@ class YahooScannerIsolate {
       }
     }
 
+    final writeQueue = SequentialWriteQueue();
+
     receivePort.listen((message) {
       if (relayIsolateLog(logger, message, '[YahooScan]')) return;
       if (message is Map) {
+        if (message['type'] == 'dbWrite') {
+          // Queued rather than awaited inline — see gmail_scanner_isolate.dart.
+          final replyTo = message['replyTo'] as SendPort;
+          writeQueue.add(() async {
+            try {
+              final result = await handleScanWriteMessage(message);
+              replyTo.send({'ok': true, 'result': result});
+            } catch (e) {
+              replyTo.send({'ok': false, 'error': e.toString()});
+            }
+          });
+          return;
+        }
         if (message['type'] == 'refresh') {
           GetEmailsService.instance.invoke(
             EmailServiceCommand(
@@ -186,6 +199,28 @@ class YahooScannerIsolate {
 }
 
 class YahooScannerIsolateWorker {
+  /// Sends a write back to the main isolate and waits for its ack. See
+  /// gmail_scanner_isolate.dart's `_writeViaMain` for the full rationale.
+  static Future<Map<String, dynamic>> _writeViaMain(
+    SendPort clientPort,
+    String service,
+    dynamic payload,
+  ) async {
+    final replyPort = ReceivePort();
+    clientPort.send({
+      'type': 'dbWrite',
+      'service': service,
+      'payload': payload,
+      'replyTo': replyPort.sendPort,
+    });
+    final reply = await replyPort.first as Map;
+    replyPort.close();
+    if (reply['ok'] != true) {
+      throw Exception('dbWrite($service) failed: ${reply['error']}');
+    }
+    return (reply['result'] as Map?)?.cast<String, dynamic>() ?? const {};
+  }
+
   static Future<void> worker(Map<String, dynamic> args) async {
     runInScanIsolateZone(() async {
       final RootIsolateToken? token = args['token'];
@@ -289,9 +324,7 @@ class YahooScannerIsolateWorker {
             name: mailbox.name,
             type: _getFolderType(mailbox.name),
           );
-          await EmailFolderUpsertService.instance.invoke(
-            EmailFolderUpsertServiceCommand(folder, appDb),
-          );
+          await _writeViaMain(clientPort!, 'emailFolder', folder);
         }
 
         // 2. Sync Emails
@@ -427,7 +460,7 @@ class YahooScannerIsolateWorker {
                 collection: collection,
                 targetFolder: targetFolder,
                 appDir: appDir,
-                appDb: appDb,
+                clientPort: clientPort!,
                 logger: logger,
               );
               emailBatch.add(emailObj);
@@ -435,10 +468,8 @@ class YahooScannerIsolateWorker {
             }
 
             if (emailBatch.isNotEmpty) {
-              await EmailUpsertService.instance.invoke(
-                EmailUpsertServiceCommand(emailBatch, appDb),
-              );
-              clientPort?.send({'type': 'refresh'});
+              await _writeViaMain(clientPort!, 'emailBatch', emailBatch);
+              clientPort.send({'type': 'refresh'});
             }
           }
         }
@@ -447,13 +478,14 @@ class YahooScannerIsolateWorker {
           "Yahoo sync complete: $totalFound found, $newEmails new, $skipped skipped.",
         );
 
-        // Update lastScanDate in the DB
+        // Update lastScanDate in the DB. The read stays on this isolate's own
+        // connection; only the write goes back to main.
         final collectionRepo = CollectionRepository(appDb);
         final col = await collectionRepo.collectionById(collection.id);
         if (col != null) {
           col.scanStatus = 'ready';
           col.lastScanDate = scanStartTime;
-          await collectionRepo.updateCollection(col);
+          await _writeViaMain(clientPort!, 'collectionStatus', col);
         }
 
         clientPort?.send({'type': 'refresh', 'status': 'done'});
@@ -634,7 +666,7 @@ class YahooScannerIsolateWorker {
   }
 
   static Future<void> _ensureFolderHierarchy({
-    required AppDatabase appDb,
+    required SendPort clientPort,
     required Collection collection,
     required String extractionRoot,
     required String labelName,
@@ -644,28 +676,26 @@ class YahooScannerIsolateWorker {
     final labelAbsPath = p.normalize(p.join(extractionRoot, labelName));
     final yearAbsPath = p.normalize(p.join(labelAbsPath, year));
 
-    await FolderUpsertService.instance.invoke(
-      FolderUpsertServiceCommand(
-        _createFolderObj(
-          absPath: labelAbsPath,
-          extractionRoot: extractionRoot,
-          name: labelName,
-          collectionId: collection.id,
-          date: msgDate,
-        ),
-        appDb,
+    await _writeViaMain(
+      clientPort,
+      'folder',
+      _createFolderObj(
+        absPath: labelAbsPath,
+        extractionRoot: extractionRoot,
+        name: labelName,
+        collectionId: collection.id,
+        date: msgDate,
       ),
     );
-    await FolderUpsertService.instance.invoke(
-      FolderUpsertServiceCommand(
-        _createFolderObj(
-          absPath: yearAbsPath,
-          extractionRoot: extractionRoot,
-          name: year,
-          collectionId: collection.id,
-          date: msgDate,
-        ),
-        appDb,
+    await _writeViaMain(
+      clientPort,
+      'folder',
+      _createFolderObj(
+        absPath: yearAbsPath,
+        extractionRoot: extractionRoot,
+        name: year,
+        collectionId: collection.id,
+        date: msgDate,
       ),
     );
   }
@@ -716,7 +746,7 @@ class YahooScannerIsolateWorker {
     required Collection collection,
     required String targetFolder,
     required String appDir,
-    required AppDatabase appDb,
+    required SendPort clientPort,
     required AppLogger logger,
   }) async {
     final messageId = message.getHeaderValue('Message-ID');
@@ -821,7 +851,7 @@ class YahooScannerIsolateWorker {
       );
 
       await _ensureFolderHierarchy(
-        appDb: appDb,
+        clientPort: clientPort,
         collection: collection,
         extractionRoot: extractionRoot,
         labelName: labelName,
@@ -843,9 +873,7 @@ class YahooScannerIsolateWorker {
       );
       emailObj.attachments = attachments;
       for (var file in attachments) {
-        await FileUpsertService.instance.invoke(
-          FileUpsertServiceCommand(file, appDb),
-        );
+        await _writeViaMain(clientPort, 'file', file);
       }
     }
     return emailObj;
