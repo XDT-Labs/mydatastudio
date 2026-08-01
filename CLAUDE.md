@@ -10,62 +10,6 @@ The app has two runtime components:
 1. **Flutter macOS desktop client** (`client/`) — the UI and data layer
 2. **Python FastAPI service** (`aiserver/`) — embedded in the flutter app and spawned as a subprocess at startup, handles all LLM inference and embeddings over HTTP on localhost
 
-## GSTACK
-gstack is a process, not a collection of tools. The skills run in the order a sprint runs:
-
-Think → Plan → Build → Review → Test → Ship → Reflect
-Each skill feeds into the next. /office-hours writes a design doc that /plan-ceo-review reads. /plan-eng-review writes a test plan that /qa picks up. /review catches bugs that /ship verifies are fixed. Nothing falls through the cracks because every step knows what came before it.
-
-- use the /browse skill from gstack for all web browsing, never use mcp__claude-in-chrome__* tools
-
-lists the available skills: ( if gstack skills aren't working, run cd .claude/skills/gstack && ./setup to build the binary and register skills.)
-
-### Planning & Review
-- `/office-hours` — YC-style forcing questions to pressure-test product ideas and demand reality
-- `/plan-ceo-review` — CEO/founder-mode plan review: rethinks the problem, challenges scope, finds the 10-star product
-- `/plan-eng-review` — Eng manager-mode plan review: locks in architecture, data flow, edge cases, test coverage
-- `/plan-design-review` — Designer's eye plan review: rates each design dimension 0-10 and fixes gaps before implementation
-- `/design-consultation` — Full design system proposal: aesthetic, typography, color, layout, spacing, motion; produces DESIGN.md
-
-### Shipping
-- `/review` — Pre-landing PR review: checks SQL safety, LLM trust boundaries, conditional side effects, structural issues
-- `/ship` — Full ship workflow: merge base, run tests, bump VERSION, update CHANGELOG, commit, push, create PR
-- `/land-and-deploy` — Merges the PR, waits for CI/deploy, verifies production health via canary checks
-
-### Quality & Testing
-- `/qa` — Systematically QA test the app, find bugs, fix them in source, commit each fix atomically, re-verify
-- `/qa-only` — Report-only QA: produces structured bug report with health score and repro steps, never fixes
-- `/canary` — Post-deploy canary monitoring: watches live app for console errors, perf regressions, page failures
-- `/benchmark` — Performance regression detection: establishes baselines for page load, Core Web Vitals, resource sizes
-
-### Debugging
-- `/investigate` — Systematic root-cause debugging: four phases (investigate, analyze, hypothesize, implement). No fixes without root cause.
-
-### UI / Design
-- `/design-review` — Designer's eye QA on a live/built site: finds visual inconsistency, spacing issues, hierarchy problems, AI slop; fixes and commits
-- `/browse` — Headless browser for navigating URLs, interacting with elements, taking screenshots, testing forms
-- `/setup-browser-cookies` — Import cookies from your real Chromium browser into the headless browse session
-
-### Security
-- `/cso` — Chief Security Officer audit: secrets archaeology, dependency supply chain, CI/CD security, OWASP Top 10, STRIDE threat modeling
-
-### Safety & Guardrails
-- `/careful` — Warns before destructive commands (rm -rf, DROP TABLE, force-push, reset --hard, kubectl delete)
-- `/freeze` — Restrict file edits to a specific directory for the session; prevents accidental changes outside scope
-- `/guard` — Full safety mode: combines /careful + /freeze for maximum protection
-- `/unfreeze` — Clear the freeze boundary set by /freeze, allowing edits to all directories again
-
-### Maintenance & Docs
-- `/retro` — Weekly engineering retrospective: analyzes commit history, work patterns, code quality metrics
-- `/document-release` — Post-ship docs update: refreshes README/ARCHITECTURE/CHANGELOG to match what shipped
-
-### Infrastructure
-- `/setup-deploy` — Configure deployment settings for /land-and-deploy (detects Fly.io, Render, Vercel, Netlify, etc.)
-
-### Tooling
-- `/codex` — OpenAI Codex CLI wrapper: code review (pass/fail gate), adversarial challenge mode, or consult mode
-- `/gstack-upgrade` — Upgrade gstack to the latest version
-
 
 ## Build Commands
 
@@ -74,10 +18,11 @@ All orchestration goes through `make` from the repo root:
 ```bash
 make all              # Build models + python binary + Flutter client
 make dev              # Build models + python binary + install locally (no Flutter build)
-make models           # Download GGUF models from Hugging Face
-make build-python     # Compile Python service to binary via PyInstaller
-make local-install-python  # Install Python binary to ~/Library/Application Support/
-make build-client     # Build Flutter macOS release
+make models           # Download default GGUF models from Hugging Face
+make build-python     # Compile Python service to binary via PyInstaller (Metal-enabled on macOS)
+make local-install-python   # Install Python binary to ~/Library/Application Support/<bundle-id>/ (dev + prod realms)
+make build-client     # Build Flutter macOS release (swaps in pubspec.prod.yaml, passes REALM_NAME)
+make notarize         # Notarize the macOS build (requires APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID)
 make clean            # Remove all build artifacts
 ```
 
@@ -90,7 +35,7 @@ flutter build macos --release --no-tree-shake-icons
 flutter test                         # Run Flutter tests
 ```
 
-> The database uses **resqlite** (+ **resqlite_vector**), not Drift. Tables are declared as raw `CREATE TABLE` DDL in `database_manager.dart`, and models under `models/tables/` are plain Dart classes with hand-written `fromMap`/`toMap`. There is **no code generation** for the schema or models — a schema change means editing the DDL and the corresponding model by hand (bump the DB version / migration in `database_manager.dart` as needed).
+> The database uses **resqlite** (+ **resqlite_vector**), not Drift. Tables are declared as raw `CREATE TABLE IF NOT EXISTS` DDL in `database_manager.dart` (`AppDatabase.schemaDDL`), and models under `models/tables/` are plain Dart classes with hand-written `fromMap`/`toMap`. There is **no code generation** for the schema or models — a schema change means editing the DDL and the corresponding model by hand. There is no incremental schema-version counter; one-off migrations are gated by ad-hoc `PRAGMA user_version` checks and idempotent `ALTER TABLE ... IF NOT EXISTS`-style helpers run on every open.
 
 ## Python Service (`aiserver/`)
 
@@ -103,29 +48,35 @@ PYTHONPATH=src pdm run pytest tests/test_routes.py   # Run a single test file
 pdm run pyinstaller -y main.spec     # Compile to standalone binary
 ```
 
+Requires Python 3.11–3.14 (`requires-python = ">=3.11,<3.15"` in `pyproject.toml`).
+
 ## Architecture
 
 ### Flutter → Python Communication
 
-On startup, `PythonManager` spawns the bundled `aiserver` binary as a subprocess and parses its stderr for a URL pattern (`http://0.0.0.0:PORT`). Once found, that URL is broadcast via `MainApp.llmServiceUrl` (a `BehaviorSubject`) so all subscribers can start making HTTP calls.
+On startup, `PythonManager` unzips the bundled `aiserver-<platform>.zip` into Application Support (if not already installed at the current version), generates a per-launch bearer token, and spawns the `aiserver` binary as a subprocess with `APP_SUPPORT_DIR`/`AICHAT_MODELS_DIR`/`AISERVER_TOKEN` env vars. It scans subprocess stdout for a URL pattern (`http://127.0.0.1:PORT` or `http://localhost:PORT`). Once found, that URL is broadcast via `MainApp.llmServiceUrl` (a `BehaviorSubject`) so all subscribers can start making HTTP calls. A `PYTHON_SERVER_URL` dart-define can override this to point at an already-running dev server instead of spawning one.
 
-`LocalLlmContentGenerator` wraps those HTTP calls behind the `ContentGenerator` interface. Key endpoints:
+`LocalLlmContentGenerator` wraps chat completion calls behind the `genui` package's `ContentGenerator` interface. All requests carry `Authorization: Bearer <AISERVER_TOKEN>`. Key endpoints actually called by the client:
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /start-session` | Load GGUF model into memory |
-| `POST /chat` | Generate/stream chat response |
-| `POST /embedding` | Text or image embeddings |
-| `POST /import/pst` | Parse Outlook PST files |
-| `POST /download-model` | Download models from Hugging Face |
+| `POST /v1/chat/completions` | Streaming/non-streaming chat completion (local GGUF or cloud provider passthrough) |
+| `POST /v1/chat/stop` | Cancel an in-flight generation |
+| `POST /util/embedding` | Text or image embeddings (local multimodal model) |
+| `GET /util/model-status` | Check whether a model is already downloaded on disk |
+| `POST /util/download-model` | Download a GGUF file or HF snapshot, streaming SSE progress |
+| `POST /util/delete-model` | Delete a downloaded model |
+| `POST /util/import/pst` | Stream-parse an Outlook PST file |
+| `POST /util/thumbnail` | Generate an image thumbnail (incl. RAW formats) |
+| `GET /skills` | List built-in `/command` skills |
 
 On app close, `windowManager.onWindowClose` triggers `pythonManager.stopAiServerService()` (SIGTERM → 5s → SIGKILL).
 
 ### Flutter State & Data Flow
 
 - **Global singletons**: `MainApp.supportDirectory`, `MainApp.appDataDirectory`, `MainApp.llmServiceUrl` — all `BehaviorSubject` from RxDart
-- **Database**: `DatabaseManager` is a resqlite singleton; write-heavy operations run in `DbIsolateWriter` (a separate `Isolate`) to avoid blocking the UI thread
-- **Embeddings**: Generated in `EmbeddingIsolate` — another separate isolate
+- **Database**: `AppDatabase` (resqlite) has no single writer isolate — each isolate (scanners, embedding workers, and the main isolate) opens its own `AppDatabase` connection directly and writes to it; `DatabaseManager.startBackgroundServices` staggers isolate startup by 500ms to avoid concurrent-open contention
+- **Embedding Generation**: Generated in `EmbeddingIsolate` (files) and `EmailEmbeddingIsolate` (emails), each a separate `Isolate`; both pause while any scanner is actively syncing
 - **Background sync**: `ScannerManager` creates `CollectionScanner` instances per collection; scanners run as isolates watching for new/changed files, emails, photos
 - **Auth**: `DesktopOAuthManager` handles OAuth2 flows for Google Drive, Gmail, Yahoo
 
@@ -143,35 +94,47 @@ modules/<feature>/
 
 Other key directories:
 - `repositories/` — resqlite query layer
-- `services/` — cross-feature services
-- `scanners/` — background isolate workers
+- `services/` — cross-feature services (includes `rx_service.dart`, the `RxService<C, R>` base class)
+- `scanners/` — `CollectionScanner` base class + `ScannerManager` (registration/lifecycle, not the scanners themselves — those live per-module under `modules/<feature>/services/scanners/`)
 - `file_sources/` — OAuth provider integrations (Google Drive, local FS)
 - `models/` — plain Dart model classes (`models/tables/`) with hand-written `fromMap`/`toMap`; the SQL schema is declared in `database_manager.dart`
+
+Implemented scanners (registered in `ScannerManager`): local filesystem, Google Drive, Gmail, Yahoo, Outlook (live IMAP). Outlook PST import is a one-time file import isolate invoked directly by the UI, not a registered scanner. Dropbox/OneDrive constants exist but have no implementation. The `social` module (Facebook/Twitter/Instagram) is UI-only placeholder pages with no backing scanner.
 
 ### Python Service Structure
 
 ```
-main.py           # Uvicorn entry point
-routes.py         # FastAPI route handlers
-model_manager.py  # LLM inference and embeddings (llama-cpp-python)
-state.py          # Global model instances, async locks
+main.py           # Uvicorn entry point; creates the FastAPI app and registers all routes
+routes.py         # Route handler implementations (chat, embeddings, model mgmt, PST, thumbnails)
+model_manager.py  # Model loaders: local GGUF (llama-cpp-python) + Gemini/Claude/OpenAI/Grok passthrough
+state.py          # Global model instance, asyncio load locks, threading generation lock, stop events
 models.py         # Pydantic request/response schemas
-pst_parser.py     # Outlook PST extraction (libpff)
-genui_schema.py   # GenUI JSON response format
+model_registry.py # Resolves model aliases via Flutter's config.json + the aichat_models table
+skills.py         # Built-in "/command" skill registry (summarize, analyze, translate, explain, rewrite)
+pst_parser.py     # Outlook PST extraction (pypff / libpff)
+auth.py           # Bearer-token auth dependency (enforced when AISERVER_TOKEN is set)
 config.py         # Constants, default model paths
 utils.py          # HuggingFace downloads, file I/O
 ```
 
+Concurrency: one shared model instance at a time; a `threading.Lock` (`state.generation_lock`) serializes actual generations since `llama_cpp` isn't safe for concurrent decoding. Per-generation `threading.Event`s back `/v1/chat/stop` so a stop can target one stream without killing others.
+
 ### Database Schema
 
-Tables (raw `CREATE TABLE` DDL in `database_manager.dart`): `App`, `AppUser`, `Collection`, `File`, `Folder`, `Email`, `EmailFolder`, `Album`, `FileEmbedding`. Collections own Files/Folders/Emails. `FileEmbedding` stores float vectors via resqlite_vector for semantic search.
+Tables (raw `CREATE TABLE` DDL in `database_manager.dart`): `apps`, `app_users`, `collections`, `files`, `folders`, `emails`, `email_folders`, `albums`, `providers`, `files_embeddings`, `emails_embeddings`, `aichat_conversations`, `aichat_conversation_history`, `aichat_models`, `aichat_skills`. Collections own Files/Folders/Emails. `files_embeddings`/`emails_embeddings` store float vectors (Qwen3-VL-Embedding-2B, dim 2048) via resqlite_vector for semantic search.
 
 ### macOS Bundle IDs
 
-- `main` branch → `com.xdtlabs.mydatastudio`
-- `develop` branch → `com.xdtlabs.mydatastudio`
+Both `main` and `develop` branches currently build to `com.xdtlabs.mydatastudio`; the realm/bundle id is controlled by `REALM_NAME` (read from `.realm_name` at build time, passed as a `--dart-define`) rather than a per-branch make target.
 
-Set via `make set-bundle-id` or controlled by `REALM_NAME` dart-define at build time.
+## Development Practices
+
+- **Test-driven for non-trivial changes**: write a test that expresses the intended behavior before implementing, then implement to make it pass (red-green-refactor). Trivial one-liners don't need ceremony — use judgment, consistent with Rule 2 below.
+- **Build before test**: run a build and fix compiler/analyzer errors before running the test suite — don't let test failures mask build breaks.
+- **Regression tests**: when fixing a bug, add a test that would have caught it, not just the fix itself (see Rule 9).
+- **Code qualities**: concrete enough to be understood, abstract enough to change; expose the problem's domain in naming; high cohesion / loose coupling; single responsibility per method/class.
+- **Git commits**: always get explicit user approval before committing — never commit unprompted.
+- **Mermaid diagrams**: quote node labels that contain spaces, newlines, or special characters (`()`, `[]`, `{}`, etc.) to avoid syntax errors.
 
 
 

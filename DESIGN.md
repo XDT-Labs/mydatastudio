@@ -112,18 +112,19 @@ The design style is a refined hybrid of **Glassmorphism** and **Corporate Modern
 
 ## Colors
 
-The palette is a deep-space dark theme dominated by the "Neutral" obsidian base and accented by "Primary" lavender tones. 
+The palette is a deep-space dark theme dominated by the "Neutral" obsidian base and accented by "Primary" lavender tones. The app ships **dark mode only** (`ThemeMode.dark` is hardcoded in `family_dam_app.dart`) — a light `ColorScheme` exists in `color_schemes.g.dart` for potential future use but is not currently reachable from the UI.
 
-- **Primary (#cfbcff):** Used for active states, key actions, and brand highlights.
+- **Primary (#e8ddff):** Used for active states, key actions, and brand highlights. `primary-container` (#cfbcff, the deeper lavender) is used for secondary emphasis surfaces and as `surfaceTint`.
 - **Secondary (#ccc2dc):** Provides muted structural contrast for secondary navigation and icons.
 - **Tertiary (#efc048):** Reserved specifically for file/folder metaphors to provide instant visual scanning.
-- **Atmospheric Layering:** The background is not a flat color but a dynamic mesh gradient. Surfaces utilize a custom "Glass" treatment with a `20px` backdrop blur and `8%` white borders to simulate layered acrylic panels.
+- **Atmospheric Layering:** The background is not a flat color but a dynamic mesh gradient. Surfaces utilize a custom "Glass" treatment with a `20px` backdrop blur and `8%` white borders to simulate layered acrylic panels. **Implementation note:** in the current codebase this glass/blur treatment is only applied in one place (`BackdropFilter` in the Files page path bar) — it is the target aesthetic for surfaces generally, not yet a reusable themed widget applied app-wide.
 
 ## Typography
 
-The typographic system utilizes a high-contrast pairing: 
-- **Montserrat** is used exclusively for brand-level display and high-impact headers to convey a bold, urban energy.
-- **Public Sans** handles the heavy lifting for data density. It is chosen for its exceptional legibility at small sizes (10px - 14px) and its institutional, trustworthy feel.
+The typographic system utilizes a high-contrast pairing, implemented via the `google_fonts` package (no bundled font assets):
+- **Montserrat** is used for brand-level display and high-impact headers (`displayLarge/Medium/Small`, `headlineLarge/Medium/Small`) to convey a bold, urban energy.
+- **Public Sans** handles the heavy lifting for data density (`titleLarge/Medium/Small`, `bodyLarge/Medium/Small`, `labelLarge/Medium/Small`). It is chosen for its exceptional legibility at small sizes (10px - 14px) and its institutional, trustworthy feel.
+- **Inter** is additionally used in-code for nav-rail labels and data-table column headers — a third, denser face not originally part of this spec; treat it as reserved for high-density tabular/navigation chrome only, not general body copy.
 
 Hierarchy is established through weight and letter-spacing rather than dramatic size changes. Data labels and category headers use a "Micro-Caps" style—extra bold, small size, and wide tracking—to differentiate them from interactive content.
 
@@ -138,12 +139,14 @@ The internal rhythm is based on a **4px baseline grid**. Horizontal padding is g
 
 ## Elevation & Depth
 
-Elevation is achieved through **Material Translucency** rather than traditional dropshadows. 
+Elevation is achieved through **Material Translucency** rather than traditional dropshadows.
 
 - **Level 1 (Base):** The Background Mesh.
 - **Level 2 (Panels):** Main navigation and containers using `glass` (60% opacity with 20px blur). This creates a sense of the background "shining through."
 - **Level 3 (Interactive):** Action bars and search inputs using `glass-elevated` (5% white tint with 12px blur), creating a "closer" tactile feel.
 - **Level 4 (Floating):** Only the Floating Action Button (FAB) uses a true shadow—a `shadow-2xl` tinted with the primary color (#cfbcff) at 40% opacity to denote it is the most critical interactive element.
+
+Most surfaces today rely on the Material 3 `surfaceContainer*` scale (flat fills, no blur) rather than the full glass treatment above — treat the glass/blur elevation model as the design target for panels and action bars as they're built out, not as something already applied consistently.
 
 ## Shapes
 

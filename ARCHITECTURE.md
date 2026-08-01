@@ -1,25 +1,60 @@
 
 ## Overview
 
-**My Data Studio** is a privacy-focused, local-first Digital Asset Manager (DAM) for managing your digital life — files, emails, photos, and social media archives — all stored on your device with no cloud dependency.
+**My Data Studio** is a privacy-focused, local-first Digital Asset Manager (DAM) for managing your digital life — files, emails, photos, and social media archives — all stored on your device with no cloud dependency required for AI features.
 
 - **Local-first**: All data stored on your device
 - **Privacy-focused**: Zero server-side data storage
-- **Cross-platform**: Windows, macOS, and Linux support
-- **AI-powered search**: Local LLM integration for semantic search and document understanding
+- **Cross-platform**: Windows, macOS, and Linux support (current release targets macOS)
+- **AI-powered search**: Local LLM integration for semantic search and document understanding, with optional cloud model passthrough (Gemini/Claude/OpenAI/Grok) **if the user supplies their own API key**
 
 ---
 
 ## Architecture
 
-The app is a hybrid Flutter + Python application:
+The app is a hybrid Flutter + Python application. The Python service is not a separate deployment — it's bundled inside the Flutter app and spawned as a child process on launch.
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | UI | Flutter (Dart) | Cross-platform desktop UI |
-| Data | SQLite + Drift ORM | Local metadata & vector storage |
-| AI | Python FastAPI | Local LLM inference & semantic search |
-| Background | Dart Isolates | Parallel file scanning & processing |
+| Data | SQLite via **resqlite** + **resqlite_vector** | Local metadata & vector storage (hand-written schema, no ORM codegen) |
+| AI | Python FastAPI (bundled subprocess) | Local LLM inference, embeddings, PST parsing |
+| Background | Dart Isolates | Parallel file/email scanning, embedding generation |
+| State | RxDart (`BehaviorSubject`/`PublishSubject`) | App-wide and page-level reactive state — no Provider/Bloc/Riverpod |
+
+```mermaid
+flowchart LR
+    subgraph Flutter["Flutter macOS App (client/)"]
+        UI["UI Pages & Widgets"]
+        Repo["Repositories"]
+        DB[("AppDatabase\nresqlite + resqlite_vector")]
+        Scanners["Scanner Isolates"]
+        EmbIso["Embedding Isolates"]
+        PM["PythonManager"]
+        LLMGen["LocalLlmContentGenerator"]
+    end
+
+    subgraph Python["aiserver (bundled Python subprocess)"]
+        FastAPI["FastAPI / Uvicorn\n(localhost, bearer-token auth)"]
+        Local["llama-cpp-python\n(local GGUF models)"]
+        Cloud["Cloud passthrough\nGemini / Claude / OpenAI / Grok"]
+        Embed["Embedding models\n(GGUF text + Qwen3-VL multimodal)"]
+        PST["PST parser (pypff)"]
+    end
+
+    UI --> Repo --> DB
+    Scanners --> DB
+    EmbIso --> DB
+    Scanners -->|"discovered items"| EmbIso
+    UI --> PM
+    PM -->|"spawns + discovers URL"| FastAPI
+    LLMGen -->|"HTTP, Bearer token"| FastAPI
+    EmbIso -->|"HTTP /util/embedding"| FastAPI
+    FastAPI --> Local
+    FastAPI --> Cloud
+    FastAPI --> Embed
+    FastAPI --> PST
+```
 
 ### Startup Sequence
 
@@ -29,10 +64,16 @@ The app is a hybrid Flutter + Python application:
 3. Check database configuration
    → If not configured: show Setup page
    → If configured: proceed
-4. Initialize DatabaseManager (SQLite + Drift ORM)
-5. Initialize PythonManager (start AI Chat service)
-6. Show splash screen → Main app
-7. AppRouter redirects based on auth state
+4. Initialize AppDatabase (resqlite + resqlite_vector) on the main isolate
+5. Initialize PythonManager:
+     → Unzip bundled aiserver-<platform>.zip into Application Support (if not already installed)
+     → Generate a per-launch bearer token
+     → Spawn the aiserver subprocess, passing APP_SUPPORT_DIR / AICHAT_MODELS_DIR / AISERVER_TOKEN
+     → Scan subprocess stdout for "http://127.0.0.1:<port>" and publish it via MainApp.llmServiceUrl
+6. DatabaseManager.startBackgroundServices() registers scanners (registration-only, no scan yet),
+   then staggers startup of EmbeddingIsolate and EmailEmbeddingIsolate (~500ms apart)
+7. Show splash screen → Main app
+8. AppRouter redirects based on auth state
    → Not logged in → Login page
    → Logged in → Home page
 ```
@@ -41,15 +82,16 @@ The app is a hybrid Flutter + Python application:
 
 ```
 User adds collection
-  → Source detected (local/Google Drive)
+  → Source detected (local / Google Drive)
   → OAuth flow (if cloud source)
   → Collection saved to database
-  → ScannerManager registers scanner
-    → LocalFileIsolate/GoogleFileScanner spawns background Isolate
-    → Files scanned, metadata extracted (EXIF, thumbnails)
-    → FileRepository upserts to SQLite
-    → DatabaseChangeWatcher notifies UI
-  → RxFilesPage observes DB change stream and updates
+  → ScannerManager registers scanner (no scan yet — registration-only startup)
+  → User triggers sync (manual button, or folder navigation) → start(force: true)
+    → LocalFileIsolate / CloudFileIsolate spawns a background Isolate
+    → Files scanned (discovery phase), metadata extracted (EXIF, thumbnails) in a sync phase
+    → FileRepository upserts to SQLite via the scanner's own AppDatabase connection
+    → EmbeddingIsolate picks up newly discovered files once the scanner finishes
+  → RxFilesPage's RxService sink is re-invoked on scanner.isScanning true→false and updates the UI
 ```
 
 ---
@@ -59,20 +101,23 @@ User adds collection
 ```
 /client/
   lib/
-    modules/       # Feature modules (files, email, photos, aichat, social)
-    repositories/  # Data access layer
-    services/      # Core business logic
+    modules/       # Feature modules: aichat, files, email, photos, social
+    repositories/  # Data access layer (resqlite queries)
+    services/      # Core business logic (incl. rx_service.dart — RxService<C,R> base class)
+    scanners/      # CollectionScanner interface + ScannerManager (lifecycle only)
+    file_sources/  # Source providers (local, Google Drive)
+    oauth/         # OAuth authentication (DesktopOAuthManager)
     pages/         # Top-level pages (Home, Login, Setup, Splash)
-    models/tables/ # Database schema (Drift ORM)
-    scanners/      # Collection scanner orchestration
-    file_sources/  # Source providers (Local, Google Drive)
-    oauth/         # OAuth authentication
+    models/tables/ # Database schema models (hand-written, no codegen)
     widgets/       # Reusable UI components
     l10n/          # Localization/i18n
+    database_manager.dart  # AppDatabase (resqlite) + startBackgroundServices()
+    python_manager.dart    # Spawns/monitors the aiserver subprocess
+    main.dart               # MainApp global BehaviorSubjects, app entry point
   assets/
-/aiserver/         # Python FastAPI LLM service
+/aiserver/         # Python FastAPI LLM service, bundled as a subprocess
 /models/           # Downloaded ML models (GGUF)
-/services/         # Cloud deployment configs (Google Cloud Run)
+/services/         # Cloud deployment configs (Google Cloud Run, for the optional download CDN)
 ```
 
 ---
@@ -82,31 +127,28 @@ User adds collection
 ### Files (`/modules/files`)
 Browse and scan local filesystem and Google Drive. Extracts EXIF metadata, generates thumbnails, and supports embedding-based semantic search.
 
-- Scanners: `local_file_isolate.dart`, `google_file_scanner.dart`
-- Services: `get_files_and_folders_service`, `file_upsert_service`, `embedding_isolate`
-- Utilities: EXIF extractor, thumbnail generator
+- Scanners: `services/scanners/local_file_isolate.dart` (`LocalFileIsolate`), `services/scanners/google_file_scanner.dart` (`CloudFileIsolate`)
+- Services: `services/embedding_isolate.dart` (`EmbeddingIsolate`), file upsert/repository services
 
 ### Email (`/modules/email`)
-Archives and searches email from multiple providers. Supports Gmail, Yahoo, and Outlook PST files.
+Archives and searches email from multiple providers.
 
-- Scanners: `gmail_scanner.dart`, `yahoo_scanner.dart`, `outlook_pst_scanner_isolate.dart`
-
-### Social (`/modules/social`)
-Social media archive support for Facebook, Twitter, and Instagram. (In progress)
-
----
-
-## Tools
-
+- Scanners: `services/scanners/gmail_scanner_isolate.dart`, `services/scanners/yahoo_scanner_isolate.dart`, `services/scanners/outlook_scanner_isolate.dart` (live IMAP), `services/scanners/outlook_pst_scanner_isolate.dart` (one-time PST file import — UI-triggered, not a registered `ScannerManager` scanner)
+- Services: `email_embedding_isolate.dart` (`EmailEmbeddingIsolate`)
 
 ### Photos (`/modules/photos`)
-Photo gallery with timeline view, GPS/EXIF data display, and full-text search.
+Photo gallery with timeline view, GPS/EXIF data display, and full-text search — a specialized view over the `files` table, no separate scanner.
 
 ### AI Chat (`/modules/aichat`)
-Semantic search across all collected data via a local LLM. Communicates with the bundled Python FastAPI service.
+Semantic search and chat across all collected data via the bundled Python FastAPI service.
 
-- Model: Gemma 3.4B (GGUF), SigLip2 embeddings
-- Libraries: LangChain, llama-cpp-python
+- `services/local_llm_content_generator.dart` (`LocalLlmContentGenerator`) — implements the `genui` package's `ContentGenerator` interface
+- Local model: GGUF chat models (e.g. Gemma) via llama-cpp-python; local embeddings via Qwen3-VL-Embedding-2B
+- Optional cloud models: Gemini, Claude, OpenAI, Grok — passthrough only, requires the user's own API key
+- Libraries: LangChain (cloud provider wrappers), llama-cpp-python (local inference)
+
+### Social (`/modules/social`)
+Facebook, Twitter, and Instagram pages exist as **static placeholder UI only** — there is no scanner, no `AppConstants.scannerSocial*` constant, and no data ingestion implemented yet.
 
 ---
 
@@ -139,12 +181,13 @@ UI calls `invoke(command)` → service does work → emits to `sink` → pages c
 
 ### Global App State
 
-Static `BehaviorSubject`s on `MainApp` (`main.dart:44-54`) hold app-wide state accessible anywhere:
+Static `BehaviorSubject`s on `MainApp` (`main.dart`) hold app-wide state accessible anywhere:
 
 ```dart
 static final BehaviorSubject<Directory?> supportDirectory = BehaviorSubject();
 static final BehaviorSubject<String?> appDataDirectory = BehaviorSubject();
 static final BehaviorSubject<String?> llmServiceUrl = BehaviorSubject();
+static final BehaviorSubject<String?> llmServiceToken = BehaviorSubject();
 ```
 
 ### Page-Level State
@@ -185,25 +228,25 @@ The files and email services use a **cache-then-scan** pattern:
 
 ```
 1. Service queries DB immediately → emits cached results → UI renders
-2. Background scanner starts (fire-and-forget)
+2. Background scanner starts (fire-and-forget, only when force: true)
 3. Page subscribes to scanner.isScanning (BehaviorSubject<bool>)
 4. When scanner transitions true → false, page re-invokes service for silent refresh
 ```
 
 ### Widget-Tree Communication: Notifications
 
-Child widgets bubble events up using Flutter's `Notification` class (not RxDart), defined in `modules/files/notifications/`:
+Child widgets bubble events up using Flutter's `Notification` class (not RxDart), defined in `modules/files/notifications/` (and mirrored under `modules/email/notifications/`):
 
 - `PathChangedNotification` — user navigated into a folder
 - `SortChangedNotification` — column sort changed
 - `FileDeletedNotification` — file was deleted
 - `SelectionChangedNotification` — multi-select changed
 
-Parent pages wrap tables in `NotificationListener<FiledNotification>` and handle each type.
+Parent pages wrap tables in a `NotificationListener` and handle each type.
 
 ### Logging Stream
 
-`AppLogger` (`app_logger.dart:154`) broadcasts status messages via a static `PublishSubject<String> statusSubject`. In isolates it sends over a `SendPort`; in the main isolate it publishes directly to the subject.
+`AppLogger` (`app_logger.dart`) broadcasts status messages via a static `PublishSubject<String> statusSubject`. In isolates it sends over a `SendPort`; in the main isolate it publishes directly to the subject.
 
 ### Summary
 
@@ -221,45 +264,141 @@ Parent pages wrap tables in `NotificationListener<FiledNotification>` and handle
 
 ---
 
-## Technology Stack
+## Isolate Architecture
 
-**Frontend:**
-- Flutter 3.7+ / Dart 3.7+
-- Material Design 3
-- GoRouter (navigation)
-- Drift ORM
-- Reactive Forms & Form Builder
+The app has no single "database writer isolate" — every isolate that needs to write opens its **own** `AppDatabase` (resqlite) connection directly, rather than routing writes through a dedicated writer process. Startup staggers isolate creation by ~500ms to avoid concurrent SQLite-open contention, and embedding isolates pause automatically whenever a scanner is actively syncing.
 
-**AI/Backend:**
-- Python 3.11+
-- FastAPI + Uvicorn
-- LangChain (LLM orchestration)
-- llama-cpp-python (local inference)
-- PyInstaller (executable bundling)
+| Isolate | Location | Role |
+|---|---|---|
+| `LocalFileIsolate` | `modules/files/services/scanners/local_file_isolate.dart` | Crawls local filesystem paths; EXIF/thumbnail extraction; upserts `files`/`folders` |
+| `CloudFileIsolate` | `modules/files/services/scanners/google_file_scanner.dart` | Google Drive scan via OAuth-authenticated API calls |
+| `GmailScannerIsolate` | `modules/email/services/scanners/gmail_scanner_isolate.dart` | Gmail sync (API/IMAP) |
+| `YahooScannerIsolate` | `modules/email/services/scanners/yahoo_scanner_isolate.dart` | Yahoo Mail IMAP sync |
+| `OutlookScannerIsolate` | `modules/email/services/scanners/outlook_scanner_isolate.dart` | Outlook live IMAP sync |
+| `OutlookPstScannerIsolate` | `modules/email/services/scanners/outlook_pst_scanner_isolate.dart` | One-time `.pst` file import; UI-triggered directly, not registered in `ScannerManager` |
+| `EmbeddingIsolate` | `modules/files/services/embedding_isolate.dart` | Generates file embeddings via aiserver `/util/embedding`; writes `files_embeddings` |
+| `EmailEmbeddingIsolate` | `modules/email/services/email_embedding_isolate.dart` | Generates email embeddings; writes `emails_embeddings` |
 
-**Database:**
-- SQLite3
-- sqlite_vector (vector embeddings)
-- Drift (code generation ORM)
+```mermaid
+flowchart TB
+    Main["Main Isolate\n(UI + AppDatabase connection)"]
 
-**Cloud/External:**
-- Google APIs (Drive, Gmail, Sign-In)
-- OAuth2 authentication
-- HuggingFace Hub (model downloads)
+    subgraph Scanners["Scanner Isolates (one AppDatabase connection each)"]
+        LFI["LocalFileIsolate"]
+        CFI["CloudFileIsolate\n(Google Drive)"]
+        GSI["GmailScannerIsolate"]
+        YSI["YahooScannerIsolate"]
+        OSI["OutlookScannerIsolate"]
+        PSTI["OutlookPstScannerIsolate\n(UI-triggered, not registered)"]
+    end
+
+    subgraph Embed["Embedding Isolates (own AppDatabase connection)"]
+        EI["EmbeddingIsolate\n(files)"]
+        EEI["EmailEmbeddingIsolate\n(emails)"]
+    end
+
+    DB[("SQLite file\n(resqlite + resqlite_vector, WAL)")]
+
+    Main -- "register (no scan)" --> Scanners
+    Main -- "force: true (manual sync / nav)" --> Scanners
+    Scanners -- "own connection, writes" --> DB
+    Scanners -. "isScanning stream" .-> Main
+    Scanners -. "pause/resume" .-> Embed
+    Embed -- "own connection, writes" --> DB
+    Embed -- "HTTP /util/embedding" --> AIServer["aiserver (Python subprocess)"]
+    Main -- "reads" --> DB
+```
+
+---
+
+## Embedded Python Server (`aiserver/`)
+
+The Python service is not a standalone deployment — `PythonManager` unzips a bundled `aiserver-<platform>.zip` into Application Support and spawns it as a **subprocess**, one per app launch, on a random localhost port. All requests require `Authorization: Bearer <token>`, where the token is generated fresh by `PythonManager` on every launch and passed to the subprocess via the `AISERVER_TOKEN` env var.
+
+### Service Structure
+
+```
+main.py           # Uvicorn entry point; builds the FastAPI app, registers routes, preloads default model
+routes.py         # Route handler implementations
+model_manager.py  # Model loaders: local GGUF (llama-cpp-python) + Gemini/Claude/OpenAI/Grok passthrough
+state.py          # Shared model instance, asyncio load locks, threading generation lock, per-stream stop events
+models.py         # Pydantic request/response schemas
+model_registry.py # Resolves model aliases via the Flutter app's config.json + the aichat_models table
+skills.py         # Built-in "/command" skills (summarize, analyze, translate, explain, rewrite)
+pst_parser.py     # Outlook PST streaming parser (pypff / libpff)
+auth.py           # Bearer-token auth dependency
+config.py         # Constants, default model paths
+utils.py          # HuggingFace Hub downloads, path/file helpers
+```
+
+### HTTP Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/` | Health check / currently loaded model |
+| GET | `/skills` | List built-in `/command` skills |
+| POST | `/v1/chat/completions` | OpenAI-compatible chat completion (streaming SSE or not); routes to local GGUF or a cloud provider |
+| POST | `/v1/chat/stop` | Cancel a specific (or all) in-flight generation(s) |
+| POST | `/v1/embeddings` | OpenAI-compatible text-embedding endpoint |
+| POST | `/util/embedding` | Multimodal (text or image) embedding via the local model |
+| GET | `/util/model-status` | Local-disk check for whether a model is already downloaded |
+| POST | `/util/download-model` | Download a GGUF file or full HF snapshot, streaming SSE progress |
+| POST | `/util/delete-model` | Delete a downloaded model and its directory |
+| POST | `/util/thumbnail` | Generate an image thumbnail from base64 bytes (incl. RAW formats) |
+| POST | `/util/import/pst` | Stream-parse an Outlook `.pst` file, returning JSON results incrementally |
+
+### AI Model Integration
+
+**Local inference** — `load_local_model()` loads a GGUF file directly via `llama_cpp.Llama` (large context window, GPU offload on Apple Silicon via Metal, optional multimodal vision through a chat handler + mmproj file, e.g. for Gemma).
+
+**Cloud passthrough** (optional, bring-your-own-key) — `model_manager.py` also provides `load_gemini_model()`, `load_claude_model()`, `load_openai_model()`, and `load_grok_model()`, each wrapping the corresponding LangChain chat client. Routing is dispatched in `routes.py` based on the resolved model's `group` column in the `aichat_models` table. No cloud calls are made unless the user has configured one of these providers with their own API key — the default, out-of-the-box experience is fully local.
+
+**Embeddings** — GGUF text embedding models load via `langchain_community.llms.LlamaCpp(embedding=True)`; multimodal embeddings (text + image) use Qwen3-VL-Embedding-2B via Transformers (CUDA if available, otherwise CPU — MPS is explicitly avoided due to a PyTorch bug on Apple Silicon).
+
+**Concurrency** — one shared model instance at a time. Because `llama_cpp` isn't safe for concurrent decoding, `state.generation_lock` (a `threading.Lock`) serializes actual generations across requests; per-generation `threading.Event`s back `/v1/chat/stop` so a stop can target a single stream without killing others.
+
+```mermaid
+sequenceDiagram
+    participant Flutter as Flutter Client
+    participant PM as PythonManager
+    participant AS as aiserver (FastAPI)
+    participant LLM as Local GGUF Model\n(llama-cpp-python)
+    participant Cloud as Cloud Provider\n(optional, BYO key)
+
+    Flutter->>PM: startAiServerService()
+    PM->>AS: spawn subprocess (AISERVER_TOKEN, AICHAT_MODELS_DIR)
+    AS-->>PM: stdout: "http://127.0.0.1:<port>"
+    PM-->>Flutter: MainApp.llmServiceUrl.add(url)
+
+    Flutter->>AS: POST /v1/chat/completions (Bearer token)
+    alt local model selected
+        AS->>LLM: acquire generation_lock, stream tokens
+        LLM-->>AS: token stream
+    else cloud model selected (user-configured key)
+        AS->>Cloud: LangChain chat call
+        Cloud-->>AS: token stream
+    end
+    AS-->>Flutter: SSE stream
+
+    Flutter->>AS: POST /v1/chat/stop {stream_id}
+    AS->>AS: set threading.Event for stream_id
+```
+
+### PST Parsing
+
+`pst_parser.py` (`PstParser`) streams Outlook `.pst` files via `pypff` (the Python bindings for libpff), extracting folders, messages, and attachments incrementally rather than loading the whole file into memory.
 
 ---
 
 ## Database Structure
 
-The database is a SQLite database managed by Drift ORM, with sqlite_vector extension for semantic embeddings.
+The database is SQLite, opened via **resqlite** with the **resqlite_vector** extension for semantic embeddings. Schema is hand-written `CREATE TABLE IF NOT EXISTS` DDL in `client/lib/database_manager.dart` — there is no ORM code generation. There is no incremental schema-version counter; one-off migrations run as idempotent `PRAGMA user_version`-gated steps and `ALTER TABLE` helpers executed on every open.
 
-### Table Diagrams
-
-Schema version: 12
+### Table Diagram
 
 ```mermaid
 erDiagram
-    App {
+    apps {
         string id PK
         string name
         string slug
@@ -268,14 +407,14 @@ erDiagram
         int icon
         string route
     }
-    AppUser {
+    app_users {
         string id PK
         string name
         string email
         string password
         string localStoragePath
     }
-    Collection {
+    collections {
         string id PK
         string name
         string path
@@ -293,16 +432,16 @@ erDiagram
         boolean downloadAttachments
         string localCopyPath
     }
-    EmailFolder {
+    email_folders {
         string id PK
-        string collectionId PK "FK -> Collection.id"
+        string collectionId PK "FK -> collections.id"
         string name
         string type
         int messagesTotal
         int messagesUnread
         string parentId
     }
-    Email {
+    emails {
         string id PK
         string collectionId FK
         string folderId FK
@@ -323,7 +462,7 @@ erDiagram
         boolean hasAttachments
         boolean isDeleted
     }
-    File {
+    files {
         string id PK
         string collectionId FK
         string emailId FK
@@ -341,7 +480,7 @@ erDiagram
         real latitude
         real longitude
     }
-    Folder {
+    folders {
         string id PK
         string collectionId FK
         string emailId FK
@@ -354,26 +493,59 @@ erDiagram
         string thumbnail
         string downloadUrl
     }
-    Album {
+    albums {
         string id PK
         string name
     }
-    FileEmbedding {
-        string fileId PK "FK -> File.id"
-        blob qwen3_8bEmbedding "Float32[2048]"
+    providers {
+        string id PK
+        string name
+        string type
+    }
+    files_embeddings {
+        string fileId PK "FK -> files.id"
+        blob qwen3_vlEmbedding "Float32[2048]"
+    }
+    emails_embeddings {
+        string emailId PK "FK -> emails.id"
+        blob qwen3_vlEmbedding "Float32[2048]"
+    }
+    aichat_models {
+        string id PK
+        string name
+        string group
+        string alias
+    }
+    aichat_conversations {
+        string id PK
+        string title
+        datetime createdAt
+    }
+    aichat_conversation_history {
+        string id PK
+        string conversationId FK
+        string role
+        string content
+    }
+    aichat_skills {
+        string id PK
+        string trigger
+        string systemPrompt
     }
 
-    Collection ||--o{ EmailFolder : "has folders"
-    Collection ||--o{ Email : "contains"
-    Collection ||--o{ File : "contains"
-    Collection ||--o{ Folder : "contains"
-    EmailFolder ||--o{ Email : "groups"
-    EmailFolder ||--o{ EmailFolder : "parent"
-    Email ||--o{ File : "has attachments"
-    Email ||--o{ Folder : "has attachment folders"
-    Folder ||--o{ File : "parent"
-    Folder ||--o{ Folder : "parent"
-    File ||--|| FileEmbedding : "has embedding"
+    collections ||--o{ email_folders : "has folders"
+    collections ||--o{ emails : "contains"
+    collections ||--o{ files : "contains"
+    collections ||--o{ folders : "contains"
+    email_folders ||--o{ emails : "groups"
+    email_folders ||--o{ email_folders : "parent"
+    emails ||--o{ files : "has attachments"
+    emails ||--o{ folders : "has attachment folders"
+    folders ||--o{ files : "parent"
+    folders ||--o{ folders : "parent"
+    files ||--|| files_embeddings : "has embedding"
+    emails ||--|| emails_embeddings : "has embedding"
+    aichat_conversations ||--o{ aichat_conversation_history : "has messages"
 ```
 
 ---
@@ -412,7 +584,7 @@ sequenceDiagram
         IW->>IW: Extract text/EXIF/Thumbnails
         IW-->>IC: Send detailed metadata
     end
-    IW->>IW: Update Collection.lastScanDate
+    IW->>IW: Update collections.lastScanDate
     IW-->>IC: Done
     IC-->>CS: Emit isScanning = false
 ```
@@ -436,7 +608,7 @@ All scanners MUST implement two distinct operation modes based on the `path` par
 1.  **Full Collection Synchronization (`path == null`)**:
     *   **Behavior**: Recursively traverses the entire collection (e.g., all Gmail folders, all local files in a multi-Gigabyte directory).
     *   **Goal**: Ensure the local database is perfectly in sync with the source.
-    *   **State**: Updates the `Collection.lastScanDate` upon successful completion.
+    *   **State**: Updates `collections.lastScanDate` upon successful completion.
 
 2.  **Targeted Folder Scan (`path != null`)**:
     *   **Behavior**: Focuses exclusively on the specified directory or folder ID.
@@ -445,7 +617,7 @@ All scanners MUST implement two distinct operation modes based on the `path` par
 
 ### Building a New Scanner (LLM Guide)
 
-When creating a new scanner (e.g., `SocialScanner`), follow these implementation requirements:
+When creating a new scanner (e.g., `SocialScanner` — currently unimplemented, see the `social` module above), follow these implementation requirements:
 
 1.  **Inherit/Implement:** Must implement the `CollectionScanner` interface.
 2.  **Isolate Client:** Create a client class (e.g., `SocialScannerIsolate`) that handles the `spawnIsolate` logic.
@@ -461,3 +633,34 @@ When creating a new scanner (e.g., `SocialScanner`), follow these implementation
     ```
 4.  **Null-Safe Isolates:** Use null-aware access for the isolate reference (`_isolate?.addOnExitListener`) to support unit testing with mock isolates.
 5.  **Status Reporting:** Use the `statusPort` to communicate progress back to the main isolate, updating `isScanning` and triggering UI refreshes.
+
+---
+
+## Technology Stack
+
+**Frontend:**
+- Flutter 3.7+ / Dart 3.7+
+- Material Design 3 (dark theme only, see `DESIGN.md`)
+- GoRouter (navigation)
+- resqlite + resqlite_vector (no ORM/codegen)
+- RxDart 0.28 (reactive state)
+- google_fonts (Montserrat, Public Sans, Inter)
+
+**AI/Backend:**
+- Python 3.11–3.14
+- FastAPI + Uvicorn
+- LangChain (cloud provider wrappers)
+- llama-cpp-python (local inference)
+- Transformers (Qwen3-VL-Embedding-2B multimodal embeddings)
+- pypff / libpff (Outlook PST parsing)
+- PyInstaller (executable bundling)
+
+**Database:**
+- SQLite3
+- resqlite (Dart SQLite driver, hand-written DDL schema)
+- resqlite_vector (vector embeddings extension)
+
+**Cloud/External (all optional, bring-your-own-key or OAuth-only):**
+- Google APIs (Drive, Gmail, Sign-In) — OAuth2
+- Gemini / Claude / OpenAI / Grok — optional cloud LLM passthrough
+- HuggingFace Hub (model downloads)
