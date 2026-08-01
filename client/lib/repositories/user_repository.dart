@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 
@@ -35,7 +36,14 @@ class UserRepository {
 
     final user = AppUser.fromDbMap(rows.first);
 
-    String keyDir = '${user.localStoragePath}${Platform.pathSeparator}keys';
+    // The storage location is not stored per-user: config.json (via
+    // MainApp.appDataDirectory) is the single source of truth, so a moved
+    // storage location is always picked up here, restart or not.
+    final currentStoragePath = MainApp.appDataDirectory.valueOrNull;
+    if (currentStoragePath == null || currentStoragePath.isEmpty) {
+      throw Exception("No app data directory is configured.");
+    }
+    String keyDir = '$currentStoragePath${Platform.pathSeparator}keys';
     String publicFilePath = '$keyDir/public.pem';
     String privateFilePath = '$keyDir/private.pem';
     if (!File(publicFilePath).existsSync() &&
@@ -80,14 +88,13 @@ class UserRepository {
     }
 
     await db!.execute(
-      "INSERT INTO app_users (id, name, email, password, local_storage_path) "
-      "VALUES (?, ?, ?, ?, ?) "
+      "INSERT INTO app_users (id, name, email, password) "
+      "VALUES (?, ?, ?, ?) "
       "ON CONFLICT(id) DO UPDATE SET "
       "name = excluded.name, "
       "email = excluded.email, "
-      "password = excluded.password, "
-      "local_storage_path = excluded.local_storage_path",
-      [user.id, user.name, user.email, user.password, user.localStoragePath],
+      "password = excluded.password",
+      [user.id, user.name, user.email, user.password],
     );
 
     return user;
