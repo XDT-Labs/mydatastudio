@@ -15,16 +15,14 @@ import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
-import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
-import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
-import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
-import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/services/scan_write_relay.dart';
+import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:http/http.dart' as http;
@@ -200,9 +198,26 @@ class OutlookPstScannerIsolate {
 
     _isolate = await Isolate.spawn(OutlookPstScannerIsolateWorker.worker, args);
 
+    final writeQueue = SequentialWriteQueue();
+
     receivePort.listen((message) {
       if (relayIsolateLog(logger, message, '[PstScan]')) return;
       if (message is Map) {
+        if (message['type'] == 'dbWrite') {
+          // Queued rather than awaited inline — see gmail_scanner_isolate.dart.
+          // Matters even more here: PST streams thousands of unbatched writes,
+          // so out-of-order processing would be far more likely to bite.
+          final replyTo = message['replyTo'] as SendPort;
+          writeQueue.add(() async {
+            try {
+              final result = await handleScanWriteMessage(message);
+              replyTo.send({'ok': true, 'result': result});
+            } catch (e) {
+              replyTo.send({'ok': false, 'error': e.toString()});
+            }
+          });
+          return;
+        }
         if (message['type'] == 'refresh') {
           // Trigger UI refresh
           GetEmailsService.instance.invoke(
@@ -252,6 +267,28 @@ class OutlookPstScannerIsolate {
 /// The worker runs in a separate isolate and communicates with the Python
 /// FastAPI service via HTTP to parse the PST file.
 class OutlookPstScannerIsolateWorker {
+  /// Sends a write back to the main isolate and waits for its ack. See
+  /// gmail_scanner_isolate.dart's `_writeViaMain` for the full rationale.
+  static Future<Map<String, dynamic>> _writeViaMain(
+    SendPort clientPort,
+    String service,
+    dynamic payload,
+  ) async {
+    final replyPort = ReceivePort();
+    clientPort.send({
+      'type': 'dbWrite',
+      'service': service,
+      'payload': payload,
+      'replyTo': replyPort.sendPort,
+    });
+    final reply = await replyPort.first as Map;
+    replyPort.close();
+    if (reply['ok'] != true) {
+      throw Exception('dbWrite($service) failed: ${reply['error']}');
+    }
+    return (reply['result'] as Map?)?.cast<String, dynamic>() ?? const {};
+  }
+
   static Future<void> worker(Map<String, dynamic> workerArgs) async {
     runInScanIsolateZone(() async {
       final RootIsolateToken? token = workerArgs['token'];
@@ -290,7 +327,7 @@ class OutlookPstScannerIsolateWorker {
         if (col != null) {
           col.scanStatus = status;
           col.lastScanDate = DateTime.now();
-          await repo.updateCollection(col);
+          await _writeViaMain(clientPort, 'collectionStatus', col);
         }
       }
 
@@ -418,9 +455,7 @@ class OutlookPstScannerIsolateWorker {
               );
 
               foldersByPath[data['path']] = folder;
-              await EmailFolderUpsertService.instance.invoke(
-                EmailFolderUpsertServiceCommand(folder, appDb),
-              );
+              await _writeViaMain(clientPort, 'emailFolder', folder);
             } else if (data['type'] == 'email') {
               final rawId = data['id'] as String? ?? 'unknown';
               final emailId = const Uuid().v5(
@@ -457,9 +492,7 @@ class OutlookPstScannerIsolateWorker {
                 isDeleted: false,
               );
 
-              await EmailUpsertService.instance.invoke(
-                EmailUpsertServiceCommand([email], appDb),
-              );
+              await _writeViaMain(clientPort, 'emailBatch', [email]);
 
               final emailFolderPath = data['folder'] as String?;
               if (emailFolderPath != null) {
@@ -494,7 +527,7 @@ class OutlookPstScannerIsolateWorker {
                     collectionId: collection.id,
                     emailDate: email.date,
                     emittedFolderPaths: emittedFolderPaths,
-                    appDb: appDb,
+                    clientPort: clientPort,
                   );
                 }
 
@@ -551,9 +584,7 @@ class OutlookPstScannerIsolateWorker {
                     htmlBody: email.htmlBody,
                   ),
                 );
-                await FileUpsertService.instance.invoke(
-                  FileUpsertServiceCommand(file, appDb),
-                );
+                await _writeViaMain(clientPort, 'file', file);
               }
 
               count++;
@@ -614,7 +645,7 @@ class OutlookPstScannerIsolateWorker {
       await _writeFolderCounts(
         foldersByPath: foldersByPath,
         emailCountByPath: emailCountByPath,
-        appDb: appDb,
+        clientPort: clientPort,
       );
 
       // 5. Cleanup. A PST import is only 'complete' when the parser's end-of-walk
@@ -684,7 +715,7 @@ class OutlookPstScannerIsolateWorker {
   static Future<void> _writeFolderCounts({
     required Map<String, EmailFolder> foldersByPath,
     required Map<String, int> emailCountByPath,
-    required AppDatabase appDb,
+    required SendPort clientPort,
   }) async {
     for (final entry in foldersByPath.entries) {
       final path = entry.key;
@@ -700,18 +731,17 @@ class OutlookPstScannerIsolateWorker {
         }
       });
 
-      await EmailFolderUpsertService.instance.invoke(
-        EmailFolderUpsertServiceCommand(
-          EmailFolder(
-            id: folder.id,
-            collectionId: folder.collectionId,
-            name: folder.name,
-            type: folder.type,
-            messagesTotal: total,
-            messagesUnread: folder.messagesUnread,
-            parentId: folder.parentId,
-          ),
-          appDb,
+      await _writeViaMain(
+        clientPort,
+        'emailFolder',
+        EmailFolder(
+          id: folder.id,
+          collectionId: folder.collectionId,
+          name: folder.name,
+          type: folder.type,
+          messagesTotal: total,
+          messagesUnread: folder.messagesUnread,
+          parentId: folder.parentId,
         ),
       );
     }
@@ -735,7 +765,7 @@ class OutlookPstScannerIsolateWorker {
     required String collectionId,
     required DateTime emailDate,
     required Set<String> emittedFolderPaths,
-    required AppDatabase appDb,
+    required SendPort clientPort,
   }) async {
     final List<String> dirs = [];
     String current = p.dirname(attPath);
@@ -761,9 +791,7 @@ class OutlookPstScannerIsolateWorker {
         dateLastModified: emailDate,
         collectionId: collectionId,
       );
-      await FolderUpsertService.instance.invoke(
-        FolderUpsertServiceCommand(folder, appDb),
-      );
+      await _writeViaMain(clientPort, 'folder', folder);
     }
   }
 }
