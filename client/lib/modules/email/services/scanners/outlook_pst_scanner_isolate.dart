@@ -30,6 +30,19 @@ import 'package:uuid/uuid.dart';
 import 'package:http/http.dart' as http;
 import 'package:rxdart/rxdart.dart';
 
+/// Whether [attPath] resolves inside [extractionRoot].
+///
+/// Compares normalized path components rather than a raw `startsWith` on the
+/// canonicalized strings, so a sibling directory that merely shares the root
+/// as a string prefix (e.g. `extraction-evil` vs `extraction`) isn't
+/// mistaken for a path inside the root.
+bool isPathWithinExtractionRoot(String attPath, String extractionRoot) {
+  final canonicalAttPath = p.canonicalize(attPath);
+  final canonicalRoot = p.canonicalize(extractionRoot);
+  return canonicalAttPath == canonicalRoot ||
+      p.isWithin(canonicalRoot, canonicalAttPath);
+}
+
 /// A snapshot of an in-flight PST import, for the UI to render.
 ///
 /// A multi-gigabyte archive takes long enough that an unannotated spinner is
@@ -463,11 +476,9 @@ class OutlookPstScannerIsolateWorker {
                 );
                 final attPath = att['path'] as String? ?? '';
 
-                // Validate path stays within extraction root
+                // Validate path stays within extraction root.
                 if (attPath.isNotEmpty &&
-                    !p
-                        .canonicalize(attPath)
-                        .startsWith(p.canonicalize(extractionRoot))) {
+                    !isPathWithinExtractionRoot(attPath, extractionRoot)) {
                   logger.w(
                     'PST Scanner: Skipping attachment with path outside extraction root',
                   );
