@@ -1,9 +1,14 @@
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/batch_file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
+import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/services/sqlite_retry.dart';
@@ -38,6 +43,24 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
     case 'folder':
       await FolderUpsertService.instance.invoke(
         FolderUpsertServiceCommand(payload as Folder, db),
+      );
+      return const {};
+
+    case 'file':
+      await FileUpsertService.instance.invoke(
+        FileUpsertServiceCommand(payload as File, db),
+      );
+      return const {};
+
+    case 'emailFolder':
+      await EmailFolderUpsertService.instance.invoke(
+        EmailFolderUpsertServiceCommand(payload as EmailFolder, db),
+      );
+      return const {};
+
+    case 'emailBatch':
+      await EmailUpsertService.instance.invoke(
+        EmailUpsertServiceCommand((payload as List).cast<Email>(), db),
       );
       return const {};
 

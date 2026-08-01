@@ -16,18 +16,16 @@ import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/email/services/email_decoding_helper.dart';
-import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/email_repository.dart';
-import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
-import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
-import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/services/scan_write_relay.dart';
+import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:uuid/uuid.dart';
 
 /// [GmailScannerIsolate] is the client-side manager for the Gmail scanning
@@ -88,6 +86,8 @@ class GmailScannerIsolate {
 
     _isolate = await spawnIsolate(GmailScannerIsolateWorker.worker, args);
 
+    final writeQueue = SequentialWriteQueue();
+
     receivePort.listen((message) {
       // Forward status messages if requested
       if (statusPort != null) {
@@ -98,6 +98,21 @@ class GmailScannerIsolate {
       if (relayIsolateLog(logger, message, '[GmailScan]')) return;
 
       if (message is Map) {
+        if (message['type'] == 'dbWrite') {
+          // Queued rather than awaited inline: this listener callback isn't
+          // awaited by the port itself, so without an explicit queue, writes
+          // could be handled out of order (a file landing before its folder).
+          final replyTo = message['replyTo'] as SendPort;
+          writeQueue.add(() async {
+            try {
+              final result = await handleScanWriteMessage(message);
+              replyTo.send({'ok': true, 'result': result});
+            } catch (e) {
+              replyTo.send({'ok': false, 'error': e.toString()});
+            }
+          });
+          return;
+        }
         if (message['type'] == 'refresh') {
           GetEmailsService.instance.invoke(
             EmailServiceCommand(
@@ -137,6 +152,31 @@ class GmailScannerIsolate {
 /// The worker runs in a separate isolate, opens its own AppDatabase connection,
 /// and writes results directly via upsert services.
 class GmailScannerIsolateWorker {
+  /// Sends a write back to the main isolate and waits for its ack, so this
+  /// isolate never opens a second, independent write connection to the same
+  /// database file. See [handleScanWriteMessage] for the dispatch on the
+  /// receiving end, and [SequentialWriteQueue] for how the main isolate keeps
+  /// these in order despite listening via a plain callback.
+  static Future<Map<String, dynamic>> _writeViaMain(
+    SendPort clientPort,
+    String service,
+    dynamic payload,
+  ) async {
+    final replyPort = ReceivePort();
+    clientPort.send({
+      'type': 'dbWrite',
+      'service': service,
+      'payload': payload,
+      'replyTo': replyPort.sendPort,
+    });
+    final reply = await replyPort.first as Map;
+    replyPort.close();
+    if (reply['ok'] != true) {
+      throw Exception('dbWrite($service) failed: ${reply['error']}');
+    }
+    return (reply['result'] as Map?)?.cast<String, dynamic>() ?? const {};
+  }
+
   static Future<void> worker(Map<String, dynamic> args) async {
     runInScanIsolateZone(() async {
       final RootIsolateToken? token = args['token'];
@@ -202,9 +242,7 @@ class GmailScannerIsolateWorker {
 
       for (var label in labels) {
         final folder = mapLabelToFolder(label, collection.id);
-        await EmailFolderUpsertService.instance.invoke(
-          EmailFolderUpsertServiceCommand(folder, appDb),
-        );
+        await _writeViaMain(clientPort, 'emailFolder', folder);
       }
 
       final scanStartTime = DateTime.now();
@@ -255,13 +293,14 @@ class GmailScannerIsolateWorker {
         "Gmail sync complete: $totalFound found, $newEmails new, $skipped skipped.",
       );
 
-      // Update lastScanDate in the DB
+      // Update lastScanDate in the DB. The read stays on this isolate's own
+      // connection; only the write goes back to main.
       final collectionRepo = CollectionRepository(appDb);
       final col = await collectionRepo.collectionById(collection.id);
       if (col != null) {
         col.scanStatus = 'ready';
         col.lastScanDate = scanStartTime;
-        await collectionRepo.updateCollection(col);
+        await _writeViaMain(clientPort, 'collectionStatus', col);
       }
 
       clientPort.send({'type': 'refresh', 'status': 'done'});
@@ -413,7 +452,7 @@ class GmailScannerIsolateWorker {
 
           // 1. Ensure folder hierarchy (Collection -> Label -> Year)
           await _ensureFolderHierarchy(
-            appDb: appDb,
+            clientPort: clientPort,
             collection: collection,
             labelName: labelName,
             year: year,
@@ -435,9 +474,7 @@ class GmailScannerIsolateWorker {
           email.attachments = attachments;
 
           for (var file in attachments) {
-            await FileUpsertService.instance.invoke(
-              FileUpsertServiceCommand(file, appDb),
-            );
+            await _writeViaMain(clientPort, 'file', file);
           }
         }
       } catch (e) {
@@ -446,9 +483,7 @@ class GmailScannerIsolateWorker {
     }
 
     if (emailBatch.isNotEmpty) {
-      await EmailUpsertService.instance.invoke(
-        EmailUpsertServiceCommand(emailBatch, appDb),
-      );
+      await _writeViaMain(clientPort, 'emailBatch', emailBatch);
       clientPort.send({'type': 'refresh'});
     }
 
@@ -670,7 +705,7 @@ class GmailScannerIsolateWorker {
   }
 
   static Future<void> _ensureFolderHierarchy({
-    required AppDatabase appDb,
+    required SendPort clientPort,
     required Collection collection,
     required String labelName,
     required String year,
@@ -680,26 +715,18 @@ class GmailScannerIsolateWorker {
 
     // 1. Label Folder
     final labelPath = p.normalize(p.join(rootPath, labelName));
-    await FolderUpsertService.instance.invoke(
-      FolderUpsertServiceCommand(
-        _createFolderObj(
-          labelPath,
-          rootPath,
-          labelName,
-          collection.id,
-          msgDate,
-        ),
-        appDb,
-      ),
+    await _writeViaMain(
+      clientPort,
+      'folder',
+      _createFolderObj(labelPath, rootPath, labelName, collection.id, msgDate),
     );
 
     // 2. Year Folder
     final yearPath = p.normalize(p.join(labelPath, year));
-    await FolderUpsertService.instance.invoke(
-      FolderUpsertServiceCommand(
-        _createFolderObj(yearPath, labelPath, year, collection.id, msgDate),
-        appDb,
-      ),
+    await _writeViaMain(
+      clientPort,
+      'folder',
+      _createFolderObj(yearPath, labelPath, year, collection.id, msgDate),
     );
   }
 
