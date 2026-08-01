@@ -4,7 +4,7 @@
 **My Data Studio** is a privacy-focused, local-first Digital Asset Manager (DAM) for managing your digital life — files, emails, photos, and social media archives — all stored on your device with no cloud dependency required for AI features.
 
 - **Local-first**: All data stored on your device
-- **Privacy-focused**: Zero server-side data storage
+- **Privacy-focused**: Zero server-side data storage in My Data Studio's own services (an optional, user-configured cloud model provider is a separate case — see below)
 - **Cross-platform**: Windows, macOS, and Linux support (current release targets macOS)
 - **AI-powered search**: Local LLM integration for semantic search and document understanding, with optional cloud model passthrough (Gemini/Claude/OpenAI/Grok) **if the user supplies their own API key**
 
@@ -317,7 +317,7 @@ The Python service is not a standalone deployment — `PythonManager` unzips a b
 
 ### Service Structure
 
-```
+```text
 main.py           # Uvicorn entry point; builds the FastAPI app, registers routes, preloads default model
 routes.py         # Route handler implementations
 model_manager.py  # Model loaders: local GGUF (llama-cpp-python) + Gemini/Claude/OpenAI/Grok passthrough
@@ -359,11 +359,11 @@ utils.py          # HuggingFace Hub downloads, path/file helpers
 
 ```mermaid
 sequenceDiagram
-    participant Flutter as Flutter Client
-    participant PM as PythonManager
-    participant AS as aiserver (FastAPI)
-    participant LLM as Local GGUF Model\n(llama-cpp-python)
-    participant Cloud as Cloud Provider\n(optional, BYO key)
+    participant Flutter as "Flutter Client"
+    participant PM as "PythonManager"
+    participant AS as "aiserver (FastAPI)"
+    participant LLM as "Local GGUF Model\n(llama-cpp-python)"
+    participant Cloud as "Cloud Provider\n(optional, BYO key)"
 
     Flutter->>PM: startAiServerService()
     PM->>AS: spawn subprocess (AISERVER_TOKEN, AICHAT_MODELS_DIR)
@@ -412,7 +412,6 @@ erDiagram
         string name
         string email
         string password
-        string localStoragePath
     }
     collections {
         string id PK

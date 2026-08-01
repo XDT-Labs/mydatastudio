@@ -40,5 +40,10 @@ void main() {
       final attPath = p.join(outside, 'file.png');
       expect(isPathWithinExtractionRoot(attPath, extractionRoot), isFalse);
     });
+
+    test('rejects a lexical parent-directory traversal out of the root', () {
+      final attPath = p.join(extractionRoot, '..', 'evil', 'file.png');
+      expect(isPathWithinExtractionRoot(attPath, extractionRoot), isFalse);
+    });
   });
 }

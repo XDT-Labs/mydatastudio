@@ -2,7 +2,7 @@
 
 ## What This Is
 
-My Data Studio Desktop is a local-first personal data archive & management tool, letting users view and search their local drives, cloud drives, email, photos, and social media entirely on-device. AI-powered search and chat uses local LLMs (no cloud API calls).
+My Data Studio Desktop is a local-first personal data archive & management tool, letting users view and search their local drives, cloud drives, email, photos, and social media entirely on-device. AI-powered search and chat use local LLMs by default; optionally, a user can supply their own API key to route requests through a cloud model (Gemini/Claude/OpenAI/Grok) instead, which sends that request off-device to the provider.
 
 The app has two runtime components:
 1. **Flutter macOS desktop client** (`client/`) — the UI and data layer

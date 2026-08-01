@@ -103,7 +103,7 @@ Implemented scanners (registered in `ScannerManager`): local filesystem, Google 
 
 ### Python Service Structure
 
-```
+```text
 main.py           # Uvicorn entry point; creates the FastAPI app and registers all routes
 routes.py         # Route handler implementations (chat, embeddings, model mgmt, PST, thumbnails)
 model_manager.py  # Model loaders: local GGUF (llama-cpp-python) + Gemini/Claude/OpenAI/Grok passthrough

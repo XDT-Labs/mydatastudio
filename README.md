@@ -7,8 +7,8 @@ My Data Studio started with one idea — we need a way to keep a local copy of o
 ## Features
 
 - **Local-first**: All data is stored locally on your device.
-- **Privacy-focused**: No data is stored on our servers. AI search and chat run against a locally-bundled LLM, not a cloud API.
-- **AI-powered search**: Semantic search and chat across your files, email, and photos using local GGUF models (Gemma + Qwen3-VL embeddings). Optional cloud models (Gemini/Claude/OpenAI/Grok) can be enabled with your own API key.
+- **Privacy-focused**: No data is stored on My Data Studio's own servers — there are none. AI search and chat run against a locally-bundled LLM by default, not a cloud API.
+- **AI-powered search**: Semantic search and chat across your files, email, and photos using local GGUF models (Gemma + Qwen3-VL embeddings). Optional cloud models (Gemini/Claude/OpenAI/Grok) can be enabled with your own API key — doing so sends that request (system prompt, chat history, your message, and any attached image bytes) off-device to the chosen provider, whose own retention and training terms apply and vary by provider and account tier. Review the provider's policy before enabling it.
 - **Multiple sources**: Local filesystem, Google Drive, Gmail, Yahoo Mail, Outlook (live IMAP or `.pst` file import).
 - **Open-source**: Free and open-source software (Apache 2.0).
 
@@ -19,14 +19,14 @@ The current release targets **macOS**. See [ARCHITECTURE.md](ARCHITECTURE.md) fo
 The app has two parts, built and shipped together:
 
 1. A **Flutter macOS client** (`client/`) — the UI, local SQLite database, and background scanners.
-2. A **Python FastAPI service** (`aiserver/`) — bundled and spawned as a subprocess by the client at launch; it does all LLM inference, embeddings, and PST parsing over a local HTTP port. You never run it separately.
+2. A **Python FastAPI service** (`aiserver/`) — bundled and spawned as a subprocess by the client at launch; it does all LLM inference, embeddings, and PST parsing over a local HTTP port. In the packaged app, you never run it separately; for `aiserver`-only development you can run it standalone (see below) and point the client at it.
 
 ## Getting Started
 
 ### Prerequisites
 
 - macOS with Xcode (for the `flutter build macos` toolchain)
-- [Flutter](https://flutter.dev) 3.7+ / Dart 3.7+
+- [Flutter](https://flutter.dev) 3.44.8 (bundles Dart 3.12)
 - Python 3.11–3.14 with [pdm](https://pdm-project.org/) installed, for building `aiserver`
 - The [`hf`](https://huggingface.co/docs/huggingface_hub/guides/cli) CLI, for downloading GGUF models (`pip install -U "huggingface_hub[cli]"`)
 

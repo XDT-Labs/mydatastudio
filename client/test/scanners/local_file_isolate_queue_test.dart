@@ -181,9 +181,17 @@ void main() {
         null,
       );
 
-      // Give the job a head start so its first UPDATE attempt runs and
-      // affects zero rows before the row is inserted below.
-      await Future.delayed(const Duration(milliseconds: 50));
+      // Wait for the job to be dequeued and start running (rather than a
+      // fixed delay) so its first UPDATE attempt has a real chance to run
+      // — and affect zero rows — before the row is inserted below.
+      final jobStarted = Completer<void>();
+      Timer.periodic(const Duration(milliseconds: 5), (timer) {
+        if (raceWorker.activeThumbnailJobsForTesting > 0) {
+          timer.cancel();
+          if (!jobStarted.isCompleted) jobStarted.complete();
+        }
+      });
+      await jobStarted.future.timeout(const Duration(seconds: 5));
 
       await FileDesktopRepository(appDb).upsertAll([
         File(
