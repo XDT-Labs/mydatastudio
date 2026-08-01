@@ -6,6 +6,7 @@ import 'package:mydatastudio/modules/files/services/batch_file_upsert_service.da
 import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/services/sqlite_retry.dart';
 
 /// Executes a `{'type': 'dbWrite', 'service': ..., 'payload': ...}` message
 /// sent by a scanner isolate, writing through the main isolate's single
@@ -42,9 +43,12 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
 
     case 'fileThumbnail':
       final map = payload as Map;
-      final result = await db.execute(
-        'UPDATE files SET thumbnail = ? WHERE id = ?',
-        [map['thumbnailKey'], map['fileId']],
+      final result = await retryOnLock(
+        () => db.execute('UPDATE files SET thumbnail = ? WHERE id = ?', [
+          map['thumbnailKey'],
+          map['fileId'],
+        ]),
+        label: 'scanWriteRelay.fileThumbnail',
       );
       return {'affectedRows': result.affectedRows};
 
@@ -57,7 +61,20 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
           map['scanStartTime'] as DateTime,
           db,
           recursive: map['recursive'] as bool? ?? true,
+          isCloud: map['isCloud'] as bool? ?? false,
+          isFullScan: map['isFullScan'] as bool? ?? false,
         ),
+      );
+      return const {};
+
+    case 'fileLocalPath':
+      final map = payload as Map;
+      await retryOnLock(
+        () => db.execute('UPDATE files SET local_path = ? WHERE id = ?', [
+          map['localPath'],
+          map['fileId'],
+        ]),
+        label: 'scanWriteRelay.fileLocalPath',
       );
       return const {};
 

@@ -12,16 +12,13 @@ import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart'
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
-import 'package:mydatastudio/modules/files/services/batch_file_upsert_service.dart';
-import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
-import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:mydatastudio/scanners/scan_isolate_support.dart';
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
-import 'package:mydatastudio/services/sqlite_retry.dart';
+import 'package:mydatastudio/services/scan_write_relay.dart';
 
 /// Scanner lifecycle manager for cloud-based file sources (Google Drive, etc.).
 ///
@@ -195,6 +192,16 @@ class CloudFileIsolate extends CollectionScanner {
           }
         } else if (type == 'status') {
           _logger?.s(msg);
+        } else if (type == 'dbWrite') {
+          // Awaited before the loop pulls the next message — see
+          // local_file_isolate.dart for why this ordering matters.
+          final replyTo = message['replyTo'] as SendPort;
+          try {
+            final result = await handleScanWriteMessage(message);
+            replyTo.send({'ok': true, 'result': result});
+          } catch (e) {
+            replyTo.send({'ok': false, 'error': e.toString()});
+          }
         } else if (type == 'scan_complete') {
           // The initial scan is done, but the isolate might stay alive for downloads.
           // For now, we allow start() to return so ScannerManager is unblocked.
@@ -255,6 +262,7 @@ class CloudFileIsolate extends CollectionScanner {
 class CloudFileIsolateWorker {
   final AppDatabase appDb;
   final SendPort? loggerPort;
+  final SendPort port;
   late final AppLogger logger;
 
   // Caches for path reconstruction
@@ -272,8 +280,31 @@ class CloudFileIsolateWorker {
   static const int _maxConcurrentDownloads = 3;
   bool _isScanning = false;
 
-  CloudFileIsolateWorker(this.appDb, this.loggerPort) {
+  CloudFileIsolateWorker(this.appDb, this.loggerPort, this.port) {
     logger = AppLogger(loggerPort);
+  }
+
+  /// Sends a write back to the main isolate and waits for its ack, so this
+  /// isolate never opens a second, independent write connection to the same
+  /// database file. See [handleScanWriteMessage] for the dispatch on the
+  /// receiving end.
+  Future<Map<String, dynamic>> _writeViaMain(
+    String service,
+    dynamic payload,
+  ) async {
+    final replyPort = ReceivePort();
+    port.send({
+      'type': 'dbWrite',
+      'service': service,
+      'payload': payload,
+      'replyTo': replyPort.sendPort,
+    });
+    final reply = await replyPort.first as Map;
+    replyPort.close();
+    if (reply['ok'] != true) {
+      throw Exception('dbWrite($service) failed: ${reply['error']}');
+    }
+    return (reply['result'] as Map?)?.cast<String, dynamic>() ?? const {};
   }
 
   // Top-level isolate entry — must be a static or top-level function.
@@ -295,7 +326,11 @@ class CloudFileIsolateWorker {
         args['dbName'] as String,
       );
 
-      final worker = CloudFileIsolateWorker(appDb, loggerPort);
+      final worker = CloudFileIsolateWorker(
+        appDb,
+        loggerPort,
+        args['port'] as SendPort,
+      );
 
       await worker._scan(args);
     } catch (e, stack) {
@@ -429,26 +464,24 @@ class CloudFileIsolateWorker {
         );
       } else if (!skipCleanup) {
         // Mark anything not seen this scan as deleted (full walks / forced refreshes)
-        await CleanupDeletedFilesService.instance.invoke(
-          CleanupDeletedFilesServiceCommand(
-            collectionId,
-            rootFolderId == collectionPath ? '' : rootFolderId,
-            scanStartTime,
-            appDb,
-            recursive: recursive,
-            isCloud: true,
-            isFullScan: isFullScan,
-          ),
-        );
+        await _writeViaMain('cleanupDeletedFiles', {
+          'collectionId': collectionId,
+          'path': rootFolderId == collectionPath ? '' : rootFolderId,
+          'scanStartTime': scanStartTime,
+          'recursive': recursive,
+          'isCloud': true,
+          'isFullScan': isFullScan,
+        });
       }
 
-      // Update lastScanDate in the DB
+      // Update lastScanDate in the DB. The read stays on this isolate's own
+      // connection; only the write goes back to main.
       final colRepo = CollectionRepository(appDb);
       final col = await colRepo.collectionById(collectionId);
       if (col != null) {
         col.scanStatus = 'ready';
         col.lastScanDate = scanStartTime;
-        await colRepo.updateCollection(col);
+        await _writeViaMain('collectionStatus', col);
       }
 
       _isScanning = false;
@@ -542,9 +575,7 @@ class CloudFileIsolateWorker {
             scanStartTime: scanStartTime,
           );
           if (folder != null) {
-            await FolderUpsertService.instance.invoke(
-              FolderUpsertServiceCommand(folder, appDb),
-            );
+            await _writeViaMain('folder', folder);
             logger.i('Found NEW/CHANGED folder: ${f.name} (${f.id})');
           }
         } else {
@@ -561,12 +592,7 @@ class CloudFileIsolateWorker {
 
             if (fileBatch.length >= 100) {
               try {
-                await BatchFileUpsertService.instance.invoke(
-                  BatchFileUpsertServiceCommand(
-                    List<File>.from(fileBatch),
-                    appDb,
-                  ),
-                );
+                await _writeViaMain('batchFile', List<File>.from(fileBatch));
               } catch (e) {
                 _failedBatches++;
                 logger.e(
@@ -583,9 +609,7 @@ class CloudFileIsolateWorker {
 
     if (fileBatch.isNotEmpty) {
       try {
-        await BatchFileUpsertService.instance.invoke(
-          BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
-        );
+        await _writeViaMain('batchFile', List<File>.from(fileBatch));
       } catch (e) {
         _failedBatches++;
         logger.e(
@@ -653,9 +677,7 @@ class CloudFileIsolateWorker {
         'CloudFileIsolate: Sending final batch of ${fileBatch.length} files to DB writer',
       );
       try {
-        await BatchFileUpsertService.instance.invoke(
-          BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
-        );
+        await _writeViaMain('batchFile', List<File>.from(fileBatch));
       } catch (e) {
         _failedBatches++;
         logger.e(
@@ -718,9 +740,7 @@ class CloudFileIsolateWorker {
             scanStartTime: scanStartTime,
           );
           if (folder != null) {
-            await FolderUpsertService.instance.invoke(
-              FolderUpsertServiceCommand(folder, appDb),
-            );
+            await _writeViaMain('folder', folder);
             logger.i('Found Drive folder: ${f.name} (${f.id})');
 
             if (discoveredFolders != null) {
@@ -745,12 +765,7 @@ class CloudFileIsolateWorker {
                 'CloudFileIsolate: Sending batch of ${fileBatch.length} files to DB writer',
               );
               try {
-                await BatchFileUpsertService.instance.invoke(
-                  BatchFileUpsertServiceCommand(
-                    List<File>.from(fileBatch),
-                    appDb,
-                  ),
-                );
+                await _writeViaMain('batchFile', List<File>.from(fileBatch));
               } catch (e) {
                 _failedBatches++;
                 logger.e(
@@ -810,17 +825,6 @@ class CloudFileIsolateWorker {
     }
   }
 
-  // Delegates to the shared helper rather than keeping a local loop: this one
-  // caught only ResqliteQueryException code 5, so a ResqliteTransactionException
-  // or SQLITE_LOCKED (6) fell straight through unretried — the exact trap
-  // sqlite_retry.dart documents.
-  Future<void> _executeWithRetry(String sql, List<Object?> params) =>
-      retryOnLock(
-        () => appDb.execute(sql, params),
-        label: 'CloudFileIsolateWorker',
-        maxRetries: 5,
-      );
-
   // Thin delegate to the shared helper (scan_isolate_support.dart); the retry
   // logic is centralized there, call sites are unchanged.
   Future<T> _retryNetworkOp<T>(Future<T> Function() operation) =>
@@ -853,10 +857,10 @@ class CloudFileIsolateWorker {
         final destFile = io.File(destPath);
         if (await destFile.exists()) {
           logger.d('File already exists on disk: $destPath');
-          await _executeWithRetry(
-            'UPDATE files SET local_path = ? WHERE id = ?',
-            [destPath, file.id],
-          );
+          await _writeViaMain('fileLocalPath', {
+            'fileId': file.id,
+            'localPath': destPath,
+          });
           return;
         }
 
@@ -878,10 +882,10 @@ class CloudFileIsolateWorker {
         try {
           await media.stream.pipe(sink);
           logger.i('Downloaded: ${file.name}');
-          await _executeWithRetry(
-            'UPDATE files SET local_path = ? WHERE id = ?',
-            [destPath, file.id],
-          );
+          await _writeViaMain('fileLocalPath', {
+            'fileId': file.id,
+            'localPath': destPath,
+          });
           return; // Success!
         } finally {
           await sink.flush();
