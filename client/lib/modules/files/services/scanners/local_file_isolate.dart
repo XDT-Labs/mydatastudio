@@ -243,11 +243,21 @@ class LocalFileIsolateWorker {
           llmServiceToken: llmServiceToken,
         );
         if (key != null) {
-          await appDb.execute(
-            "UPDATE files SET thumbnail = ? WHERE id = ?",
-            [key, fileId],
-          );
-          logger?.d('LocalScanner: Saved thumbnail for $absPath');
+          // The file row may not have landed yet: discovery enqueues this job
+          // before the surrounding batch upsert flushes, so a plain UPDATE can
+          // race ahead of the INSERT and silently affect zero rows. Retry
+          // until the row shows up rather than losing the thumbnail key.
+          for (var attempt = 0; attempt < 5; attempt++) {
+            final result = await appDb.execute(
+              "UPDATE files SET thumbnail = ? WHERE id = ?",
+              [key, fileId],
+            );
+            if (result.affectedRows > 0) {
+              logger?.d('LocalScanner: Saved thumbnail for $absPath');
+              break;
+            }
+            await Future.delayed(const Duration(milliseconds: 200));
+          }
         }
       } catch (e) {
         logger?.e('LocalScanner: Error generating thumbnail for $absPath: $e');

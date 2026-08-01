@@ -1,88 +1,70 @@
 # CRITICAL TOOL USE INSTRUCTIONS
 
+## What This Is
 
-## Software Engineering Rules
-These are non-negotiable rules for all interactions and code changes. Failure to adhere to these will result in project non-compliance.
+My Data Studio Desktop is a local-first personal data archive & management tool, letting users view and search their local drives, cloud drives, email, photos, and social media entirely on-device. AI-powered search and chat use local LLMs by default; optionally, a user can supply their own API key to route requests through a cloud model (Gemini/Claude/OpenAI/Grok) instead, which sends that request off-device to the provider.
 
-1. **Test-Driven Development (TDD) MANDATORY:** All development MUST follow a Red-Green-Refactor TDD cycle.
-    *   Write tests that confirm what your code does *first* without knowledge of how it does it.
-2. **Simplicity First:** Don't try to be clever. Build the simplest code possible that passes tests.
-3. **Avoid Regressions** When you fix a bug write a test to confirm the fix and prevent future regressions.
-4. **Code Qualities:** 
-    *   Concrete enough to be understood, abstract enough for change.
-    *   Clearly reflect and expose the problem's domain.
-    *   Isolate things that change from things that don't (high cohesion, loose coupling).
-    *   Each method: Single Responsibility, Consistent.
-    *   Follow SOLID principles.
-5.  **Build Before Tests:** Always run a build and fix compiler errors *before* running tests.
+The app has two runtime components:
+1. **Flutter macOS desktop client** (`client/`) — the UI and data layer
+2. **Python FastAPI service** (`aiserver/`) — embedded in the Flutter app and spawned as a subprocess at startup, handles all LLM inference and embeddings over HTTP on localhost
 
-## Git Commit
-CRITICAL! You MUST always seek the user's approval before commiting to git.  Never commit without the user's approval.
+## Development Practices
 
-* After completing an Implementation Plan, write a markup git commit message for the work done. 
+- **Test-driven for non-trivial changes**: write a test that expresses the intended behavior before implementing, then implement to make it pass (red-green-refactor). Trivial one-liners don't need ceremony — use judgment, consistent with Rule 2 below.
+- **Build before test**: run a build and fix compiler/analyzer errors before running the test suite — don't let test failures mask build breaks.
+- **Regression tests**: when fixing a bug, add a test that would have caught it, not just the fix itself (see Rule 9).
+- **Code qualities**: concrete enough to be understood, abstract enough to change; expose the problem's domain in naming; high cohesion / loose coupling; single responsibility per method/class.
+- **Git commits**: always get explicit user approval before committing — never commit unprompted.
+- **Mermaid diagrams**: quote node labels that contain spaces, newlines, or special characters (`()`, `[]`, `{}`, etc.) to avoid syntax errors.
 
-## Mermaid Diagrams
-- When generating Mermaid diagrams, ALWAYS wrap node labels in double quotes if they contain spaces, newlines (\n), or special characters (like (), [], {}, etc.) to prevent syntax errors.
+---
 
+# Project Architecture Overview
 
-# Project Code Review: My Data Studio Desktop
-
-This document provides a technical overview and review of the project's architecture, patterns, and implementation details.
+This section summarizes the project's architecture, patterns, and implementation details. See `ARCHITECTURE.md` at the repo root for the full write-up with diagrams.
 
 ## 1. High-Level Architecture
-The project is a Flutter desktop application designed for high-performance data management and AI integration. Leveraging **Isolates** for multi-threaded execution to keep the UI responsive during resource-intensive tasks.
 
-### Core Components:
-- **Modules**: Located in `lib/modules`, these encapsulate feature-specific logic.
-- **Services**: Business logic and external integrations (e.g., Python AI service).
-- **Repositories**: Data access layer.
-- **Database Manager**: Handles persistence and concurrency.
+The project is a Flutter desktop application designed for high-performance data management and AI integration, leveraging **Isolates** for multi-threaded execution to keep the UI responsive during resource-intensive tasks (file scanning, embedding generation).
 
----
+### Core Components
+- **Modules** (`client/lib/modules/`): feature-specific logic (`aichat`, `files`, `email`, `photos`, `social`), each with `pages/`, `widgets/`, `services/`.
+- **Services**: business logic and external integrations (e.g. the Python AI service, via `PythonManager`).
+- **Repositories** (`client/lib/repositories/`): resqlite query layer.
+- **AppDatabase**: resqlite (+ resqlite_vector) wrapper handling persistence and per-isolate connections.
 
 ## 2. Module System & Scanners
-The application uses a robust module-based architecture.
 
 ### Module Structure
-Each feature (e.g., `aichat`, `files`, `photos`) is isolated within its own directory under `lib/modules`, containing:
+Each feature (e.g. `aichat`, `files`, `photos`, `email`) is isolated within its own directory under `lib/modules`, containing:
 - `pages/`: UI entry points.
-- `widgets/`: Reusable components.
-- `services/`: Feature-specific logic (e.g., `LocalLLMContentGenerator`).
+- `widgets/`: reusable components.
+- `services/`: feature-specific logic (e.g. `LocalLlmContentGenerator`), including a `services/scanners/` subfolder for that module's `CollectionScanner` implementations.
 
 ### Scanning Logic (ScannerManager)
-The scanning system is designed to ingest local and remote data asynchronously.
-- **ScannerManager**: Acts as a lifecycle manager for scanners. It watches the `collections` table and automatically starts/stops scanners based on database state.
-- **`CollectionScanner` Interface**: Defines the contract for all scanners.
-- **Isolate-Based Scanning**: The LocalFileIsolate spawns a background worker LocalFileIsolateWorker to traverse the filesystem. This is critical for macOS/Desktop environments where scanning millions of files could otherwise freeze the UI.
-
----
+- **ScannerManager** (`client/lib/scanners/scanner_manager.dart`): lifecycle manager for scanners, registered per `Collection.scanner` value. Per the "Registration-Only Startup" rule, it registers scanners on app start but never triggers a background scan automatically — scans start only on explicit `force: true` (manual sync or folder navigation).
+- **`CollectionScanner` interface** (`client/lib/scanners/collection_scanner.dart`): the contract all scanners implement (`isScanning`, `start()`, `stop()`, `moveToTrash()`).
+- **Isolate-based scanning**: e.g. `LocalFileIsolate` spawns a background worker to traverse the filesystem — critical on desktop where scanning large trees would otherwise freeze the UI.
+- **Implemented scanners**: local filesystem, Google Drive, Gmail, Yahoo, Outlook (live IMAP). Outlook PST is a one-time UI-triggered import isolate, not a registered scanner. Dropbox/OneDrive constants exist but are unimplemented. `social` (Facebook/Twitter/Instagram) is placeholder UI only, with no backing scanner.
 
 ## 3. Database Management & Concurrency
-The most critical architectural feature is the **Single-Writer Isolate Pattern**.
 
-### DatabaseManager
-- Manages the singleton instance of AppDatabase (powered by **Drift**).
-- Initializes the DbIsolateWriterClient during startup.
+The database is **resqlite** (+ **resqlite_vector**), not Drift. Schema is hand-written `CREATE TABLE IF NOT EXISTS` DDL in `database_manager.dart` (`AppDatabase.schemaDDL`) — there is no code generation, and no incremental schema-version counter; one-off migrations are gated by ad-hoc `PRAGMA user_version` checks.
 
-### Write Operations (Isolate Dispatch)
-To ensure thread safety and prevent SQLite locks during massive scans:
-- **DbIsolateWriter**: A dedicated isolate that owns its own AppDatabase connection.
-- **Flow**: Any module or scanner needing to write data (e.g., `FileUpsertService`) sends a message to the `DbIsolateWriterPort`. The isolate performs the write and sends back a confirmation.
-- **Benefit**: Scanners can flood the writer with data without impacting UI performance or causing "Database Busy" errors.
+### Write Operations
+There is no single dedicated writer isolate. Each isolate — scanners, `EmbeddingIsolate`, `EmailEmbeddingIsolate`, and the main isolate — opens its **own** `AppDatabase` connection directly and writes to it. `DatabaseManager.startBackgroundServices` staggers isolate startup by ~500ms to avoid concurrent-open contention, and embedding isolates pause automatically while any scanner is actively syncing.
 
 ### Read Operations
-- Performed directly on the main thread via [AppDatabase] and [DatabaseRepository].
-- **Reactive UI**: By reading on the main thread, the app takes full advantage of Drift's `stream` and `watch` capabilities, allowing the UI to update automatically as the background isolate writes new data.
-
----
+Performed on the main isolate via `AppDatabase`/repositories. UI pages subscribe to `RxService` sinks (`BehaviorSubject`s) and re-invoke queries after a scan completes, rather than using live DB-level streaming watchers.
 
 ## 4. Build & Native Integration
-- **Makefile**: Used to manage complex build tasks, likely including native C++ bindings for LLM support (e.g., `llama.cpp`).
-- **Python Integration**: The `PythonManager` orchestrates background Python services for AI tasks, ensuring they are bundled and managed correctly within the macOS application sandbox.
+
+- **Makefile**: orchestrates the full build — `make models` (download GGUF models), `make build-python` (PyInstaller, Metal-enabled on macOS), `make build-client` (Flutter macOS release), `make notarize`. See `CLAUDE.md` for the full command reference.
+- **Python integration**: `PythonManager` unzips the bundled `aiserver-<platform>.zip`, spawns it as a subprocess with a per-launch bearer token, and discovers its URL by scanning stdout — ensuring it's bundled and managed correctly within the macOS application sandbox.
 
 ---
 
-# Important Rules 
+# Important Rules
 
 These rules apply to every task in this project unless explicitly overridden.
 Bias: caution over speed on non-trivial work. Use judgment on trivial tasks.

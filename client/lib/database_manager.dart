@@ -1086,8 +1086,7 @@ class AppDatabase {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT NOT NULL,
-      password TEXT NOT NULL,
-      local_storage_path TEXT NOT NULL
+      password TEXT NOT NULL
     );
     ''',
     // collections

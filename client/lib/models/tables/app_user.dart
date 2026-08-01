@@ -3,9 +3,14 @@ class AppUser {
   String name;
   String email;
   String password;
-  String localStoragePath;
   String? privateKey;
   String? publicKey;
+
+  /// Transient, in-memory only (never in [toDbMap], never persisted): the
+  /// storage path chosen during the setup wizard, threaded between steps
+  /// before `config.json`/`MainApp.appDataDirectory` become the source of
+  /// truth. Not stored per-user — the app has one storage location.
+  String localStoragePath;
 
   /// Transient, in-memory only (never in [toDbMap], never persisted): the
   /// plaintext password entered during setup, used once to create the credential
@@ -29,17 +34,11 @@ class AppUser {
       name: map['name'] as String,
       email: map['email'] as String,
       password: map['password'] as String,
-      localStoragePath: map['local_storage_path'] as String,
+      localStoragePath: '',
     );
   }
 
   Map<String, dynamic> toDbMap() {
-    return {
-      'id': id,
-      'name': name,
-      'email': email,
-      'password': password,
-      'local_storage_path': localStoragePath,
-    };
+    return {'id': id, 'name': name, 'email': email, 'password': password};
   }
 }
