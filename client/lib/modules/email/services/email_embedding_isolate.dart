@@ -8,6 +8,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/services/embedding_message_handler.dart';
 
 class EmailEmbeddingIsolate {
   Isolate? _isolate;
@@ -77,6 +78,11 @@ class EmailEmbeddingIsolate {
               logger.d('[EmailEmbeddingIsolate] $msg');
               break;
           }
+        } else if (type == 'embedding') {
+          final repo = DatabaseManager.instance.repository;
+          if (repo != null) {
+            handleEmbeddingMessage(repo, data, logger);
+          }
         }
       }
     });
@@ -124,9 +130,10 @@ class EmailEmbeddingIsolate {
     final String storagePath = cfg['storagePath'];
     final String dbName = cfg['dbName'];
     final AppLogger logger = AppLogger(cfg['loggerPort'] as SendPort?);
+    final SendPort replyTo = cfg['replyTo'] as SendPort;
 
     final controlPort = ReceivePort();
-    cfg['replyTo'].send(controlPort.sendPort);
+    replyTo.send(controlPort.sendPort);
 
     String? serviceUrl;
     String? serviceToken;
@@ -180,7 +187,7 @@ class EmailEmbeddingIsolate {
           continue;
         }
 
-        final emails = await repo.getEmailsWithMissingEmbeddings(limit: 10);
+        final emails = await repo.getEmailsWithMissingEmbeddings(limit: 1000);
 
         if (emails.isEmpty) {
           await Future.delayed(const Duration(minutes: 1));
@@ -200,11 +207,17 @@ class EmailEmbeddingIsolate {
             );
             // logger.d("Processed email ${email.id} in $duration");
 
-            if (embedding != null) {
-              await repo.upsertEmailEmbedding(email.id, embedding);
-              // logger.d("Saved embedding for email: ${email.id}");
-            } else {
-              await repo.upsertEmailEmbedding(email.id, []);
+            // Hand the result back to the main isolate to write — resqlite
+            // serializes writes through a single connection internally, so
+            // writing here (a second, independent connection to the same
+            // file) only added SQLITE_BUSY contention.
+            replyTo.send({
+              'type': 'embedding',
+              'table': 'emails_embeddings',
+              'id': email.id,
+              'embedding': embedding ?? <double>[],
+            });
+            if (embedding == null) {
               logger.w("Skipped unprocessable email: ${email.id}");
             }
           } catch (e) {

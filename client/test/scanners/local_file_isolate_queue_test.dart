@@ -13,30 +13,66 @@ import 'dart:io' as io;
 import 'package:path/path.dart' as p;
 
 class MockAppDatabase extends Mock implements AppDatabase {}
-class MockSendPort extends Mock implements SendPort {}
+
+/// Thumbnail writes now go through the worker's `receiverPort` as a
+/// `{'type': 'dbWrite', 'service': 'fileThumbnail', ...}` message instead of
+/// calling `appDb.execute` directly (see the SQLITE_BUSY fix this replaced).
+/// This stands in for the main isolate's side of that exchange: it receives
+/// the message, runs the write against [db], and replies with the ack the
+/// worker is awaiting.
+StreamSubscription<dynamic> _wireFakeMainIsolate(
+  ReceivePort port,
+  AppDatabase db,
+) {
+  return port.listen((data) async {
+    if (data is! Map || data['type'] != 'dbWrite') return;
+    final replyTo = data['replyTo'] as SendPort;
+    if (data['service'] != 'fileThumbnail') {
+      replyTo.send({'ok': false, 'error': 'unsupported in test'});
+      return;
+    }
+    try {
+      final payload = data['payload'] as Map;
+      final result = await db.execute(
+        'UPDATE files SET thumbnail = ? WHERE id = ?',
+        [payload['thumbnailKey'], payload['fileId']],
+      );
+      replyTo.send({
+        'ok': true,
+        'result': {'affectedRows': result.affectedRows},
+      });
+    } catch (e) {
+      replyTo.send({'ok': false, 'error': e.toString()});
+    }
+  });
+}
 
 void main() {
   late MockAppDatabase mockDb;
-  late MockSendPort mockPort;
+  late ReceivePort receivePort;
+  late StreamSubscription<dynamic> mainIsolateSub;
   late LocalFileIsolateWorker worker;
   late String tempDir;
 
   setUp(() {
     mockDb = MockAppDatabase();
-    mockPort = MockSendPort();
+    receivePort = ReceivePort();
+    mainIsolateSub = _wireFakeMainIsolate(receivePort, mockDb);
     tempDir = io.Directory.systemTemp.createTempSync('thumb_queue_test').path;
     // Use tempDir as the storage root so cached thumbnails land under
     // tempDir/thumbnails and get cleaned up in tearDown.
     worker = LocalFileIsolateWorker(
       null,
-      mockPort,
+      receivePort.sendPort,
       tempDir,
       'test.db',
-      mockPort,
+      receivePort.sendPort,
     );
   });
 
-  tearDown(() {
+  tearDown(() async {
+    await mainIsolateSub.cancel();
+    receivePort.close();
     io.Directory(tempDir).deleteSync(recursive: true);
   });
 
@@ -57,7 +93,6 @@ void main() {
 
     // Enqueue the thumbnail job
     worker.enqueueThumbnailJobForTesting(
-      mockDb,
       'test-collection-id',
       'test-file-id',
       path,
@@ -66,10 +101,20 @@ void main() {
     );
 
     await updateCompleter.future.timeout(const Duration(seconds: 5));
-    // Let the queue's post-job bookkeeping (activeJobs--, _processThumbnailQueue) run.
-    await Future.delayed(Duration.zero);
+    // Let the queue's post-job bookkeeping (activeJobs--, _processThumbnailQueue)
+    // run — the write now round-trips through the fake main isolate's
+    // ReceivePort, which takes a few more event-loop turns than a directly
+    // awaited mock call did.
+    final settled = Completer<void>();
+    Timer.periodic(const Duration(milliseconds: 5), (timer) {
+      if (worker.activeThumbnailJobsForTesting == 0) {
+        timer.cancel();
+        if (!settled.isCompleted) settled.complete();
+      }
+    });
+    await settled.future.timeout(const Duration(seconds: 5));
 
-    // Verify that it called database.execute to update the thumbnail
+    // Verify that the relayed write reached the database.
     verify(() => mockDb.execute(
       "UPDATE files SET thumbnail = ? WHERE id = ?",
       any(),
@@ -98,10 +143,10 @@ void main() {
 
     final splitWorker = LocalFileIsolateWorker(
       null,
-      mockPort,
+      receivePort.sendPort,
       dbDir,
       'test.db',
-      mockPort,
+      receivePort.sendPort,
       appDir: storageRoot,
     );
 
@@ -120,7 +165,6 @@ void main() {
     });
 
     splitWorker.enqueueThumbnailJobForTesting(
-      mockDb,
       'test-collection-id',
       'test-file-id',
       path,
@@ -156,6 +200,15 @@ void main() {
       final appDb = await AppDatabase.create(null, dbDir, 'race_test.db');
       addTearDown(() => appDb.close());
 
+      // Route this worker's relayed writes to the real database instead of
+      // the mock, so the retry loop observes real affected-row counts.
+      final raceReceivePort = ReceivePort();
+      final raceSub = _wireFakeMainIsolate(raceReceivePort, appDb);
+      addTearDown(() async {
+        await raceSub.cancel();
+        raceReceivePort.close();
+      });
+
       final image = img.Image(width: 100, height: 100);
       img.fill(image, color: img.ColorRgb8(0, 0, 255));
       final path = p.join(tempDir, 'race.jpg');
@@ -163,17 +216,16 @@ void main() {
 
       final raceWorker = LocalFileIsolateWorker(
         null,
-        mockPort,
+        raceReceivePort.sendPort,
         dbDir,
         'race_test.db',
-        mockPort,
+        raceReceivePort.sendPort,
       );
 
       const fileId = 'race-file-id';
 
       // Thumbnail generation completes first: no file row exists yet.
       raceWorker.enqueueThumbnailJobForTesting(
-        appDb,
         'test-collection-id',
         fileId,
         path,

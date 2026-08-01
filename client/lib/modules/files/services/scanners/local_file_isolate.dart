@@ -7,9 +7,6 @@ import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
-import 'package:mydatastudio/modules/files/services/batch_file_upsert_service.dart';
-import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
-import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:flutter/services.dart';
@@ -19,6 +16,7 @@ import 'package:path/path.dart' as p;
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
+import 'package:mydatastudio/services/scan_write_relay.dart';
 
 /// [LocalFileIsolate] is a collection scanner responsible for indexing files
 /// on the local filesystem. It uses a background Dart isolate to crawl
@@ -152,6 +150,18 @@ class LocalFileIsolate extends CollectionScanner {
           }
         } else if (type == 'status') {
           logger?.s(msg);
+        } else if (type == 'dbWrite') {
+          // Awaited before the loop pulls the next message — this is what
+          // keeps writes from this isolate in send order (a folder must land
+          // before the files inside it), and gives the worker a definite
+          // point to resume from via the reply.
+          final replyTo = message['replyTo'] as SendPort;
+          try {
+            final result = await handleScanWriteMessage(message);
+            replyTo.send({'ok': true, 'result': result});
+          } catch (e) {
+            replyTo.send({'ok': false, 'error': e.toString()});
+          }
         }
       }
     }
@@ -208,6 +218,29 @@ class LocalFileIsolateWorker {
     this.appDir,
   });
 
+  /// Sends a write back to the main isolate and waits for its ack, so this
+  /// isolate never opens a second, independent write connection to the same
+  /// database file. See [handleScanWriteMessage] for the dispatch on the
+  /// receiving end.
+  Future<Map<String, dynamic>> _writeViaMain(
+    String service,
+    dynamic payload,
+  ) async {
+    final replyPort = ReceivePort();
+    receiverPort.send({
+      'type': 'dbWrite',
+      'service': service,
+      'payload': payload,
+      'replyTo': replyPort.sendPort,
+    });
+    final reply = await replyPort.first as Map;
+    replyPort.close();
+    if (reply['ok'] != true) {
+      throw Exception('dbWrite($service) failed: ${reply['error']}');
+    }
+    return (reply['result'] as Map?)?.cast<String, dynamic>() ?? const {};
+  }
+
   final List<Future<void> Function()> _thumbnailQueue = [];
   int _activeThumbnailJobs = 0;
   static const int _maxConcurrentThumbnails = 4;
@@ -223,7 +256,6 @@ class LocalFileIsolateWorker {
   );
 
   void _enqueueThumbnailJob(
-    AppDatabase appDb,
     String collectionId,
     String fileId,
     String absPath,
@@ -247,12 +279,16 @@ class LocalFileIsolateWorker {
           // before the surrounding batch upsert flushes, so a plain UPDATE can
           // race ahead of the INSERT and silently affect zero rows. Retry
           // until the row shows up rather than losing the thumbnail key.
+          // Routed through the main isolate (like the other writes) rather
+          // than this isolate's own connection: a second, independent
+          // connection issuing this UPDATE was hitting SQLITE_BUSY against
+          // writes landing through the main isolate's connection.
           for (var attempt = 0; attempt < 5; attempt++) {
-            final result = await appDb.execute(
-              "UPDATE files SET thumbnail = ? WHERE id = ?",
-              [key, fileId],
-            );
-            if (result.affectedRows > 0) {
+            final result = await _writeViaMain('fileThumbnail', {
+              'fileId': fileId,
+              'thumbnailKey': key,
+            });
+            if ((result['affectedRows'] as int? ?? 0) > 0) {
               logger?.d('LocalScanner: Saved thumbnail for $absPath');
               break;
             }
@@ -380,18 +416,16 @@ class LocalFileIsolateWorker {
       );
     } else {
       final cleanupRelPath = p.relative(path, from: rootPath);
-      await CleanupDeletedFilesService.instance.invoke(
-        CleanupDeletedFilesServiceCommand(
-          collectionId,
-          cleanupRelPath == '.' ? '' : cleanupRelPath,
-          scanStartTime,
-          appDb,
-          recursive: recursive,
-        ),
-      );
+      await _writeViaMain('cleanupDeletedFiles', {
+        'collectionId': collectionId,
+        'path': cleanupRelPath == '.' ? '' : cleanupRelPath,
+        'scanStartTime': scanStartTime,
+        'recursive': recursive,
+      });
     }
 
-    // Update collection lastScanDate and status
+    // Update collection lastScanDate and status. The read stays on this
+    // isolate's own connection; only the write goes back to main.
     final colRepo = CollectionRepository(appDb);
     final col = await colRepo.collectionById(collectionId);
     if (col != null) {
@@ -399,7 +433,7 @@ class LocalFileIsolateWorker {
       // status doesn't claim a clean scan the sweep was skipped for.
       col.scanStatus = failedBatches > 0 ? 'incomplete' : 'idle';
       col.lastScanDate = scanStartTime;
-      await colRepo.updateCollection(col);
+      await _writeViaMain('collectionStatus', col);
     }
 
     // Wait for any remaining thumbnails to finish generating
@@ -479,7 +513,6 @@ class LocalFileIsolateWorker {
           if (validation['isCacheHit'] == false &&
               file.contentType == FilesConstants.mimeTypeImage) {
             _enqueueThumbnailJob(
-              appDb,
               file.collectionId,
               file.id,
               asset.path,
@@ -493,12 +526,7 @@ class LocalFileIsolateWorker {
           if (fileBatch.length >= 100) {
             logger.i('Found ${fileBatch.length} files, saving batch');
             try {
-              await BatchFileUpsertService.instance.invoke(
-                BatchFileUpsertServiceCommand(
-                  List<File>.from(fileBatch),
-                  appDb,
-                ),
-              );
+              await _writeViaMain('batchFile', List<File>.from(fileBatch));
             } catch (e) {
               failedBatches++;
               logger.e(
@@ -520,9 +548,7 @@ class LocalFileIsolateWorker {
         );
         if (folder != null) {
           logger.i('Found folder: ${folder.path}');
-          await FolderUpsertService.instance.invoke(
-            FolderUpsertServiceCommand(folder, appDb),
-          );
+          await _writeViaMain('folder', folder);
 
           try {
             if (recursive) {
@@ -558,9 +584,7 @@ class LocalFileIsolateWorker {
     if (currentBatch == null && fileBatch.isNotEmpty) {
       logger.i('Found ${fileBatch.length} files, saving final batch');
       try {
-        await BatchFileUpsertService.instance.invoke(
-          BatchFileUpsertServiceCommand(List<File>.from(fileBatch), appDb),
-        );
+        await _writeViaMain('batchFile', List<File>.from(fileBatch));
       } catch (e) {
         failedBatches++;
         logger.e(
@@ -759,7 +783,6 @@ class LocalFileIsolateWorker {
   }
 
   void enqueueThumbnailJobForTesting(
-    AppDatabase appDb,
     String collectionId,
     String fileId,
     String absPath,
@@ -768,7 +791,6 @@ class LocalFileIsolateWorker {
     String? llmServiceToken,
   }) {
     _enqueueThumbnailJob(
-      appDb,
       collectionId,
       fileId,
       absPath,

@@ -12,6 +12,7 @@ import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/services/embedding_message_handler.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 
 class EmbeddingIsolate {
@@ -90,6 +91,11 @@ class EmbeddingIsolate {
               logger.d('[EmbeddingIsolate] $msg');
               break;
           }
+        } else if (type == 'embedding') {
+          final repo = DatabaseManager.instance.repository;
+          if (repo != null) {
+            handleEmbeddingMessage(repo, data, logger);
+          }
         }
       }
     });
@@ -143,10 +149,11 @@ class EmbeddingIsolate {
     final String storagePath = cfg['storagePath'];
     final String dbName = cfg['dbName'];
     final AppLogger logger = AppLogger(cfg['loggerPort'] as SendPort?);
+    final SendPort replyTo = cfg['replyTo'] as SendPort;
 
     // Create a control port to receive commands from the main isolate
     final controlPort = ReceivePort();
-    cfg['replyTo'].send(controlPort.sendPort);
+    replyTo.send(controlPort.sendPort);
 
     String? serviceUrl;
     String? serviceToken;
@@ -207,7 +214,7 @@ class EmbeddingIsolate {
         }
 
         // Query for 10 files with missing embeddings
-        final files = await repo.getFilesWithMissingEmbeddings(limit: 10);
+        final files = await repo.getFilesWithMissingEmbeddings(limit: 1000);
 
         if (files.isEmpty) {
           //logger.d("No files with missing embeddings found. Sleeping...");
@@ -240,11 +247,19 @@ class EmbeddingIsolate {
             final duration = DateTime.now().difference(start);
             logger.d("Processed file ${file.path} in $duration");
 
+            // Hand the result back to the main isolate to write — resqlite
+            // serializes writes through a single connection internally, so
+            // writing here (a second, independent connection to the same
+            // file) only added SQLITE_BUSY contention.
+            replyTo.send({
+              'type': 'embedding',
+              'table': 'files_embeddings',
+              'id': file.id,
+              'embedding': embedding ?? <double>[],
+            });
             if (embedding != null) {
-              await repo.upsertFileEmbedding(file.id, embedding);
-              logger.d("Saved embedding for file: ${file.path}");
+              logger.d("Sent embedding for file: ${file.path}");
             } else {
-              await repo.upsertFileEmbedding(file.id, []);
               logger.w("Skipped unprocessable file: ${file.path}");
             }
             // Batch complete
