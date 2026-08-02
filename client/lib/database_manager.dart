@@ -509,6 +509,29 @@ class AppDatabase {
         FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
       );
     ''');
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS file_tags (
+        file_id TEXT NOT NULL,
+        tag TEXT NOT NULL,
+        PRIMARY KEY (file_id, tag),
+        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS file_tags_tag_idx ON file_tags (tag);',
+    );
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS file_landmarks (
+        file_id TEXT NOT NULL,
+        landmark TEXT NOT NULL,
+        PRIMARY KEY (file_id, landmark),
+        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS file_landmarks_landmark_idx '
+      'ON file_landmarks (landmark);',
+    );
     final added = await _addMissingColumns();
 
     // Only on the open that introduces the column, so a large archive pays for
@@ -612,6 +635,17 @@ class AppDatabase {
         // Whether the attachment is part of the message body — a spacer, logo
         // or tracking pixel — rather than something the sender attached.
         'is_inline': 'INTEGER NOT NULL DEFAULT 0',
+        // AI-generated or user-entered description of the file's contents.
+        'description': 'TEXT',
+      },
+      'files_embeddings': {
+        // Distinguishes what an embedding was computed from — e.g. 'file' for
+        // the image itself, vs. future 'chunk' (PDF RAG chunks) or
+        // 'description' (embeddings of a generated description) rows.
+        // DEFAULT 'file' both seeds existing rows on this ALTER and covers
+        // every row written today, since file-level embeddings are all there
+        // is right now.
+        'type': "TEXT NOT NULL DEFAULT 'file'",
       },
     };
 
@@ -1175,7 +1209,8 @@ class AppDatabase {
       longitude REAL,
       local_path TEXT,
       content_id TEXT,
-      is_inline INTEGER NOT NULL DEFAULT 0
+      is_inline INTEGER NOT NULL DEFAULT 0,
+      description TEXT
     );
     ''',
     // folders
@@ -1206,8 +1241,33 @@ class AppDatabase {
     CREATE TABLE IF NOT EXISTS files_embeddings (
       file_id TEXT PRIMARY KEY,
       qwen3_vl_embedding BLOB,
+      type TEXT NOT NULL DEFAULT 'file',
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
+    ''',
+    // file_tags
+    '''
+    CREATE TABLE IF NOT EXISTS file_tags (
+      file_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      PRIMARY KEY (file_id, tag),
+      FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS file_tags_tag_idx ON file_tags (tag);
+    ''',
+    // file_landmarks
+    '''
+    CREATE TABLE IF NOT EXISTS file_landmarks (
+      file_id TEXT NOT NULL,
+      landmark TEXT NOT NULL,
+      PRIMARY KEY (file_id, landmark),
+      FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS file_landmarks_landmark_idx ON file_landmarks (landmark);
     ''',
     // emails_embeddings
     '''

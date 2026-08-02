@@ -37,6 +37,9 @@ class File implements FileAsset {
   /// photos module and the embedding isolate can ignore that traffic.
   bool isInline;
 
+  /// AI-generated or user-entered description of the file's contents.
+  String? description;
+
   File({
     required this.id,
     required this.name,
@@ -57,6 +60,7 @@ class File implements FileAsset {
     this.localPath,
     this.contentId,
     this.isInline = false,
+    this.description,
   });
 
   factory File.fromDbMap(Map<String, dynamic> map) {
@@ -93,6 +97,7 @@ class File implements FileAsset {
       localPath: map['local_path'] as String?,
       contentId: map['content_id'] as String?,
       isInline: (map['is_inline'] as int? ?? 0) != 0,
+      description: map['description'] as String?,
     );
   }
 
@@ -117,6 +122,7 @@ class File implements FileAsset {
       'local_path': localPath,
       'content_id': contentId,
       'is_inline': isInline ? 1 : 0,
+      'description': description,
     };
   }
 }

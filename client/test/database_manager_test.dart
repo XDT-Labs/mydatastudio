@@ -293,6 +293,85 @@ void main() {
       },
     );
 
+    test(
+      'reopening an existing database adds files_embeddings.type, '
+      'files.description, and the tag/landmark join tables',
+      () async {
+        // Simulates an install created before these columns/tables existed:
+        // build a fresh db, then strip it back to the pre-migration shape so
+        // reopening exercises the same migration path an upgraded install
+        // takes.
+        final supportDir = await getApplicationSupportDirectory();
+        const dbName = 'metadata_migration_test.db';
+        final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+        if (dbFile.existsSync()) dbFile.deleteSync();
+
+        var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        await appDb.rawDb.execute(
+          'ALTER TABLE files_embeddings DROP COLUMN type',
+        );
+        await appDb.rawDb.execute('ALTER TABLE files DROP COLUMN description');
+        await appDb.rawDb.execute('DROP TABLE file_tags');
+        await appDb.rawDb.execute('DROP TABLE file_landmarks');
+
+        // A file/embedding pair written under the old schema.
+        await appDb.rawDb.execute(
+          "INSERT INTO files (id, name, path, parent, date_created, "
+          "date_last_modified, collection_id, content_type, size, is_deleted) "
+          "VALUES ('f1', 'sunset.jpg', '/tmp/sunset.jpg', '/tmp', 0, 0, 'c1', "
+          "'image/jpeg', 1, 0)",
+        );
+        await appDb.rawDb.execute(
+          "INSERT INTO files_embeddings (file_id) VALUES ('f1')",
+        );
+        await appDb.close();
+
+        // Reopening is what an upgraded install does.
+        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+
+        final embeddingRows = await appDb.rawDb.select(
+          'SELECT type FROM files_embeddings WHERE file_id = ?',
+          ['f1'],
+        );
+        expect(
+          embeddingRows.first['type'],
+          'file',
+          reason:
+              'pre-existing embeddings are all file-level; DEFAULT backfills '
+              'them without a separate UPDATE pass',
+        );
+
+        final fileColumns =
+            (await appDb.rawDb.select(
+              'PRAGMA table_info(files)',
+            )).map((r) => r['name'] as String).toSet();
+        expect(fileColumns.contains('description'), true);
+
+        // Join tables exist and are queryable/indexable by value.
+        await appDb.rawDb.execute(
+          "INSERT INTO file_tags (file_id, tag) VALUES ('f1', 'beach')",
+        );
+        final tagRows = await appDb.rawDb.select(
+          'SELECT file_id FROM file_tags WHERE tag = ?',
+          ['beach'],
+        );
+        expect(tagRows.map((r) => r['file_id']), ['f1']);
+
+        await appDb.rawDb.execute(
+          "INSERT INTO file_landmarks (file_id, landmark) "
+          "VALUES ('f1', 'Golden Gate Bridge')",
+        );
+        final landmarkRows = await appDb.rawDb.select(
+          'SELECT file_id FROM file_landmarks WHERE landmark = ?',
+          ['Golden Gate Bridge'],
+        );
+        expect(landmarkRows.map((r) => r['file_id']), ['f1']);
+
+        await appDb.close();
+        if (dbFile.existsSync()) dbFile.deleteSync();
+      },
+    );
+
     test('getRealApplicationSupportPath should return correct path even if PathProviderPlatform is overridden', () async {
       final originalSupportDir = await getApplicationSupportDirectory();
       final realPath = await DatabaseManager.getRealApplicationSupportPath();
