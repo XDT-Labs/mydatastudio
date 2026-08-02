@@ -141,8 +141,12 @@ class GmailScannerIsolate {
 
 /// Entry point and logic for the Gmail background scan.
 ///
-/// The worker runs in a separate isolate, opens its own AppDatabase connection,
-/// and writes results directly via upsert services.
+/// The worker runs in a separate isolate and opens its own `AppDatabase`
+/// connection, but only to read (e.g. `getAllById` for already-downloaded
+/// messages). Writes are relayed to the main isolate via [writeViaMain] and
+/// executed there through `handleScanWriteMessage` — see
+/// `scan_write_relay.dart` — so this isolate never opens a second write
+/// connection to the same database file.
 class GmailScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> args) async {
     runInScanIsolateZone(() async {

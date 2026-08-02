@@ -41,8 +41,10 @@ import 'package:mydatastudio/services/scan_write_relay.dart';
 /// be transferred. Instead we pass raw strings (providerKey, accessToken,
 /// refreshToken) and rebuild the provider inside.
 ///
-/// Writes `batch_file`, `folder`, and `cleanup_deleted` operations directly
-/// to the database via the repository layer.
+/// Relays `batchFile`, `folder`, `cleanupDeletedFiles`, and `collectionStatus`
+/// writes to the main isolate via [writeViaMain] instead of writing through
+/// its own connection — see `scan_write_relay.dart`'s
+/// `handleScanWriteMessage` for where they're actually executed.
 class CloudFileIsolate extends CollectionScanner {
   final SendPort? loggerIsolatePort;
   final String? storagePath;
