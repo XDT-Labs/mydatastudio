@@ -7,12 +7,14 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/modules/files/services/utilities/file_bytes_loader.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/services/file_description_message_handler.dart';
 import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
+import 'package:path/path.dart' as p;
 
 /// Matches `DEFAULT_MODEL_ALIAS` in aiserver/src/aichat/config.py — omitting
 /// `model` from the chat completion request already gets this, but the
@@ -259,9 +261,24 @@ class FileDescriptionIsolate {
             break;
           }
           try {
-            final bytes = await FileBytesLoader.load(file, repo, logger);
-            if (bytes == null) {
+            final rawBytes = await FileBytesLoader.load(file, repo, logger);
+            if (rawBytes == null) {
               logger.w("Skipped unprocessable file: ${file.path}");
+              continue;
+            }
+
+            final bytes = await _toVisionCompatibleJpeg(
+              rawBytes,
+              file.name,
+              serviceUrl!,
+              serviceToken,
+              logger,
+            );
+            if (bytes == null) {
+              logger.w(
+                "Skipped file whose image format couldn't be converted: "
+                "${file.path}",
+              );
               continue;
             }
 
@@ -355,6 +372,64 @@ class FileDescriptionIsolate {
     } catch (e) {
       logger.d("Could not check chat model status: $e");
       return false;
+    }
+  }
+
+  /// Converts RAW (.nef, .cr2, ...) and HEIC/HEIF bytes to JPEG via the
+  /// aiserver's `/util/thumbnail` endpoint before handing them to the vision
+  /// model — llama.cpp's image loader (`_create_bitmap_from_bytes`) can only
+  /// decode formats Pillow's default opener understands, and raises
+  /// "Failed to create bitmap from image bytes" on RAW/HEIC. Other formats
+  /// are passed through unchanged. Uses a larger bound than the UI thumbnail
+  /// (1024px) since this feeds the model's own understanding of the image,
+  /// not a small preview tile.
+  static Future<List<int>?> _toVisionCompatibleJpeg(
+    List<int> bytes,
+    String fileName,
+    String serviceUrl,
+    String? serviceToken,
+    AppLogger logger,
+  ) async {
+    final ext = p.extension(fileName).toLowerCase();
+    final isRaw = rawImageExtensions.contains(ext);
+    final isHeic = heicImageExtensions.contains(ext);
+    if (!isRaw && !isHeic) return bytes;
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$serviceUrl/util/thumbnail'),
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(serviceToken),
+            },
+            body: jsonEncode({
+              'image_base64': base64Encode(bytes),
+              'is_raw': isRaw,
+              'width': 1024,
+              'height': 1024,
+            }),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (response.statusCode != 200) {
+        logger.e(
+          "Thumbnail conversion failed for $fileName: "
+          "${response.statusCode} ${response.body}",
+        );
+        return null;
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final b64 = data['thumbnail'] as String?;
+      if (b64 == null) {
+        logger.w("Thumbnail conversion returned no image for $fileName");
+        return null;
+      }
+      return base64Decode(b64);
+    } catch (e) {
+      logger.e("Error converting $fileName to JPEG for vision model: $e");
+      return null;
     }
   }
 

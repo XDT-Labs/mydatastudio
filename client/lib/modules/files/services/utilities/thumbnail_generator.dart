@@ -12,13 +12,16 @@ import 'package:mydatastudio/app_logger.dart';
 /// console; a bare print() only reaches the console.
 final AppLogger _logger = AppLogger(null);
 
-const _rawExtensions = ['.nef', '.cr2', '.arw', '.dng', '.orf', '.sr2'];
+/// RAW extensions the aiserver decodes via rawpy (`is_raw: true`). Also used
+/// by FileDescriptionIsolate to know when a vision-model image needs
+/// converting to JPEG first, since llama.cpp's image loader can't read RAW.
+const rawImageExtensions = ['.nef', '.cr2', '.arw', '.dng', '.orf', '.sr2'];
 
 /// Formats the Dart `image` package can't decode locally but the aiserver
 /// can (via pillow-heif registered with PIL). Unlike RAW these decode with
 /// plain PIL.Image.open once the HEIF opener is registered, so `is_raw`
-/// stays false for these.
-const _heicExtensions = ['.heic', '.heif'];
+/// stays false for these. Also used by FileDescriptionIsolate — see above.
+const heicImageExtensions = ['.heic', '.heif'];
 
 class ThumbnailGenerator {
   /// Generates a JPEG thumbnail for [filePath], writes it into [cache], and
@@ -60,8 +63,8 @@ class ThumbnailGenerator {
     String? llmServiceToken,
   }) async {
     final ext = p.extension(filePath).toLowerCase();
-    final isRaw = _rawExtensions.contains(ext);
-    final isHeic = _heicExtensions.contains(ext);
+    final isRaw = rawImageExtensions.contains(ext);
+    final isHeic = heicImageExtensions.contains(ext);
 
     // RAW/HEIC: send the bytes to the Python service, which decodes them
     // from a buffer (rawpy for RAW, PIL+pillow-heif for HEIC) and returns a
