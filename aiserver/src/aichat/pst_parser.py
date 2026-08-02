@@ -455,6 +455,38 @@ class PstParser:
         mime_type, _ = mimetypes.guess_type(filename)
         return mime_type or "application/octet-stream"
 
+    @staticmethod
+    def _strip_macbinary_header(data: bytes) -> bytes:
+        """
+        Strips a MacBinary header from `data` if one is detected, returning
+        just the data fork. Passes `data` through unchanged otherwise.
+
+        Old Mac email clients and AppleTalk mail gateways sometimes stored
+        attachments wrapped in MacBinary -- a pre-MIME format bundling the
+        data fork, resource fork, and Finder metadata (type/creator codes,
+        icon position, etc.) into one 128-byte-header-prefixed blob. PST
+        archives from that era can carry the wrapped bytes verbatim as the
+        attachment payload, and a MacBinary-wrapped image fails to decode as
+        an image at all downstream.
+
+        Detection follows the same lenient heuristic most MacBinary readers
+        use (no full CRC check): a plausible version/filename-length byte
+        pair, the header's fixed zero-fill byte actually being zero, and a
+        data-fork length that fits within the remaining bytes.
+        """
+        if len(data) < 128 or data[0] != 0:
+            return data
+        filename_length = data[1]
+        if filename_length < 1 or filename_length > 63:
+            return data
+        if data[74] != 0:
+            return data
+        data_fork_length = int.from_bytes(data[83:87], "big")
+        end = 128 + data_fork_length
+        if data_fork_length <= 0 or end > len(data):
+            return data
+        return data[128:end]
+
 
     def _process_folder(self, folder, folder_path):
         # A folder whose name can't be read is still worth descending into, so
@@ -723,6 +755,7 @@ class PstParser:
 
                             att.seek_offset(0, 0)
                             raw_data = att.read_buffer(att_size)
+                            raw_data = self._strip_macbinary_header(raw_data)
 
                             with open(file_path, "wb") as f_out:
                                 f_out.write(raw_data)
