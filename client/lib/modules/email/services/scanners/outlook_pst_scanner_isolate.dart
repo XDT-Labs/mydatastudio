@@ -202,22 +202,11 @@ class OutlookPstScannerIsolate {
 
     receivePort.listen((message) {
       if (relayIsolateLog(logger, message, '[PstScan]')) return;
+      // Queued rather than handled inline — see gmail_scanner_isolate.dart.
+      // Matters even more here: PST streams many batched writes, so
+      // out-of-order processing would be far more likely to bite.
+      if (tryHandleScanWrite(message, writeQueue)) return;
       if (message is Map) {
-        if (message['type'] == 'dbWrite') {
-          // Queued rather than awaited inline — see gmail_scanner_isolate.dart.
-          // Matters even more here: PST streams thousands of unbatched writes,
-          // so out-of-order processing would be far more likely to bite.
-          final replyTo = message['replyTo'] as SendPort;
-          writeQueue.add(() async {
-            try {
-              final result = await handleScanWriteMessage(message);
-              replyTo.send({'ok': true, 'result': result});
-            } catch (e) {
-              replyTo.send({'ok': false, 'error': e.toString()});
-            }
-          });
-          return;
-        }
         if (message['type'] == 'refresh') {
           // Trigger UI refresh
           GetEmailsService.instance.invoke(
@@ -303,9 +292,11 @@ class OutlookPstScannerIsolateWorker {
         final repo = CollectionRepository(appDb);
         final col = await repo.collectionById(collection.id);
         if (col != null) {
-          col.scanStatus = status;
-          col.lastScanDate = DateTime.now();
-          await writeViaMain(clientPort, 'collectionStatus', col);
+          await writeViaMain(clientPort, 'collectionStatus', {
+            'collectionId': col.id,
+            'scanStatus': status,
+            'lastScanDate': DateTime.now(),
+          });
         }
       }
 
@@ -378,6 +369,27 @@ class OutlookPstScannerIsolateWorker {
       // record. 0 means it couldn't read the tree; the UI shows an indeterminate
       // bar rather than a wrong percentage.
       int totalMessages = 0;
+
+      // Emails are buffered and relayed in batches rather than one at a time:
+      // a PST archive can stream thousands of records, and this was the
+      // chattiest write path of any scanner. Attachments (already batched
+      // per-email) may land slightly ahead of the email they belong to since
+      // files.email_id isn't FK-enforced — an eventual-consistency window of
+      // at most one batch, not a correctness issue.
+      final emailBatch = <Email>[];
+      Future<void> flushEmailBatch() async {
+        if (emailBatch.isEmpty) return;
+        final batch = List<Email>.from(emailBatch);
+        emailBatch.clear();
+        try {
+          await writeViaMain(clientPort, 'emailBatch', batch);
+        } catch (e) {
+          errorCount += batch.length;
+          logger.e(
+            "PST Isolate: batch of ${batch.length} emails was not saved: $e",
+          );
+        }
+      }
 
       // 3. Listen to stream output — use await-for to support async service calls
       try {
@@ -470,7 +482,10 @@ class OutlookPstScannerIsolateWorker {
                 isDeleted: false,
               );
 
-              await writeViaMain(clientPort, 'emailBatch', [email]);
+              emailBatch.add(email);
+              if (emailBatch.length >= 50) {
+                await flushEmailBatch();
+              }
 
               final emailFolderPath = data['folder'] as String?;
               if (emailFolderPath != null) {
@@ -613,6 +628,10 @@ class OutlookPstScannerIsolateWorker {
         streamFailed = true;
         logger.e("PST Isolate: Stream failed mid-import: $e");
       }
+
+      // Flush whatever's left in the batch — the loop above only flushes at
+      // the 50-email threshold, so the tail end otherwise never gets sent.
+      await flushEmailBatch();
 
       // 4. Second pass: stamp each folder with the number of emails it holds,
       // counting its whole subtree. This can only run once the stream is done,

@@ -441,14 +441,20 @@ class CloudFileIsolateWorker {
         );
       } else if (!skipCleanup) {
         // Mark anything not seen this scan as deleted (full walks / forced refreshes)
-        await writeViaMain(port, 'cleanupDeletedFiles', {
-          'collectionId': collectionId,
-          'path': rootFolderId == collectionPath ? '' : rootFolderId,
-          'scanStartTime': scanStartTime,
-          'recursive': recursive,
-          'isCloud': true,
-          'isFullScan': isFullScan,
-        });
+        try {
+          await writeViaMain(port, 'cleanupDeletedFiles', {
+            'collectionId': collectionId,
+            'path': rootFolderId == collectionPath ? '' : rootFolderId,
+            'scanStartTime': scanStartTime,
+            'recursive': recursive,
+            'isCloud': true,
+            'isFullScan': isFullScan,
+          });
+        } catch (e) {
+          // A transient relay failure here shouldn't skip the collection
+          // status update below or the download queue after it.
+          logger.e('CloudFileIsolate: cleanup-deleted-files write failed: $e');
+        }
       }
 
       // Update lastScanDate in the DB. The read stays on this isolate's own
@@ -456,9 +462,15 @@ class CloudFileIsolateWorker {
       final colRepo = CollectionRepository(appDb);
       final col = await colRepo.collectionById(collectionId);
       if (col != null) {
-        col.scanStatus = 'ready';
-        col.lastScanDate = scanStartTime;
-        await writeViaMain(port, 'collectionStatus', col);
+        try {
+          await writeViaMain(port, 'collectionStatus', {
+            'collectionId': col.id,
+            'scanStatus': 'ready',
+            'lastScanDate': scanStartTime,
+          });
+        } catch (e) {
+          logger.e('CloudFileIsolate: failed to update collection status: $e');
+        }
       }
 
       _isScanning = false;
@@ -547,7 +559,12 @@ class CloudFileIsolateWorker {
             scanStartTime: scanStartTime,
           );
           if (folder != null) {
-            await writeViaMain(port, 'folder', folder);
+            try {
+              await writeViaMain(port, 'folder', folder);
+            } catch (e) {
+              _failedBatches++;
+              logger.e('CloudFileIsolate: folder write failed: $e');
+            }
             logger.i('Found NEW/CHANGED folder: ${f.name} (${f.id})');
           }
         } else {
@@ -716,7 +733,12 @@ class CloudFileIsolateWorker {
             scanStartTime: scanStartTime,
           );
           if (folder != null) {
-            await writeViaMain(port, 'folder', folder);
+            try {
+              await writeViaMain(port, 'folder', folder);
+            } catch (e) {
+              _failedBatches++;
+              logger.e('CloudFileIsolate: folder write failed: $e');
+            }
             logger.i('Found Drive folder: ${f.name} (${f.id})');
 
             if (discoveredFolders != null) {

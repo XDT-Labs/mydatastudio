@@ -94,21 +94,7 @@ class GmailScannerIsolate {
       // replyTo SendPort and the full File/Email/Folder payload being
       // written, neither of which statusPort's listener (scan status and
       // progress only) should ever see.
-      if (message is Map && message['type'] == 'dbWrite') {
-        // Queued rather than awaited inline: this listener callback isn't
-        // awaited by the port itself, so without an explicit queue, writes
-        // could be handled out of order (a file landing before its folder).
-        final replyTo = message['replyTo'] as SendPort;
-        writeQueue.add(() async {
-          try {
-            final result = await handleScanWriteMessage(message);
-            replyTo.send({'ok': true, 'result': result});
-          } catch (e) {
-            replyTo.send({'ok': false, 'error': e.toString()});
-          }
-        });
-        return;
-      }
+      if (tryHandleScanWrite(message, writeQueue)) return;
 
       // Forward status messages if requested
       if (statusPort != null) {
@@ -279,9 +265,11 @@ class GmailScannerIsolateWorker {
         final collectionRepo = CollectionRepository(appDb);
         final col = await collectionRepo.collectionById(collection.id);
         if (col != null) {
-          col.scanStatus = 'ready';
-          col.lastScanDate = scanStartTime;
-          await writeViaMain(clientPort, 'collectionStatus', col);
+          await writeViaMain(clientPort, 'collectionStatus', {
+            'collectionId': col.id,
+            'scanStatus': 'ready',
+            'lastScanDate': scanStartTime,
+          });
         }
 
         clientPort.send({'type': 'refresh', 'status': 'done'});

@@ -31,7 +31,11 @@ Future<void> handleEmbeddingMessage(
       default:
         logger.w('handleEmbeddingMessage: unknown table "$table"');
     }
-  } catch (e) {
-    logger.e('handleEmbeddingMessage: failed to save $table id=$id: $e');
+  } catch (e, stackTrace) {
+    logger.e(
+      'handleEmbeddingMessage: failed to save $table id=$id: $e',
+      error: e,
+      stackTrace: stackTrace,
+    );
   }
 }

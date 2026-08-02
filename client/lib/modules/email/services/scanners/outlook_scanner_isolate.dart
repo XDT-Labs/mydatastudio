@@ -105,20 +105,9 @@ class OutlookScannerIsolate {
 
     receivePort.listen((message) {
       if (relayIsolateLog(logger, message, '[OutlookScan]')) return;
+      // Queued rather than handled inline — see gmail_scanner_isolate.dart.
+      if (tryHandleScanWrite(message, writeQueue)) return;
       if (message is Map) {
-        if (message['type'] == 'dbWrite') {
-          // Queued rather than awaited inline — see gmail_scanner_isolate.dart.
-          final replyTo = message['replyTo'] as SendPort;
-          writeQueue.add(() async {
-            try {
-              final result = await handleScanWriteMessage(message);
-              replyTo.send({'ok': true, 'result': result});
-            } catch (e) {
-              replyTo.send({'ok': false, 'error': e.toString()});
-            }
-          });
-          return;
-        }
         if (message['type'] == 'refresh') {
           GetEmailsService.instance.invoke(
             EmailServiceCommand(
@@ -523,9 +512,11 @@ class OutlookScannerIsolateWorker {
         final collectionRepo = CollectionRepository(appDb);
         final col = await collectionRepo.collectionById(collection.id);
         if (col != null) {
-          col.scanStatus = 'ready';
-          col.lastScanDate = scanStartTime;
-          await writeViaMain(clientPort, 'collectionStatus', col);
+          await writeViaMain(clientPort, 'collectionStatus', {
+            'collectionId': col.id,
+            'scanStatus': 'ready',
+            'lastScanDate': scanStartTime,
+          });
         }
 
         clientPort.send({'type': 'refresh', 'status': 'done'});

@@ -314,10 +314,20 @@ class DatabaseRepository {
 
   /// Returns a list of emails that do not have a corresponding entry in the
   /// `emails_embeddings` table, limited to [limit] results.
+  ///
+  /// Excludes `headers` — the raw MIME header dump, unused by
+  /// `formatEmailForEmbedding` and easily the largest column on a row. The
+  /// embedding isolate pulls batches of up to 1000; carrying that column
+  /// along would materialize its full size for every one of them for no
+  /// benefit. `Email.fromDbMap` leaves `headers` null when the key is
+  /// absent, which is fine here since these rows are never written back.
   Future<List<Email>> getEmailsWithMissingEmbeddings({int limit = 10}) async {
     final rows = await db.select(
       '''
-      SELECT e.*
+      SELECT e.id, e.collection_id, e.date, e."from", e."to", e.cc,
+             e.subject, e.snippet, e.html_body, e.plain_body, e.labels,
+             e.folder_id, e.message_id, e.thread_id, e.is_read,
+             e.has_attachments, e.is_deleted, e.uid
       FROM emails e
       LEFT OUTER JOIN emails_embeddings ee ON ee.email_id = e.id
       WHERE (ee.email_id IS NULL OR ee.qwen3_vl_embedding IS NULL)
