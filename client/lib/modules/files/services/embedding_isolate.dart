@@ -12,6 +12,8 @@ import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/services/embedding_message_handler.dart';
+import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 
 class EmbeddingIsolate {
@@ -19,6 +21,7 @@ class EmbeddingIsolate {
   ReceivePort? _receivePort;
   SendPort? _controlPort;
   VoidCallback? _vaultListener;
+  final SequentialWriteQueue _writeQueue = SequentialWriteQueue();
 
   Future<void> start(
     String storagePath,
@@ -90,6 +93,21 @@ class EmbeddingIsolate {
               logger.d('[EmbeddingIsolate] $msg');
               break;
           }
+        } else if (type == 'embedding') {
+          // Queued rather than fired-and-forgotten: unbounded concurrent
+          // db.transaction calls from a burst of relayed messages work
+          // against the same contention this relay exists to remove.
+          _writeQueue.add(() async {
+            final repo = DatabaseManager.instance.repository;
+            if (repo == null) {
+              logger.w(
+                '[EmbeddingIsolate] dropped embedding for id=${data['id']}: '
+                'no main database connection',
+              );
+              return;
+            }
+            await handleEmbeddingMessage(repo, data, logger);
+          });
         }
       }
     });
@@ -143,10 +161,11 @@ class EmbeddingIsolate {
     final String storagePath = cfg['storagePath'];
     final String dbName = cfg['dbName'];
     final AppLogger logger = AppLogger(cfg['loggerPort'] as SendPort?);
+    final SendPort replyTo = cfg['replyTo'] as SendPort;
 
     // Create a control port to receive commands from the main isolate
     final controlPort = ReceivePort();
-    cfg['replyTo'].send(controlPort.sendPort);
+    replyTo.send(controlPort.sendPort);
 
     String? serviceUrl;
     String? serviceToken;
@@ -206,8 +225,8 @@ class EmbeddingIsolate {
           continue;
         }
 
-        // Query for 10 files with missing embeddings
-        final files = await repo.getFilesWithMissingEmbeddings(limit: 10);
+        // Query for a batch of files with missing embeddings
+        final files = await repo.getFilesWithMissingEmbeddings(limit: 100);
 
         if (files.isEmpty) {
           //logger.d("No files with missing embeddings found. Sleeping...");
@@ -218,6 +237,10 @@ class EmbeddingIsolate {
         logger.i("Processing ${files.length} files for embeddings");
 
         for (final file in files) {
+          if (isPaused) {
+            logger.d("Pause requested; abandoning remaining batch");
+            break;
+          }
           try {
             List<double>? embedding;
             final start = DateTime.now();
@@ -240,11 +263,27 @@ class EmbeddingIsolate {
             final duration = DateTime.now().difference(start);
             logger.d("Processed file ${file.path} in $duration");
 
+            // Hand the result back to the main isolate to write — resqlite
+            // serializes writes through a single connection internally, so
+            // writing here (a second, independent connection to the same
+            // file) only added SQLITE_BUSY contention.
+            //
+            // Only relayed when generation actually succeeded: writing a
+            // placeholder empty embedding for a null result would persist a
+            // non-NULL BLOB, and getFilesWithMissingEmbeddings only ever
+            // re-selects rows where the embedding IS NULL — a failure (a
+            // missing file, a token refresh error, an aiserver outage)
+            // would then be permanently excluded from retry instead of
+            // picked up again next pass.
             if (embedding != null) {
-              await repo.upsertFileEmbedding(file.id, embedding);
-              logger.d("Saved embedding for file: ${file.path}");
+              replyTo.send({
+                'type': 'embedding',
+                'table': 'files_embeddings',
+                'id': file.id,
+                'embedding': embedding,
+              });
+              logger.d("Sent embedding for file: ${file.path}");
             } else {
-              await repo.upsertFileEmbedding(file.id, []);
               logger.w("Skipped unprocessable file: ${file.path}");
             }
             // Batch complete
@@ -425,13 +464,21 @@ class EmbeddingIsolate {
     }
   }
 
-  void stop() {
+  Future<void> stop() async {
     if (_vaultListener != null) {
       VaultManager.instance.unlocked.removeListener(_vaultListener!);
       _vaultListener = null;
     }
+    // Killing the isolate only stops it from sending more dbWrite messages —
+    // it doesn't touch writes already queued here. Wait for those to land
+    // (bounded, so a stuck write can't hang shutdown) before closing the
+    // port they'd reply on.
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
+    await _writeQueue.whenIdle.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () {},
+    );
     _receivePort?.close();
   }
 }

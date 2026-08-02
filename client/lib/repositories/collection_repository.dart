@@ -119,6 +119,28 @@ class CollectionRepository {
     }, label: 'CollectionRepository.updateCollection');
   }
 
+  /// Updates only `scan_status` and `last_scan_date`, by id.
+  ///
+  /// Scanner isolates relay a scan-completion status update through this
+  /// instead of a full [updateCollection]: that call re-encrypts and writes
+  /// back every column on the `Collection` object the isolate read at scan
+  /// start, including OAuth tokens. If a token refresh landed on a different
+  /// connection while the scan was running, a full-object write clobbers it
+  /// with the stale value the isolate happened to be holding. A targeted
+  /// UPDATE touches only the two columns the scan actually changed.
+  Future<void> updateScanStatus(
+    String id,
+    String status,
+    DateTime lastScanDate,
+  ) async {
+    return retryOnLock(() async {
+      await db.execute(
+        "UPDATE collections SET scan_status = ?, last_scan_date = ? WHERE id = ?",
+        [status, lastScanDate.millisecondsSinceEpoch, id],
+      );
+    }, label: 'CollectionRepository.updateScanStatus');
+  }
+
   /// Update the scan date for services that check external systems on a schedule, such as email
   void updateLastScanDate(Collection collection, DateTime? value) async {
     collection.lastScanDate = DateTime.now();

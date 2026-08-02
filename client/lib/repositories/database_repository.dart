@@ -43,10 +43,11 @@ class DatabaseRepository {
     // Build JSON array string that sqlite_vector's vector_as_f32() accepts.
     final jsonArray = '[${embedding.join(',')}]';
 
+    int affectedRows = 0;
     await db.transaction((tx) async {
       try {
         // Use vector_as_f32() to pack the JSON float array into a BLOB.
-        await tx.execute(
+        final result = await tx.execute(
           '''
           INSERT INTO files_embeddings (file_id, qwen3_vl_embedding)
           SELECT ?, vector_as_f32(?)
@@ -56,13 +57,14 @@ class DatabaseRepository {
           ''',
           [fileId, jsonArray, fileId],
         );
+        affectedRows = result.affectedRows;
       } catch (e) {
         // Fallback: store as raw Float32 BLOB when extension is not loaded
         // (e.g. unit tests). The BLOB can still be read back; vector_full_scan
         // won't work, but upsert/delete operations succeed.
         logger.w('vector_as_f32 unavailable, storing raw BLOB: $e');
         final blob = Float32List.fromList(embedding).buffer.asUint8List();
-        await tx.execute(
+        final result = await tx.execute(
           '''
           INSERT INTO files_embeddings (file_id, qwen3_vl_embedding)
           SELECT ?, ?
@@ -72,10 +74,21 @@ class DatabaseRepository {
           ''',
           [fileId, blob, fileId],
         );
+        affectedRows = result.affectedRows;
       }
     });
 
-    logger.d('upsertFileEmbedding: fileId=$fileId dim=${embedding.length}');
+    // The WHERE EXISTS guard makes a missing `files` row a silent no-op
+    // (0 rows affected, no exception) rather than a failure — surface it
+    // loudly instead of letting the caller believe the embedding was saved.
+    if (affectedRows == 0) {
+      logger.w(
+        'upsertFileEmbedding: no row written for fileId=$fileId — '
+        'files row missing or not yet visible to this connection',
+      );
+    } else {
+      logger.d('upsertFileEmbedding: fileId=$fileId dim=${embedding.length}');
+    }
   }
 
   /// Deletes the embedding record for [fileId] from `files_embeddings`.
@@ -232,9 +245,10 @@ class DatabaseRepository {
   ) async {
     final jsonArray = '[${embedding.join(',')}]';
 
+    int affectedRows = 0;
     await db.transaction((tx) async {
       try {
-        await tx.execute(
+        final result = await tx.execute(
           '''
           INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding)
           SELECT ?, vector_as_f32(?)
@@ -244,10 +258,11 @@ class DatabaseRepository {
           ''',
           [emailId, jsonArray, emailId],
         );
+        affectedRows = result.affectedRows;
       } catch (e) {
         logger.w('vector_as_f32 unavailable, storing raw BLOB: $e');
         final blob = Float32List.fromList(embedding).buffer.asUint8List();
-        await tx.execute(
+        final result = await tx.execute(
           '''
           INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding)
           SELECT ?, ?
@@ -257,10 +272,22 @@ class DatabaseRepository {
           ''',
           [emailId, blob, emailId],
         );
+        affectedRows = result.affectedRows;
       }
     });
 
-    // logger.d('upsertEmailEmbedding: emailId=$emailId dim=${embedding.length}');
+    // See upsertFileEmbedding: WHERE EXISTS makes a missing `emails` row a
+    // silent no-op rather than a failure — surface it loudly.
+    if (affectedRows == 0) {
+      logger.w(
+        'upsertEmailEmbedding: no row written for emailId=$emailId — '
+        'emails row missing or not yet visible to this connection',
+      );
+    } else {
+      logger.d(
+        'upsertEmailEmbedding: emailId=$emailId dim=${embedding.length}',
+      );
+    }
   }
 
   /// Deletes the embedding record for [emailId] from `emails_embeddings`.
@@ -287,10 +314,20 @@ class DatabaseRepository {
 
   /// Returns a list of emails that do not have a corresponding entry in the
   /// `emails_embeddings` table, limited to [limit] results.
+  ///
+  /// Excludes `headers` — the raw MIME header dump, unused by
+  /// `formatEmailForEmbedding` and easily the largest column on a row. The
+  /// embedding isolate pulls batches of up to 1000; carrying that column
+  /// along would materialize its full size for every one of them for no
+  /// benefit. `Email.fromDbMap` leaves `headers` null when the key is
+  /// absent, which is fine here since these rows are never written back.
   Future<List<Email>> getEmailsWithMissingEmbeddings({int limit = 10}) async {
     final rows = await db.select(
       '''
-      SELECT e.*
+      SELECT e.id, e.collection_id, e.date, e."from", e."to", e.cc,
+             e.subject, e.snippet, e.html_body, e.plain_body, e.labels,
+             e.folder_id, e.message_id, e.thread_id, e.is_read,
+             e.has_attachments, e.is_deleted, e.uid
       FROM emails e
       LEFT OUTER JOIN emails_embeddings ee ON ee.email_id = e.id
       WHERE (ee.email_id IS NULL OR ee.qwen3_vl_embedding IS NULL)
