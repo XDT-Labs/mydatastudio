@@ -199,28 +199,6 @@ class YahooScannerIsolate {
 }
 
 class YahooScannerIsolateWorker {
-  /// Sends a write back to the main isolate and waits for its ack. See
-  /// gmail_scanner_isolate.dart's `_writeViaMain` for the full rationale.
-  static Future<Map<String, dynamic>> _writeViaMain(
-    SendPort clientPort,
-    String service,
-    dynamic payload,
-  ) async {
-    final replyPort = ReceivePort();
-    clientPort.send({
-      'type': 'dbWrite',
-      'service': service,
-      'payload': payload,
-      'replyTo': replyPort.sendPort,
-    });
-    final reply = await replyPort.first as Map;
-    replyPort.close();
-    if (reply['ok'] != true) {
-      throw Exception('dbWrite($service) failed: ${reply['error']}');
-    }
-    return (reply['result'] as Map?)?.cast<String, dynamic>() ?? const {};
-  }
-
   static Future<void> worker(Map<String, dynamic> args) async {
     runInScanIsolateZone(() async {
       final RootIsolateToken? token = args['token'];
@@ -303,6 +281,20 @@ class YahooScannerIsolateWorker {
           return;
         }
 
+        // move_to_trash spawns this worker without a 'port' arg, so
+        // clientPort is null for that call. It always returns above before
+        // reaching here — but only when uidsToMove is non-empty; guard
+        // explicitly rather than relying on that to hold and crashing on the
+        // first clientPort! below if it doesn't.
+        if (clientPort == null) {
+          logger.e(
+            'YahooScannerIsolate: no clientPort for a sync-path run — '
+            'aborting rather than crashing on a null write relay',
+          );
+          await client.logout();
+          return;
+        }
+
         final appDb = await AppDatabase.create(
           null,
           dbDir,
@@ -324,7 +316,7 @@ class YahooScannerIsolateWorker {
             name: mailbox.name,
             type: _getFolderType(mailbox.name),
           );
-          await _writeViaMain(clientPort!, 'emailFolder', folder);
+          await writeViaMain(clientPort, 'emailFolder', folder);
         }
 
         // 2. Sync Emails
@@ -368,7 +360,7 @@ class YahooScannerIsolateWorker {
           totalFound = allUids.length;
 
           if (searchCriteria == 'ALL') {
-            clientPort?.send({
+            clientPort.send({
               'type': 'cleanup_uids',
               'folder': targetFolder,
               'uids': allUids,
@@ -460,7 +452,7 @@ class YahooScannerIsolateWorker {
                 collection: collection,
                 targetFolder: targetFolder,
                 appDir: appDir,
-                clientPort: clientPort!,
+                clientPort: clientPort,
                 logger: logger,
               );
               emailBatch.add(emailObj);
@@ -468,7 +460,7 @@ class YahooScannerIsolateWorker {
             }
 
             if (emailBatch.isNotEmpty) {
-              await _writeViaMain(clientPort!, 'emailBatch', emailBatch);
+              await writeViaMain(clientPort, 'emailBatch', emailBatch);
               clientPort.send({'type': 'refresh'});
             }
           }
@@ -485,10 +477,10 @@ class YahooScannerIsolateWorker {
         if (col != null) {
           col.scanStatus = 'ready';
           col.lastScanDate = scanStartTime;
-          await _writeViaMain(clientPort!, 'collectionStatus', col);
+          await writeViaMain(clientPort, 'collectionStatus', col);
         }
 
-        clientPort?.send({'type': 'refresh', 'status': 'done'});
+        clientPort.send({'type': 'refresh', 'status': 'done'});
       } catch (e, stack) {
         logger.e("Error in Yahoo Isolate: $e", error: e, stackTrace: stack);
       } finally {
@@ -676,7 +668,7 @@ class YahooScannerIsolateWorker {
     final labelAbsPath = p.normalize(p.join(extractionRoot, labelName));
     final yearAbsPath = p.normalize(p.join(labelAbsPath, year));
 
-    await _writeViaMain(
+    await writeViaMain(
       clientPort,
       'folder',
       _createFolderObj(
@@ -687,7 +679,7 @@ class YahooScannerIsolateWorker {
         date: msgDate,
       ),
     );
-    await _writeViaMain(
+    await writeViaMain(
       clientPort,
       'folder',
       _createFolderObj(
@@ -872,8 +864,8 @@ class YahooScannerIsolateWorker {
         htmlBody: htmlBody,
       );
       emailObj.attachments = attachments;
-      for (var file in attachments) {
-        await _writeViaMain(clientPort, 'file', file);
+      if (attachments.isNotEmpty) {
+        await writeViaMain(clientPort, 'batchFile', attachments);
       }
     }
     return emailObj;

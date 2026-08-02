@@ -9,12 +9,14 @@ import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/embedding_message_handler.dart';
+import 'package:mydatastudio/services/sequential_write_queue.dart';
 
 class EmailEmbeddingIsolate {
   Isolate? _isolate;
   ReceivePort? _receivePort;
   SendPort? _controlPort;
   StreamSubscription<String?>? _urlSubscription;
+  final SequentialWriteQueue _writeQueue = SequentialWriteQueue();
 
   Future<void> start(
     String storagePath,
@@ -79,10 +81,18 @@ class EmailEmbeddingIsolate {
               break;
           }
         } else if (type == 'embedding') {
-          final repo = DatabaseManager.instance.repository;
-          if (repo != null) {
-            handleEmbeddingMessage(repo, data, logger);
-          }
+          // Queued rather than fired-and-forgotten — see embedding_isolate.dart.
+          _writeQueue.add(() async {
+            final repo = DatabaseManager.instance.repository;
+            if (repo == null) {
+              logger.w(
+                '[EmailEmbeddingIsolate] dropped embedding for id=${data['id']}: '
+                'no main database connection',
+              );
+              return;
+            }
+            await handleEmbeddingMessage(repo, data, logger);
+          });
         }
       }
     });
@@ -197,6 +207,10 @@ class EmailEmbeddingIsolate {
         logger.i("Processing ${emails.length} emails for embeddings");
 
         for (final email in emails) {
+          if (isPaused) {
+            logger.d("Pause requested; abandoning remaining batch");
+            break;
+          }
           try {
             final formattedText = formatEmailForEmbedding(email);
             final embedding = await _generateEmbedding(
@@ -211,13 +225,18 @@ class EmailEmbeddingIsolate {
             // serializes writes through a single connection internally, so
             // writing here (a second, independent connection to the same
             // file) only added SQLITE_BUSY contention.
-            replyTo.send({
-              'type': 'embedding',
-              'table': 'emails_embeddings',
-              'id': email.id,
-              'embedding': embedding ?? <double>[],
-            });
-            if (embedding == null) {
+            //
+            // Only relayed when generation actually succeeded — see
+            // embedding_isolate.dart for why a placeholder empty embedding
+            // on failure would permanently exclude the email from retry.
+            if (embedding != null) {
+              replyTo.send({
+                'type': 'embedding',
+                'table': 'emails_embeddings',
+                'id': email.id,
+                'embedding': embedding,
+              });
+            } else {
               logger.w("Skipped unprocessable email: ${email.id}");
             }
           } catch (e) {

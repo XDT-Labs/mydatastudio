@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:mydatastudio/app_logger.dart';
+
 /// Runs queued tasks one at a time, in the order they were added.
 ///
 /// [ReceivePort.listen] callbacks fire for each message as it arrives without
@@ -11,10 +13,20 @@ import 'dart:async';
 /// `await for`-based scanners (local filesystem, Google Drive) get for free.
 class SequentialWriteQueue {
   Future<void> _tail = Future.value();
+  final AppLogger _logger = AppLogger(null);
 
   /// Schedules [task] after everything already queued, regardless of whether
-  /// prior tasks succeeded or failed.
+  /// prior tasks succeeded or failed. A failing task is logged rather than
+  /// silently discarded — a task that throws before sending its ack would
+  /// otherwise leave the caller awaiting a reply that never arrives, with no
+  /// trace of why in the logs.
   void add(Future<void> Function() task) {
-    _tail = _tail.then((_) => task()).catchError((_) {});
+    _tail = _tail.then((_) => task()).catchError((Object e, StackTrace st) {
+      _logger.e(
+        'SequentialWriteQueue: task failed: $e',
+        error: e,
+        stackTrace: st,
+      );
+    });
   }
 }

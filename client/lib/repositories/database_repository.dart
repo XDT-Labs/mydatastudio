@@ -245,9 +245,10 @@ class DatabaseRepository {
   ) async {
     final jsonArray = '[${embedding.join(',')}]';
 
+    int affectedRows = 0;
     await db.transaction((tx) async {
       try {
-        await tx.execute(
+        final result = await tx.execute(
           '''
           INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding)
           SELECT ?, vector_as_f32(?)
@@ -257,10 +258,11 @@ class DatabaseRepository {
           ''',
           [emailId, jsonArray, emailId],
         );
+        affectedRows = result.affectedRows;
       } catch (e) {
         logger.w('vector_as_f32 unavailable, storing raw BLOB: $e');
         final blob = Float32List.fromList(embedding).buffer.asUint8List();
-        await tx.execute(
+        final result = await tx.execute(
           '''
           INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding)
           SELECT ?, ?
@@ -270,10 +272,22 @@ class DatabaseRepository {
           ''',
           [emailId, blob, emailId],
         );
+        affectedRows = result.affectedRows;
       }
     });
 
-    // logger.d('upsertEmailEmbedding: emailId=$emailId dim=${embedding.length}');
+    // See upsertFileEmbedding: WHERE EXISTS makes a missing `emails` row a
+    // silent no-op rather than a failure — surface it loudly.
+    if (affectedRows == 0) {
+      logger.w(
+        'upsertEmailEmbedding: no row written for emailId=$emailId — '
+        'emails row missing or not yet visible to this connection',
+      );
+    } else {
+      logger.d(
+        'upsertEmailEmbedding: emailId=$emailId dim=${embedding.length}',
+      );
+    }
   }
 
   /// Deletes the embedding record for [emailId] from `emails_embeddings`.

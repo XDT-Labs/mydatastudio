@@ -267,28 +267,6 @@ class OutlookPstScannerIsolate {
 /// The worker runs in a separate isolate and communicates with the Python
 /// FastAPI service via HTTP to parse the PST file.
 class OutlookPstScannerIsolateWorker {
-  /// Sends a write back to the main isolate and waits for its ack. See
-  /// gmail_scanner_isolate.dart's `_writeViaMain` for the full rationale.
-  static Future<Map<String, dynamic>> _writeViaMain(
-    SendPort clientPort,
-    String service,
-    dynamic payload,
-  ) async {
-    final replyPort = ReceivePort();
-    clientPort.send({
-      'type': 'dbWrite',
-      'service': service,
-      'payload': payload,
-      'replyTo': replyPort.sendPort,
-    });
-    final reply = await replyPort.first as Map;
-    replyPort.close();
-    if (reply['ok'] != true) {
-      throw Exception('dbWrite($service) failed: ${reply['error']}');
-    }
-    return (reply['result'] as Map?)?.cast<String, dynamic>() ?? const {};
-  }
-
   static Future<void> worker(Map<String, dynamic> workerArgs) async {
     runInScanIsolateZone(() async {
       final RootIsolateToken? token = workerArgs['token'];
@@ -327,7 +305,7 @@ class OutlookPstScannerIsolateWorker {
         if (col != null) {
           col.scanStatus = status;
           col.lastScanDate = DateTime.now();
-          await _writeViaMain(clientPort, 'collectionStatus', col);
+          await writeViaMain(clientPort, 'collectionStatus', col);
         }
       }
 
@@ -455,7 +433,7 @@ class OutlookPstScannerIsolateWorker {
               );
 
               foldersByPath[data['path']] = folder;
-              await _writeViaMain(clientPort, 'emailFolder', folder);
+              await writeViaMain(clientPort, 'emailFolder', folder);
             } else if (data['type'] == 'email') {
               final rawId = data['id'] as String? ?? 'unknown';
               final emailId = const Uuid().v5(
@@ -492,7 +470,7 @@ class OutlookPstScannerIsolateWorker {
                 isDeleted: false,
               );
 
-              await _writeViaMain(clientPort, 'emailBatch', [email]);
+              await writeViaMain(clientPort, 'emailBatch', [email]);
 
               final emailFolderPath = data['folder'] as String?;
               if (emailFolderPath != null) {
@@ -502,6 +480,7 @@ class OutlookPstScannerIsolateWorker {
 
               // Process attachments — also emit Folder records so the file module
               // can navigate the directory tree (e.g., INBOX → 2010 → files).
+              final attachmentFiles = <File>[];
               for (var att in data['attachments']) {
                 final fileId = const Uuid().v5(
                   Namespace.url.value,
@@ -584,7 +563,10 @@ class OutlookPstScannerIsolateWorker {
                     htmlBody: email.htmlBody,
                   ),
                 );
-                await _writeViaMain(clientPort, 'file', file);
+                attachmentFiles.add(file);
+              }
+              if (attachmentFiles.isNotEmpty) {
+                await writeViaMain(clientPort, 'batchFile', attachmentFiles);
               }
 
               count++;
@@ -731,7 +713,7 @@ class OutlookPstScannerIsolateWorker {
         }
       });
 
-      await _writeViaMain(
+      await writeViaMain(
         clientPort,
         'emailFolder',
         EmailFolder(
@@ -791,7 +773,7 @@ class OutlookPstScannerIsolateWorker {
         dateLastModified: emailDate,
         collectionId: collectionId,
       );
-      await _writeViaMain(clientPort, 'folder', folder);
+      await writeViaMain(clientPort, 'folder', folder);
     }
   }
 }

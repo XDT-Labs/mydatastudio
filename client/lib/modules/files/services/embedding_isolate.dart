@@ -13,6 +13,7 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/services/embedding_message_handler.dart';
+import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 
 class EmbeddingIsolate {
@@ -20,6 +21,7 @@ class EmbeddingIsolate {
   ReceivePort? _receivePort;
   SendPort? _controlPort;
   VoidCallback? _vaultListener;
+  final SequentialWriteQueue _writeQueue = SequentialWriteQueue();
 
   Future<void> start(
     String storagePath,
@@ -92,10 +94,20 @@ class EmbeddingIsolate {
               break;
           }
         } else if (type == 'embedding') {
-          final repo = DatabaseManager.instance.repository;
-          if (repo != null) {
-            handleEmbeddingMessage(repo, data, logger);
-          }
+          // Queued rather than fired-and-forgotten: unbounded concurrent
+          // db.transaction calls from a burst of relayed messages work
+          // against the same contention this relay exists to remove.
+          _writeQueue.add(() async {
+            final repo = DatabaseManager.instance.repository;
+            if (repo == null) {
+              logger.w(
+                '[EmbeddingIsolate] dropped embedding for id=${data['id']}: '
+                'no main database connection',
+              );
+              return;
+            }
+            await handleEmbeddingMessage(repo, data, logger);
+          });
         }
       }
     });
@@ -213,7 +225,7 @@ class EmbeddingIsolate {
           continue;
         }
 
-        // Query for 10 files with missing embeddings
+        // Query for a batch of files with missing embeddings
         final files = await repo.getFilesWithMissingEmbeddings(limit: 1000);
 
         if (files.isEmpty) {
@@ -225,6 +237,10 @@ class EmbeddingIsolate {
         logger.i("Processing ${files.length} files for embeddings");
 
         for (final file in files) {
+          if (isPaused) {
+            logger.d("Pause requested; abandoning remaining batch");
+            break;
+          }
           try {
             List<double>? embedding;
             final start = DateTime.now();
@@ -251,13 +267,21 @@ class EmbeddingIsolate {
             // serializes writes through a single connection internally, so
             // writing here (a second, independent connection to the same
             // file) only added SQLITE_BUSY contention.
-            replyTo.send({
-              'type': 'embedding',
-              'table': 'files_embeddings',
-              'id': file.id,
-              'embedding': embedding ?? <double>[],
-            });
+            //
+            // Only relayed when generation actually succeeded: writing a
+            // placeholder empty embedding for a null result would persist a
+            // non-NULL BLOB, and getFilesWithMissingEmbeddings only ever
+            // re-selects rows where the embedding IS NULL — a failure (a
+            // missing file, a token refresh error, an aiserver outage)
+            // would then be permanently excluded from retry instead of
+            // picked up again next pass.
             if (embedding != null) {
+              replyTo.send({
+                'type': 'embedding',
+                'table': 'files_embeddings',
+                'id': file.id,
+                'embedding': embedding,
+              });
               logger.d("Sent embedding for file: ${file.path}");
             } else {
               logger.w("Skipped unprocessable file: ${file.path}");

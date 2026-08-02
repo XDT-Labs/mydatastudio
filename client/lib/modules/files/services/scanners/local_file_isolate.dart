@@ -16,6 +16,7 @@ import 'package:path/path.dart' as p;
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
+import 'package:mydatastudio/scanners/scan_isolate_support.dart';
 import 'package:mydatastudio/services/scan_write_relay.dart';
 
 /// [LocalFileIsolate] is a collection scanner responsible for indexing files
@@ -218,29 +219,6 @@ class LocalFileIsolateWorker {
     this.appDir,
   });
 
-  /// Sends a write back to the main isolate and waits for its ack, so this
-  /// isolate never opens a second, independent write connection to the same
-  /// database file. See [handleScanWriteMessage] for the dispatch on the
-  /// receiving end.
-  Future<Map<String, dynamic>> _writeViaMain(
-    String service,
-    dynamic payload,
-  ) async {
-    final replyPort = ReceivePort();
-    receiverPort.send({
-      'type': 'dbWrite',
-      'service': service,
-      'payload': payload,
-      'replyTo': replyPort.sendPort,
-    });
-    final reply = await replyPort.first as Map;
-    replyPort.close();
-    if (reply['ok'] != true) {
-      throw Exception('dbWrite($service) failed: ${reply['error']}');
-    }
-    return (reply['result'] as Map?)?.cast<String, dynamic>() ?? const {};
-  }
-
   final List<Future<void> Function()> _thumbnailQueue = [];
   int _activeThumbnailJobs = 0;
   static const int _maxConcurrentThumbnails = 4;
@@ -283,16 +261,24 @@ class LocalFileIsolateWorker {
           // than this isolate's own connection: a second, independent
           // connection issuing this UPDATE was hitting SQLITE_BUSY against
           // writes landing through the main isolate's connection.
+          bool saved = false;
           for (var attempt = 0; attempt < 5; attempt++) {
-            final result = await _writeViaMain('fileThumbnail', {
+            final result = await writeViaMain(receiverPort, 'fileThumbnail', {
               'fileId': fileId,
               'thumbnailKey': key,
             });
             if ((result['affectedRows'] as int? ?? 0) > 0) {
               logger?.d('LocalScanner: Saved thumbnail for $absPath');
+              saved = true;
               break;
             }
             await Future.delayed(const Duration(milliseconds: 200));
+          }
+          if (!saved) {
+            logger?.w(
+              'LocalScanner: thumbnail for $absPath was not saved after 5 '
+              'attempts (file row never appeared)',
+            );
           }
         }
       } catch (e) {
@@ -416,7 +402,7 @@ class LocalFileIsolateWorker {
       );
     } else {
       final cleanupRelPath = p.relative(path, from: rootPath);
-      await _writeViaMain('cleanupDeletedFiles', {
+      await writeViaMain(receiverPort, 'cleanupDeletedFiles', {
         'collectionId': collectionId,
         'path': cleanupRelPath == '.' ? '' : cleanupRelPath,
         'scanStartTime': scanStartTime,
@@ -433,12 +419,14 @@ class LocalFileIsolateWorker {
       // status doesn't claim a clean scan the sweep was skipped for.
       col.scanStatus = failedBatches > 0 ? 'incomplete' : 'idle';
       col.lastScanDate = scanStartTime;
-      await _writeViaMain('collectionStatus', col);
+      await writeViaMain(receiverPort, 'collectionStatus', col);
     }
 
     // Wait for any remaining thumbnails to finish generating
     if (_activeThumbnailJobs > 0 || _thumbnailQueue.isNotEmpty) {
-      logger?.i('LocalScan: Waiting for ${_thumbnailQueue.length + _activeThumbnailJobs} remaining thumbnails to generate...');
+      logger?.i(
+        'LocalScan: Waiting for ${_thumbnailQueue.length + _activeThumbnailJobs} remaining thumbnails to generate...',
+      );
       _thumbnailCompleter = Completer<void>();
       await _thumbnailCompleter!.future;
     }
@@ -526,7 +514,11 @@ class LocalFileIsolateWorker {
           if (fileBatch.length >= 100) {
             logger.i('Found ${fileBatch.length} files, saving batch');
             try {
-              await _writeViaMain('batchFile', List<File>.from(fileBatch));
+              await writeViaMain(
+                receiverPort,
+                'batchFile',
+                List<File>.from(fileBatch),
+              );
             } catch (e) {
               failedBatches++;
               logger.e(
@@ -548,7 +540,7 @@ class LocalFileIsolateWorker {
         );
         if (folder != null) {
           logger.i('Found folder: ${folder.path}');
-          await _writeViaMain('folder', folder);
+          await writeViaMain(receiverPort, 'folder', folder);
 
           try {
             if (recursive) {
@@ -584,7 +576,11 @@ class LocalFileIsolateWorker {
     if (currentBatch == null && fileBatch.isNotEmpty) {
       logger.i('Found ${fileBatch.length} files, saving final batch');
       try {
-        await _writeViaMain('batchFile', List<File>.from(fileBatch));
+        await writeViaMain(
+          receiverPort,
+          'batchFile',
+          List<File>.from(fileBatch),
+        );
       } catch (e) {
         failedBatches++;
         logger.e(

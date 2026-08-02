@@ -284,29 +284,6 @@ class CloudFileIsolateWorker {
     logger = AppLogger(loggerPort);
   }
 
-  /// Sends a write back to the main isolate and waits for its ack, so this
-  /// isolate never opens a second, independent write connection to the same
-  /// database file. See [handleScanWriteMessage] for the dispatch on the
-  /// receiving end.
-  Future<Map<String, dynamic>> _writeViaMain(
-    String service,
-    dynamic payload,
-  ) async {
-    final replyPort = ReceivePort();
-    port.send({
-      'type': 'dbWrite',
-      'service': service,
-      'payload': payload,
-      'replyTo': replyPort.sendPort,
-    });
-    final reply = await replyPort.first as Map;
-    replyPort.close();
-    if (reply['ok'] != true) {
-      throw Exception('dbWrite($service) failed: ${reply['error']}');
-    }
-    return (reply['result'] as Map?)?.cast<String, dynamic>() ?? const {};
-  }
-
   // Top-level isolate entry — must be a static or top-level function.
   static Future<void> _entry(Map<String, dynamic> args) async {
     final SendPort? loggerPort = args['loggerPort'] as SendPort?;
@@ -464,7 +441,7 @@ class CloudFileIsolateWorker {
         );
       } else if (!skipCleanup) {
         // Mark anything not seen this scan as deleted (full walks / forced refreshes)
-        await _writeViaMain('cleanupDeletedFiles', {
+        await writeViaMain(port, 'cleanupDeletedFiles', {
           'collectionId': collectionId,
           'path': rootFolderId == collectionPath ? '' : rootFolderId,
           'scanStartTime': scanStartTime,
@@ -481,7 +458,7 @@ class CloudFileIsolateWorker {
       if (col != null) {
         col.scanStatus = 'ready';
         col.lastScanDate = scanStartTime;
-        await _writeViaMain('collectionStatus', col);
+        await writeViaMain(port, 'collectionStatus', col);
       }
 
       _isScanning = false;
@@ -505,12 +482,7 @@ class CloudFileIsolateWorker {
         logger.i(
           'CloudFileIsolate: processing download queue (${_downloadQueue.length} items)',
         );
-        await _processQueue(
-          driveApi,
-          appDir,
-          collectionName,
-          collectionPath,
-        );
+        await _processQueue(driveApi, appDir, collectionName, collectionPath);
       }
     } catch (e, stack) {
       logger.e(
@@ -575,7 +547,7 @@ class CloudFileIsolateWorker {
             scanStartTime: scanStartTime,
           );
           if (folder != null) {
-            await _writeViaMain('folder', folder);
+            await writeViaMain(port, 'folder', folder);
             logger.i('Found NEW/CHANGED folder: ${f.name} (${f.id})');
           }
         } else {
@@ -592,7 +564,11 @@ class CloudFileIsolateWorker {
 
             if (fileBatch.length >= 100) {
               try {
-                await _writeViaMain('batchFile', List<File>.from(fileBatch));
+                await writeViaMain(
+                  port,
+                  'batchFile',
+                  List<File>.from(fileBatch),
+                );
               } catch (e) {
                 _failedBatches++;
                 logger.e(
@@ -609,7 +585,7 @@ class CloudFileIsolateWorker {
 
     if (fileBatch.isNotEmpty) {
       try {
-        await _writeViaMain('batchFile', List<File>.from(fileBatch));
+        await writeViaMain(port, 'batchFile', List<File>.from(fileBatch));
       } catch (e) {
         _failedBatches++;
         logger.e(
@@ -677,7 +653,7 @@ class CloudFileIsolateWorker {
         'CloudFileIsolate: Sending final batch of ${fileBatch.length} files to DB writer',
       );
       try {
-        await _writeViaMain('batchFile', List<File>.from(fileBatch));
+        await writeViaMain(port, 'batchFile', List<File>.from(fileBatch));
       } catch (e) {
         _failedBatches++;
         logger.e(
@@ -740,7 +716,7 @@ class CloudFileIsolateWorker {
             scanStartTime: scanStartTime,
           );
           if (folder != null) {
-            await _writeViaMain('folder', folder);
+            await writeViaMain(port, 'folder', folder);
             logger.i('Found Drive folder: ${f.name} (${f.id})');
 
             if (discoveredFolders != null) {
@@ -765,7 +741,11 @@ class CloudFileIsolateWorker {
                 'CloudFileIsolate: Sending batch of ${fileBatch.length} files to DB writer',
               );
               try {
-                await _writeViaMain('batchFile', List<File>.from(fileBatch));
+                await writeViaMain(
+                  port,
+                  'batchFile',
+                  List<File>.from(fileBatch),
+                );
               } catch (e) {
                 _failedBatches++;
                 logger.e(
@@ -857,7 +837,7 @@ class CloudFileIsolateWorker {
         final destFile = io.File(destPath);
         if (await destFile.exists()) {
           logger.d('File already exists on disk: $destPath');
-          await _writeViaMain('fileLocalPath', {
+          await writeViaMain(port, 'fileLocalPath', {
             'fileId': file.id,
             'localPath': destPath,
           });
@@ -882,7 +862,7 @@ class CloudFileIsolateWorker {
         try {
           await media.stream.pipe(sink);
           logger.i('Downloaded: ${file.name}');
-          await _writeViaMain('fileLocalPath', {
+          await writeViaMain(port, 'fileLocalPath', {
             'fileId': file.id,
             'localPath': destPath,
           });

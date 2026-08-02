@@ -9,7 +9,8 @@ import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
-import 'package:mydatastudio/scanners/scan_isolate_support.dart';import 'package:mydatastudio/services/vault_manager.dart';
+import 'package:mydatastudio/scanners/scan_isolate_support.dart';
+import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
@@ -89,6 +90,26 @@ class GmailScannerIsolate {
     final writeQueue = SequentialWriteQueue();
 
     receivePort.listen((message) {
+      // Checked before the statusPort forward below: a dbWrite carries a live
+      // replyTo SendPort and the full File/Email/Folder payload being
+      // written, neither of which statusPort's listener (scan status and
+      // progress only) should ever see.
+      if (message is Map && message['type'] == 'dbWrite') {
+        // Queued rather than awaited inline: this listener callback isn't
+        // awaited by the port itself, so without an explicit queue, writes
+        // could be handled out of order (a file landing before its folder).
+        final replyTo = message['replyTo'] as SendPort;
+        writeQueue.add(() async {
+          try {
+            final result = await handleScanWriteMessage(message);
+            replyTo.send({'ok': true, 'result': result});
+          } catch (e) {
+            replyTo.send({'ok': false, 'error': e.toString()});
+          }
+        });
+        return;
+      }
+
       // Forward status messages if requested
       if (statusPort != null) {
         statusPort.send(message);
@@ -98,21 +119,6 @@ class GmailScannerIsolate {
       if (relayIsolateLog(logger, message, '[GmailScan]')) return;
 
       if (message is Map) {
-        if (message['type'] == 'dbWrite') {
-          // Queued rather than awaited inline: this listener callback isn't
-          // awaited by the port itself, so without an explicit queue, writes
-          // could be handled out of order (a file landing before its folder).
-          final replyTo = message['replyTo'] as SendPort;
-          writeQueue.add(() async {
-            try {
-              final result = await handleScanWriteMessage(message);
-              replyTo.send({'ok': true, 'result': result});
-            } catch (e) {
-              replyTo.send({'ok': false, 'error': e.toString()});
-            }
-          });
-          return;
-        }
         if (message['type'] == 'refresh') {
           GetEmailsService.instance.invoke(
             EmailServiceCommand(
@@ -152,126 +158,82 @@ class GmailScannerIsolate {
 /// The worker runs in a separate isolate, opens its own AppDatabase connection,
 /// and writes results directly via upsert services.
 class GmailScannerIsolateWorker {
-  /// Sends a write back to the main isolate and waits for its ack, so this
-  /// isolate never opens a second, independent write connection to the same
-  /// database file. See [handleScanWriteMessage] for the dispatch on the
-  /// receiving end, and [SequentialWriteQueue] for how the main isolate keeps
-  /// these in order despite listening via a plain callback.
-  static Future<Map<String, dynamic>> _writeViaMain(
-    SendPort clientPort,
-    String service,
-    dynamic payload,
-  ) async {
-    final replyPort = ReceivePort();
-    clientPort.send({
-      'type': 'dbWrite',
-      'service': service,
-      'payload': payload,
-      'replyTo': replyPort.sendPort,
-    });
-    final reply = await replyPort.first as Map;
-    replyPort.close();
-    if (reply['ok'] != true) {
-      throw Exception('dbWrite($service) failed: ${reply['error']}');
-    }
-    return (reply['result'] as Map?)?.cast<String, dynamic>() ?? const {};
-  }
-
   static Future<void> worker(Map<String, dynamic> args) async {
     runInScanIsolateZone(() async {
       final RootIsolateToken? token = args['token'];
-    final SendPort clientPort = args['port'];
-    final Collection collection = args['collection'];
-    final String? folderId = args['folderId'];
-    final String? lastScanDateStr = args['lastScanDate'];
-    final DateTime? lastScanDate =
-        lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
-    final bool force = args['force'] ?? false;
-    final String appDir = args['appDir'];
-    final String dbDir = args['dbDir'] ?? appDir;
+      final SendPort clientPort = args['port'];
+      final Collection collection = args['collection'];
+      final String? folderId = args['folderId'];
+      final String? lastScanDateStr = args['lastScanDate'];
+      final DateTime? lastScanDate =
+          lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
+      final bool force = args['force'] ?? false;
+      final String appDir = args['appDir'];
+      final String dbDir = args['dbDir'] ?? appDir;
 
-    // Init platform channels + install the credential vault (AUDIT M2 phase 4)
-    // so in-isolate collection reads/writes and token refresh can decrypt
-    // secrets. Without the vault, decrypting the collection tokens fails.
-    bootstrapScanIsolate(token, args['vaultDek'] as Uint8List?);
+      // Init platform channels + install the credential vault (AUDIT M2 phase 4)
+      // so in-isolate collection reads/writes and token refresh can decrypt
+      // secrets. Without the vault, decrypting the collection tokens fails.
+      bootstrapScanIsolate(token, args['vaultDek'] as Uint8List?);
 
-    final AppLogger logger = AppLogger(clientPort);
+      final AppLogger logger = AppLogger(clientPort);
 
-    // Validate tokens exist before attempting refresh or API calls.
-    // Dart flow-analysis doesn't recognise Isolate.exit() as a terminator,
-    // so we use local non-nullable bindings instead of the ! operator.
-    final accessTokenRaw = collection.accessToken;
-    final refreshTokenRaw = collection.refreshToken;
-    if (accessTokenRaw == null || refreshTokenRaw == null) {
-      logger.e(
-        'GmailScannerIsolate: no tokens for "${collection.name}" — aborting scan',
-      );
-      Isolate.exit(clientPort, {'error': 'auth_failed'});
-    }
-    final String safeAccessToken = accessTokenRaw;
-    final String safeRefreshToken = refreshTokenRaw;
-
-    // Refresh token if near expiry using consolidated auth service
-    String accessToken = safeAccessToken;
-    try {
-      if (GoogleAuthService.isTokenExpired(collection.expiration)) {
-        final result = await GoogleAuthService.refreshTokens(
-          accessToken: safeAccessToken,
-          refreshToken: safeRefreshToken,
+      // Validate tokens exist before attempting refresh or API calls.
+      // Dart flow-analysis doesn't recognise Isolate.exit() as a terminator,
+      // so we use local non-nullable bindings instead of the ! operator.
+      final accessTokenRaw = collection.accessToken;
+      final refreshTokenRaw = collection.refreshToken;
+      if (accessTokenRaw == null || refreshTokenRaw == null) {
+        logger.e(
+          'GmailScannerIsolate: no tokens for "${collection.name}" — aborting scan',
         );
-        accessToken = result.accessToken;
+        Isolate.exit(clientPort, {'error': 'auth_failed'});
       }
-    } catch (e) {
-      logger.e("Failed to validate Gmail token: $e");
-      Isolate.exit(clientPort, {'error': 'auth_failed'});
-    }
+      final String safeAccessToken = accessTokenRaw;
+      final String safeRefreshToken = refreshTokenRaw;
 
-    final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
-
-    final authHttpClient = AuthenticatedHttpClient.bearer(accessToken);
-    final GmailApi gmailApi = GmailApi(authHttpClient);
-
-    try {
-      // 1. Sync Labels (Folders)
-      logger.s("Syncing Gmail labels...");
-      final labelsResponse = await _retryNetworkOp(
-        () => gmailApi.users.labels.list('me'),
-        logger,
-      );
-      final labels = labelsResponse.labels ?? [];
-
-      for (var label in labels) {
-        final folder = mapLabelToFolder(label, collection.id);
-        await _writeViaMain(clientPort, 'emailFolder', folder);
+      // Refresh token if near expiry using consolidated auth service
+      String accessToken = safeAccessToken;
+      try {
+        if (GoogleAuthService.isTokenExpired(collection.expiration)) {
+          final result = await GoogleAuthService.refreshTokens(
+            accessToken: safeAccessToken,
+            refreshToken: safeRefreshToken,
+          );
+          accessToken = result.accessToken;
+        }
+      } catch (e) {
+        logger.e("Failed to validate Gmail token: $e");
+        Isolate.exit(clientPort, {'error': 'auth_failed'});
       }
 
-      final scanStartTime = DateTime.now();
-      int totalFound = 0;
-      int newEmails = 0;
-      int skipped = 0;
+      final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
 
-      // 2. Sync Emails
-      if (folderId != null) {
-        logger.s("Syncing folder: $folderId");
-        final results = await _pullEmails(
-          gmailApi,
-          appDb,
-          clientPort,
-          collection,
-          appDir,
-          accessToken,
-          labelId: folderId,
-          lastScanDate: lastScanDate,
-          force: force,
+      final authHttpClient = AuthenticatedHttpClient.bearer(accessToken);
+      final GmailApi gmailApi = GmailApi(authHttpClient);
+
+      try {
+        // 1. Sync Labels (Folders)
+        logger.s("Syncing Gmail labels...");
+        final labelsResponse = await _retryNetworkOp(
+          () => gmailApi.users.labels.list('me'),
+          logger,
         );
-        totalFound += results['total'] ?? 0;
-        newEmails += results['new'] ?? 0;
-        skipped += results['skipped'] ?? 0;
-      } else {
-        // Default sync: Inbox, Sent, Trash, Spam
-        const defaultLabels = ['INBOX', 'SENT', 'TRASH', 'SPAM'];
-        for (var label in defaultLabels) {
-          logger.s("Syncing label: $label");
+        final labels = labelsResponse.labels ?? [];
+
+        for (var label in labels) {
+          final folder = mapLabelToFolder(label, collection.id);
+          await writeViaMain(clientPort, 'emailFolder', folder);
+        }
+
+        final scanStartTime = DateTime.now();
+        int totalFound = 0;
+        int newEmails = 0;
+        int skipped = 0;
+
+        // 2. Sync Emails
+        if (folderId != null) {
+          logger.s("Syncing folder: $folderId");
           final results = await _pullEmails(
             gmailApi,
             appDb,
@@ -279,36 +241,55 @@ class GmailScannerIsolateWorker {
             collection,
             appDir,
             accessToken,
-            labelId: label,
+            labelId: folderId,
             lastScanDate: lastScanDate,
             force: force,
           );
           totalFound += results['total'] ?? 0;
           newEmails += results['new'] ?? 0;
           skipped += results['skipped'] ?? 0;
+        } else {
+          // Default sync: Inbox, Sent, Trash, Spam
+          const defaultLabels = ['INBOX', 'SENT', 'TRASH', 'SPAM'];
+          for (var label in defaultLabels) {
+            logger.s("Syncing label: $label");
+            final results = await _pullEmails(
+              gmailApi,
+              appDb,
+              clientPort,
+              collection,
+              appDir,
+              accessToken,
+              labelId: label,
+              lastScanDate: lastScanDate,
+              force: force,
+            );
+            totalFound += results['total'] ?? 0;
+            newEmails += results['new'] ?? 0;
+            skipped += results['skipped'] ?? 0;
+          }
         }
+
+        logger.i(
+          "Gmail sync complete: $totalFound found, $newEmails new, $skipped skipped.",
+        );
+
+        // Update lastScanDate in the DB. The read stays on this isolate's own
+        // connection; only the write goes back to main.
+        final collectionRepo = CollectionRepository(appDb);
+        final col = await collectionRepo.collectionById(collection.id);
+        if (col != null) {
+          col.scanStatus = 'ready';
+          col.lastScanDate = scanStartTime;
+          await writeViaMain(clientPort, 'collectionStatus', col);
+        }
+
+        clientPort.send({'type': 'refresh', 'status': 'done'});
+      } catch (e, stack) {
+        logger.e("Error in Gmail Isolate: $e", error: e, stackTrace: stack);
+      } finally {
+        Isolate.exit(clientPort, {'status': 'done'});
       }
-
-      logger.i(
-        "Gmail sync complete: $totalFound found, $newEmails new, $skipped skipped.",
-      );
-
-      // Update lastScanDate in the DB. The read stays on this isolate's own
-      // connection; only the write goes back to main.
-      final collectionRepo = CollectionRepository(appDb);
-      final col = await collectionRepo.collectionById(collection.id);
-      if (col != null) {
-        col.scanStatus = 'ready';
-        col.lastScanDate = scanStartTime;
-        await _writeViaMain(clientPort, 'collectionStatus', col);
-      }
-
-      clientPort.send({'type': 'refresh', 'status': 'done'});
-    } catch (e, stack) {
-      logger.e("Error in Gmail Isolate: $e", error: e, stackTrace: stack);
-    } finally {
-      Isolate.exit(clientPort, {'status': 'done'});
-    }
     });
   }
 
@@ -380,11 +361,7 @@ class GmailScannerIsolateWorker {
         }
 
         final m = await _retryNetworkOp(
-          () => gmailApi.users.messages.get(
-            'me',
-            id,
-            format: 'full',
-          ),
+          () => gmailApi.users.messages.get('me', id, format: 'full'),
           logger,
         );
 
@@ -473,8 +450,8 @@ class GmailScannerIsolateWorker {
           );
           email.attachments = attachments;
 
-          for (var file in attachments) {
-            await _writeViaMain(clientPort, 'file', file);
+          if (attachments.isNotEmpty) {
+            await writeViaMain(clientPort, 'batchFile', attachments);
           }
         }
       } catch (e) {
@@ -483,7 +460,7 @@ class GmailScannerIsolateWorker {
     }
 
     if (emailBatch.isNotEmpty) {
-      await _writeViaMain(clientPort, 'emailBatch', emailBatch);
+      await writeViaMain(clientPort, 'emailBatch', emailBatch);
       clientPort.send({'type': 'refresh'});
     }
 
@@ -715,7 +692,7 @@ class GmailScannerIsolateWorker {
 
     // 1. Label Folder
     final labelPath = p.normalize(p.join(rootPath, labelName));
-    await _writeViaMain(
+    await writeViaMain(
       clientPort,
       'folder',
       _createFolderObj(labelPath, rootPath, labelName, collection.id, msgDate),
@@ -723,7 +700,7 @@ class GmailScannerIsolateWorker {
 
     // 2. Year Folder
     final yearPath = p.normalize(p.join(labelPath, year));
-    await _writeViaMain(
+    await writeViaMain(
       clientPort,
       'folder',
       _createFolderObj(yearPath, labelPath, year, collection.id, msgDate),
@@ -769,6 +746,5 @@ class GmailScannerIsolateWorker {
   static Future<T> _retryNetworkOp<T>(
     Future<T> Function() operation,
     AppLogger logger,
-  ) =>
-      retryNetworkOp(operation, logger: logger);
+  ) => retryNetworkOp(operation, logger: logger);
 }
