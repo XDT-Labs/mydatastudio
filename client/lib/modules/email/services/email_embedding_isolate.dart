@@ -197,7 +197,7 @@ class EmailEmbeddingIsolate {
           continue;
         }
 
-        final emails = await repo.getEmailsWithMissingEmbeddings(limit: 100);
+        final emails = await repo.getEmailsWithMissingEmbeddings(limit: 10);
 
         if (emails.isEmpty) {
           await Future.delayed(const Duration(minutes: 1));

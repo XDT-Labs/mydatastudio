@@ -87,27 +87,29 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     final file = widget.asset as File;
     if (!_isImage(file)) return;
 
+    final ioFile = io.File(_resolvedPath(file));
+    if (!await ioFile.exists()) return;
+
     setState(() => _loadingExif = true);
     try {
-      final ioFile = io.File(_resolvedPath(file));
-      if (await ioFile.exists()) {
-        final exif = await readExifFromFile(ioFile);
-        if (mounted) {
-          setState(() {
-            _exifData = exif;
-            if (_resolution == null) {
-              final widthTag = exif['EXIF ExifImageWidth'] ?? exif['Image ImageWidth'];
-              final heightTag = exif['EXIF ExifImageLength'] ?? exif['Image ImageLength'];
-              if (widthTag != null && heightTag != null) {
-                final w = widthTag.printable.trim();
-                final h = heightTag.printable.trim();
-                if (w.isNotEmpty && h.isNotEmpty) {
-                  _resolution = '${w}x${h}';
-                }
+      final exif = await readExifFromFile(ioFile);
+      if (mounted) {
+        setState(() {
+          _exifData = exif;
+          if (_resolution == null) {
+            final widthTag =
+                exif['EXIF ExifImageWidth'] ?? exif['Image ImageWidth'];
+            final heightTag =
+                exif['EXIF ExifImageLength'] ?? exif['Image ImageLength'];
+            if (widthTag != null && heightTag != null) {
+              final w = widthTag.printable.trim();
+              final h = heightTag.printable.trim();
+              if (w.isNotEmpty && h.isNotEmpty) {
+                _resolution = '${w}x${h}';
               }
             }
-          });
-        }
+          }
+        });
       }
     } catch (_) {}
     if (mounted) setState(() => _loadingExif = false);

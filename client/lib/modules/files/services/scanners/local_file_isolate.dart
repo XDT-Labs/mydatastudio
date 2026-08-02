@@ -785,6 +785,8 @@ class LocalFileIsolateWorker {
       case 'tif':
       case 'psd':
       case 'nef':
+      case 'heic':
+      case 'heif':
         return FilesConstants.mimeTypeImage;
       case 'pdf':
         return FilesConstants.mimeTypePdf;

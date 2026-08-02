@@ -24,6 +24,16 @@ def _png_base64(width: int, height: int) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
+def _heic_base64(width: int, height: int) -> str:
+    import pillow_heif
+
+    img = Image.new("RGB", (width, height), color=(0, 128, 255))
+    heif_file = pillow_heif.from_pillow(img)
+    buf = io.BytesIO()
+    heif_file.save(buf, quality=80)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
 def test_thumbnail_downscales_large_image():
     req = ThumbnailRequest(image_base64=_png_base64(800, 600), width=320, height=240)
     result = generate_thumbnail(req)
@@ -66,6 +76,22 @@ def test_thumbnail_rejects_non_image_bytes():
     with pytest.raises(HTTPException) as exc:
         generate_thumbnail(ThumbnailRequest(image_base64=payload))
     assert exc.value.status_code == 500
+
+
+def test_thumbnail_decodes_heic():
+    # Regression guard: HEIC/HEIF import photos previously fell through
+    # PIL.Image.open with no registered opener and 500'd. pillow_heif's
+    # opener (registered at import time in routes.py) must make plain
+    # Image.open() decode HEIC bytes with no is_raw flag needed.
+    req = ThumbnailRequest(image_base64=_heic_base64(400, 300), width=320, height=240)
+    result = generate_thumbnail(req)
+
+    assert result["format"] == "JPEG"
+    assert result["width"] <= 320
+    assert result["height"] <= 240
+    decoded = base64.b64decode(result["thumbnail"])
+    out = Image.open(io.BytesIO(decoded))
+    assert out.format == "JPEG"
 
 
 def test_request_model_has_no_path_field():

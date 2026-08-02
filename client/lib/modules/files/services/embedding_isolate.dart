@@ -223,7 +223,7 @@ class EmbeddingIsolate {
         }
 
         // Query for a batch of files with missing embeddings
-        final files = await repo.getFilesWithMissingEmbeddings(limit: 100);
+        final files = await repo.getFilesWithMissingEmbeddings(limit: 10);
 
         if (files.isEmpty) {
           //logger.d("No files with missing embeddings found. Sleeping...");
