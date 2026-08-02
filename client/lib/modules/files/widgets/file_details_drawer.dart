@@ -16,6 +16,7 @@ import 'package:http/http.dart' as http;
 import 'package:mydatastudio/modules/files/widgets/video_file_preview.dart';
 import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/file_metadata_section.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/image_description_section.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/folder_metadata_section.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/tabbed_metadata_section.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/image_preview_widget.dart';
@@ -302,6 +303,16 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                     _buildPreviewSection(),
                     const SizedBox(height: 16),
                     if (widget.asset is File) ...[
+                      if (isImage &&
+                          ((widget.asset as File).description
+                                  ?.trim()
+                                  .isNotEmpty ??
+                              false)) ...[
+                        ImageDescriptionSection(
+                          description: (widget.asset as File).description,
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                       FileMetadataSection(
                         file: widget.asset as File,
                         resolution: _resolution,

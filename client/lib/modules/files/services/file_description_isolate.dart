@@ -385,9 +385,7 @@ class FileDescriptionIsolate {
               'content': [
                 {
                   'type': 'image_url',
-                  'image_url': {
-                    'url': 'data:image/jpeg;base64,$base64Image',
-                  },
+                  'image_url': {'url': 'data:image/jpeg;base64,$base64Image'},
                 },
                 {'type': 'text', 'text': _kDescriptionPrompt},
               ],
@@ -421,7 +419,8 @@ class FileDescriptionIsolate {
         return null;
       }
 
-      final parsed = jsonDecode(content) as Map<String, dynamic>;
+      final parsed =
+          jsonDecode(stripJsonFence(content)) as Map<String, dynamic>;
       final description = (parsed['description'] as String?)?.trim() ?? '';
       if (description.isEmpty) {
         logger.w("Chat completion returned an empty description");
@@ -443,6 +442,28 @@ class FileDescriptionIsolate {
       logger.e("Error calling Python chat completion service: $e");
       return null;
     }
+  }
+
+  /// Strips a ```json ... ``` (or bare ``` ... ```) markdown fence around
+  /// [content] if present.
+  ///
+  /// `response_format`'s grammar constraint is supposed to make this
+  /// unnecessary, but llama.cpp's grammar sampling isn't reliably applied
+  /// for MTMD (vision) chat handlers across all versions — the model can
+  /// still fall back to its default "wrap JSON in a code block" habit.
+  /// Stripping here is cheap insurance against that, independent of whether
+  /// the underlying grammar bug ever gets fixed upstream.
+  static String stripJsonFence(String content) {
+    final trimmed = content.trim();
+    if (!trimmed.startsWith('```')) return trimmed;
+
+    final withoutOpenFence = trimmed.replaceFirst(
+      RegExp(r'^```[a-zA-Z]*\s*\n?'),
+      '',
+    );
+    final closingFenceIndex = withoutOpenFence.lastIndexOf('```');
+    if (closingFenceIndex == -1) return withoutOpenFence.trim();
+    return withoutOpenFence.substring(0, closingFenceIndex).trim();
   }
 
   /// Embeds [text] (the generated description) with the same multimodal
