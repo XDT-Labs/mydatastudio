@@ -10,7 +10,7 @@ import '../../../../helpers/file_fixture.dart';
 void main() {
   group('TabbedMetadataSection', () {
     testWidgets(
-      'renders EXIF tab first by default and loads GPS tab when tapped',
+      'renders EXIF tab first by default and loads Location tab when tapped',
       (tester) async {
         final file = makeTestFile(latitude: 37.7749, longitude: -122.4194);
         final collection = makeTestCollection();
@@ -41,11 +41,11 @@ void main() {
         expect(find.byType(ExifMetadataTab), findsOneWidget);
         expect(find.text('No EXIF data available.'), findsOneWidget);
 
-        // 2. Verify GPS tab content (GpsMetadataTab) is NOT in the tree initially
+        // 2. Verify Location tab content (GpsMetadataTab) is NOT in the tree initially
         expect(find.byType(GpsMetadataTab), findsNothing);
 
-        // 3. Tap the GPS tab
-        await tester.tap(find.text('GPS'));
+        // 3. Tap the Location tab
+        await tester.tap(find.text('LOCATION'));
         await tester.pumpAndSettle();
 
         // 4. Verify GpsMetadataTab is now rendered

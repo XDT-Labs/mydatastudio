@@ -38,7 +38,7 @@ class TabbedMetadataSection extends StatelessWidget {
         TabBar(
           tabs: [
             if (showExif) const Tab(text: 'EXIF'),
-            if (showExif) const Tab(text: 'GPS'),
+            if (showExif) const Tab(text: 'LOCATION'),
             const Tab(text: 'SIMILAR'),
           ],
           labelStyle: const TextStyle(
