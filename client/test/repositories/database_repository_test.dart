@@ -240,6 +240,110 @@ void main() {
       expect(rows, isEmpty);
     });
 
+    test(
+      'DatabaseRepository saveFileDescription writes description, tags, '
+      'landmarks, and a description-type embedding alongside the file-type one',
+      () async {
+        final db = databaseManager.database!;
+        final dbRepo = DatabaseRepository(db);
+        final fileRepo = FileDesktopRepository(db);
+        final colRepo = CollectionRepository(db);
+
+        final colId = const Uuid().v4();
+        await colRepo.addCollection(
+          Collection(
+            id: colId,
+            name: 'Photos Collection',
+            path: '/photos',
+            type: 'file',
+            scanner: 'local',
+            needsReAuth: false,
+            scanStatus: 'idle',
+          ),
+        );
+
+        final fileId = const Uuid().v4();
+        await fileRepo.create(
+          File(
+            id: fileId,
+            name: 'eiffel.jpg',
+            path: 'eiffel.jpg',
+            parent: '/photos',
+            dateCreated: DateTime.now(),
+            dateLastModified: DateTime.now(),
+            collectionId: colId,
+            contentType: 'image/jpeg',
+            size: 2048,
+            isDeleted: false,
+          ),
+        );
+
+        // Missing until both the description isolate's own eligibility
+        // query and its file-embedding counterpart say so — the two run
+        // independently and shouldn't affect one another.
+        var missingDescriptions = await dbRepo.getFilesWithMissingDescriptions(
+          limit: 10,
+        );
+        expect(missingDescriptions.any((f) => f.id == fileId), isTrue);
+
+        // The file also has a 'file'-type image embedding already, as it
+        // would once the embedding isolate reaches it first.
+        final fileEmbedding = List<double>.filled(2048, 0.25);
+        await dbRepo.upsertFileEmbedding(fileId, fileEmbedding);
+
+        final descriptionEmbedding = List<double>.filled(2048, 0.75);
+        await dbRepo.saveFileDescription(
+          fileId,
+          description: 'The Eiffel Tower at sunset with a clear sky.',
+          tags: const ['sunset', 'landmark', 'sunset'], // dup tag on purpose
+          landmarks: const ['Eiffel Tower'],
+          embedding: descriptionEmbedding,
+        );
+
+        final fileRow = (await db.select(
+          'SELECT description FROM files WHERE id = ?',
+          [fileId],
+        )).first;
+        expect(
+          fileRow['description'],
+          'The Eiffel Tower at sunset with a clear sky.',
+        );
+
+        final tagRows = await db.select(
+          'SELECT tag FROM file_tags WHERE file_id = ? ORDER BY tag',
+          [fileId],
+        );
+        expect(
+          tagRows.map((r) => r['tag']),
+          ['landmark', 'sunset'],
+          reason: 'duplicate tag is deduped by the (file_id, tag) key',
+        );
+
+        final landmarkRows = await db.select(
+          'SELECT landmark FROM file_landmarks WHERE file_id = ?',
+          [fileId],
+        );
+        expect(landmarkRows.map((r) => r['landmark']), ['Eiffel Tower']);
+
+        // Both embedding types coexist for the same file, each independently
+        // retrievable, and neither overwrote the other.
+        final storedFileEmbedding = await dbRepo.getFileEmbedding(fileId);
+        final storedDescriptionEmbedding = await dbRepo.getFileEmbedding(
+          fileId,
+          type: 'description',
+        );
+        expect(storedFileEmbedding, fileEmbedding);
+        expect(storedDescriptionEmbedding, descriptionEmbedding);
+
+        // Now that the description is set, it drops out of the eligibility
+        // query — the isolate wouldn't reprocess it next pass.
+        missingDescriptions = await dbRepo.getFilesWithMissingDescriptions(
+          limit: 10,
+        );
+        expect(missingDescriptions.any((f) => f.id == fileId), isFalse);
+      },
+    );
+
     test('DatabaseRepository Email Embeddings Routing & Queries', () async {
       final db = databaseManager.database!;
       final dbRepo = DatabaseRepository(db);

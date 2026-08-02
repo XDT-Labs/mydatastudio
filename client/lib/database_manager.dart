@@ -15,6 +15,7 @@ import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:mydatastudio/modules/files/services/embedding_isolate.dart';
+import 'package:mydatastudio/modules/files/services/file_description_isolate.dart';
 import 'package:mydatastudio/modules/email/services/email_embedding_isolate.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:uuid/uuid.dart';
@@ -38,6 +39,7 @@ class DatabaseManager {
   AppDatabase? appDatabase;
   EmbeddingIsolate? _embeddingIsolate;
   EmailEmbeddingIsolate? _emailEmbeddingIsolate;
+  FileDescriptionIsolate? _fileDescriptionIsolate;
   DatabaseRepository? _repository;
   bool _backgroundServicesStarted = false;
   VoidCallback? _vaultUnlockListener;
@@ -274,6 +276,12 @@ class DatabaseManager {
     if (appDatabase != null && _emailEmbeddingIsolate == null) {
       await _startEmailEmbeddingIsolate(appDatabase!.path!);
     }
+
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (generation != _startGeneration) return;
+    if (appDatabase != null && _fileDescriptionIsolate == null) {
+      await _startFileDescriptionIsolate(appDatabase!.path!);
+    }
   }
 
   void stopBackgroundServices() {
@@ -283,6 +291,8 @@ class DatabaseManager {
     _embeddingIsolate = null;
     unawaited(_emailEmbeddingIsolate?.stop());
     _emailEmbeddingIsolate = null;
+    unawaited(_fileDescriptionIsolate?.stop());
+    _fileDescriptionIsolate = null;
   }
 
   Future<AppDatabase> _openDatabase(String dbDir) async {
@@ -347,10 +357,20 @@ class DatabaseManager {
     );
   }
 
+  Future<void> _startFileDescriptionIsolate(String storagePath) async {
+    _fileDescriptionIsolate = FileDescriptionIsolate();
+    await _fileDescriptionIsolate!.start(
+      storagePath,
+      AppConstants.dbName,
+      RootIsolateToken.instance!,
+    );
+  }
+
   void pauseEmbeddingIsolates() {
     logger.d("Pausing embedding isolates for active scanner/import");
     _embeddingIsolate?.pause();
     _emailEmbeddingIsolate?.pause();
+    _fileDescriptionIsolate?.pause();
   }
 
   void resumeEmbeddingIsolates() {
@@ -359,6 +379,7 @@ class DatabaseManager {
     );
     _embeddingIsolate?.resume();
     _emailEmbeddingIsolate?.resume();
+    _fileDescriptionIsolate?.resume();
   }
 
   void dispose() {
@@ -532,6 +553,7 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS file_landmarks_landmark_idx '
       'ON file_landmarks (landmark);',
     );
+    await _migrateFilesEmbeddingsKey();
     final added = await _addMissingColumns();
 
     // Only on the open that introduces the column, so a large archive pays for
@@ -617,6 +639,55 @@ class AppDatabase {
     }
   }
 
+  /// Rebuilds `files_embeddings` onto a `(file_id, type)` primary key when it
+  /// still has the original `file_id`-only key (with or without the `type`
+  /// column added by an earlier version of this migration).
+  ///
+  /// SQLite can't alter a primary key with `ALTER TABLE`, so this is a
+  /// rename-recreate-copy-drop done inside a transaction. Safe to run on
+  /// every open: once the key covers `type` this is a single `PRAGMA
+  /// table_info` read and nothing else. A single-column key can't hold both
+  /// a 'file' and a 'description' embedding for the same file — the second
+  /// insert would silently overwrite the first's vector instead of adding a
+  /// row — so this has to land before anything writes a non-'file' row.
+  Future<void> _migrateFilesEmbeddingsKey() async {
+    final info = await _db.select('PRAGMA table_info(files_embeddings)');
+    Map<String, Object?>? typeColumn;
+    for (final row in info) {
+      if (row['name'] == 'type') {
+        typeColumn = row;
+        break;
+      }
+    }
+    final keyedByType = typeColumn != null && (typeColumn['pk'] as int) > 0;
+    if (keyedByType) return;
+
+    logger.i(
+      'AppDatabase: migrating files_embeddings to a (file_id, type) key',
+    );
+    final hasTypeColumn = typeColumn != null;
+    await _db.transaction((tx) async {
+      await tx.execute(
+        'ALTER TABLE files_embeddings RENAME TO files_embeddings_old',
+      );
+      await tx.execute('''
+        CREATE TABLE files_embeddings (
+          file_id TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'file',
+          qwen3_vl_embedding BLOB,
+          PRIMARY KEY (file_id, type),
+          FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+        )
+      ''');
+      await tx.execute('''
+        INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding)
+        SELECT file_id, ${hasTypeColumn ? 'type' : "'file'"}, qwen3_vl_embedding
+        FROM files_embeddings_old
+      ''');
+      await tx.execute('DROP TABLE files_embeddings_old');
+    });
+  }
+
   /// Columns added to [schemaDDL] after the initial schema shipped.
   ///
   /// The DDL above only runs for a brand-new database, so an existing install
@@ -637,15 +708,6 @@ class AppDatabase {
         'is_inline': 'INTEGER NOT NULL DEFAULT 0',
         // AI-generated or user-entered description of the file's contents.
         'description': 'TEXT',
-      },
-      'files_embeddings': {
-        // Distinguishes what an embedding was computed from — e.g. 'file' for
-        // the image itself, vs. future 'chunk' (PDF RAG chunks) or
-        // 'description' (embeddings of a generated description) rows.
-        // DEFAULT 'file' both seeds existing rows on this ALTER and covers
-        // every row written today, since file-level embeddings are all there
-        // is right now.
-        'type': "TEXT NOT NULL DEFAULT 'file'",
       },
     };
 
@@ -1237,11 +1299,18 @@ class AppDatabase {
     );
     ''',
     // files_embeddings
+    //
+    // Keyed on (file_id, type) rather than file_id alone: a file needs one
+    // embedding row per kind of thing it was computed from — the image
+    // itself ('file'), a generated description's text ('description'), and
+    // eventually PDF RAG chunks ('chunk') — all sharing the same vector
+    // column so similarity search can scan across (or filter within) them.
     '''
     CREATE TABLE IF NOT EXISTS files_embeddings (
-      file_id TEXT PRIMARY KEY,
-      qwen3_vl_embedding BLOB,
+      file_id TEXT NOT NULL,
       type TEXT NOT NULL DEFAULT 'file',
+      qwen3_vl_embedding BLOB,
+      PRIMARY KEY (file_id, type),
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
     ''',

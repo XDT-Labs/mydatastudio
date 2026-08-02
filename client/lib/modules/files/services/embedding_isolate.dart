@@ -1,15 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' as io;
 import 'dart:isolate';
 import 'package:flutter/services.dart';
-import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
-import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatastudio/main.dart';
-import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/services/utilities/file_bytes_loader.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/services/embedding_message_handler.dart';
@@ -242,24 +239,18 @@ class EmbeddingIsolate {
             break;
           }
           try {
-            List<double>? embedding;
             final start = DateTime.now();
-            if (file.path.startsWith('gdrive://')) {
-              embedding = await _processGDriveFile(
-                file,
-                repo,
-                serviceUrl!,
-                serviceToken,
-                logger,
-              );
-            } else {
-              embedding = await _processLocalFile(
-                file,
-                serviceUrl!,
-                serviceToken,
-                logger,
-              );
-            }
+            final bytes = await FileBytesLoader.load(file, repo, logger);
+            final embedding =
+                bytes == null
+                    ? null
+                    : await _generateEmbedding(
+                      bytes,
+                      file.name,
+                      serviceUrl!,
+                      serviceToken,
+                      logger,
+                    );
             final duration = DateTime.now().difference(start);
             logger.d("Processed file ${file.path} in $duration");
 
@@ -332,96 +323,6 @@ class EmbeddingIsolate {
     } catch (e) {
       logger.d("Could not check embedding model status: $e");
       return false;
-    }
-  }
-
-  static Future<List<double>?> _processLocalFile(
-    File file,
-    String serviceUrl,
-    String? serviceToken,
-    AppLogger logger,
-  ) async {
-    final ioFile = io.File(file.path);
-    if (!ioFile.existsSync()) {
-      logger.w("File not found: ${file.path}");
-      return null;
-    }
-
-    final bytes = await ioFile.readAsBytes();
-    return await _generateEmbedding(
-      bytes,
-      file.name,
-      serviceUrl,
-      serviceToken,
-      logger,
-    );
-  }
-
-  static Future<List<double>?> _processGDriveFile(
-    File file,
-    DatabaseRepository repo,
-    String serviceUrl,
-    String? serviceToken,
-    AppLogger logger,
-  ) async {
-    final collection = await repo.getCollection(file.collectionId);
-    if (collection == null) {
-      logger.w("Collection not found for GDrive file: ${file.path}. Skipping.");
-      return null;
-    }
-
-    final fileId = file.path.replaceFirst('gdrive://', '');
-
-    // Refresh token if needed
-    String? accessToken = collection.accessToken;
-    final now = DateTime.now().toUtc();
-    final nearExpiry =
-        collection.expiration == null ||
-        now.isAfter(
-          collection.expiration!.subtract(const Duration(minutes: 5)),
-        );
-
-    if (nearExpiry && collection.refreshToken != null) {
-      try {
-        final result = await GoogleAuthService.refreshTokens(
-          accessToken: collection.accessToken!,
-          refreshToken: collection.refreshToken!,
-        );
-        accessToken = result.accessToken;
-        // Optionally we could update the DB here, but let's just use it for now
-      } catch (e) {
-        logger.e("GDrive token refresh failed: $e");
-        return null;
-      }
-    }
-
-    if (accessToken == null) {
-      logger.w("No access token for GDrive file: ${file.path}");
-      return null;
-    }
-
-    final driveApi = drive.DriveApi(
-      AuthenticatedHttpClient.bearer(accessToken),
-    );
-
-    try {
-      final media =
-          await driveApi.files.get(
-                fileId,
-                downloadOptions: drive.DownloadOptions.fullMedia,
-              )
-              as drive.Media;
-      final bytes = await http.ByteStream(media.stream).toBytes();
-      return await _generateEmbedding(
-        bytes,
-        file.name,
-        serviceUrl,
-        serviceToken,
-        logger,
-      );
-    } catch (e) {
-      logger.e("Error downloading GDrive file: $e");
-      return null;
     }
   }
 

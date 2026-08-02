@@ -460,6 +460,8 @@ async def generate_chat_completion(request: ChatCompletionRequest):
             kwargs["temperature"] = request.temperature
         if request.max_tokens is not None:
             kwargs["max_tokens"] = request.max_tokens
+        if request.response_format is not None:
+            kwargs["response_format"] = request.response_format
 
         if request.stream:
             current_model = get_current_model_id()
