@@ -3,7 +3,9 @@ import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 
 /// Loads the raw bytes of [file] from local disk or Google Drive.
@@ -61,9 +63,22 @@ class FileBytesLoader {
         final result = await GoogleAuthService.refreshTokens(
           accessToken: collection.accessToken!,
           refreshToken: collection.refreshToken!,
+          db: repo.db,
         );
         accessToken = result.accessToken;
+      } on GoogleAuthException catch (e) {
+        // The refresh token itself is dead (revoked, or issued under an
+        // OAuth client that's since been deleted/rotated) — no retry will
+        // ever fix this. Flag the collection so the app's existing
+        // needsReAuth prompt (see auth_dialog_manager.dart) tells the user
+        // to reconnect, instead of this failing silently in the background
+        // on every file forever.
+        logger.e("GDrive token refresh failed: $e");
+        await _flagNeedsReAuth(collection, repo, logger);
+        return null;
       } catch (e) {
+        // Anything else (not configured, network blip) is worth retrying
+        // later — don't force a reconnect for a transient failure.
         logger.e("GDrive token refresh failed: $e");
         return null;
       }
@@ -89,6 +104,19 @@ class FileBytesLoader {
     } catch (e) {
       logger.e("Error downloading GDrive file: $e");
       return null;
+    }
+  }
+
+  static Future<void> _flagNeedsReAuth(
+    Collection collection,
+    DatabaseRepository repo,
+    AppLogger logger,
+  ) async {
+    try {
+      collection.needsReAuth = true;
+      await CollectionRepository(repo.db).updateCollection(collection);
+    } catch (e) {
+      logger.w("Failed to flag collection needsReAuth: $e");
     }
   }
 }

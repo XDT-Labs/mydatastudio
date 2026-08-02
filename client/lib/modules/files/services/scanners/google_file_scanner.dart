@@ -378,9 +378,29 @@ class CloudFileIsolateWorker {
         final result = await GoogleAuthService.refreshTokens(
           accessToken: safeAccessToken,
           refreshToken: safeRefreshToken,
+          db: appDb,
         );
         validToken = result.accessToken;
         logger.i('CloudFileIsolate: token refreshed');
+      } on GoogleAuthException catch (e) {
+        // Dead refresh token (revoked, or issued under an OAuth client
+        // that's since been deleted/rotated) — flag it so the app's
+        // existing needsReAuth prompt (auth_dialog_manager.dart) tells the
+        // user to reconnect, instead of this scan failing silently forever.
+        logger.e(
+          'CloudFileIsolate: token refresh failed for "$collectionName": $e',
+        );
+        try {
+          await appDb.execute(
+            'UPDATE collections SET needs_re_auth = 1 WHERE id = ?',
+            [collectionId],
+          );
+        } catch (updateError) {
+          logger.w(
+            'CloudFileIsolate: failed to flag needsReAuth: $updateError',
+          );
+        }
+        Isolate.exit(args['port'] as SendPort, 0);
       } catch (e) {
         logger.e(
           'CloudFileIsolate: token refresh failed for "$collectionName": $e',

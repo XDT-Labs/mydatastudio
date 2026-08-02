@@ -144,8 +144,8 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
       _authState = _DriveAuthState.checking;
     });
 
-    final clientId = await LoginProviders.googleDrive.clientId;
-    final clientSecret = await LoginProviders.googleDrive.clientSecret;
+    final clientId = await LoginProviders.googleDrive.clientId();
+    final clientSecret = await LoginProviders.googleDrive.clientSecret();
 
     if (!mounted) return;
 
