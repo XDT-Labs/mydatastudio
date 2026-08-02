@@ -1,5 +1,6 @@
+import 'dart:isolate';
+
 import 'package:mydatastudio/database_manager.dart';
-import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -11,7 +12,28 @@ import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_servic
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:mydatastudio/services/sqlite_retry.dart';
+
+/// Claims and queues [message] if it's a `{'type': 'dbWrite', ...}` request,
+/// returning true so the caller can `return` immediately (the message has
+/// been handled). Used by the four scanners that listen via a plain
+/// `receivePort.listen(...)` callback (Gmail, Outlook, Yahoo, PST) — the
+/// `await for`-based scanners (local filesystem, Google Drive) inline this
+/// directly since they don't need [queue] for ordering.
+bool tryHandleScanWrite(Object? message, SequentialWriteQueue queue) {
+  if (message is! Map || message['type'] != 'dbWrite') return false;
+  final replyTo = message['replyTo'] as SendPort;
+  queue.add(() async {
+    try {
+      final result = await handleScanWriteMessage(message);
+      replyTo.send({'ok': true, 'result': result});
+    } catch (e) {
+      replyTo.send({'ok': false, 'error': e.toString()});
+    }
+  });
+  return true;
+}
 
 /// Executes a `{'type': 'dbWrite', 'service': ..., 'payload': ...}` message
 /// sent by a scanner isolate, writing through the main isolate's single
@@ -35,8 +57,12 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
 
   switch (service) {
     case 'batchFile':
+      // List<T>.from eagerly type-checks each element (unlike .cast<T>,
+      // which is a lazy view and would only throw once the upsert service
+      // got around to iterating it — by then the bad payload is out of
+      // context and the error just says "type File is not a subtype").
       await BatchFileUpsertService.instance.invoke(
-        BatchFileUpsertServiceCommand((payload as List).cast<File>(), db),
+        BatchFileUpsertServiceCommand(List<File>.from(payload as List), db),
       );
       return const {};
 
@@ -60,7 +86,7 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
 
     case 'emailBatch':
       await EmailUpsertService.instance.invoke(
-        EmailUpsertServiceCommand((payload as List).cast<Email>(), db),
+        EmailUpsertServiceCommand(List<Email>.from(payload as List), db),
       );
       return const {};
 
@@ -102,7 +128,15 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       return const {};
 
     case 'collectionStatus':
-      await CollectionRepository(db).updateCollection(payload as Collection);
+      // A targeted update (scan_status, last_scan_date only) — not the full
+      // Collection object the isolate read at scan start, which would
+      // otherwise clobber a token refreshed on another connection mid-scan.
+      final map = payload as Map;
+      await CollectionRepository(db).updateScanStatus(
+        map['collectionId'] as String,
+        map['scanStatus'] as String,
+        map['lastScanDate'] as DateTime,
+      );
       return const {};
 
     default:

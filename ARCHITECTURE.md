@@ -266,7 +266,15 @@ Parent pages wrap tables in a `NotificationListener` and handle each type.
 
 ## Isolate Architecture
 
-The app has no single "database writer isolate" — every isolate that needs to write opens its **own** `AppDatabase` (resqlite) connection directly, rather than routing writes through a dedicated writer process. Startup staggers isolate creation by ~500ms to avoid concurrent SQLite-open contention, and embedding isolates pause automatically whenever a scanner is actively syncing.
+Only the main isolate's `AppDatabase` (resqlite) connection writes. Scanner and embedding isolates each open their own `AppDatabase` connection too, but use it for reads only (discovery queries, cache warm-up); every write is relayed over the isolate's existing control port to the main isolate and executed there:
+
+- Scanners send `{'type': 'dbWrite', 'service': ..., 'payload': ...}` via the shared `writeViaMain()` helper (`client/lib/scanners/scan_isolate_support.dart` — 30s timeout, guaranteed reply-port cleanup); the main isolate dispatches it through `handleScanWriteMessage` (`client/lib/services/scan_write_relay.dart`) and acks back.
+- Embedding isolates send `{'type': 'embedding', 'table': ..., 'id': ..., 'embedding': ...}`; the main isolate dispatches it through `handleEmbeddingMessage` (`client/lib/services/embedding_message_handler.dart`).
+- Write **ordering** (a folder must land before the files inside it) comes for free in scanners that consume their port with `await for` (local filesystem, Google Drive) — one message is fully handled before the next is pulled. Scanners that listen via a plain `receivePort.listen(...)` callback (Gmail, Outlook, Yahoo, PST) don't get that for free, since a callback isn't awaited by the port itself; they route through a `SequentialWriteQueue` on the main-isolate side instead, via the `tryHandleScanWrite()` helper in `scan_write_relay.dart`.
+
+This replaced an earlier design where every isolate opened its own connection and wrote through it directly. That caused two problems in practice: SQLITE_BUSY contention between concurrent writers, and — worse — a write could silently affect zero rows when a row inserted by one connection wasn't yet visible to another connection's existence guard, with no error surfaced.
+
+Startup still staggers isolate creation by ~500ms to avoid concurrent SQLite-open contention on connection creation itself, and embedding isolates pause automatically whenever a scanner is actively syncing.
 
 | Isolate | Location | Role |
 |---|---|---|
@@ -281,9 +289,9 @@ The app has no single "database writer isolate" — every isolate that needs to 
 
 ```mermaid
 flowchart TB
-    Main["Main Isolate\n(UI + AppDatabase connection)"]
+    Main["Main Isolate\n(UI + the single writing AppDatabase connection)"]
 
-    subgraph Scanners["Scanner Isolates (one AppDatabase connection each)"]
+    subgraph Scanners["Scanner Isolates (own AppDatabase connection, read-only)"]
         LFI["LocalFileIsolate"]
         CFI["CloudFileIsolate\n(Google Drive)"]
         GSI["GmailScannerIsolate"]
@@ -292,7 +300,7 @@ flowchart TB
         PSTI["OutlookPstScannerIsolate\n(UI-triggered, not registered)"]
     end
 
-    subgraph Embed["Embedding Isolates (own AppDatabase connection)"]
+    subgraph Embed["Embedding Isolates (own AppDatabase connection, read-only)"]
         EI["EmbeddingIsolate\n(files)"]
         EEI["EmailEmbeddingIsolate\n(emails)"]
     end
@@ -301,12 +309,14 @@ flowchart TB
 
     Main -- "register (no scan)" --> Scanners
     Main -- "force: true (manual sync / nav)" --> Scanners
-    Scanners -- "own connection, writes" --> DB
+    Scanners -- "reads" --> DB
+    Scanners -- "dbWrite relay (writeViaMain)" --> Main
     Scanners -. "isScanning stream" .-> Main
     Scanners -. "pause/resume" .-> Embed
-    Embed -- "own connection, writes" --> DB
+    Embed -- "reads" --> DB
+    Embed -- "embedding relay" --> Main
     Embed -- "HTTP /util/embedding" --> AIServer["aiserver (Python subprocess)"]
-    Main -- "reads" --> DB
+    Main -- "reads + all writes" --> DB
 ```
 
 ---

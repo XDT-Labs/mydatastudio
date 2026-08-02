@@ -29,4 +29,10 @@ class SequentialWriteQueue {
       );
     });
   }
+
+  /// Resolves once every task queued so far has run (successfully or not —
+  /// failures are already caught and logged by [add]). Lets a caller like
+  /// `EmbeddingIsolate.stop()` wait for in-flight relayed writes to land
+  /// before tearing down, instead of abandoning them mid-write.
+  Future<void> get whenIdle => _tail;
 }

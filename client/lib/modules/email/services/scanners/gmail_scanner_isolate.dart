@@ -94,21 +94,7 @@ class GmailScannerIsolate {
       // replyTo SendPort and the full File/Email/Folder payload being
       // written, neither of which statusPort's listener (scan status and
       // progress only) should ever see.
-      if (message is Map && message['type'] == 'dbWrite') {
-        // Queued rather than awaited inline: this listener callback isn't
-        // awaited by the port itself, so without an explicit queue, writes
-        // could be handled out of order (a file landing before its folder).
-        final replyTo = message['replyTo'] as SendPort;
-        writeQueue.add(() async {
-          try {
-            final result = await handleScanWriteMessage(message);
-            replyTo.send({'ok': true, 'result': result});
-          } catch (e) {
-            replyTo.send({'ok': false, 'error': e.toString()});
-          }
-        });
-        return;
-      }
+      if (tryHandleScanWrite(message, writeQueue)) return;
 
       // Forward status messages if requested
       if (statusPort != null) {
@@ -155,8 +141,12 @@ class GmailScannerIsolate {
 
 /// Entry point and logic for the Gmail background scan.
 ///
-/// The worker runs in a separate isolate, opens its own AppDatabase connection,
-/// and writes results directly via upsert services.
+/// The worker runs in a separate isolate and opens its own `AppDatabase`
+/// connection, but only to read (e.g. `getAllById` for already-downloaded
+/// messages). Writes are relayed to the main isolate via [writeViaMain] and
+/// executed there through `handleScanWriteMessage` — see
+/// `scan_write_relay.dart` — so this isolate never opens a second write
+/// connection to the same database file.
 class GmailScannerIsolateWorker {
   static Future<void> worker(Map<String, dynamic> args) async {
     runInScanIsolateZone(() async {
@@ -279,9 +269,11 @@ class GmailScannerIsolateWorker {
         final collectionRepo = CollectionRepository(appDb);
         final col = await collectionRepo.collectionById(collection.id);
         if (col != null) {
-          col.scanStatus = 'ready';
-          col.lastScanDate = scanStartTime;
-          await writeViaMain(clientPort, 'collectionStatus', col);
+          await writeViaMain(clientPort, 'collectionStatus', {
+            'collectionId': col.id,
+            'scanStatus': 'ready',
+            'lastScanDate': scanStartTime,
+          });
         }
 
         clientPort.send({'type': 'refresh', 'status': 'done'});

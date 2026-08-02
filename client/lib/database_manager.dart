@@ -279,9 +279,9 @@ class DatabaseManager {
   void stopBackgroundServices() {
     _backgroundServicesStarted = false;
     _startGeneration++;
-    _embeddingIsolate?.stop();
+    unawaited(_embeddingIsolate?.stop());
     _embeddingIsolate = null;
-    _emailEmbeddingIsolate?.stop();
+    unawaited(_emailEmbeddingIsolate?.stop());
     _emailEmbeddingIsolate = null;
   }
 

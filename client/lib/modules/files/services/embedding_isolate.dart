@@ -464,13 +464,21 @@ class EmbeddingIsolate {
     }
   }
 
-  void stop() {
+  Future<void> stop() async {
     if (_vaultListener != null) {
       VaultManager.instance.unlocked.removeListener(_vaultListener!);
       _vaultListener = null;
     }
+    // Killing the isolate only stops it from sending more dbWrite messages —
+    // it doesn't touch writes already queued here. Wait for those to land
+    // (bounded, so a stuck write can't hang shutdown) before closing the
+    // port they'd reply on.
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
+    await _writeQueue.whenIdle.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () {},
+    );
     _receivePort?.close();
   }
 }

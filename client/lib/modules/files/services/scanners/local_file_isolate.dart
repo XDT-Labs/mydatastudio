@@ -402,12 +402,18 @@ class LocalFileIsolateWorker {
       );
     } else {
       final cleanupRelPath = p.relative(path, from: rootPath);
-      await writeViaMain(receiverPort, 'cleanupDeletedFiles', {
-        'collectionId': collectionId,
-        'path': cleanupRelPath == '.' ? '' : cleanupRelPath,
-        'scanStartTime': scanStartTime,
-        'recursive': recursive,
-      });
+      try {
+        await writeViaMain(receiverPort, 'cleanupDeletedFiles', {
+          'collectionId': collectionId,
+          'path': cleanupRelPath == '.' ? '' : cleanupRelPath,
+          'scanStartTime': scanStartTime,
+          'recursive': recursive,
+        });
+      } catch (e) {
+        // A transient relay failure here (a timeout, say) shouldn't abort the
+        // rest of scan completion — the next scan's sweep will catch up.
+        logger?.e('LocalScan: cleanup-deleted-files write failed: $e');
+      }
     }
 
     // Update collection lastScanDate and status. The read stays on this
@@ -417,9 +423,16 @@ class LocalFileIsolateWorker {
     if (col != null) {
       // 'incomplete' records that this run did not see the whole tree, so the
       // status doesn't claim a clean scan the sweep was skipped for.
-      col.scanStatus = failedBatches > 0 ? 'incomplete' : 'idle';
-      col.lastScanDate = scanStartTime;
-      await writeViaMain(receiverPort, 'collectionStatus', col);
+      final status = failedBatches > 0 ? 'incomplete' : 'idle';
+      try {
+        await writeViaMain(receiverPort, 'collectionStatus', {
+          'collectionId': col.id,
+          'scanStatus': status,
+          'lastScanDate': scanStartTime,
+        });
+      } catch (e) {
+        logger?.e('LocalScan: failed to update collection status: $e');
+      }
     }
 
     // Wait for any remaining thumbnails to finish generating
@@ -540,7 +553,16 @@ class LocalFileIsolateWorker {
         );
         if (folder != null) {
           logger.i('Found folder: ${folder.path}');
-          await writeViaMain(receiverPort, 'folder', folder);
+          try {
+            await writeViaMain(receiverPort, 'folder', folder);
+          } catch (e) {
+            // Files don't FK to folders by id (parent is a relative path
+            // string), so a lost folder row doesn't block the files under it
+            // from writing — just track it like a lost batch, and keep
+            // recursing rather than aborting the rest of this subtree.
+            failedBatches++;
+            logger.e('LocalScan: folder write failed for ${folder.path}: $e');
+          }
 
           try {
             if (recursive) {
