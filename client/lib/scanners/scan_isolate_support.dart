@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' as io;
+import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/app_logger.dart';
@@ -135,5 +136,45 @@ Future<T> retryNetworkOp<T>(
       }
       rethrow;
     }
+  }
+}
+
+/// Sends a `{'type': 'dbWrite', ...}` write request to the main isolate and
+/// waits for its ack, so a scan worker never opens a second, independent
+/// write connection to the same database file. See `scan_write_relay.dart`'s
+/// `handleScanWriteMessage` for the dispatch on the receiving end.
+///
+/// Bounded by [timeout] rather than awaiting the reply forever — if the main
+/// isolate never replies (a stalled write, or its port closing early), every
+/// later `dbWrite` from this worker would otherwise queue up behind a hang
+/// that never resolves. The reply port is always closed, on every exit path.
+Future<Map<String, dynamic>> writeViaMain(
+  SendPort clientPort,
+  String service,
+  dynamic payload, {
+  Duration timeout = const Duration(seconds: 30),
+}) async {
+  final replyPort = ReceivePort();
+  try {
+    clientPort.send({
+      'type': 'dbWrite',
+      'service': service,
+      'payload': payload,
+      'replyTo': replyPort.sendPort,
+    });
+    final reply = await replyPort.first.timeout(
+      timeout,
+      onTimeout: () => throw TimeoutException(
+        'dbWrite($service) timed out waiting for the main isolate to ack',
+        timeout,
+      ),
+    );
+    final map = reply as Map;
+    if (map['ok'] != true) {
+      throw Exception('dbWrite($service) failed: ${map['error']}');
+    }
+    return (map['result'] as Map?)?.cast<String, dynamic>() ?? const {};
+  } finally {
+    replyPort.close();
   }
 }

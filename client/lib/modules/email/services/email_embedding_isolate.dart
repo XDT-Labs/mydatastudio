@@ -8,12 +8,15 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/services/embedding_message_handler.dart';
+import 'package:mydatastudio/services/sequential_write_queue.dart';
 
 class EmailEmbeddingIsolate {
   Isolate? _isolate;
   ReceivePort? _receivePort;
   SendPort? _controlPort;
   StreamSubscription<String?>? _urlSubscription;
+  final SequentialWriteQueue _writeQueue = SequentialWriteQueue();
 
   Future<void> start(
     String storagePath,
@@ -77,6 +80,19 @@ class EmailEmbeddingIsolate {
               logger.d('[EmailEmbeddingIsolate] $msg');
               break;
           }
+        } else if (type == 'embedding') {
+          // Queued rather than fired-and-forgotten — see embedding_isolate.dart.
+          _writeQueue.add(() async {
+            final repo = DatabaseManager.instance.repository;
+            if (repo == null) {
+              logger.w(
+                '[EmailEmbeddingIsolate] dropped embedding for id=${data['id']}: '
+                'no main database connection',
+              );
+              return;
+            }
+            await handleEmbeddingMessage(repo, data, logger);
+          });
         }
       }
     });
@@ -124,9 +140,10 @@ class EmailEmbeddingIsolate {
     final String storagePath = cfg['storagePath'];
     final String dbName = cfg['dbName'];
     final AppLogger logger = AppLogger(cfg['loggerPort'] as SendPort?);
+    final SendPort replyTo = cfg['replyTo'] as SendPort;
 
     final controlPort = ReceivePort();
-    cfg['replyTo'].send(controlPort.sendPort);
+    replyTo.send(controlPort.sendPort);
 
     String? serviceUrl;
     String? serviceToken;
@@ -180,7 +197,7 @@ class EmailEmbeddingIsolate {
           continue;
         }
 
-        final emails = await repo.getEmailsWithMissingEmbeddings(limit: 10);
+        final emails = await repo.getEmailsWithMissingEmbeddings(limit: 1000);
 
         if (emails.isEmpty) {
           await Future.delayed(const Duration(minutes: 1));
@@ -190,6 +207,10 @@ class EmailEmbeddingIsolate {
         logger.i("Processing ${emails.length} emails for embeddings");
 
         for (final email in emails) {
+          if (isPaused) {
+            logger.d("Pause requested; abandoning remaining batch");
+            break;
+          }
           try {
             final formattedText = formatEmailForEmbedding(email);
             final embedding = await _generateEmbedding(
@@ -200,11 +221,22 @@ class EmailEmbeddingIsolate {
             );
             // logger.d("Processed email ${email.id} in $duration");
 
+            // Hand the result back to the main isolate to write — resqlite
+            // serializes writes through a single connection internally, so
+            // writing here (a second, independent connection to the same
+            // file) only added SQLITE_BUSY contention.
+            //
+            // Only relayed when generation actually succeeded — see
+            // embedding_isolate.dart for why a placeholder empty embedding
+            // on failure would permanently exclude the email from retry.
             if (embedding != null) {
-              await repo.upsertEmailEmbedding(email.id, embedding);
-              // logger.d("Saved embedding for email: ${email.id}");
+              replyTo.send({
+                'type': 'embedding',
+                'table': 'emails_embeddings',
+                'id': email.id,
+                'embedding': embedding,
+              });
             } else {
-              await repo.upsertEmailEmbedding(email.id, []);
               logger.w("Skipped unprocessable email: ${email.id}");
             }
           } catch (e) {
