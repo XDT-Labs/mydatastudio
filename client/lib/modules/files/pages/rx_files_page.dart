@@ -1013,6 +1013,8 @@ class _RxFilesPage extends State<RxFilesPage> {
       '.bmp',
       '.tif',
       '.psd',
+      '.heic',
+      '.heif',
     ].contains(ext);
   }
 

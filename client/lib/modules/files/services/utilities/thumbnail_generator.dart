@@ -14,6 +14,12 @@ final AppLogger _logger = AppLogger(null);
 
 const _rawExtensions = ['.nef', '.cr2', '.arw', '.dng', '.orf', '.sr2'];
 
+/// Formats the Dart `image` package can't decode locally but the aiserver
+/// can (via pillow-heif registered with PIL). Unlike RAW these decode with
+/// plain PIL.Image.open once the HEIF opener is registered, so `is_raw`
+/// stays false for these.
+const _heicExtensions = ['.heic', '.heif'];
+
 class ThumbnailGenerator {
   /// Generates a JPEG thumbnail for [filePath], writes it into [cache], and
   /// returns the relative cache key to store in `files.thumbnail`
@@ -55,17 +61,19 @@ class ThumbnailGenerator {
   }) async {
     final ext = p.extension(filePath).toLowerCase();
     final isRaw = _rawExtensions.contains(ext);
+    final isHeic = _heicExtensions.contains(ext);
 
-    // RAW: send the bytes to the Python service, which decodes them from a
-    // buffer (rawpy) and returns a JPEG. The server never opens the path.
-    if (isRaw && llmServiceUrl != null) {
+    // RAW/HEIC: send the bytes to the Python service, which decodes them
+    // from a buffer (rawpy for RAW, PIL+pillow-heif for HEIC) and returns a
+    // JPEG. The server never opens the path.
+    if ((isRaw || isHeic) && llmServiceUrl != null) {
       try {
         // RAW files run 30-100MB+; the non-RAW branch below caps decode input
         // at 50MB, and base64-ing an uncapped file into a JSON body is worse.
         final rawLength = await io.File(filePath).length();
         if (rawLength > 100 * 1024 * 1024) {
           _logger.w(
-            'ThumbnailGenerator: RAW file over 100MB, skipping: $filePath',
+            'ThumbnailGenerator: file over 100MB, skipping: $filePath',
           );
           return null;
         }
@@ -79,13 +87,13 @@ class ThumbnailGenerator {
               },
               body: jsonEncode({
                 'image_base64': base64Encode(rawBytes),
-                'is_raw': true,
+                'is_raw': isRaw,
                 'width': 320,
                 'height': 240,
               }),
             )
             // Without this an unresponsive aiserver hangs the generator forever.
-            .timeout(const Duration(seconds: 30));
+            .timeout(const Duration(seconds: 60));
 
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
@@ -98,8 +106,8 @@ class ThumbnailGenerator {
       return null;
     }
 
-    // Non-RAW images: resize locally with the Dart image library.
-    if (contentType == FilesConstants.mimeTypeImage && !isRaw) {
+    // Non-RAW, non-HEIC images: resize locally with the Dart image library.
+    if (contentType == FilesConstants.mimeTypeImage && !isRaw && !isHeic) {
       final localFile = io.File(filePath);
       if (localFile.existsSync()) {
         try {
