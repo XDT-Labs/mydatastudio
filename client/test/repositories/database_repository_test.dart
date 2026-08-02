@@ -344,6 +344,67 @@ void main() {
       },
     );
 
+    test(
+      'DatabaseRepository getFileTags/getFileLandmarks return alphabetically, '
+      'and delete removes exactly one entry',
+      () async {
+        final db = databaseManager.database!;
+        final dbRepo = DatabaseRepository(db);
+        final fileRepo = FileDesktopRepository(db);
+        final colRepo = CollectionRepository(db);
+
+        final colId = const Uuid().v4();
+        await colRepo.addCollection(
+          Collection(
+            id: colId,
+            name: 'Photos Collection',
+            path: '/photos',
+            type: 'file',
+            scanner: 'local',
+            needsReAuth: false,
+            scanStatus: 'idle',
+          ),
+        );
+
+        final fileId = const Uuid().v4();
+        await fileRepo.create(
+          File(
+            id: fileId,
+            name: 'eiffel.jpg',
+            path: 'eiffel.jpg',
+            parent: '/photos',
+            dateCreated: DateTime.now(),
+            dateLastModified: DateTime.now(),
+            collectionId: colId,
+            contentType: 'image/jpeg',
+            size: 2048,
+            isDeleted: false,
+          ),
+        );
+
+        await dbRepo.saveFileDescription(
+          fileId,
+          description: 'The Eiffel Tower at sunset.',
+          tags: const ['sunset', 'landmark'],
+          landmarks: const ['Eiffel Tower'],
+          embedding: List<double>.filled(2048, 0.5),
+        );
+
+        expect(await dbRepo.getFileTags(fileId), ['landmark', 'sunset']);
+        expect(await dbRepo.getFileLandmarks(fileId), ['Eiffel Tower']);
+
+        await dbRepo.deleteFileTag(fileId, 'landmark');
+        expect(await dbRepo.getFileTags(fileId), ['sunset']);
+
+        await dbRepo.deleteFileLandmark(fileId, 'Eiffel Tower');
+        expect(await dbRepo.getFileLandmarks(fileId), isEmpty);
+
+        // Deleting something already gone is a no-op, not an error.
+        await dbRepo.deleteFileTag(fileId, 'landmark');
+        expect(await dbRepo.getFileTags(fileId), ['sunset']);
+      },
+    );
+
     test('DatabaseRepository Email Embeddings Routing & Queries', () async {
       final db = databaseManager.database!;
       final dbRepo = DatabaseRepository(db);

@@ -368,6 +368,51 @@ class DatabaseRepository {
     }
   }
 
+  /// Returns [fileId]'s tags, alphabetically.
+  Future<List<String>> getFileTags(String fileId) async {
+    final rows = await db.select(
+      'SELECT tag FROM file_tags WHERE file_id = ? ORDER BY tag',
+      [fileId],
+    );
+    return rows.map((r) => r['tag'] as String).toList();
+  }
+
+  /// Returns [fileId]'s landmarks, alphabetically.
+  Future<List<String>> getFileLandmarks(String fileId) async {
+    final rows = await db.select(
+      'SELECT landmark FROM file_landmarks WHERE file_id = ? ORDER BY landmark',
+      [fileId],
+    );
+    return rows.map((r) => r['landmark'] as String).toList();
+  }
+
+  /// Adds a single manually-entered [tag] to [fileId]. A no-op if the tag
+  /// is already present (case-sensitive — the UI is responsible for
+  /// case-insensitive dedup against the tags it already has loaded).
+  Future<void> addFileTag(String fileId, String tag) async {
+    await db.execute(
+      'INSERT OR IGNORE INTO file_tags (file_id, tag) VALUES (?, ?)',
+      [fileId, tag],
+    );
+  }
+
+  /// Removes a single [tag] from [fileId] (e.g. the user dismissing a pill
+  /// in the UI). A no-op if the tag isn't present.
+  Future<void> deleteFileTag(String fileId, String tag) async {
+    await db.execute('DELETE FROM file_tags WHERE file_id = ? AND tag = ?', [
+      fileId,
+      tag,
+    ]);
+  }
+
+  /// Removes a single [landmark] from [fileId]. A no-op if not present.
+  Future<void> deleteFileLandmark(String fileId, String landmark) async {
+    await db.execute(
+      'DELETE FROM file_landmarks WHERE file_id = ? AND landmark = ?',
+      [fileId, landmark],
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Email Embedding Methods (sqlite_vector API)
   // ---------------------------------------------------------------------------
