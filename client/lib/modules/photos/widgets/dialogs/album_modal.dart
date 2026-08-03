@@ -68,26 +68,38 @@ class _AlbumModalState extends State<AlbumModal> {
     if (_selectedAlbumIds.isEmpty || _isSubmitting) return;
 
     setState(() => _isSubmitting = true);
-    final selectedAlbums = _albumsWithCounts.where(
-      (a) => _selectedAlbumIds.contains(a.album.id),
-    ).toList();
+    try {
+      final selectedAlbums = _albumsWithCounts.where(
+        (a) => _selectedAlbumIds.contains(a.album.id),
+      ).toList();
 
-    for (final albumId in _selectedAlbumIds) {
-      for (final fileId in widget.selectedFileIds) {
-        await _repo.addFileToAlbum(fileId, albumId);
+      for (final albumId in _selectedAlbumIds) {
+        for (final fileId in widget.selectedFileIds) {
+          await _repo.addFileToAlbum(fileId, albumId);
+        }
       }
-    }
 
-    if (mounted) {
-      final names = selectedAlbums.map((a) => '"${a.album.name}"').join(', ');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Added ${widget.selectedFileIds.length} item(s) to $names',
+      if (mounted) {
+        final names = selectedAlbums.map((a) => '"${a.album.name}"').join(', ');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Added ${widget.selectedFileIds.length} item(s) to $names',
+            ),
           ),
-        ),
-      );
-      Navigator.of(context).pop(true);
+        );
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add to album: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
@@ -95,33 +107,47 @@ class _AlbumModalState extends State<AlbumModal> {
     if (!_formKey.currentState!.validate() || _isSubmitting) return;
 
     setState(() => _isSubmitting = true);
-    final title = _titleController.text.trim();
-    final description = _descController.text.trim();
+    try {
+      final title = _titleController.text.trim();
+      final description = _descController.text.trim();
 
-    final coverId = widget.selectedFileIds.isEmpty
-        ? null
-        : widget.selectedFileIds.first;
+      final coverId = widget.selectedFileIds.isEmpty
+          ? null
+          : widget.selectedFileIds.first;
 
-    final newAlbum = Album(
-      id: const Uuid().v4(),
-      name: title,
-      description: description.isEmpty ? null : description,
-      coverFileId: coverId,
-    );
-
-    await _repo.createAlbum(newAlbum);
-
-    for (final fileId in widget.selectedFileIds) {
-      await _repo.addFileToAlbum(fileId, newAlbum.id);
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Created album "$title" and added selected items'),
-        ),
+      final newAlbum = Album(
+        id: const Uuid().v4(),
+        name: title,
+        description: description.isEmpty ? null : description,
+        coverFileId: coverId,
       );
-      Navigator.of(context).pop(true);
+
+      await _repo.createAlbum(newAlbum);
+
+      for (final fileId in widget.selectedFileIds) {
+        await _repo.addFileToAlbum(fileId, newAlbum.id);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Created album "$title" and added ${widget.selectedFileIds.length} item(s)',
+            ),
+          ),
+        );
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to create album: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
