@@ -52,6 +52,7 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
     _gridItemSize = ViewStateService.instance.gridItemSize.value;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       _selectionSub = SelectionService.instance.selectedIds.listen((selected) {
         if (mounted) setState(() => _selectedIds = selected);
       });
