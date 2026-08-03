@@ -60,6 +60,11 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
     super.dispose();
   }
 
+  bool get _isEditing {
+    final focusWidget = FocusManager.instance.primaryFocus?.context?.widget;
+    return focusWidget is EditableText;
+  }
+
   void _handleEscape() {
     if (ViewStateService.instance.lightboxMedia.value != null) {
       ViewStateService.instance.setLightboxMedia(null);
@@ -71,12 +76,17 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
   }
 
   void _handleOpenLightbox() {
-    if (ViewStateService.instance.lightboxMedia.value != null) return;
+    if (_isEditing) return;
+    final lightbox = ViewStateService.instance.lightboxMedia.value;
+    if (lightbox != null) {
+      ViewStateService.instance.setLightboxMedia(null);
+      return;
+    }
 
-    final selectedIds = SelectionService.instance.selectedIds.value;
     final files = PhotosService.instance.sink.valueOrNull ?? [];
     if (files.isEmpty) return;
 
+    final selectedIds = SelectionService.instance.selectedIds.value;
     if (selectedIds.isNotEmpty) {
       final selectedFile = files.cast<File?>().firstWhere(
             (f) => f != null && selectedIds.contains(f.id),
@@ -97,10 +107,12 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
   }
 
   void _handleToggleInfo() {
+    if (_isEditing) return;
     ViewStateService.instance.toggleInfo();
   }
 
   Future<void> _handleToggleFavorite() async {
+    if (_isEditing) return;
     final repo = widget.photosRepository ?? PhotosRepository();
     final lightboxMedia = ViewStateService.instance.lightboxMedia.value;
     final infoMedia = ViewStateService.instance.infoMedia.value;
@@ -119,6 +131,7 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
   }
 
   Future<void> _handleDeleteSelected() async {
+    if (_isEditing) return;
     final selectedIds = SelectionService.instance.selectedIds.value;
     if (selectedIds.isEmpty) return;
 
@@ -158,6 +171,7 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
   }
 
   void _handleShowShortcuts() {
+    if (_isEditing) return;
     showDialog<void>(
       context: context,
       builder: (_) => const KeyboardShortcutsModal(),
