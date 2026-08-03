@@ -98,13 +98,36 @@ class _InfoSidebarState extends State<InfoSidebar> {
       });
       return;
     }
+    final fileId = _currentFile!.id;
     final repo = widget.repository ?? PhotosRepository();
-    await repo.updateFileName(_currentFile!.id, newName);
-    setState(() {
-      _currentFile!.name = newName;
-      _isEditingTitle = false;
-    });
-    ViewStateService.instance.infoMedia.add(_currentFile);
+    final updatedFile = await repo.updateFileName(fileId, newName);
+    final nextFile = updatedFile ?? await repo.getFile(fileId);
+
+    if (mounted && (nextFile != null || _currentFile?.id == fileId)) {
+      final fileToPublish = nextFile ?? File(
+        id: _currentFile!.id,
+        name: newName,
+        collectionId: _currentFile!.collectionId,
+        path: _currentFile!.path,
+        parent: _currentFile!.parent,
+        size: _currentFile!.size,
+        contentType: _currentFile!.contentType,
+        dateCreated: _currentFile!.dateCreated,
+        dateLastModified: _currentFile!.dateLastModified,
+        thumbnail: _currentFile!.thumbnail,
+        latitude: _currentFile!.latitude,
+        longitude: _currentFile!.longitude,
+        isFavorite: _currentFile!.isFavorite,
+        isDeleted: _currentFile!.isDeleted,
+        description: _currentFile!.description,
+      );
+
+      setState(() {
+        _currentFile = fileToPublish;
+        _isEditingTitle = false;
+      });
+      ViewStateService.instance.infoMedia.add(fileToPublish);
+    }
   }
 
   Future<void> _addTag() async {

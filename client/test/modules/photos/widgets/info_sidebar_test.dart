@@ -41,8 +41,9 @@ class FakePhotosRepository extends PhotosRepository {
   }
 
   @override
-  Future<void> updateFileName(String fileId, String newName) async {
+  Future<File?> updateFileName(String fileId, String newName) async {
     updatedFileName = newName;
+    return null;
   }
 
   @override

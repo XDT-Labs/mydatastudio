@@ -342,11 +342,21 @@ class PhotosRepository {
     )).toList();
   }
 
-  Future<void> updateFileName(String fileId, String newName) async {
+  Future<File?> getFile(String fileId) async {
     AppDatabase? db = DatabaseManager.instance.database;
-    if (db == null) return;
+    if (db == null) return null;
+
+    final rows = await db.select("SELECT * FROM files WHERE id = ?", [fileId]);
+    if (rows.isEmpty) return null;
+    return _fileWithAbsolutePath(rows.first);
+  }
+
+  Future<File?> updateFileName(String fileId, String newName) async {
+    AppDatabase? db = DatabaseManager.instance.database;
+    if (db == null) return null;
 
     await db.execute("UPDATE files SET name = ? WHERE id = ?", [newName, fileId]);
+    return getFile(fileId);
   }
 
   Future<void> deleteFile(String fileId) async {
