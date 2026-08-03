@@ -1293,11 +1293,8 @@ class AppDatabase {
       local_path TEXT,
       content_id TEXT,
       is_inline INTEGER NOT NULL DEFAULT 0,
-<<<<<<< HEAD
-      is_favorite INTEGER NOT NULL DEFAULT 0
-=======
+      is_favorite INTEGER NOT NULL DEFAULT 0,
       description TEXT
->>>>>>> origin/develop
     );
     ''',
     // folders
