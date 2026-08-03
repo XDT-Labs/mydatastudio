@@ -44,10 +44,23 @@ class BatchActionService {
     if (saveDir != null) {
       final allFiles = PhotosService.instance.sink.valueOrNull ?? [];
       final targets = allFiles.where((f) => fileIds.contains(f.id)).toList();
+      final usedNames = <String, int>{};
       for (final f in targets) {
         final src = io.File(f.path);
         if (await src.exists()) {
-          final destPath = p.join(saveDir, f.name);
+          final baseName = p.basenameWithoutExtension(f.name);
+          final ext = p.extension(f.name);
+
+          String destFileName = f.name;
+          if (usedNames.containsKey(f.name)) {
+            final count = usedNames[f.name]! + 1;
+            usedNames[f.name] = count;
+            destFileName = '$baseName ($count)$ext';
+          } else {
+            usedNames[f.name] = 1;
+          }
+
+          final destPath = p.join(saveDir, destFileName);
           await src.copy(destPath);
         }
       }
@@ -55,21 +68,23 @@ class BatchActionService {
   }
 
   Future<void> deleteSelected(Set<String> fileIds) async {
+    if (fileIds.isEmpty) return;
     final db = DatabaseManager.instance.database;
     if (db != null) {
-      for (String id in fileIds) {
-        await db.execute("UPDATE files SET is_deleted = 1 WHERE id = ?", [id]);
-      }
+      final paramSets = fileIds.map((id) => [id]).toList();
+      await db.executeBatch("UPDATE files SET is_deleted = 1 WHERE id = ?", paramSets);
+      await PhotosService.instance.refresh();
     }
     SelectionService.instance.deselectAll();
   }
 
   Future<void> favoriteSelected(Set<String> fileIds) async {
+    if (fileIds.isEmpty) return;
     final db = DatabaseManager.instance.database;
-    if (db == null) return;
-    
-    for (String id in fileIds) {
-      await db.execute("UPDATE files SET is_favorite = 1 WHERE id = ?", [id]);
+    if (db != null) {
+      final paramSets = fileIds.map((id) => [id]).toList();
+      await db.executeBatch("UPDATE files SET is_favorite = 1 WHERE id = ?", paramSets);
+      await PhotosService.instance.refresh();
     }
   }
 
