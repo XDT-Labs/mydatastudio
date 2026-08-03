@@ -40,9 +40,9 @@ class PhotosRepository {
     }
 
     if (filter.searchQuery.isNotEmpty) {
-      q += " AND (f.name LIKE ? OR f.path LIKE ? OR f.id IN (SELECT file_id FROM file_tags WHERE tag LIKE ?))";
+      q += " AND (f.name LIKE ? OR f.path LIKE ? OR f.id IN (SELECT file_id FROM file_tags WHERE tag LIKE ?) OR f.id IN (SELECT file_id FROM file_landmarks WHERE landmark LIKE ?))";
       final searchPattern = '%${filter.searchQuery}%';
-      params.addAll([searchPattern, searchPattern, searchPattern]);
+      params.addAll([searchPattern, searchPattern, searchPattern, searchPattern]);
     }
 
     if (filter.source != null) {
@@ -61,7 +61,8 @@ class PhotosRepository {
     }
 
     if (filter.location != null) {
-      // Basic location search since we don't have City, Country columns yet
+      q += " AND f.id IN (SELECT file_id FROM file_landmarks WHERE landmark = ?)";
+      params.add(filter.location);
     }
 
     if (filter.onlyFavorites) {
@@ -152,7 +153,17 @@ class PhotosRepository {
   }
 
   Future<Map<String, int>> allLocations() async {
-    return {};
+    AppDatabase? db = DatabaseManager.instance.database;
+    if (db == null) return {};
+
+    final rows = await db.select(
+      "SELECT landmark, COUNT(*) as count FROM file_landmarks GROUP BY landmark ORDER BY count DESC",
+    );
+    Map<String, int> result = {};
+    for (var r in rows) {
+      result[r['landmark'] as String] = r['count'] as int;
+    }
+    return result;
   }
 
   Future<Map<String, int>> sourceCountsByType() async {
