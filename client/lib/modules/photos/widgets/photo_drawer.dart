@@ -352,6 +352,7 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                                     count: count > 0 ? count : null,
                                     isActive: isActive,
                                     onSecondaryAction: () => _deleteAlbum(album.id),
+                                    secondaryActionTooltip: 'Delete album',
                                     onTap: () {
                                       final newFilter = isActive
                                           ? const PhotoFilter()

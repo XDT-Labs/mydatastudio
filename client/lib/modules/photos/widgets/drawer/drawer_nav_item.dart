@@ -11,6 +11,7 @@ class DrawerNavItem extends StatelessWidget {
     this.isActive = false,
     this.onSecondaryAction,
     this.secondaryActionIcon = Icons.delete_outline,
+    this.secondaryActionTooltip,
   });
 
   final String label;
@@ -20,6 +21,7 @@ class DrawerNavItem extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onSecondaryAction;
   final IconData secondaryActionIcon;
+  final String? secondaryActionTooltip;
 
   @override
   Widget build(BuildContext context) {
@@ -90,6 +92,7 @@ class DrawerNavItem extends StatelessWidget {
               if (onSecondaryAction != null) ...[
                 const SizedBox(width: 4),
                 IconButton(
+                  tooltip: secondaryActionTooltip,
                   icon: Icon(
                     secondaryActionIcon,
                     size: 18,
