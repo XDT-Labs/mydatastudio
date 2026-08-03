@@ -14,11 +14,19 @@ class FakePhotosRepository extends PhotosRepository {
   bool albumDeleted = false;
   (String id, String name, String? desc)? updatedAlbum;
 
+  PhotoFilter? capturedFilter;
+
   @override
   Future<Album?> getAlbum(String albumId) async => testAlbum;
 
   @override
-  Future<List<File>> photos({PhotoFilter? filter}) async => albumFiles;
+  Future<List<File>> photos({PhotoFilter? filter}) async {
+    capturedFilter = filter;
+    if (filter != null && filter.albumId == testAlbum?.id) {
+      return albumFiles;
+    }
+    return [];
+  }
 
   @override
   Future<void> updateAlbum(String albumId, String name, String? description) async {
@@ -100,6 +108,8 @@ void main() {
       expect(find.text('Summer Trip 2026'), findsOneWidget);
       expect(find.text('Photos from the beach trip'), findsOneWidget);
       expect(find.text('2 photos'), findsOneWidget);
+      expect(fakeRepo.capturedFilter, isNotNull);
+      expect(fakeRepo.capturedFilter!.albumId, equals('a100'));
     });
 
     testWidgets('shows edit album dialog and updates title and description', (tester) async {
