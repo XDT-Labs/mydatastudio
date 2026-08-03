@@ -38,6 +38,8 @@ class _PhotoMapViewState extends State<PhotoMapView> {
   double _currentZoom = 10.0;
   File? _activePlaybackFile;
   late List<File> _cachedGeoFiles;
+  int? _cachedZoomBucket;
+  List<_PhotoCluster>? _cachedClusters;
 
   List<File> get _geoFiles => _cachedGeoFiles;
 
@@ -47,6 +49,8 @@ class _PhotoMapViewState extends State<PhotoMapView> {
         .toList();
     validFiles.sort((a, b) => a.dateCreated.compareTo(b.dateCreated));
     _cachedGeoFiles = validFiles;
+    _cachedZoomBucket = null;
+    _cachedClusters = null;
   }
 
   @override
@@ -250,10 +254,25 @@ class _PhotoMapViewState extends State<PhotoMapView> {
     );
   }
 
+  List<_PhotoCluster> _getClusters(List<File> files, double zoom) {
+    final bucket = zoom.round();
+    if (_cachedZoomBucket == bucket && _cachedClusters != null) {
+      return _cachedClusters!;
+    }
+    final threshold = zoom < 8
+        ? 0.5
+        : zoom < 12
+            ? 0.1
+            : 0.02;
+    _cachedZoomBucket = bucket;
+    _cachedClusters = _clusterFiles(files, threshold);
+    return _cachedClusters!;
+  }
+
   List<Marker> _buildMarkers(List<File> geoFiles, ThemeData theme) {
     final List<Marker> markers = [];
-    if (_currentZoom < 8.0) {
-      final clusters = _clusterFiles(geoFiles, 0.5);
+    if (_currentZoom < 14) {
+      final clusters = _getClusters(geoFiles, _currentZoom);
       for (final cluster in clusters) {
         if (cluster.files.length == 1) {
           markers.add(_buildSingleMarker(cluster.files.first, theme));
