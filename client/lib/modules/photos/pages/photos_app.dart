@@ -18,13 +18,17 @@ import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 
 /// Main orchestration page for the Photos application module.
 class PhotosApp extends StatefulWidget {
-  const PhotosApp({super.key});
+  const PhotosApp({super.key, this.photosRepository});
+
+  final PhotosRepository? photosRepository;
 
   @override
   State<PhotosApp> createState() => _PhotosAppState();
 }
 
 class _PhotosAppState extends State<PhotosApp> {
+  late final PhotosRepository _photosRepo;
+
   StreamSubscription? _viewModeSub;
   StreamSubscription? _photosSub;
   StreamSubscription? _infoOpenSub;
@@ -41,6 +45,7 @@ class _PhotosAppState extends State<PhotosApp> {
   @override
   void initState() {
     super.initState();
+    _photosRepo = widget.photosRepository ?? PhotosRepository();
     _viewMode = ViewStateService.instance.viewMode.value;
     _files = PhotosService.instance.sink.valueOrNull ?? [];
     _isInfoOpen = ViewStateService.instance.isInfoOpen.value;
@@ -52,7 +57,7 @@ class _PhotosAppState extends State<PhotosApp> {
     });
 
     _photosSub = PhotosService.instance.sink.listen((files) {
-      if (mounted) setState(() => _files = files ?? []);
+      if (mounted) setState(() => _files = files);
     });
 
     _infoOpenSub = ViewStateService.instance.isInfoOpen.listen((isOpen) {
@@ -67,8 +72,8 @@ class _PhotosAppState extends State<PhotosApp> {
       PhotosService.instance.invoke(PhotosServiceCommand(filter));
     });
 
-    _selectionSub = SelectionService.instance.selectedIds.listen((selected) {
-      if (mounted) setState(() => _selectedIds = selected);
+    _selectionSub = SelectionService.instance.selectedIds.listen((ids) {
+      if (mounted) setState(() => _selectedIds = ids);
     });
   }
 
@@ -108,6 +113,13 @@ class _PhotosAppState extends State<PhotosApp> {
     }
   }
 
+  Widget _buildInfoPanel() {
+    return AnimatedInfoPanel(
+      isOpen: _isInfoOpen,
+      child: const InfoSidebar(),
+    );
+  }
+
   Widget _buildStatusBar(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -130,7 +142,12 @@ class _PhotosAppState extends State<PhotosApp> {
     return Container(
       height: 32,
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      color: colorScheme.surfaceContainerLow,
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainer,
+        border: Border(
+          top: BorderSide(color: colorScheme.outlineVariant),
+        ),
+      ),
       child: Row(
         children: [
           Text(
@@ -165,10 +182,7 @@ class _PhotosAppState extends State<PhotosApp> {
                     Expanded(
                       child: _buildActiveView(),
                     ),
-                    AnimatedInfoPanel(
-                      isOpen: _isInfoOpen,
-                      child: const InfoSidebar(),
-                    ),
+                    _buildInfoPanel(),
                   ],
                 ),
               ),
@@ -186,7 +200,7 @@ class _PhotosAppState extends State<PhotosApp> {
                       onClose: () => ViewStateService.instance.setLightboxMedia(null),
                       onOpenInfo: (file) => ViewStateService.instance.openInfo(file),
                       onToggleFavorite: (file) async {
-                        await PhotosRepository().toggleFavorite(file.id);
+                        await _photosRepo.toggleFavorite(file.id);
                         final updatedList = await PhotosService.instance.refresh();
                         final updated = updatedList.firstWhere(
                           (f) => f.id == file.id,
@@ -196,10 +210,7 @@ class _PhotosAppState extends State<PhotosApp> {
                       },
                     ),
                   ),
-                  AnimatedInfoPanel(
-                    isOpen: _isInfoOpen,
-                    child: const InfoSidebar(),
-                  ),
+                  _buildInfoPanel(),
                 ],
               ),
             ),
