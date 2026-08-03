@@ -1,5 +1,9 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/modules/photos/services/photos_service.dart';
+import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 
 /// Simple file picker dialog for importing local photos and videos.
 class ImportDialog extends StatefulWidget {
@@ -60,18 +64,65 @@ class _ImportDialogState extends State<ImportDialog> {
 
     setState(() => _isImporting = true);
 
-    // Simulate import processing
-    await Future.delayed(const Duration(milliseconds: 600));
+    final db = DatabaseManager.instance.database;
+    if (db == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Database is not initialized for import.')),
+        );
+        setState(() => _isImporting = false);
+      }
+      return;
+    }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Successfully imported ${_selectedFiles.length} item(s)',
+    try {
+      int importedCount = 0;
+      for (final pf in _selectedFiles) {
+        if (pf.path == null) continue;
+        final fileId = const Uuid().v4();
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final ext = pf.extension?.toLowerCase() ?? '';
+        final mimeType = ['mp4', 'mov', 'avi', 'mkv'].contains(ext)
+            ? 'video/$ext'
+            : 'image/${ext.isEmpty ? 'jpeg' : ext}';
+
+        await db.execute('''
+          INSERT INTO files (
+            id, name, path, parent, date_created, date_last_modified,
+            collection_id, content_type, size, is_deleted
+          ) VALUES (?, ?, ?, ?, ?, ?, 'local_import', ?, ?, 0)
+        ''', [
+          fileId,
+          pf.name,
+          pf.path,
+          p.dirname(pf.path!),
+          now,
+          now,
+          mimeType,
+          pf.size,
+        ]);
+        importedCount++;
+      }
+
+      if (mounted && importedCount > 0) {
+        await PhotosService.instance.refresh();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Successfully imported $importedCount item(s)'),
           ),
-        ),
-      );
-      Navigator.of(context).pop(true);
+        );
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to import files: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isImporting = false);
+      }
     }
   }
 
