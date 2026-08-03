@@ -193,8 +193,8 @@ class _PhotoMapViewState extends State<PhotoMapView> {
               boxShadow: [
                 BoxShadow(
                   color: isActive
-                      ? colorScheme.primary.withOpacity(0.8)
-                      : colorScheme.primary.withOpacity(0.4),
+                      ? colorScheme.primary.withValues(alpha: 0.8)
+                      : colorScheme.primary.withValues(alpha: 0.4),
                   blurRadius: isActive ? 12 : 6,
                   spreadRadius: isActive ? 3 : 1,
                 ),
@@ -233,7 +233,7 @@ class _PhotoMapViewState extends State<PhotoMapView> {
             ),
             boxShadow: [
               BoxShadow(
-                color: colorScheme.primary.withOpacity(0.3),
+                color: colorScheme.primary.withValues(alpha: 0.3),
                 blurRadius: 6,
                 spreadRadius: 1,
               ),
@@ -304,7 +304,7 @@ class _PhotoMapViewState extends State<PhotoMapView> {
               Icon(
                 Icons.map_outlined,
                 size: 64,
-                color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
+                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
               ),
               const SizedBox(height: 16),
               Text(

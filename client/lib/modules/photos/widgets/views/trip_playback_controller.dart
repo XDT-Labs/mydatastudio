@@ -178,7 +178,7 @@ class _TripPlaybackControllerState extends State<TripPlaybackController> {
 
     return Card(
       elevation: 6,
-      color: colorScheme.surfaceContainerHigh.withOpacity(0.95),
+      color: colorScheme.surfaceContainerHigh.withValues(alpha: 0.95),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: colorScheme.outlineVariant),

@@ -98,7 +98,7 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
                     Positioned.fill(
                       child: IgnorePointer(
                         child: Container(
-                          color: colorScheme.primary.withOpacity(0.2),
+                          color: colorScheme.primary.withValues(alpha: 0.2),
                         ),
                       ),
                     ),
@@ -142,9 +142,9 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
                                 begin: Alignment.topCenter,
                                 end: Alignment.bottomCenter,
                                 colors: [
-                                  Colors.black.withOpacity(0.5),
+                                  Colors.black.withValues(alpha: 0.5),
                                   Colors.transparent,
-                                  Colors.black.withOpacity(0.6),
+                                  Colors.black.withValues(alpha: 0.6),
                                 ],
                                 stops: const [0.0, 0.5, 1.0],
                               ),
@@ -207,7 +207,7 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: Colors.black.withOpacity(0.7),
+                                          color: Colors.black.withValues(alpha: 0.7),
                                           borderRadius:
                                               BorderRadius.circular(4),
                                         ),
@@ -239,7 +239,7 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: Colors.black.withOpacity(0.7),
+                                          color: Colors.black.withValues(alpha: 0.7),
                                           borderRadius:
                                               BorderRadius.circular(4),
                                         ),

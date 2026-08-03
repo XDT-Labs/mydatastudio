@@ -69,7 +69,7 @@ class TimelineQuickJump extends StatelessWidget {
                           ),
                         ),
                         color: isActive
-                            ? colorScheme.primaryContainer.withOpacity(0.15)
+                            ? colorScheme.primaryContainer.withValues(alpha: 0.15)
                             : Colors.transparent,
                       ),
                       child: Column(
@@ -94,9 +94,9 @@ class TimelineQuickJump extends StatelessWidget {
                               '$count',
                               style: textTheme.labelSmall?.copyWith(
                                 color: isActive
-                                    ? colorScheme.primary.withOpacity(0.8)
+                                    ? colorScheme.primary.withValues(alpha: 0.8)
                                     : colorScheme.onSurfaceVariant
-                                        .withOpacity(0.7),
+                                        .withValues(alpha: 0.7),
                                 fontSize: 9,
                               ),
                               textAlign: TextAlign.center,

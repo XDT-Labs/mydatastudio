@@ -106,7 +106,7 @@ class _PhotoListViewState extends State<PhotoListView> {
             Icon(
               Icons.photo_library,
               size: 64,
-              color: colorScheme.onSurfaceVariant.withOpacity(0.5),
+              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
             ),
             const SizedBox(height: 16),
             Text(
@@ -338,7 +338,7 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
     final imageProvider = ThumbnailResolver.providerFor(widget.file.thumbnail);
 
     final backgroundColor = widget.isSelected
-        ? colorScheme.primaryContainer.withOpacity(0.15)
+        ? colorScheme.primaryContainer.withValues(alpha: 0.15)
         : (_isHovered ? colorScheme.surfaceContainerHigh : Colors.transparent);
 
     return MouseRegion(
@@ -356,7 +356,7 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
                 width: 3,
               ),
               bottom: BorderSide(
-                color: colorScheme.outlineVariant.withOpacity(0.3),
+                color: colorScheme.outlineVariant.withValues(alpha: 0.3),
                 width: 0.5,
               ),
             ),
