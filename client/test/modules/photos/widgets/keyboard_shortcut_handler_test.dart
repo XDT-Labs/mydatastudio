@@ -122,6 +122,25 @@ void main() {
       expect(SelectionService.instance.selectedIds.value, containsAll(['f1', 'f2']));
     });
 
+    testWidgets('Cmd+A selects all visible items on macOS', (tester) async {
+      SelectionService.instance.deselectAll();
+      await tester.pumpWidget(createTestApp(
+        KeyboardShortcutHandler(
+          child: Container(),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(SelectionService.instance.selectedIds.value, isEmpty);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+      await tester.pumpAndSettle();
+
+      expect(SelectionService.instance.selectedIds.value, containsAll(['f1', 'f2']));
+    });
+
     testWidgets('? key opens KeyboardShortcutsModal dialog', (tester) async {
       await tester.pumpWidget(createTestApp(
         KeyboardShortcutHandler(
