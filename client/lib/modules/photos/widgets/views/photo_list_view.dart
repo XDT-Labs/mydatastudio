@@ -67,24 +67,32 @@ class _PhotoListViewState extends State<PhotoListView> {
 
   void _onSortHeaderTapped(PhotoSortOrder targetSort) {
     PhotoSortOrder newSort = targetSort;
-    if (targetSort == PhotoSortOrder.dateDesc) {
+    if (targetSort == PhotoSortOrder.dateDesc || targetSort == PhotoSortOrder.dateAsc) {
       if (_currentFilter.sortBy == PhotoSortOrder.dateDesc) {
         newSort = PhotoSortOrder.dateAsc;
       } else {
         newSort = PhotoSortOrder.dateDesc;
       }
+    } else {
+      newSort = targetSort;
     }
     ViewStateService.instance.setSortOrder(newSort);
   }
 
   Widget _buildSortIndicator(PhotoSortOrder sortKey) {
-    if (_currentFilter.sortBy == sortKey) {
-      return const Padding(
-        padding: EdgeInsets.only(left: 4.0),
-        child: Icon(Icons.arrow_downward, size: 14),
-      );
-    } else if (sortKey == PhotoSortOrder.dateDesc &&
-        _currentFilter.sortBy == PhotoSortOrder.dateAsc) {
+    if (sortKey == PhotoSortOrder.dateDesc || sortKey == PhotoSortOrder.dateAsc) {
+      if (_currentFilter.sortBy == PhotoSortOrder.dateDesc) {
+        return const Padding(
+          padding: EdgeInsets.only(left: 4.0),
+          child: Icon(Icons.arrow_downward, size: 14),
+        );
+      } else if (_currentFilter.sortBy == PhotoSortOrder.dateAsc) {
+        return const Padding(
+          padding: EdgeInsets.only(left: 4.0),
+          child: Icon(Icons.arrow_upward, size: 14),
+        );
+      }
+    } else if (_currentFilter.sortBy == sortKey) {
       return const Padding(
         padding: EdgeInsets.only(left: 4.0),
         child: Icon(Icons.arrow_upward, size: 14),
