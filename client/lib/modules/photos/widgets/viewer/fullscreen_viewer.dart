@@ -333,10 +333,16 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
                         // Favorite toggle
                         IconButton(
                           icon: Icon(
-                            Icons.favorite_border,
-                            color: theme.colorScheme.onSurface,
+                            media.isFavorite
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                            color: media.isFavorite
+                                ? Colors.red
+                                : theme.colorScheme.onSurface,
                           ),
-                          tooltip: 'Favorite',
+                          tooltip: media.isFavorite
+                              ? 'Remove from favorites'
+                              : 'Favorite',
                           onPressed: () =>
                               widget.onToggleFavorite?.call(media),
                         ),

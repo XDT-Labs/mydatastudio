@@ -107,10 +107,13 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
 
     if (lightboxMedia != null) {
       await repo.toggleFavorite(lightboxMedia.id);
+      await PhotosService.instance.refresh();
     } else if (selectedIds.isNotEmpty) {
       await BatchActionService.instance.favoriteSelected(selectedIds);
+      await PhotosService.instance.refresh();
     } else if (infoMedia != null) {
       await repo.toggleFavorite(infoMedia.id);
+      await PhotosService.instance.refresh();
     }
   }
 

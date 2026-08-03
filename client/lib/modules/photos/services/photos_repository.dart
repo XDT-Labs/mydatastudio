@@ -312,7 +312,7 @@ class PhotosRepository {
     AppDatabase? db = DatabaseManager.instance.database;
     if (db == null) return (usedBytes: 0, totalBytes: 0);
 
-    final rows = await db.select("SELECT SUM(size) as total_size FROM files WHERE 1=1 $_excludeDeleted AND $_isMedia", [FilesConstants.mimeTypeImage]);
+    final rows = await db.select("SELECT SUM(f.size) as total_size FROM files f WHERE 1=1 $_excludeDeleted AND $_isMedia", [FilesConstants.mimeTypeImage]);
     int usedBytes = 0;
     if (rows.isNotEmpty) {
       usedBytes = rows.first['total_size'] as int? ?? 0;

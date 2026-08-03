@@ -8,6 +8,7 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
+import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 
@@ -221,11 +222,12 @@ class _PhotoListViewState extends State<PhotoListView> {
                     SelectionService.instance.toggle(file.id);
                   }
                 },
-                onToggleFavorite: () {
+                onToggleFavorite: () async {
                   if (widget.onToggleFavoriteRow != null) {
                     widget.onToggleFavoriteRow!(file);
                   } else {
-                    PhotosRepository().toggleFavorite(file.id);
+                    await PhotosRepository().toggleFavorite(file.id);
+                    await PhotosService.instance.refresh();
                   }
                 },
                 onOpenLightbox: () {

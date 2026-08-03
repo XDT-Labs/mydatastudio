@@ -5,6 +5,8 @@ import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/services/rx_service.dart';
 import 'package:rxdart/rxdart.dart';
 
+import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
+
 class PhotosServiceCommand extends RxCommand {
   final PhotoFilter filter;
   PhotosServiceCommand(this.filter);
@@ -24,6 +26,11 @@ class PhotosService extends RxService<PhotosServiceCommand, List<File>> {
   final BehaviorSubject<Map<String, int>> tagCounts = BehaviorSubject<Map<String, int>>();
   final BehaviorSubject<Map<String, int>> locationCounts = BehaviorSubject<Map<String, int>>();
   final BehaviorSubject<Map<String, int>> sourceCounts = BehaviorSubject<Map<String, int>>();
+
+  Future<List<File>> refresh() async {
+    final filter = ViewStateService.instance.activeFilter.valueOrNull ?? const PhotoFilter();
+    return invoke(PhotosServiceCommand(filter));
+  }
 
   @override
   Future<List<File>> invoke(PhotosServiceCommand command) async {

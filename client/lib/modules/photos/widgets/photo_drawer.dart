@@ -71,7 +71,10 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
       });
 
       _photosSub = PhotosService.instance.sink.listen((photos) {
-        if (mounted) setState(() => _photos = photos);
+        if (mounted) {
+          setState(() => _photos = photos);
+          _loadLibraryCounts();
+        }
       });
 
       _loadAlbums();

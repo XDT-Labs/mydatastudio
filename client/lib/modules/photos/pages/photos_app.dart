@@ -14,6 +14,8 @@ import 'package:mydatastudio/modules/photos/widgets/views/photo_list_view.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_map_view.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_timeline_view.dart';
 
+import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
+
 /// Main orchestration page for the Photos application module.
 class PhotosApp extends StatefulWidget {
   const PhotosApp({super.key});
@@ -185,6 +187,15 @@ class _PhotosAppState extends State<PhotosApp> {
               currentFile: _lightboxMedia!,
               mediaList: _files,
               onClose: () => ViewStateService.instance.setLightboxMedia(null),
+              onToggleFavorite: (file) async {
+                await PhotosRepository().toggleFavorite(file.id);
+                final updatedList = await PhotosService.instance.refresh();
+                final updated = updatedList.firstWhere(
+                  (f) => f.id == file.id,
+                  orElse: () => file..isFavorite = !file.isFavorite,
+                );
+                ViewStateService.instance.setLightboxMedia(updated);
+              },
             ),
         ],
       ),

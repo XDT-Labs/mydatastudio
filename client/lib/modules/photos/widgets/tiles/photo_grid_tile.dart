@@ -41,6 +41,7 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
         widget.file.latitude != null && widget.file.longitude != null;
 
     final imageProvider = ThumbnailResolver.providerFor(widget.file.thumbnail);
+    final isFav = widget.isFavorite || widget.file.isFavorite;
     final showOverlay = _isHovered || widget.isSelected;
 
     return Focus(
@@ -102,6 +103,27 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
                       ),
                     ),
 
+                  // Persistent Favorite Badge (when not hovering and favorited)
+                  if (isFav && !showOverlay)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: IgnorePointer(
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.favorite,
+                            color: Colors.red,
+                            size: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+
                   // Hover / Selection Overlay Controls
                   Positioned.fill(
                     child: AnimatedOpacity(
@@ -152,15 +174,15 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
                                 right: 4,
                                 child: IconButton(
                                   icon: Icon(
-                                    widget.isFavorite
+                                    isFav
                                         ? Icons.favorite
                                         : Icons.favorite_border,
-                                    color: widget.isFavorite
+                                    color: isFav
                                         ? Colors.red
                                         : Colors.white70,
                                   ),
                                   onPressed: widget.onToggleFavorite,
-                                  tooltip: widget.isFavorite
+                                  tooltip: isFav
                                       ? 'Remove from favorites'
                                       : 'Favorite',
                                   constraints: const BoxConstraints(),

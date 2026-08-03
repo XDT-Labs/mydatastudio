@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
+import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/tiles/date_section_header.dart';
@@ -129,6 +130,7 @@ class PhotoGrid extends StatelessWidget {
                     return PhotoGridTile(
                       file: file,
                       isSelected: isSelected,
+                      isFavorite: file.isFavorite,
                       onTap: () {
                         if (onTapTile != null) {
                           onTapTile!(file);
@@ -143,11 +145,12 @@ class PhotoGrid extends StatelessWidget {
                           SelectionService.instance.toggle(file.id);
                         }
                       },
-                      onToggleFavorite: () {
+                      onToggleFavorite: () async {
                         if (onToggleFavoriteTile != null) {
                           onToggleFavoriteTile!(file);
                         } else {
-                          PhotosRepository().toggleFavorite(file.id);
+                          await PhotosRepository().toggleFavorite(file.id);
+                          await PhotosService.instance.refresh();
                         }
                       },
                       onOpenLightbox: () {
