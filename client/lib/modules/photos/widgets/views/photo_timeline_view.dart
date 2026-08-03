@@ -246,7 +246,7 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
                         if (widget.onTapTile != null) {
                           widget.onTapTile!(file);
                         } else {
-                          SelectionService.instance.selectSingle(file.id);
+                          SelectionService.instance.handleTap(file, widget.files);
                           ViewStateService.instance.setInfoMedia(file);
                         }
                       },

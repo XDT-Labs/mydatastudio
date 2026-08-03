@@ -205,7 +205,7 @@ class _PhotoListViewState extends State<PhotoListView> {
                   if (widget.onTapRow != null) {
                     widget.onTapRow!(file);
                   } else {
-                    SelectionService.instance.selectSingle(file.id);
+                    SelectionService.instance.handleTap(file, widget.files);
                     ViewStateService.instance.setInfoMedia(file);
                   }
                 },
