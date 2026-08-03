@@ -185,6 +185,28 @@ class PhotosRepository {
     return result;
   }
 
+  Future<({int total, int favorites, int videos})> libraryCounts() async {
+    AppDatabase? db = DatabaseManager.instance.database;
+    if (db == null) return (total: 0, favorites: 0, videos: 0);
+
+    final rows = await db.select('''
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN f.is_favorite = 1 THEN 1 ELSE 0 END) as favorites,
+        SUM(CASE WHEN f.content_type LIKE 'video/%' THEN 1 ELSE 0 END) as videos
+      FROM files f
+      WHERE 1=1 $_excludeInline $_excludeDeleted AND $_isMedia
+    ''', [FilesConstants.mimeTypeImage]);
+
+    if (rows.isEmpty) return (total: 0, favorites: 0, videos: 0);
+    final row = rows.first;
+    return (
+      total: (row['total'] as int? ?? 0),
+      favorites: (row['favorites'] as int? ?? 0),
+      videos: (row['videos'] as int? ?? 0),
+    );
+  }
+
   Future<void> toggleFavorite(String fileId) async {
     AppDatabase? db = DatabaseManager.instance.database;
     if (db == null) return;

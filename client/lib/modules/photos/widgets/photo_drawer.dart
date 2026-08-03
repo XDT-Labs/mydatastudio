@@ -70,9 +70,8 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
         if (mounted) setState(() => _locationCounts = counts);
       });
 
-      _photosSub = PhotosService.instance.sink.listen((photos) {
+      _photosSub = PhotosService.instance.sink.listen((_) {
         if (mounted) {
-          setState(() => _photos = photos);
           _loadLibraryCounts();
         }
       });
@@ -112,12 +111,12 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
   }
 
   Future<void> _loadLibraryCounts() async {
-    final allPhotos = await PhotosRepository().photos(filter: const PhotoFilter());
+    final counts = await PhotosRepository().libraryCounts();
     if (!mounted) return;
     setState(() {
-      _allCount = allPhotos.length;
-      _favoritesCount = allPhotos.where((f) => f.isFavorite).length;
-      _videosCount = allPhotos.where((f) => f.contentType.startsWith('video/')).length;
+      _allCount = counts.total;
+      _favoritesCount = counts.favorites;
+      _videosCount = counts.videos;
     });
   }
 
