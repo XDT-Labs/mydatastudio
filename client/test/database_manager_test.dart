@@ -294,10 +294,9 @@ void main() {
     );
 
     Future<void> expectMetadataSchemaMigrated(
-      AppDatabase Function() reopen,
+      AppDatabase appDb,
       String dbFile,
     ) async {
-      final appDb = reopen();
       final embeddingRows = await appDb.rawDb.select(
         'SELECT type FROM files_embeddings WHERE file_id = ?',
         ['f1'],
@@ -386,7 +385,7 @@ void main() {
 
         // Reopening is what an upgraded install does.
         appDb = await AppDatabase.create(null, supportDir.path, dbName);
-        await expectMetadataSchemaMigrated(() => appDb, dbFile.path);
+        await expectMetadataSchemaMigrated(appDb, dbFile.path);
       },
     );
 
@@ -426,7 +425,7 @@ void main() {
         await appDb.close();
 
         appDb = await AppDatabase.create(null, supportDir.path, dbName);
-        await expectMetadataSchemaMigrated(() => appDb, dbFile.path);
+        await expectMetadataSchemaMigrated(appDb, dbFile.path);
       },
     );
 

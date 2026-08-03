@@ -16,7 +16,11 @@ Future<void> handleFileDescriptionMessage(
   final description = message['description'] as String;
   final tags = (message['tags'] as List).cast<String>();
   final landmarks = (message['landmarks'] as List).cast<String>();
-  final embedding = (message['embedding'] as List).cast<double>();
+  // Not .cast<double>(): JSON-decoded whole-number components (0, 1, ...)
+  // come through as int, and cast's runtime type check throws on those
+  // instead of converting them.
+  final embedding =
+      (message['embedding'] as List).map((e) => (e as num).toDouble()).toList();
 
   await repo.saveFileDescription(
     id,

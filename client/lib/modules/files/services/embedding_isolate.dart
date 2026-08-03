@@ -200,6 +200,12 @@ class EmbeddingIsolate {
     // Initial delay to let everything settle
     await Future.delayed(const Duration(seconds: 5));
 
+    // A full batch means there's likely more backlog waiting, so the
+    // heartbeat sleep below stays short; a partial batch means the queue
+    // just got drained, so it's fine to back off.
+    const kBatchSize = 10;
+    var lastBatchLength = 0;
+
     while (true) {
       try {
         if (isPaused) {
@@ -223,7 +229,10 @@ class EmbeddingIsolate {
         }
 
         // Query for a batch of files with missing embeddings
-        final files = await repo.getFilesWithMissingEmbeddings(limit: 10);
+        final files = await repo.getFilesWithMissingEmbeddings(
+          limit: kBatchSize,
+        );
+        lastBatchLength = files.length;
 
         if (files.isEmpty) {
           //logger.d("No files with missing embeddings found. Sleeping...");
@@ -291,8 +300,13 @@ class EmbeddingIsolate {
         await Future.delayed(const Duration(seconds: 30));
       }
 
-      // Heartbeat sleep
-      await Future.delayed(const Duration(seconds: 10));
+      // Heartbeat sleep — short when the last batch was full (more backlog
+      // likely waiting), otherwise the usual pace.
+      await Future.delayed(
+        lastBatchLength >= kBatchSize
+            ? const Duration(seconds: 1)
+            : const Duration(seconds: 10),
+      );
     }
   }
 

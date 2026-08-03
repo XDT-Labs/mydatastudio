@@ -56,6 +56,7 @@ class FileDescriptionIsolate {
   ReceivePort? _receivePort;
   SendPort? _controlPort;
   VoidCallback? _vaultListener;
+  StreamSubscription<String?>? _urlSubscription;
   final SequentialWriteQueue _writeQueue = SequentialWriteQueue();
 
   Future<void> start(
@@ -138,11 +139,20 @@ class FileDescriptionIsolate {
             }
             await handleFileDescriptionMessage(repo, data, logger);
           });
+        } else if (type == 'descriptionFailed') {
+          // Records a failed attempt so a file that can never succeed
+          // eventually drops out of getFilesWithMissingDescriptions instead
+          // of being retried forever — see maxDescriptionAttempts.
+          _writeQueue.add(() async {
+            final repo = DatabaseManager.instance.repository;
+            if (repo == null) return;
+            await repo.incrementDescriptionAttempts(data['id'] as String);
+          });
         }
       }
     });
 
-    MainApp.llmServiceUrl.listen((url) {
+    _urlSubscription = MainApp.llmServiceUrl.listen((url) {
       if (url != null) {
         updateUrl(url);
       }
@@ -264,6 +274,7 @@ class FileDescriptionIsolate {
             final rawBytes = await FileBytesLoader.load(file, repo, logger);
             if (rawBytes == null) {
               logger.w("Skipped unprocessable file: ${file.path}");
+              replyTo.send({'type': 'descriptionFailed', 'id': file.id});
               continue;
             }
 
@@ -279,6 +290,7 @@ class FileDescriptionIsolate {
                 "Skipped file whose image format couldn't be converted: "
                 "${file.path}",
               );
+              replyTo.send({'type': 'descriptionFailed', 'id': file.id});
               continue;
             }
 
@@ -290,6 +302,7 @@ class FileDescriptionIsolate {
             );
             if (analysis == null) {
               logger.w("Skipped file with no usable analysis: ${file.path}");
+              replyTo.send({'type': 'descriptionFailed', 'id': file.id});
               continue;
             }
 
@@ -303,6 +316,7 @@ class FileDescriptionIsolate {
               logger.w(
                 "Skipped file with no description embedding: ${file.path}",
               );
+              replyTo.send({'type': 'descriptionFailed', 'id': file.id});
               continue;
             }
 
@@ -320,6 +334,7 @@ class FileDescriptionIsolate {
             logger.d("Sent description for file: ${file.path}");
           } catch (e) {
             logger.e("Error processing file ${file.path}: $e");
+            replyTo.send({'type': 'descriptionFailed', 'id': file.id});
           }
         }
       } catch (e, stack) {
@@ -445,34 +460,41 @@ class FileDescriptionIsolate {
     final base64Image = base64Encode(bytes);
 
     try {
-      final response = await http.post(
-        Uri.parse('$serviceUrl/v1/chat/completions'),
-        headers: {
-          'Content-Type': 'application/json',
-          ...aiServerAuthHeaders(serviceToken),
-        },
-        body: jsonEncode({
-          // No 'model': the server defaults to the vision-capable Gemma
-          // model configured as DEFAULT_MODEL_ALIAS.
-          'messages': [
-            {
-              'role': 'user',
-              'content': [
-                {
-                  'type': 'image_url',
-                  'image_url': {'url': 'data:image/jpeg;base64,$base64Image'},
-                },
-                {'type': 'text', 'text': _kDescriptionPrompt},
-              ],
+      final response = await http
+          .post(
+            Uri.parse('$serviceUrl/v1/chat/completions'),
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(serviceToken),
             },
-          ],
-          'stream': false,
-          'response_format': {
-            'type': 'json_object',
-            'schema': _kDescriptionSchema,
-          },
-        }),
-      );
+            body: jsonEncode({
+              // No 'model': the server defaults to the vision-capable Gemma
+              // model configured as DEFAULT_MODEL_ALIAS.
+              'messages': [
+                {
+                  'role': 'user',
+                  'content': [
+                    {
+                      'type': 'image_url',
+                      'image_url': {
+                        'url': 'data:image/jpeg;base64,$base64Image',
+                      },
+                    },
+                    {'type': 'text', 'text': _kDescriptionPrompt},
+                  ],
+                },
+              ],
+              'stream': false,
+              'response_format': {
+                'type': 'json_object',
+                'schema': _kDescriptionSchema,
+              },
+            }),
+          )
+          // Local LLM inference on a large image is genuinely slow — this is
+          // generous headroom, not a normal-case bound — but an unresponsive
+          // aiserver must not hang this isolate's loop forever.
+          .timeout(const Duration(minutes: 5));
 
       if (response.statusCode != 200) {
         logger.e(
@@ -551,22 +573,27 @@ class FileDescriptionIsolate {
     AppLogger logger,
   ) async {
     try {
-      final response = await http.post(
-        Uri.parse("$serviceUrl/util/embedding"),
-        headers: {
-          'Content-Type': 'application/json',
-          ...aiServerAuthHeaders(serviceToken),
-        },
-        body: jsonEncode({
-          'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
-          'text': text,
-        }),
-      );
+      final response = await http
+          .post(
+            Uri.parse("$serviceUrl/util/embedding"),
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(serviceToken),
+            },
+            body: jsonEncode({
+              'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+              'text': text,
+            }),
+          )
+          .timeout(const Duration(seconds: 60));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final List<dynamic> embData = data['embedding'];
-        return embData.cast<double>();
+        // Not .cast<double>(): JSON-decoded whole-number components (0, 1,
+        // ...) come through as int, and cast's runtime type check throws on
+        // those instead of converting them.
+        return embData.map((e) => (e as num).toDouble()).toList();
       } else {
         logger.e(
           "Python service error: ${response.statusCode} ${response.body}",
@@ -584,6 +611,8 @@ class FileDescriptionIsolate {
       VaultManager.instance.unlocked.removeListener(_vaultListener!);
       _vaultListener = null;
     }
+    await _urlSubscription?.cancel();
+    _urlSubscription = null;
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
     await _writeQueue.whenIdle.timeout(

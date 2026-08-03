@@ -174,6 +174,12 @@ class EmailEmbeddingIsolate {
 
     await Future.delayed(const Duration(seconds: 5));
 
+    // A full batch means there's likely more backlog waiting, so the
+    // heartbeat sleep below stays short; a partial batch means the queue
+    // just got drained, so it's fine to back off.
+    const kBatchSize = 10;
+    var lastBatchLength = 0;
+
     while (true) {
       try {
         if (isPaused) {
@@ -197,7 +203,10 @@ class EmailEmbeddingIsolate {
           continue;
         }
 
-        final emails = await repo.getEmailsWithMissingEmbeddings(limit: 10);
+        final emails = await repo.getEmailsWithMissingEmbeddings(
+          limit: kBatchSize,
+        );
+        lastBatchLength = emails.length;
 
         if (emails.isEmpty) {
           await Future.delayed(const Duration(minutes: 1));
@@ -252,7 +261,13 @@ class EmailEmbeddingIsolate {
         await Future.delayed(const Duration(seconds: 30));
       }
 
-      await Future.delayed(const Duration(seconds: 10));
+      // Short when the last batch was full (more backlog likely waiting),
+      // otherwise the usual pace.
+      await Future.delayed(
+        lastBatchLength >= kBatchSize
+            ? const Duration(seconds: 1)
+            : const Duration(seconds: 10),
+      );
     }
   }
 

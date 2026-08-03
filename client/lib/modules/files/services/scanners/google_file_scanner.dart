@@ -391,10 +391,9 @@ class CloudFileIsolateWorker {
           'CloudFileIsolate: token refresh failed for "$collectionName": $e',
         );
         try {
-          await appDb.execute(
-            'UPDATE collections SET needs_re_auth = 1 WHERE id = ?',
-            [collectionId],
-          );
+          await writeViaMain(args['port'] as SendPort, 'needsReAuth', {
+            'collectionId': collectionId,
+          });
         } catch (updateError) {
           logger.w(
             'CloudFileIsolate: failed to flag needsReAuth: $updateError',

@@ -207,10 +207,9 @@ class GmailScannerIsolateWorker {
         // user to reconnect, instead of this scan failing silently forever.
         logger.e("Failed to validate Gmail token: $e");
         try {
-          await appDb.execute(
-            'UPDATE collections SET needs_re_auth = 1 WHERE id = ?',
-            [collection.id],
-          );
+          await writeViaMain(clientPort, 'needsReAuth', {
+            'collectionId': collection.id,
+          });
         } catch (updateError) {
           logger.w("Failed to flag needsReAuth: $updateError");
         }

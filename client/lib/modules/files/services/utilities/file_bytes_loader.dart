@@ -58,7 +58,9 @@ class FileBytesLoader {
           collection.expiration!.subtract(const Duration(minutes: 5)),
         );
 
-    if (nearExpiry && collection.refreshToken != null) {
+    if (nearExpiry &&
+        collection.accessToken != null &&
+        collection.refreshToken != null) {
       try {
         final result = await GoogleAuthService.refreshTokens(
           accessToken: collection.accessToken!,
@@ -95,12 +97,13 @@ class FileBytesLoader {
 
     try {
       final media =
-          await driveApi.files.get(
-                fileId,
-                downloadOptions: drive.DownloadOptions.fullMedia,
-              )
+          await driveApi.files
+                  .get(fileId, downloadOptions: drive.DownloadOptions.fullMedia)
+                  .timeout(const Duration(seconds: 30))
               as drive.Media;
-      return await http.ByteStream(media.stream).toBytes();
+      return await http.ByteStream(media.stream).toBytes().timeout(
+        const Duration(minutes: 5),
+      );
     } catch (e) {
       logger.e("Error downloading GDrive file: $e");
       return null;
@@ -113,8 +116,7 @@ class FileBytesLoader {
     AppLogger logger,
   ) async {
     try {
-      collection.needsReAuth = true;
-      await CollectionRepository(repo.db).updateCollection(collection);
+      await CollectionRepository(repo.db).markNeedsReAuth(collection.id);
     } catch (e) {
       logger.w("Failed to flag collection needsReAuth: $e");
     }

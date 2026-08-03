@@ -247,10 +247,17 @@ class DatabaseRepository {
     return _filesWithResolvedPaths(rows);
   }
 
+  /// Files that have failed description generation this many times are
+  /// excluded from [getFilesWithMissingDescriptions] — past this point the
+  /// failure is treated as permanent (unreadable image, unsupported format)
+  /// rather than worth retrying every batch forever.
+  static const maxDescriptionAttempts = 5;
+
   /// Returns images with no AI-generated description yet, limited to
   /// [limit] results. Same eligibility rules as
   /// [getFilesWithMissingEmbeddings] (real images, not deleted, not an
-  /// inline message-body asset).
+  /// inline message-body asset), plus excluding files that have already
+  /// exhausted [maxDescriptionAttempts].
   Future<List<File>> getFilesWithMissingDescriptions({int limit = 10}) async {
     final rows = await db.select(
       '''
@@ -261,11 +268,23 @@ class DatabaseRepository {
         AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
         AND f.is_deleted = 0
         AND f.is_inline = 0
+        AND f.description_attempts < ?
       LIMIT ?
       ''',
-      [limit],
+      [maxDescriptionAttempts, limit],
     );
     return _filesWithResolvedPaths(rows);
+  }
+
+  /// Records a failed description-generation attempt for [fileId] so
+  /// [getFilesWithMissingDescriptions] eventually stops re-selecting a file
+  /// that can never succeed.
+  Future<void> incrementDescriptionAttempts(String fileId) async {
+    await db.execute(
+      'UPDATE files SET description_attempts = description_attempts + 1 '
+      'WHERE id = ?',
+      [fileId],
+    );
   }
 
   /// Builds [File] models from a `files` query joined with `collections` as

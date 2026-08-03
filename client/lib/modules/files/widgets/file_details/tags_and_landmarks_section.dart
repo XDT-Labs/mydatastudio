@@ -51,12 +51,16 @@ class _TagsAndLandmarksSectionState extends State<TagsAndLandmarksSection> {
   // save right now" rather than letting the exception escape unhandled.
 
   Future<void> _load() async {
+    final requestedFileId = widget.fileId;
     try {
       final repo = DatabaseManager.instance.repository;
       if (repo == null) return;
-      final tags = await repo.getFileTags(widget.fileId);
-      final landmarks = await repo.getFileLandmarks(widget.fileId);
-      if (!mounted) return;
+      final tags = await repo.getFileTags(requestedFileId);
+      final landmarks = await repo.getFileLandmarks(requestedFileId);
+      // A faster, later _load() for a newer fileId may have already
+      // resolved and updated state by the time this one gets here — don't
+      // clobber it with this stale result.
+      if (!mounted || widget.fileId != requestedFileId) return;
       setState(() {
         _tags = tags;
         _landmarks = landmarks;
@@ -71,10 +75,15 @@ class _TagsAndLandmarksSectionState extends State<TagsAndLandmarksSection> {
         widget.fileId,
         tag,
       );
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) {
+        setState(() => _tags = _tags.where((t) => t != tag).toList());
+      }
+    }
   }
 
   Future<void> _deleteTag(String tag) async {
+    final previousTags = _tags;
     if (mounted) {
       setState(() => _tags = _tags.where((t) => t != tag).toList());
     }
@@ -83,10 +92,13 @@ class _TagsAndLandmarksSectionState extends State<TagsAndLandmarksSection> {
         widget.fileId,
         tag,
       );
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) setState(() => _tags = previousTags);
+    }
   }
 
   Future<void> _deleteLandmark(String landmark) async {
+    final previousLandmarks = _landmarks;
     if (mounted) {
       setState(
         () => _landmarks = _landmarks.where((l) => l != landmark).toList(),
@@ -97,7 +109,9 @@ class _TagsAndLandmarksSectionState extends State<TagsAndLandmarksSection> {
         widget.fileId,
         landmark,
       );
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) setState(() => _landmarks = previousLandmarks);
+    }
   }
 
   @override

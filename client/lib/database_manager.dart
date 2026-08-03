@@ -652,6 +652,7 @@ class AppDatabase {
   /// row — so this has to land before anything writes a non-'file' row.
   Future<void> _migrateFilesEmbeddingsKey() async {
     final info = await _db.select('PRAGMA table_info(files_embeddings)');
+    if (info.isEmpty) return;
     Map<String, Object?>? typeColumn;
     for (final row in info) {
       if (row['name'] == 'type') {
@@ -708,6 +709,12 @@ class AppDatabase {
         'is_inline': 'INTEGER NOT NULL DEFAULT 0',
         // AI-generated or user-entered description of the file's contents.
         'description': 'TEXT',
+        // How many times FileDescriptionIsolate has tried and failed to
+        // generate a description for this file (unreadable image, model
+        // returned no usable analysis, embedding failed, ...). Without this,
+        // a file that can never succeed gets re-selected and retried by
+        // getFilesWithMissingDescriptions forever.
+        'description_attempts': 'INTEGER NOT NULL DEFAULT 0',
       },
     };
 
