@@ -153,11 +153,42 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
   }
 
   Future<void> _deleteAlbum(String albumId) async {
-    await PhotosRepository().deleteAlbum(albumId);
-    if (_activeFilter.albumId == albumId) {
-      _clearFilters();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Album'),
+        content: const Text('Are you sure you want to delete this album? Photos will not be deleted.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await PhotosRepository().deleteAlbum(albumId);
+      if (_activeFilter.albumId == albumId) {
+        _clearFilters();
+      }
+      await _loadAlbums();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete album: $e')),
+        );
+      }
     }
-    await _loadAlbums();
   }
 
   @override
