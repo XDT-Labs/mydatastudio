@@ -8,6 +8,7 @@ import 'package:mydatastudio/modules/email/widgets/email_drawer.dart';
 import 'package:mydatastudio/modules/files/pages/new_file_collection_page.dart';
 import 'package:mydatastudio/modules/files/pages/rx_files_page.dart';
 import 'package:mydatastudio/modules/files/widgets/file_drawer.dart';
+import 'package:mydatastudio/modules/photos/pages/album_detail_page.dart';
 import 'package:mydatastudio/modules/photos/pages/photos_app.dart';
 import 'package:mydatastudio/modules/photos/widgets/photo_drawer.dart';
 import 'package:mydatastudio/modules/social/pages/facebook_page.dart';
@@ -185,6 +186,20 @@ class AppRouter {
                     drawer: PhotoDrawer(),
                   ),
                 ),
+            routes: [
+              GoRoute(
+                path: 'albums/:albumId',
+                pageBuilder:
+                    (context, state) => RoutePage(
+                      body: NavigationWrapper(
+                        body: AlbumDetailPage(
+                          albumId: state.pathParameters['albumId']!,
+                        ),
+                        drawer: const PhotoDrawer(),
+                      ),
+                    ),
+              ),
+            ],
           ),
 
           //Email Networks
