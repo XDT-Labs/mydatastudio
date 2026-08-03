@@ -1,5 +1,6 @@
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
+import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:rxdart/rxdart.dart';
 
 enum PhotoViewMode { grid, list, timeline, map }
@@ -27,6 +28,18 @@ class ViewStateService {
   }
   void openLightbox(File media) => lightboxMedia.add(media);
   void setLightboxMedia(File? media) => lightboxMedia.add(media);
-  void updateFilter(PhotoFilter filter) => activeFilter.add(filter);
-  void setActiveNav(String nav) => activeNav.add(nav);
+  void closeLightboxAndInfo() {
+    lightboxMedia.add(null);
+    isInfoOpen.add(false);
+  }
+  void updateFilter(PhotoFilter filter) {
+    closeLightboxAndInfo();
+    SelectionService.instance.deselectAll();
+    activeFilter.add(filter);
+  }
+  void setActiveNav(String nav) {
+    closeLightboxAndInfo();
+    SelectionService.instance.deselectAll();
+    activeNav.add(nav);
+  }
 }
