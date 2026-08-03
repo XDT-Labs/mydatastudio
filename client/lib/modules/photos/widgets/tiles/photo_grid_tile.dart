@@ -1,6 +1,65 @@
 import 'package:flutter/material.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
+import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
+import 'package:mydatastudio/modules/photos/services/photos_service.dart';
+import 'package:mydatastudio/modules/photos/services/selection_service.dart';
+import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
+
+Widget buildWiredPhotoGridTile({
+  required File file,
+  required bool isSelected,
+  required List<File> allFiles,
+  ValueChanged<File>? onTapTile,
+  ValueChanged<File>? onSelectTile,
+  ValueChanged<File>? onToggleFavoriteTile,
+  ValueChanged<File>? onOpenLightboxTile,
+  ValueChanged<File>? onOpenInfoTile,
+}) {
+  return PhotoGridTile(
+    file: file,
+    isSelected: isSelected,
+    isFavorite: file.isFavorite,
+    onTap: () {
+      if (onTapTile != null) {
+        onTapTile(file);
+      } else {
+        SelectionService.instance.handleTap(file, allFiles);
+        ViewStateService.instance.setInfoMedia(file);
+      }
+    },
+    onSelect: () {
+      if (onSelectTile != null) {
+        onSelectTile(file);
+      } else {
+        SelectionService.instance.toggle(file.id);
+      }
+    },
+    onToggleFavorite: () async {
+      if (onToggleFavoriteTile != null) {
+        onToggleFavoriteTile(file);
+      } else {
+        await PhotosRepository().toggleFavorite(file.id);
+        await PhotosService.instance.refresh();
+      }
+    },
+    onOpenLightbox: () {
+      if (onOpenLightboxTile != null) {
+        onOpenLightboxTile(file);
+      } else {
+        ViewStateService.instance.setLightboxMedia(file);
+      }
+    },
+    onOpenInfo: () {
+      if (onOpenInfoTile != null) {
+        onOpenInfoTile(file);
+      } else {
+        ViewStateService.instance.setInfoMedia(file);
+        ViewStateService.instance.isInfoOpen.add(true);
+      }
+    },
+  );
+}
 
 /// Individual grid cell widget representing a photo or video item in the photo grid.
 class PhotoGridTile extends StatefulWidget {

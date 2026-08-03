@@ -269,48 +269,15 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
                     final file = monthFiles[index];
                     final isSelected = widget.selectedIds.contains(file.id);
 
-                    return PhotoGridTile(
+                    return buildWiredPhotoGridTile(
                       file: file,
                       isSelected: isSelected,
-                      isFavorite: file.isFavorite,
-                      onTap: () {
-                        if (widget.onTapTile != null) {
-                          widget.onTapTile!(file);
-                        } else {
-                          SelectionService.instance.handleTap(file, widget.files);
-                          ViewStateService.instance.setInfoMedia(file);
-                        }
-                      },
-                      onSelect: () {
-                        if (widget.onSelectTile != null) {
-                          widget.onSelectTile!(file);
-                        } else {
-                          SelectionService.instance.toggle(file.id);
-                        }
-                      },
-                      onToggleFavorite: () async {
-                        if (widget.onToggleFavoriteTile != null) {
-                          widget.onToggleFavoriteTile!(file);
-                        } else {
-                          await PhotosRepository().toggleFavorite(file.id);
-                          await PhotosService.instance.refresh();
-                        }
-                      },
-                      onOpenLightbox: () {
-                        if (widget.onOpenLightboxTile != null) {
-                          widget.onOpenLightboxTile!(file);
-                        } else {
-                          ViewStateService.instance.setLightboxMedia(file);
-                        }
-                      },
-                      onOpenInfo: () {
-                        if (widget.onOpenInfoTile != null) {
-                          widget.onOpenInfoTile!(file);
-                        } else {
-                          ViewStateService.instance.setInfoMedia(file);
-                          ViewStateService.instance.isInfoOpen.add(true);
-                        }
-                      },
+                      allFiles: widget.files,
+                      onTapTile: widget.onTapTile,
+                      onSelectTile: widget.onSelectTile,
+                      onToggleFavoriteTile: widget.onToggleFavoriteTile,
+                      onOpenLightboxTile: widget.onOpenLightboxTile,
+                      onOpenInfoTile: widget.onOpenInfoTile,
                     );
                   },
                   childCount: monthFiles.length,
