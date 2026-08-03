@@ -123,11 +123,9 @@ class _PhotoGridState extends State<PhotoGrid> {
                       monthFiles.map((f) => f.id).toList(),
                     );
                   } else {
-                    for (final f in monthFiles) {
-                      if (widget.selectedIds.contains(f.id)) {
-                        SelectionService.instance.toggle(f.id);
-                      }
-                    }
+                    SelectionService.instance.deselectMany(
+                      monthFiles.map((f) => f.id),
+                    );
                   }
                 },
               ),

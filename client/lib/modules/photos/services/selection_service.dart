@@ -42,6 +42,13 @@ class SelectionService {
     isSelectionMode.add(current.isNotEmpty);
   }
 
+  void deselectMany(Iterable<String> fileIds) {
+    final current = Set<String>.from(selectedIds.value);
+    current.removeAll(fileIds);
+    selectedIds.add(current);
+    isSelectionMode.add(current.isNotEmpty);
+  }
+
   void deselectAll() {
     _lastSelectedId = null;
     selectedIds.add({});
