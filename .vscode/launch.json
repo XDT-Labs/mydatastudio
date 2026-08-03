@@ -44,7 +44,14 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/aiserver",
             "justMyCode": true,
-            "python": "${workspaceFolder}/aiserver/.venv/bin/python",
+            // Resolved via pdm rather than a hardcoded .venv path: pdm's own
+            // interpreter (see `pdm info`, or aiserver/.pdm-python) lives
+            // outside the workspace and is machine/worktree-specific, so it
+            // can't be committed here. Run "Python: Select Interpreter" once
+            // and pick the pdm-managed environment for aiserver (VS Code's
+            // Python extension auto-detects it); this then just reuses that
+            // selection.
+            "python": "${command:python.interpreterPath}",
             "env": {
                 "AICHAT_PORT": "8000",
                 // Normally set by PythonManager when it spawns the bundled

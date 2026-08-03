@@ -16,7 +16,7 @@ void main() {
             home: Scaffold(body: GpsMetadataTab(exifData: null, file: file)),
           ),
         );
-        expect(find.text('No GPS data found.'), findsOneWidget);
+        expect(find.text('No location data found.'), findsOneWidget);
       },
     );
 
@@ -29,7 +29,7 @@ void main() {
           home: Scaffold(body: GpsMetadataTab(exifData: {}, file: file)),
         ),
       );
-      expect(find.text('No GPS data found.'), findsOneWidget);
+      expect(find.text('No location data found.'), findsOneWidget);
     });
 
     testWidgets('renders lat/lng rows when file has coordinates', (

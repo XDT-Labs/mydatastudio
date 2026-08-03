@@ -127,6 +127,13 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       );
       return const {};
 
+    case 'needsReAuth':
+      final map = payload as Map;
+      await CollectionRepository(db).markNeedsReAuth(
+        map['collectionId'] as String,
+      );
+      return const {};
+
     case 'collectionStatus':
       // A targeted update (scan_status, last_scan_date only) — not the full
       // Collection object the isolate read at scan start, which would

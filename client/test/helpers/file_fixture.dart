@@ -22,6 +22,7 @@ File makeTestFile({
   DateTime? dateLastModified,
   DateTime? lastScannedDate,
   String? contentId,
+  String? description,
 }) {
   final now = DateTime(2024, 1, 1);
   return File(
@@ -42,6 +43,7 @@ File makeTestFile({
     dateLastModified: dateLastModified ?? now,
     lastScannedDate: lastScannedDate,
     contentId: contentId,
+    description: description,
   );
 }
 

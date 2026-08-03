@@ -182,6 +182,13 @@ class GmailScannerIsolateWorker {
       final String safeAccessToken = accessTokenRaw;
       final String safeRefreshToken = refreshTokenRaw;
 
+      // Opened before the token refresh below (rather than after, as
+      // before) so refreshTokens can be given this isolate's own
+      // connection — without it, LoginProviders.clientId/clientSecret fall
+      // back to DatabaseManager's singleton, which is always unset inside a
+      // spawned isolate, silently resolving to empty strings.
+      final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
+
       // Refresh token if near expiry using consolidated auth service
       String accessToken = safeAccessToken;
       try {
@@ -189,15 +196,28 @@ class GmailScannerIsolateWorker {
           final result = await GoogleAuthService.refreshTokens(
             accessToken: safeAccessToken,
             refreshToken: safeRefreshToken,
+            db: appDb,
           );
           accessToken = result.accessToken;
         }
+      } on GoogleAuthException catch (e) {
+        // Dead refresh token (revoked, or issued under an OAuth client
+        // that's since been deleted/rotated) — flag it so the app's
+        // existing needsReAuth prompt (auth_dialog_manager.dart) tells the
+        // user to reconnect, instead of this scan failing silently forever.
+        logger.e("Failed to validate Gmail token: $e");
+        try {
+          await writeViaMain(clientPort, 'needsReAuth', {
+            'collectionId': collection.id,
+          });
+        } catch (updateError) {
+          logger.w("Failed to flag needsReAuth: $updateError");
+        }
+        Isolate.exit(clientPort, {'error': 'auth_failed'});
       } catch (e) {
         logger.e("Failed to validate Gmail token: $e");
         Isolate.exit(clientPort, {'error': 'auth_failed'});
       }
-
-      final appDb = await AppDatabase.create(null, dbDir, AppConstants.dbName);
 
       final authHttpClient = AuthenticatedHttpClient.bearer(accessToken);
       final GmailApi gmailApi = GmailApi(authHttpClient);

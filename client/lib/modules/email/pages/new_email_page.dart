@@ -131,8 +131,8 @@ class _GmailTabState extends State<_GmailTab> {
       _authState = _GmailAuthState.loading;
     });
 
-    final clientId = await LoginProviders.google.clientId;
-    final clientSecret = await LoginProviders.google.clientSecret;
+    final clientId = await LoginProviders.google.clientId();
+    final clientSecret = await LoginProviders.google.clientSecret();
 
     if (!mounted) return;
 
@@ -682,8 +682,8 @@ class _OutlookTabState extends State<_OutlookTab> {
       _authState = _OutlookAuthState.loading;
     });
 
-    final clientId = await LoginProviders.outlook.clientId;
-    final clientSecret = await LoginProviders.outlook.clientSecret;
+    final clientId = await LoginProviders.outlook.clientId();
+    final clientSecret = await LoginProviders.outlook.clientSecret();
 
     if (!mounted) return;
 
