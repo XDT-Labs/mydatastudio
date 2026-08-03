@@ -10,6 +10,7 @@ import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
+import 'package:mydatastudio/modules/photos/utils/byte_formatter.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/tag_chip.dart';
 
 /// A right slide-over sidebar for inspecting and editing photo metadata,
@@ -179,16 +180,6 @@ class _InfoSidebarState extends State<InfoSidebar> {
     try {
       await Process.run('open', ['-R', path]);
     } catch (_) {}
-  }
-
-  String _formatBytes(int bytes) {
-    if (bytes <= 0) return '0 B';
-    const suffixes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    int i = (log(bytes) / log(1024)).floor();
-    i = i.clamp(0, suffixes.length - 1);
-    final num val = bytes / pow(1024, i);
-    if (i == 0) return '$bytes B';
-    return '${val.toStringAsFixed(1)} ${suffixes[i]}';
   }
 
   String _formatLocation(double? lat, double? lng) {
@@ -375,7 +366,7 @@ class _InfoSidebarState extends State<InfoSidebar> {
               const _MetadataRow(label: 'Resolution', value: 'Unknown'),
               _MetadataRow(
                 label: 'File Size',
-                value: _formatBytes(file.size),
+                value: formatBytes(file.size),
               ),
               _MetadataRow(
                 label: 'Content Type',

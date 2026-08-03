@@ -1,5 +1,5 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:mydatastudio/modules/photos/utils/byte_formatter.dart' as util;
 
 /// A storage usage progress meter widget for the Photos module drawer.
 class StorageMeter extends StatelessWidget {
@@ -12,20 +12,7 @@ class StorageMeter extends StatelessWidget {
   final int usedBytes;
   final int totalBytes;
 
-  static String formatBytes(int bytes) {
-    if (bytes <= 0) return '0 B';
-    const suffixes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-    int i = (log(bytes) / log(1024)).floor();
-    if (i >= suffixes.length) i = suffixes.length - 1;
-    double num = bytes / pow(1024, i);
-    String formatted = num < 10 && i > 0
-        ? num.toStringAsFixed(1)
-        : num.toStringAsFixed(0);
-    if (formatted.endsWith('.0')) {
-      formatted = formatted.substring(0, formatted.length - 2);
-    }
-    return '$formatted ${suffixes[i]}';
-  }
+  static String formatBytes(int bytes) => util.formatBytes(bytes);
 
   @override
   Widget build(BuildContext context) {

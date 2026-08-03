@@ -76,8 +76,8 @@ void main() {
     expect(find.text('Jul 10, 2026'), findsOneWidget);
     expect(find.text('37.77, -122.42'), findsOneWidget);
     expect(find.text('Unknown'), findsOneWidget);
-    expect(find.text('5.0 MB'), findsOneWidget);
-    expect(find.text('2.0 KB'), findsOneWidget);
+    expect(find.text('5 MB'), findsOneWidget);
+    expect(find.text('2 KB'), findsOneWidget);
   });
 
   testWidgets('row click triggers selection callback', (WidgetTester tester) async {

@@ -12,6 +12,7 @@ import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
+import 'package:mydatastudio/modules/photos/utils/byte_formatter.dart';
 
 /// Tabular list view of photos with metadata columns and virtualization.
 class PhotoListView extends StatefulWidget {
@@ -304,16 +305,6 @@ class _PhotoListRowTile extends StatefulWidget {
 class _PhotoListRowTileState extends State<_PhotoListRowTile> {
   bool _isHovered = false;
 
-  String _formatBytes(int bytes) {
-    if (bytes <= 0) return '0 B';
-    const suffixes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    int i = (log(bytes) / log(1024)).floor();
-    i = i.clamp(0, suffixes.length - 1);
-    final double val = bytes / pow(1024, i);
-    if (i == 0) return '$bytes B';
-    return '${val.toStringAsFixed(1)} ${suffixes[i]}';
-  }
-
   String _formatDate(DateTime date) {
     return DateFormat('MMM dd, yyyy').format(date);
   }
@@ -490,7 +481,7 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
               SizedBox(
                 width: 200,
                 child: Text(
-                  _formatBytes(widget.file.size),
+                  formatBytes(widget.file.size),
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
