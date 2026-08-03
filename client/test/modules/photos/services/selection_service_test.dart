@@ -1,5 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
+
+File _createTestFile(String id) => File(
+      id: id,
+      name: '$id.jpg',
+      path: '/$id.jpg',
+      parent: '/',
+      dateCreated: DateTime.now(),
+      dateLastModified: DateTime.now(),
+      collectionId: 'col1',
+      contentType: 'image/jpeg',
+      size: 100,
+      isDeleted: false,
+    );
 
 void main() {
   group('SelectionService', () {
@@ -31,6 +45,30 @@ void main() {
       service.deselectAll();
       expect(service.selectedIds.value, isEmpty);
       expect(service.isSelectionMode.value, isFalse);
+    });
+
+    test('selectRange handles forward, reversed ranges, and missing endpoint fallback', () {
+      final files = [
+        _createTestFile('f1'),
+        _createTestFile('f2'),
+        _createTestFile('f3'),
+        _createTestFile('f4'),
+      ];
+
+      // Forward range: f1 to f3 -> includes f1, f2, f3
+      service.selectRange('f1', 'f3', files);
+      expect(service.selectedIds.value, equals({'f1', 'f2', 'f3'}));
+      expect(service.isSelectionMode.value, isTrue);
+
+      // Reversed range: f4 to f2 -> includes f2, f3, f4
+      service.deselectAll();
+      service.selectRange('f4', 'f2', files);
+      expect(service.selectedIds.value, equals({'f2', 'f3', 'f4'}));
+
+      // Missing endpoint fallback -> falls back to single selection of target
+      service.deselectAll();
+      service.selectRange('missing', 'f2', files);
+      expect(service.selectedIds.value, equals({'f2'}));
     });
   });
 }
