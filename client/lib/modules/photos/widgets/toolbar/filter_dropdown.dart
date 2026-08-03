@@ -51,45 +51,55 @@ class FilterDropdown extends StatelessWidget {
           ),
         ),
         PopupMenuItem<void>(
-          onTap: () => onMediaTypeChanged(null),
-          child: Row(
-            children: [
-              Radio<String?>(
-                value: null,
-                groupValue: mediaType,
-                onChanged: onMediaTypeChanged,
-              ),
-              const SizedBox(width: 8),
-              const Text('All'),
-            ],
-          ),
-        ),
-        PopupMenuItem<void>(
-          onTap: () => onMediaTypeChanged('photo'),
-          child: Row(
-            children: [
-              Radio<String?>(
-                value: 'photo',
-                groupValue: mediaType,
-                onChanged: onMediaTypeChanged,
-              ),
-              const SizedBox(width: 8),
-              const Text('Photos'),
-            ],
-          ),
-        ),
-        PopupMenuItem<void>(
-          onTap: () => onMediaTypeChanged('video'),
-          child: Row(
-            children: [
-              Radio<String?>(
-                value: 'video',
-                groupValue: mediaType,
-                onChanged: onMediaTypeChanged,
-              ),
-              const SizedBox(width: 8),
-              const Text('Videos'),
-            ],
+          enabled: false,
+          child: RadioGroup<String?>(
+            groupValue: mediaType,
+            onChanged: onMediaTypeChanged,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                InkWell(
+                  onTap: () {
+                    onMediaTypeChanged(null);
+                    Navigator.of(context).pop();
+                  },
+                  child: const Row(
+                    children: [
+                      Radio<String?>(value: null),
+                      SizedBox(width: 8),
+                      Text('All'),
+                    ],
+                  ),
+                ),
+                InkWell(
+                  onTap: () {
+                    onMediaTypeChanged('photo');
+                    Navigator.of(context).pop();
+                  },
+                  child: const Row(
+                    children: [
+                      Radio<String?>(value: 'photo'),
+                      SizedBox(width: 8),
+                      Text('Photos'),
+                    ],
+                  ),
+                ),
+                InkWell(
+                  onTap: () {
+                    onMediaTypeChanged('video');
+                    Navigator.of(context).pop();
+                  },
+                  child: const Row(
+                    children: [
+                      Radio<String?>(value: 'video'),
+                      SizedBox(width: 8),
+                      Text('Videos'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         const PopupMenuDivider(),
@@ -121,26 +131,36 @@ class FilterDropdown extends StatelessWidget {
             ),
           ),
         ),
-        ...[
-          (value: 'dateDesc', label: 'Newest'),
-          (value: 'dateAsc', label: 'Oldest'),
-          (value: 'title', label: 'Title'),
-          (value: 'size', label: 'Size'),
-        ].map(
-          (option) => PopupMenuItem<void>(
-            onTap: () => onSortChanged(option.value),
-            child: Row(
+        PopupMenuItem<void>(
+          enabled: false,
+          child: RadioGroup<String>(
+            groupValue: sortBy,
+            onChanged: (val) {
+              if (val != null) onSortChanged(val);
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Radio<String>(
-                  value: option.value,
-                  groupValue: sortBy,
-                  onChanged: (val) {
-                    if (val != null) onSortChanged(val);
+                (value: 'dateDesc', label: 'Newest'),
+                (value: 'dateAsc', label: 'Oldest'),
+                (value: 'title', label: 'Title'),
+                (value: 'size', label: 'Size'),
+              ].map(
+                (option) => InkWell(
+                  onTap: () {
+                    onSortChanged(option.value);
+                    Navigator.of(context).pop();
                   },
+                  child: Row(
+                    children: [
+                      Radio<String>(value: option.value),
+                      const SizedBox(width: 8),
+                      Text(option.label),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 8),
-                Text(option.label),
-              ],
+              ).toList(),
             ),
           ),
         ),
