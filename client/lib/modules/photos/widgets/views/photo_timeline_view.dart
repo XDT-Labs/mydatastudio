@@ -40,7 +40,7 @@ class PhotoTimelineView extends StatefulWidget {
 }
 
 class _PhotoTimelineViewState extends State<PhotoTimelineView> {
-  late final ScrollController _scrollController;
+  late ScrollController _scrollController;
   bool _createdOwnController = false;
 
   int _activeIndex = 0;
@@ -66,6 +66,25 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
         if (mounted) setState(() => _gridItemSize = size);
       });
     });
+  }
+
+  @override
+  void didUpdateWidget(PhotoTimelineView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.scrollController != oldWidget.scrollController) {
+      _scrollController.removeListener(_onScroll);
+      if (_createdOwnController) {
+        _scrollController.dispose();
+        _createdOwnController = false;
+      }
+      if (widget.scrollController != null) {
+        _scrollController = widget.scrollController!;
+      } else {
+        _scrollController = ScrollController();
+        _createdOwnController = true;
+      }
+      _scrollController.addListener(_onScroll);
+    }
   }
 
   @override
