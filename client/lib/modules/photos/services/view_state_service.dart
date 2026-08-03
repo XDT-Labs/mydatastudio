@@ -39,6 +39,12 @@ class ViewStateService {
     SelectionService.instance.deselectAll();
     activeFilter.add(filter);
   }
+  void setSortOrder(PhotoSortOrder sort) {
+    final current = activeFilter.value;
+    if (current.sortBy != sort) {
+      activeFilter.add(current.copyWith(sortBy: sort));
+    }
+  }
   void setActiveNav(String nav) {
     closeLightboxAndInfo();
     SelectionService.instance.deselectAll();

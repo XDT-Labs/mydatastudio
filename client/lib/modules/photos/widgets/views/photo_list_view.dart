@@ -74,8 +74,7 @@ class _PhotoListViewState extends State<PhotoListView> {
         newSort = PhotoSortOrder.dateDesc;
       }
     }
-    final updated = _currentFilter.copyWith(sortBy: newSort);
-    ViewStateService.instance.updateFilter(updated);
+    ViewStateService.instance.setSortOrder(newSort);
   }
 
   Widget _buildSortIndicator(PhotoSortOrder sortKey) {
