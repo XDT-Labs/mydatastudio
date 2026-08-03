@@ -1,5 +1,7 @@
 enum PhotoSortOrder { dateDesc, dateAsc, title, size }
 
+const Object _sentinel = Object();
+
 class PhotoFilter {
   final String searchQuery;
   final String? mediaType;
@@ -23,21 +25,21 @@ class PhotoFilter {
 
   PhotoFilter copyWith({
     String? searchQuery,
-    String? mediaType,
-    String? source,
-    String? albumId,
-    String? tag,
-    String? location,
+    Object? mediaType = _sentinel,
+    Object? source = _sentinel,
+    Object? albumId = _sentinel,
+    Object? tag = _sentinel,
+    Object? location = _sentinel,
     bool? onlyFavorites,
     PhotoSortOrder? sortBy,
   }) {
     return PhotoFilter(
       searchQuery: searchQuery ?? this.searchQuery,
-      mediaType: mediaType ?? this.mediaType,
-      source: source ?? this.source,
-      albumId: albumId ?? this.albumId,
-      tag: tag ?? this.tag,
-      location: location ?? this.location,
+      mediaType: mediaType == _sentinel ? this.mediaType : mediaType as String?,
+      source: source == _sentinel ? this.source : source as String?,
+      albumId: albumId == _sentinel ? this.albumId : albumId as String?,
+      tag: tag == _sentinel ? this.tag : tag as String?,
+      location: location == _sentinel ? this.location : location as String?,
       onlyFavorites: onlyFavorites ?? this.onlyFavorites,
       sortBy: sortBy ?? this.sortBy,
     );
