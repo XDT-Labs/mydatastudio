@@ -8,6 +8,7 @@ import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_grid.dart';
+import 'package:mydatastudio/app_logger.dart';
 
 
 /// Page for viewing details and files belonging to a specific Album.
@@ -27,7 +28,7 @@ class AlbumDetailPage extends StatefulWidget {
 
 class _AlbumDetailPageState extends State<AlbumDetailPage> {
   late final PhotosRepository _repo;
-  StreamSubscription? _selectionSub;
+  StreamSubscription<Set<String>>? _selectionSub;
 
   Album? _album;
   List<File> _files = [];
@@ -55,17 +56,25 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final album = await _repo.getAlbum(widget.albumId);
-    final files = await _repo.photos(
-      filter: PhotoFilter(albumId: widget.albumId),
-    );
+    try {
+      final album = await _repo.getAlbum(widget.albumId);
+      final files = await _repo.photos(
+        filter: PhotoFilter(albumId: widget.albumId),
+      );
 
-    if (mounted) {
-      setState(() {
-        _album = album;
-        _files = files;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _album = album;
+          _files = files;
+        });
+      }
+    } catch (e, st) {
+      AppLogger(null).e('Failed to load album data', error: e, stackTrace: st);
+      rethrow;
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
