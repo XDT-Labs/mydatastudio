@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
@@ -7,6 +8,7 @@ import 'package:mydatastudio/models/tables/album.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
+import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/tag_chip.dart';
 
@@ -25,7 +27,7 @@ class InfoSidebar extends StatefulWidget {
 }
 
 class _InfoSidebarState extends State<InfoSidebar> {
-  Object? _infoMediaSub;
+  StreamSubscription<File?>? _infoMediaSub;
   File? _currentFile;
   bool _isEditingTitle = false;
   late final TextEditingController _titleController;
@@ -43,19 +45,14 @@ class _InfoSidebarState extends State<InfoSidebar> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _infoMediaSub = ViewStateService.instance.infoMedia.listen((file) {
-        if (mounted) {
-          _onFileChanged(file);
-        }
+        if (mounted) _onFileChanged(file);
       });
     });
   }
 
   @override
   void dispose() {
-    final sub = _infoMediaSub;
-    if (sub is dynamic && sub.cancel != null) {
-      sub.cancel();
-    }
+    _infoMediaSub?.cancel();
     _titleController.dispose();
     _tagController.dispose();
     super.dispose();
@@ -501,6 +498,7 @@ class _InfoSidebarState extends State<InfoSidebar> {
                       onPressed: () async {
                         final repo = widget.repository ?? PhotosRepository();
                         await repo.deleteFile(file.id);
+                        await PhotosService.instance.refresh();
                         ViewStateService.instance.closeInfo();
                       },
                       icon: const Icon(Icons.delete_outline, size: 18),
