@@ -47,35 +47,28 @@ class _PhotosAppState extends State<PhotosApp> {
     _lightboxMedia = ViewStateService.instance.lightboxMedia.value;
     _selectedIds = SelectionService.instance.selectedIds.value;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _viewModeSub = ViewStateService.instance.viewMode.listen((mode) {
-        if (mounted) setState(() => _viewMode = mode);
-      });
+    _viewModeSub = ViewStateService.instance.viewMode.listen((mode) {
+      if (mounted) setState(() => _viewMode = mode);
+    });
 
-      _photosSub = PhotosService.instance.sink.listen((files) {
-        if (mounted) setState(() => _files = files ?? []);
-      });
+    _photosSub = PhotosService.instance.sink.listen((files) {
+      if (mounted) setState(() => _files = files ?? []);
+    });
 
-      _infoOpenSub = ViewStateService.instance.isInfoOpen.listen((isOpen) {
-        if (mounted) setState(() => _isInfoOpen = isOpen);
-      });
+    _infoOpenSub = ViewStateService.instance.isInfoOpen.listen((isOpen) {
+      if (mounted) setState(() => _isInfoOpen = isOpen);
+    });
 
-      _lightboxSub = ViewStateService.instance.lightboxMedia.listen((media) {
-        if (mounted) setState(() => _lightboxMedia = media);
-      });
+    _lightboxSub = ViewStateService.instance.lightboxMedia.listen((media) {
+      if (mounted) setState(() => _lightboxMedia = media);
+    });
 
-      _filterSub = ViewStateService.instance.activeFilter.listen((filter) {
-        PhotosService.instance.invoke(PhotosServiceCommand(filter));
-      });
+    _filterSub = ViewStateService.instance.activeFilter.listen((filter) {
+      PhotosService.instance.invoke(PhotosServiceCommand(filter));
+    });
 
-      _selectionSub = SelectionService.instance.selectedIds.listen((selected) {
-        if (mounted) setState(() => _selectedIds = selected);
-      });
-
-      // Initial data load
-      PhotosService.instance.invoke(
-        PhotosServiceCommand(ViewStateService.instance.activeFilter.value),
-      );
+    _selectionSub = SelectionService.instance.selectedIds.listen((selected) {
+      if (mounted) setState(() => _selectedIds = selected);
     });
   }
 
