@@ -117,12 +117,27 @@ void main() {
     await mouse.addPointer(location: Offset.zero);
     await tester.pump();
 
+    final initialContainer = tester.widget<Container>(
+      find.ancestor(
+        of: find.text('july_photo1.jpg'),
+        matching: find.byType(Container),
+      ).first,
+    );
+    final initialColor = (initialContainer.decoration as BoxDecoration).color;
+
     // Hover over the first row
     await mouse.moveTo(tester.getCenter(find.text('july_photo1.jpg')));
     await tester.pumpAndSettle();
 
-    // Verify MouseRegion hover state rendered without exception
-    expect(find.text('july_photo1.jpg'), findsOneWidget);
+    final hoveredContainer = tester.widget<Container>(
+      find.ancestor(
+        of: find.text('july_photo1.jpg'),
+        matching: find.byType(Container),
+      ).first,
+    );
+    final hoveredColor = (hoveredContainer.decoration as BoxDecoration).color;
+
+    expect(hoveredColor, isNot(equals(initialColor)));
   });
 
   testWidgets('empty state shows message when files list is empty', (WidgetTester tester) async {

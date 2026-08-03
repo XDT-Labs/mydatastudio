@@ -43,6 +43,8 @@ void main() {
       // Tap header to collapse
       await tester.tap(find.text('Library'));
       await tester.pumpAndSettle();
+      final crossFade = tester.widget<AnimatedCrossFade>(find.byType(AnimatedCrossFade));
+      expect(crossFade.crossFadeState, equals(CrossFadeState.showSecond));
 
       // Tap header to re-expand
       await tester.tap(find.text('Library'));

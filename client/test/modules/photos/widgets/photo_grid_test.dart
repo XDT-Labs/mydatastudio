@@ -1,7 +1,9 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/tiles/date_section_header.dart';
 import 'package:mydatastudio/modules/photos/widgets/tiles/photo_grid_tile.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_grid.dart';
@@ -129,10 +131,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Tap first tile
+    // Single tap first tile
     await tester.tap(find.byType(PhotoGridTile).first);
     await tester.pump(const Duration(milliseconds: 300));
     expect(tappedFile, equals(files.first));
+
+    // Trigger onSelect on tile widget
+    final tileWidget = tester.widget<PhotoGridTile>(find.byType(PhotoGridTile).first);
+    tileWidget.onSelect?.call();
+    expect(selectedFile, equals(files.first));
   });
 
   testWidgets('selected tiles show selection styling', (WidgetTester tester) async {
