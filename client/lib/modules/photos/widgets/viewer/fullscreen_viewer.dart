@@ -86,6 +86,7 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentFile.id != widget.currentFile.id ||
         oldWidget.mediaList != widget.mediaList) {
+      _imageProviderCache.clear();
       _updateCurrentIndex();
       _zoomController.reset();
     }
@@ -143,6 +144,12 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
     SelectionService.instance.selectSingle(prev.id);
   }
 
+
+  final Map<String, ImageProvider> _imageProviderCache = {};
+
+  ImageProvider _imageProviderFor(File file) {
+    return _imageProviderCache.putIfAbsent(file.id, () => _buildImageProvider(file));
+  }
 
   ImageProvider _buildImageProvider(File file) {
     final candidates = [
@@ -255,7 +262,7 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
                               minScale: ZoomController.minZoom,
                               maxScale: ZoomController.maxZoom,
                               child: Image(
-                                image: _buildImageProvider(media),
+                                image: _imageProviderFor(media),
                                 fit: BoxFit.contain,
                                 errorBuilder: (context, error, stackTrace) {
                                   return Center(
