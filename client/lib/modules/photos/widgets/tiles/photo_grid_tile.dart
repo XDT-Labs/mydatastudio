@@ -131,21 +131,26 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
                       duration: const Duration(milliseconds: 150),
                       child: IgnorePointer(
                         ignoring: !showOverlay,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.black.withOpacity(0.5),
-                                Colors.transparent,
-                                Colors.black.withOpacity(0.6),
-                              ],
-                              stops: const [0.0, 0.5, 1.0],
+                        child: GestureDetector(
+                          onTap: widget.onTap,
+                          onDoubleTap: widget.onOpenLightbox,
+                          onSecondaryTap: widget.onOpenInfo,
+                          behavior: HitTestBehavior.opaque,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withOpacity(0.5),
+                                  Colors.transparent,
+                                  Colors.black.withOpacity(0.6),
+                                ],
+                                stops: const [0.0, 0.5, 1.0],
+                              ),
                             ),
-                          ),
-                          child: Stack(
-                            children: [
+                            child: Stack(
+                              children: [
                               // Top-left: Selection checkbox
                               Positioned(
                                 top: 4,
@@ -284,6 +289,7 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
                         ),
                       ),
                     ),
+                  ),
                   ),
                 ],
               ),

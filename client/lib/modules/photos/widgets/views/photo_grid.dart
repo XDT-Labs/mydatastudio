@@ -135,7 +135,8 @@ class PhotoGrid extends StatelessWidget {
                         if (onTapTile != null) {
                           onTapTile!(file);
                         } else {
-                          ViewStateService.instance.setLightboxMedia(file);
+                          SelectionService.instance.selectSingle(file.id);
+                          ViewStateService.instance.setInfoMedia(file);
                         }
                       },
                       onSelect: () {

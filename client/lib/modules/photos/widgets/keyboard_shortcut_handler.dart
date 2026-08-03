@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/services/batch_action_service.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
@@ -72,24 +73,24 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
   void _handleOpenLightbox() {
     if (ViewStateService.instance.lightboxMedia.value != null) return;
 
-    if (ViewStateService.instance.infoMedia.value != null) {
-      ViewStateService.instance.openLightbox(ViewStateService.instance.infoMedia.value!);
-      return;
-    }
-
     final selectedIds = SelectionService.instance.selectedIds.value;
     final files = PhotosService.instance.sink.valueOrNull ?? [];
     if (files.isEmpty) return;
 
     if (selectedIds.isNotEmpty) {
-      final selectedFile = files.cast<dynamic>().firstWhere(
-            (f) => selectedIds.contains(f.id),
+      final selectedFile = files.cast<File?>().firstWhere(
+            (f) => f != null && selectedIds.contains(f.id),
             orElse: () => null,
           );
       if (selectedFile != null) {
         ViewStateService.instance.openLightbox(selectedFile);
         return;
       }
+    }
+
+    if (ViewStateService.instance.infoMedia.value != null) {
+      ViewStateService.instance.openLightbox(ViewStateService.instance.infoMedia.value!);
+      return;
     }
 
     ViewStateService.instance.openLightbox(files.first);

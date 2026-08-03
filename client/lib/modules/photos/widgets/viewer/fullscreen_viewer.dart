@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
+import 'package:mydatastudio/modules/photos/services/selection_service.dart';
+import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/viewer/zoom_controller.dart';
 
 class NextMediaIntent extends Intent {
@@ -57,6 +59,7 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
   late int _currentIndex;
   late ZoomController _zoomController;
   late TransformationController _transformationController;
+  late FocusNode _focusNode;
   Timer? _slideshowTimer;
   bool _isSlideshowPlaying = false;
   bool _showExifOverlay = false;
@@ -68,6 +71,12 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
     _zoomController = ZoomController();
     _transformationController = TransformationController();
     _zoomController.addListener(_onZoomControllerChanged);
+    _focusNode = FocusNode();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _focusNode.requestFocus();
+      }
+    });
   }
 
   void _updateCurrentIndex() {
@@ -91,6 +100,7 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
     _zoomController.removeListener(_onZoomControllerChanged);
     _zoomController.dispose();
     _transformationController.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -111,6 +121,9 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
       _currentIndex = (_currentIndex + 1) % widget.mediaList.length;
       _zoomController.reset();
     });
+    final next = _currentMedia;
+    ViewStateService.instance.setInfoMedia(next);
+    SelectionService.instance.selectSingle(next.id);
   }
 
   void _prevMedia() {
@@ -120,6 +133,9 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
           (_currentIndex - 1 + widget.mediaList.length) % widget.mediaList.length;
       _zoomController.reset();
     });
+    final prev = _currentMedia;
+    ViewStateService.instance.setInfoMedia(prev);
+    SelectionService.instance.selectSingle(prev.id);
   }
 
   void _toggleSlideshow() {
@@ -144,20 +160,34 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
   }
 
   ImageProvider _buildImageProvider(File file) {
-    final path = file.localPath ?? file.path;
-    if (path.isNotEmpty && io.File(path).existsSync()) {
-      return FileImage(io.File(path));
+    final candidates = [
+      if (file.localPath != null && file.localPath!.isNotEmpty) file.localPath!,
+      if (file.path.isNotEmpty) file.path,
+    ];
+
+    for (final p in candidates) {
+      if (io.File(p).existsSync()) {
+        return FileImage(io.File(p));
+      }
+      if (p.startsWith('http://') || p.startsWith('https://')) {
+        return NetworkImage(p);
+      }
     }
+
     if (file.downloadUrl != null && file.downloadUrl!.isNotEmpty) {
       return NetworkImage(file.downloadUrl!);
     }
+
     final thumbProvider = ThumbnailResolver.providerFor(file.thumbnail);
     if (thumbProvider != null) {
       return thumbProvider;
     }
-    if (path.isNotEmpty) {
-      return FileImage(io.File(path));
+
+    final fallbackPath = file.localPath ?? file.path;
+    if (fallbackPath.isNotEmpty) {
+      return FileImage(io.File(fallbackPath));
     }
+
     return NetworkImage(file.downloadUrl ?? '');
   }
 
@@ -213,6 +243,7 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
           ),
         },
         child: Focus(
+          focusNode: _focusNode,
           autofocus: true,
           child: Scaffold(
             backgroundColor: Colors.black.withValues(alpha: 0.95),

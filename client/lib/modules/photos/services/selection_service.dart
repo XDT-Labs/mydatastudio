@@ -10,6 +10,11 @@ class SelectionService {
   final BehaviorSubject<Set<String>> selectedIds = BehaviorSubject<Set<String>>.seeded({});
   final BehaviorSubject<bool> isSelectionMode = BehaviorSubject<bool>.seeded(false);
 
+  void selectSingle(String fileId) {
+    selectedIds.add({fileId});
+    isSelectionMode.add(true);
+  }
+
   void toggle(String fileId) {
     final current = Set<String>.from(selectedIds.value);
     if (current.contains(fileId)) {
