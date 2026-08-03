@@ -37,25 +37,30 @@ class PhotosService extends RxService<PhotosServiceCommand, List<File>> {
     isLoading.add(true);
     PhotosRepository repo = PhotosRepository();
 
-    final photos = await repo.photos(filter: command.filter);
-    final byDate = await repo.photosByDate(filter: command.filter);
-    final byMonth = await repo.photosByMonth(filter: command.filter);
-    final withLocation = await repo.photosWithLocation(filter: command.filter);
-    
-    final tCounts = await repo.allTags();
-    final lCounts = await repo.allLocations();
-    final sCounts = await repo.sourceCountsByType();
+    try {
+      final photos = await repo.photos(filter: command.filter);
+      final byDate = await repo.photosByDate(filter: command.filter);
+      final byMonth = await repo.photosByMonth(filter: command.filter);
+      final withLocation = await repo.photosWithLocation(filter: command.filter);
+      
+      final tCounts = await repo.allTags();
+      final lCounts = await repo.allLocations();
+      final sCounts = await repo.sourceCountsByType();
 
-    sink.add(photos);
-    photosByDate.add(byDate);
-    photosByMonth.add(byMonth);
-    photosWithLocation.add(withLocation);
-    tagCounts.add(tCounts);
-    locationCounts.add(lCounts);
-    sourceCounts.add(sCounts);
-    
-    isLoading.add(false);
+      sink.add(photos);
+      photosByDate.add(byDate);
+      photosByMonth.add(byMonth);
+      photosWithLocation.add(withLocation);
+      tagCounts.add(tCounts);
+      locationCounts.add(lCounts);
+      sourceCounts.add(sCounts);
 
-    return photos;
+      return photos;
+    } catch (e, st) {
+      sink.addError(e, st);
+      rethrow;
+    } finally {
+      isLoading.add(false);
+    }
   }
 }
