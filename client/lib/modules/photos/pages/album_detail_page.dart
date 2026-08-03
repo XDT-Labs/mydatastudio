@@ -243,27 +243,34 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(12.0),
-                child: Container(
-                  width: 96,
-                  height: 96,
-                  color: colorScheme.surfaceContainerHigh,
-                  child: (coverFile != null && ThumbnailResolver.providerFor(coverFile.thumbnail) != null)
-                      ? Image(
-                          image: ThumbnailResolver.providerFor(coverFile.thumbnail)!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Icon(
+                child: Builder(
+                  builder: (context) {
+                    final coverProvider = coverFile != null
+                        ? ThumbnailResolver.providerFor(coverFile.thumbnail)
+                        : null;
+                    return Container(
+                      width: 96,
+                      height: 96,
+                      color: colorScheme.surfaceContainerHigh,
+                      child: coverProvider != null
+                          ? Image(
+                              image: coverProvider,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Icon(
+                                  Icons.collections_bookmark_outlined,
+                                  size: 48,
+                                  color: colorScheme.onSurfaceVariant,
+                                );
+                              },
+                            )
+                          : Icon(
                               Icons.collections_bookmark_outlined,
                               size: 48,
                               color: colorScheme.onSurfaceVariant,
-                            );
-                          },
-                        )
-                      : Icon(
-                          Icons.collections_bookmark_outlined,
-                          size: 48,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+                            ),
+                    );
+                  },
                 ),
               ),
               const SizedBox(width: 20),
