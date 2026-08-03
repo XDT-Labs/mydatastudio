@@ -210,6 +210,8 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
                               setState(() {
                                 _gridItemSize = val;
                               });
+                            },
+                            onChangeEnd: (val) {
                               ViewStateService.instance.setGridItemSize(val);
                             },
                           ),
