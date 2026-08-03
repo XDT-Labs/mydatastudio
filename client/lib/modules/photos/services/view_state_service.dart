@@ -17,8 +17,10 @@ class ViewStateService {
   final BehaviorSubject<File?> lightboxMedia = BehaviorSubject<File?>.seeded(null);
   final BehaviorSubject<PhotoFilter> activeFilter = BehaviorSubject<PhotoFilter>.seeded(const PhotoFilter());
   final BehaviorSubject<String> activeNav = BehaviorSubject<String>.seeded('all');
+  final BehaviorSubject<double> gridItemSize = BehaviorSubject<double>.seeded(160.0);
 
   void setViewMode(PhotoViewMode mode) => viewMode.add(mode);
+  void setGridItemSize(double size) => gridItemSize.add(size);
   void setInfoMedia(File? media) => infoMedia.add(media);
   void toggleInfo() => isInfoOpen.add(!isInfoOpen.value);
   void closeInfo() => isInfoOpen.add(false);

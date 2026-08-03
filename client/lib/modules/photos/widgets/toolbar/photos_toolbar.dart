@@ -30,11 +30,13 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
   StreamSubscription? _filterSub;
   StreamSubscription? _viewModeSub;
   StreamSubscription? _photosSub;
+  StreamSubscription? _gridSizeSub;
 
   Set<String> _selectedIds = {};
   PhotoFilter _activeFilter = const PhotoFilter();
   PhotoViewMode _currentViewMode = PhotoViewMode.grid;
   List<File> _files = [];
+  double _gridItemSize = 160.0;
 
   @override
   void initState() {
@@ -47,6 +49,7 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
     _activeFilter = ViewStateService.instance.activeFilter.value;
     _currentViewMode = ViewStateService.instance.viewMode.value;
     _files = PhotosService.instance.sink.valueOrNull ?? [];
+    _gridItemSize = ViewStateService.instance.gridItemSize.value;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _selectionSub = SelectionService.instance.selectedIds.listen((selected) {
@@ -69,6 +72,10 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
       _photosSub = PhotosService.instance.sink.listen((photos) {
         if (mounted) setState(() => _files = photos);
       });
+
+      _gridSizeSub = ViewStateService.instance.gridItemSize.listen((size) {
+        if (mounted) setState(() => _gridItemSize = size);
+      });
     });
   }
 
@@ -80,6 +87,7 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
     _filterSub?.cancel();
     _viewModeSub?.cancel();
     _photosSub?.cancel();
+    _gridSizeSub?.cancel();
     super.dispose();
   }
 
@@ -106,119 +114,174 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Row(
-      children: [
-        // Search TextField
-        SizedBox(
-          width: 240,
-          child: TextField(
-            controller: _searchController,
-            onChanged: _onSearchChanged,
-            style: theme.textTheme.bodyMedium,
-            decoration: InputDecoration(
-              hintText: 'Search photos...',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              isDense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: colorScheme.outlineVariant),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: colorScheme.outlineVariant),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: colorScheme.primary),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 750;
+        final sliderWidth = isCompact ? 60.0 : 100.0;
 
-        // Filter Dropdown
-        FilterDropdown(
-          mediaType: _activeFilter.mediaType,
-          onlyFavorites: _activeFilter.onlyFavorites,
-          sortBy: _activeFilter.sortBy.name,
-          onMediaTypeChanged: (type) {
-            ViewStateService.instance.updateFilter(
-              _activeFilter.copyWith(mediaType: type),
-            );
-          },
-          onFavoritesChanged: (fav) {
-            ViewStateService.instance.updateFilter(
-              _activeFilter.copyWith(onlyFavorites: fav),
-            );
-          },
-          onSortChanged: (sortStr) {
-            final sortEnum = PhotoSortOrder.values.firstWhere(
-              (e) => e.name == sortStr,
-              orElse: () => PhotoSortOrder.dateDesc,
-            );
-            ViewStateService.instance.updateFilter(
-              _activeFilter.copyWith(sortBy: sortEnum),
-            );
-          },
-        ),
+        return Row(
+          children: [
+            // Search TextField
+            Flexible(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 240, minWidth: 100),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: _onSearchChanged,
+                  style: theme.textTheme.bodyMedium,
+                  decoration: InputDecoration(
+                    hintText: 'Search photos...',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: colorScheme.outlineVariant),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: colorScheme.outlineVariant),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: colorScheme.primary),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
 
-        const Spacer(),
+            // Filter Dropdown
+            FilterDropdown(
+              mediaType: _activeFilter.mediaType,
+              onlyFavorites: _activeFilter.onlyFavorites,
+              sortBy: _activeFilter.sortBy.name,
+              onMediaTypeChanged: (type) {
+                ViewStateService.instance.updateFilter(
+                  _activeFilter.copyWith(mediaType: type),
+                );
+              },
+              onFavoritesChanged: (fav) {
+                ViewStateService.instance.updateFilter(
+                  _activeFilter.copyWith(onlyFavorites: fav),
+                );
+              },
+              onSortChanged: (sortStr) {
+                final sortEnum = PhotoSortOrder.values.firstWhere(
+                  (e) => e.name == sortStr,
+                  orElse: () => PhotoSortOrder.dateDesc,
+                );
+                ViewStateService.instance.updateFilter(
+                  _activeFilter.copyWith(sortBy: sortEnum),
+                );
+              },
+            ),
 
-        // View Mode SegmentedButton
-        SegmentedButton<PhotoViewMode>(
-          segments: const [
-            ButtonSegment<PhotoViewMode>(
-              value: PhotoViewMode.grid,
-              icon: Icon(Icons.grid_view, size: 18),
-              tooltip: 'Grid View',
+            if (_currentViewMode == PhotoViewMode.grid ||
+                _currentViewMode == PhotoViewMode.timeline) ...[
+              if (constraints.maxWidth >= 650) ...[
+                const SizedBox(width: 8),
+                Tooltip(
+                  message: 'Image Grid Size',
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.photo_size_select_small,
+                        size: 16,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      SizedBox(
+                        width: sliderWidth,
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 2,
+                            thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 6),
+                          ),
+                          child: Slider(
+                            value: _gridItemSize,
+                            min: 100.0,
+                            max: 320.0,
+                            onChanged: (val) {
+                              setState(() {
+                                _gridItemSize = val;
+                              });
+                              ViewStateService.instance.setGridItemSize(val);
+                            },
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        Icons.photo_size_select_large,
+                        size: 20,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+
+            const Spacer(),
+
+            // View Mode SegmentedButton
+            SegmentedButton<PhotoViewMode>(
+              segments: const [
+                ButtonSegment<PhotoViewMode>(
+                  value: PhotoViewMode.grid,
+                  icon: Icon(Icons.grid_view, size: 18),
+                  tooltip: 'Grid View',
+                ),
+                ButtonSegment<PhotoViewMode>(
+                  value: PhotoViewMode.list,
+                  icon: Icon(Icons.view_list, size: 18),
+                  tooltip: 'List View',
+                ),
+                ButtonSegment<PhotoViewMode>(
+                  value: PhotoViewMode.timeline,
+                  icon: Icon(Icons.timeline, size: 18),
+                  tooltip: 'Timeline View',
+                ),
+                ButtonSegment<PhotoViewMode>(
+                  value: PhotoViewMode.map,
+                  icon: Icon(Icons.map, size: 18),
+                  tooltip: 'Map View',
+                ),
+              ],
+              selected: {_currentViewMode},
+              onSelectionChanged: (newSelection) {
+                if (newSelection.isNotEmpty) {
+                  ViewStateService.instance.setViewMode(newSelection.first);
+                }
+              },
             ),
-            ButtonSegment<PhotoViewMode>(
-              value: PhotoViewMode.list,
-              icon: Icon(Icons.view_list, size: 18),
-              tooltip: 'List View',
+
+            const SizedBox(width: 8),
+
+            // Import Button
+            IconButton(
+              icon: const Icon(Icons.file_upload_outlined),
+              tooltip: 'Import Photos',
+              onPressed: () {
+                showDialog<void>(
+                  context: context,
+                  builder: (context) => const ImportDialog(),
+                );
+              },
             ),
-            ButtonSegment<PhotoViewMode>(
-              value: PhotoViewMode.timeline,
-              icon: Icon(Icons.timeline, size: 18),
-              tooltip: 'Timeline View',
-            ),
-            ButtonSegment<PhotoViewMode>(
-              value: PhotoViewMode.map,
-              icon: Icon(Icons.map, size: 18),
-              tooltip: 'Map View',
+
+            // Shortcuts Button
+            IconButton(
+              icon: const Icon(Icons.keyboard_outlined),
+              tooltip: 'Keyboard Shortcuts',
+              onPressed: () => _showKeyboardShortcuts(context),
             ),
           ],
-          selected: {_currentViewMode},
-          onSelectionChanged: (newSelection) {
-            if (newSelection.isNotEmpty) {
-              ViewStateService.instance.setViewMode(newSelection.first);
-            }
-          },
-        ),
-
-        const SizedBox(width: 8),
-
-        // Import Button
-        IconButton(
-          icon: const Icon(Icons.file_upload_outlined),
-          tooltip: 'Import Photos',
-          onPressed: () {
-            showDialog<void>(
-              context: context,
-              builder: (context) => const ImportDialog(),
-            );
-          },
-        ),
-
-        // Keyboard Shortcuts Button
-        IconButton(
-          icon: const Icon(Icons.keyboard),
-          tooltip: 'Keyboard Shortcuts',
-          onPressed: () => _showKeyboardShortcuts(context),
-        ),
-      ],
+        );
+      },
     );
   }
 

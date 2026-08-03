@@ -126,6 +126,7 @@ void main() {
           selectedIds: const {},
           scrollController: controller,
         ),
+        height: 300,
       ),
     );
 

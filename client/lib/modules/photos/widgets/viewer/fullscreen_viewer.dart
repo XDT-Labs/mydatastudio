@@ -1,10 +1,10 @@
-import 'dart:async';
 import 'dart:io' as io;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
+import 'package:mydatastudio/modules/photos/services/batch_action_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/viewer/zoom_controller.dart';
@@ -60,8 +60,6 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
   late ZoomController _zoomController;
   late TransformationController _transformationController;
   late FocusNode _focusNode;
-  Timer? _slideshowTimer;
-  bool _isSlideshowPlaying = false;
 
   @override
   void initState() {
@@ -95,7 +93,6 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
 
   @override
   void dispose() {
-    _slideshowTimer?.cancel();
     _zoomController.removeListener(_onZoomControllerChanged);
     _zoomController.dispose();
     _transformationController.dispose();
@@ -103,10 +100,17 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
     super.dispose();
   }
 
+  Size _viewportSize = Size.zero;
+
   void _onZoomControllerChanged() {
+    final s = _zoomController.zoomLevel;
+    final cx = _viewportSize.width > 0 ? _viewportSize.width / 2 : 0.0;
+    final cy = _viewportSize.height > 0 ? _viewportSize.height / 2 : 0.0;
+
     setState(() {
       _transformationController.value = Matrix4.identity()
-        ..scale(_zoomController.zoomLevel);
+        ..translate(cx * (1 - s), cy * (1 - s))
+        ..scale(s, s, 1.0);
     });
   }
 
@@ -137,21 +141,6 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
     final prev = _currentMedia;
     ViewStateService.instance.setInfoMedia(prev);
     SelectionService.instance.selectSingle(prev.id);
-  }
-
-  void _toggleSlideshow() {
-    setState(() {
-      _isSlideshowPlaying = !_isSlideshowPlaying;
-      if (_isSlideshowPlaying) {
-        _slideshowTimer = Timer.periodic(
-          const Duration(milliseconds: 3500),
-          (_) => _nextMedia(),
-        );
-      } else {
-        _slideshowTimer?.cancel();
-        _slideshowTimer = null;
-      }
-    });
   }
 
 
@@ -209,10 +198,14 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
         const SingleActivator(LogicalKeyboardKey.escape): const CloseViewerIntent(),
         const SingleActivator(LogicalKeyboardKey.keyI): const ToggleExifIntent(),
         const SingleActivator(LogicalKeyboardKey.equal): const ZoomInIntent(),
+        const SingleActivator(LogicalKeyboardKey.equal, shift: true): const ZoomInIntent(),
         const SingleActivator(LogicalKeyboardKey.add): const ZoomInIntent(),
         const SingleActivator(LogicalKeyboardKey.minus): const ZoomOutIntent(),
         const SingleActivator(LogicalKeyboardKey.numpadAdd): const ZoomInIntent(),
         const SingleActivator(LogicalKeyboardKey.numpadSubtract): const ZoomOutIntent(),
+        const CharacterActivator('+'): const ZoomInIntent(),
+        const CharacterActivator('='): const ZoomInIntent(),
+        const CharacterActivator('-'): const ZoomOutIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -254,35 +247,40 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
                 Center(
                   child: isVideo
                       ? _buildVideoPlaceholder(theme, media)
-                      : InteractiveViewer(
-                          transformationController: _transformationController,
-                          minScale: ZoomController.minZoom,
-                          maxScale: ZoomController.maxZoom,
-                          child: Image(
-                            image: _buildImageProvider(media),
-                            fit: BoxFit.contain,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.broken_image,
-                                      size: 64,
-                                      color: theme.colorScheme.error,
+                      : LayoutBuilder(
+                          builder: (context, constraints) {
+                            _viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
+                            return InteractiveViewer(
+                              transformationController: _transformationController,
+                              minScale: ZoomController.minZoom,
+                              maxScale: ZoomController.maxZoom,
+                              child: Image(
+                                image: _buildImageProvider(media),
+                                fit: BoxFit.contain,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.broken_image,
+                                          size: 64,
+                                          color: theme.colorScheme.error,
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          media.name,
+                                          style: theme.textTheme.bodyMedium?.copyWith(
+                                            color: theme.colorScheme.onErrorContainer,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      media.name,
-                                      style: theme.textTheme.bodyMedium?.copyWith(
-                                        color: theme.colorScheme.onSurface,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
+                                  );
+                                },
+                              ),
+                            );
+                          },
                         ),
                 ),
 
@@ -307,20 +305,6 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
                           ),
                         ),
                         const Spacer(),
-
-                        // Slideshow toggle
-                        IconButton(
-                          icon: Icon(
-                            _isSlideshowPlaying
-                                ? Icons.pause
-                                : Icons.play_arrow,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                          tooltip: _isSlideshowPlaying
-                              ? 'Pause Slideshow'
-                              : 'Start Slideshow',
-                          onPressed: _toggleSlideshow,
-                        ),
 
                         // Zoom controls
                         IconButton(
@@ -387,7 +371,9 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
                             color: theme.colorScheme.onSurface,
                           ),
                           tooltip: 'Download',
-                          onPressed: () {},
+                          onPressed: () {
+                            BatchActionService.instance.downloadSingle(media);
+                          },
                         ),
 
                         // Close button

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -9,7 +10,7 @@ import 'package:mydatastudio/modules/photos/widgets/tiles/date_section_header.da
 import 'package:mydatastudio/modules/photos/widgets/tiles/photo_grid_tile.dart';
 
 /// Main photo grid view component with virtualized date-grouped sections.
-class PhotoGrid extends StatelessWidget {
+class PhotoGrid extends StatefulWidget {
   const PhotoGrid({
     super.key,
     required this.files,
@@ -29,12 +30,34 @@ class PhotoGrid extends StatelessWidget {
   final ValueChanged<File>? onOpenLightboxTile;
   final ValueChanged<File>? onOpenInfoTile;
 
-  static int getColumnCount(double width) {
-    if (width < 600) return 2;
-    if (width < 900) return 3;
-    if (width < 1200) return 4;
-    if (width < 1500) return 5;
-    return 6;
+  static int getColumnCount(double width, {double itemSize = 160.0}) {
+    final cols = (width / itemSize).round();
+    return cols.clamp(1, 12);
+  }
+
+  @override
+  State<PhotoGrid> createState() => _PhotoGridState();
+}
+
+class _PhotoGridState extends State<PhotoGrid> {
+  StreamSubscription<double>? _gridSizeSub;
+  double _gridItemSize = 160.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _gridItemSize = ViewStateService.instance.gridItemSize.value;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _gridSizeSub = ViewStateService.instance.gridItemSize.listen((size) {
+        if (mounted) setState(() => _gridItemSize = size);
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _gridSizeSub?.cancel();
+    super.dispose();
   }
 
   Map<String, List<File>> _groupByMonthYear(List<File> files) {
@@ -52,7 +75,7 @@ class PhotoGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    if (files.isEmpty) {
+    if (widget.files.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -60,7 +83,7 @@ class PhotoGrid extends StatelessWidget {
             Icon(
               Icons.photo_library,
               size: 64,
-              color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
+              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
             ),
             const SizedBox(height: 16),
             Text(
@@ -74,17 +97,17 @@ class PhotoGrid extends StatelessWidget {
       );
     }
 
-    final groups = _groupByMonthYear(files);
+    final groups = _groupByMonthYear(widget.files);
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = getColumnCount(constraints.maxWidth);
+        final columns = PhotoGrid.getColumnCount(constraints.maxWidth, itemSize: _gridItemSize);
 
         final List<Widget> slivers = [];
 
         groups.forEach((monthYear, monthFiles) {
           final isGroupAllSelected = monthFiles.every(
-            (f) => selectedIds.contains(f.id),
+            (f) => widget.selectedIds.contains(f.id),
           );
 
           // 1. Date section header
@@ -101,7 +124,7 @@ class PhotoGrid extends StatelessWidget {
                     );
                   } else {
                     for (final f in monthFiles) {
-                      if (selectedIds.contains(f.id)) {
+                      if (widget.selectedIds.contains(f.id)) {
                         SelectionService.instance.toggle(f.id);
                       }
                     }
@@ -125,45 +148,45 @@ class PhotoGrid extends StatelessWidget {
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {
                     final file = monthFiles[index];
-                    final isSelected = selectedIds.contains(file.id);
+                    final isSelected = widget.selectedIds.contains(file.id);
 
                     return PhotoGridTile(
                       file: file,
                       isSelected: isSelected,
                       isFavorite: file.isFavorite,
                       onTap: () {
-                        if (onTapTile != null) {
-                          onTapTile!(file);
+                        if (widget.onTapTile != null) {
+                          widget.onTapTile!(file);
                         } else {
-                          SelectionService.instance.handleTap(file, files);
+                          SelectionService.instance.handleTap(file, widget.files);
                           ViewStateService.instance.setInfoMedia(file);
                         }
                       },
                       onSelect: () {
-                        if (onSelectTile != null) {
-                          onSelectTile!(file);
+                        if (widget.onSelectTile != null) {
+                          widget.onSelectTile!(file);
                         } else {
                           SelectionService.instance.toggle(file.id);
                         }
                       },
                       onToggleFavorite: () async {
-                        if (onToggleFavoriteTile != null) {
-                          onToggleFavoriteTile!(file);
+                        if (widget.onToggleFavoriteTile != null) {
+                          widget.onToggleFavoriteTile!(file);
                         } else {
                           await PhotosRepository().toggleFavorite(file.id);
                           await PhotosService.instance.refresh();
                         }
                       },
                       onOpenLightbox: () {
-                        if (onOpenLightboxTile != null) {
-                          onOpenLightboxTile!(file);
+                        if (widget.onOpenLightboxTile != null) {
+                          widget.onOpenLightboxTile!(file);
                         } else {
                           ViewStateService.instance.setLightboxMedia(file);
                         }
                       },
                       onOpenInfo: () {
-                        if (onOpenInfoTile != null) {
-                          onOpenInfoTile!(file);
+                        if (widget.onOpenInfoTile != null) {
+                          widget.onOpenInfoTile!(file);
                         } else {
                           ViewStateService.instance.setInfoMedia(file);
                           ViewStateService.instance.isInfoOpen.add(true);

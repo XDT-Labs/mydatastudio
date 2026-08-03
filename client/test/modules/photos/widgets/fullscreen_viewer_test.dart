@@ -72,7 +72,6 @@ void main() {
       expect(find.byTooltip('Close'), findsOneWidget);
       expect(find.byTooltip('Zoom In'), findsOneWidget);
       expect(find.byTooltip('Zoom Out'), findsOneWidget);
-      expect(find.byTooltip('Start Slideshow'), findsOneWidget);
       expect(find.byTooltip('Info Details'), findsOneWidget);
       expect(find.byTooltip('Favorite'), findsOneWidget);
     });
@@ -159,37 +158,6 @@ void main() {
       await tester.tap(find.text('75%'));
       await tester.pumpAndSettle();
       expect(find.text('100%'), findsOneWidget);
-    });
-
-    testWidgets('slideshow auto-advances', (WidgetTester tester) async {
-      await tester.pumpWidget(
-        buildTestWidget(
-          currentFile: imageFile1,
-          mediaList: mediaList,
-          onClose: () {},
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('1 / 3'), findsOneWidget);
-
-      // Start slideshow
-      await tester.tap(find.byTooltip('Start Slideshow'));
-      await tester.pumpAndSettle();
-
-      // Advance timer by 3500ms
-      await tester.pump(const Duration(milliseconds: 3500));
-      await tester.pumpAndSettle();
-      expect(find.text('2 / 3'), findsOneWidget);
-
-      // Advance timer again
-      await tester.pump(const Duration(milliseconds: 3500));
-      await tester.pumpAndSettle();
-      expect(find.text('3 / 3'), findsOneWidget);
-
-      // Pause slideshow
-      await tester.tap(find.byTooltip('Pause Slideshow'));
-      await tester.pumpAndSettle();
     });
 
     testWidgets('keyboard shortcuts work (Escape closes, arrows navigate)', (WidgetTester tester) async {

@@ -32,7 +32,7 @@ class _AlbumModalState extends State<AlbumModal> {
 
   List<({Album album, int count})> _albumsWithCounts = [];
   bool _isLoading = true;
-  String? _selectedAlbumId;
+  final Set<String> _selectedAlbumIds = {};
   bool _isSubmitting = false;
 
   @override
@@ -57,30 +57,33 @@ class _AlbumModalState extends State<AlbumModal> {
       setState(() {
         _albumsWithCounts = albums;
         _isLoading = false;
-        if (albums.isNotEmpty) {
-          _selectedAlbumId = albums.first.album.id;
+        if (albums.isNotEmpty && _selectedAlbumIds.isEmpty) {
+          _selectedAlbumIds.add(albums.first.album.id);
         }
       });
     }
   }
 
   Future<void> _handleAddToExisting() async {
-    if (_selectedAlbumId == null || _isSubmitting) return;
+    if (_selectedAlbumIds.isEmpty || _isSubmitting) return;
 
     setState(() => _isSubmitting = true);
-    final albumItem = _albumsWithCounts.firstWhere(
-      (a) => a.album.id == _selectedAlbumId,
-    );
+    final selectedAlbums = _albumsWithCounts.where(
+      (a) => _selectedAlbumIds.contains(a.album.id),
+    ).toList();
 
-    for (final fileId in widget.selectedFileIds) {
-      await _repo.addFileToAlbum(fileId, _selectedAlbumId!);
+    for (final albumId in _selectedAlbumIds) {
+      for (final fileId in widget.selectedFileIds) {
+        await _repo.addFileToAlbum(fileId, albumId);
+      }
     }
 
     if (mounted) {
+      final names = selectedAlbums.map((a) => '"${a.album.name}"').join(', ');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Added ${widget.selectedFileIds.length} item(s) to "${albumItem.album.name}"',
+            'Added ${widget.selectedFileIds.length} item(s) to $names',
           ),
         ),
       );
@@ -238,12 +241,19 @@ class _AlbumModalState extends State<AlbumModal> {
           final item = _albumsWithCounts[index];
           final album = item.album;
           final count = item.count;
-          final isSelected = _selectedAlbumId == album.id;
+          final isSelected = _selectedAlbumIds.contains(album.id);
 
-          return RadioListTile<String>(
-            value: album.id,
-            groupValue: _selectedAlbumId,
-            onChanged: (val) => setState(() => _selectedAlbumId = val),
+          return CheckboxListTile(
+            value: isSelected,
+            onChanged: (val) {
+              setState(() {
+                if (val == true) {
+                  _selectedAlbumIds.add(album.id);
+                } else {
+                  _selectedAlbumIds.remove(album.id);
+                }
+              });
+            },
             activeColor: colorScheme.primary,
             title: Text(
               album.name,
@@ -381,7 +391,7 @@ class _AlbumModalState extends State<AlbumModal> {
                   onPressed: _isSubmitting
                       ? null
                       : (_mode == AlbumModalMode.addToExisting
-                          ? (_selectedAlbumId != null &&
+                          ? (_selectedAlbumIds.isNotEmpty &&
                                   _albumsWithCounts.isNotEmpty
                               ? _handleAddToExisting
                               : null)

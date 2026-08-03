@@ -123,7 +123,7 @@ void main() {
       expect(fakeRepo.addedFiles.length, 2);
     });
 
-    testWidgets('adds selected files to an existing album selection', (tester) async {
+    testWidgets('adds selected files to existing album selections', (tester) async {
       await tester.pumpWidget(createTestApp(
         AlbumModal(
           selectedFileIds: const {'f10'},
@@ -133,16 +133,16 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // Tap 'Vacation 2025' radio tile
-      await tester.tap(find.text('Vacation 2025'));
+      // 'Vacation 2025' ('a1') is pre-selected. Tap 'Family' ('a2') checkbox to multi-select both
+      await tester.tap(find.text('Family'));
       await tester.pumpAndSettle();
 
       // Tap Add to Album
       await tester.tap(find.text('Add to Album'));
       await tester.pumpAndSettle();
 
-      expect(fakeRepo.addedFiles.length, 1);
-      expect(fakeRepo.addedFiles.first, ('f10', 'a1'));
+      expect(fakeRepo.addedFiles.length, 2);
+      expect(fakeRepo.addedFiles, containsAll([('f10', 'a1'), ('f10', 'a2')]));
     });
   });
 }

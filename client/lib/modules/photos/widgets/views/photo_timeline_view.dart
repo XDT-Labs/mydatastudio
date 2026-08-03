@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -45,6 +46,9 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
   int _activeIndex = 0;
   List<double> _sectionOffsets = [];
 
+  StreamSubscription<double>? _gridSizeSub;
+  double _gridItemSize = 160.0;
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +59,13 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
       _createdOwnController = true;
     }
     _scrollController.addListener(_onScroll);
+
+    _gridItemSize = ViewStateService.instance.gridItemSize.value;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _gridSizeSub = ViewStateService.instance.gridItemSize.listen((size) {
+        if (mounted) setState(() => _gridItemSize = size);
+      });
+    });
   }
 
   @override
@@ -63,6 +74,7 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
     if (_createdOwnController) {
       _scrollController.dispose();
     }
+    _gridSizeSub?.cancel();
     super.dispose();
   }
 
@@ -188,7 +200,7 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final mainWidth = max(0.0, constraints.maxWidth - 48.0);
-        final columns = PhotoGrid.getColumnCount(mainWidth);
+        final columns = PhotoGrid.getColumnCount(mainWidth, itemSize: _gridItemSize);
 
         _sectionOffsets = _calculateSectionOffsets(groups, mainWidth, columns);
 

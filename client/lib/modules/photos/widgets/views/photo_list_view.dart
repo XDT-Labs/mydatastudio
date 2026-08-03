@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
+import 'package:mydatastudio/modules/photos/services/batch_action_service.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
@@ -255,7 +256,7 @@ class _PhotoListViewState extends State<PhotoListView> {
                 },
                 onDownload: widget.onDownloadRow != null
                     ? () => widget.onDownloadRow!(file)
-                    : null,
+                    : () => BatchActionService.instance.downloadSingle(file),
               );
             },
           ),

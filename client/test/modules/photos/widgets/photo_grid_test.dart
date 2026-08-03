@@ -83,11 +83,16 @@ void main() {
   });
 
   testWidgets('responsive column count at different widths', (WidgetTester tester) async {
-    expect(PhotoGrid.getColumnCount(500), equals(2));
-    expect(PhotoGrid.getColumnCount(750), equals(3));
-    expect(PhotoGrid.getColumnCount(1000), equals(4));
-    expect(PhotoGrid.getColumnCount(1300), equals(5));
-    expect(PhotoGrid.getColumnCount(1600), equals(6));
+    // Default itemSize=160: columns = (width / 160).round() clamped 1-12
+    expect(PhotoGrid.getColumnCount(500), equals(3));   // 500/160=3.1 → 3
+    expect(PhotoGrid.getColumnCount(750), equals(5));   // 750/160=4.7 → 5
+    expect(PhotoGrid.getColumnCount(1000), equals(6));  // 1000/160=6.25 → 6
+    expect(PhotoGrid.getColumnCount(1300), equals(8));  // 1300/160=8.1 → 8
+    expect(PhotoGrid.getColumnCount(1600), equals(10)); // 1600/160=10 → 10
+
+    // With a custom itemSize of 200
+    expect(PhotoGrid.getColumnCount(800, itemSize: 200), equals(4));  // 800/200=4 → 4
+    expect(PhotoGrid.getColumnCount(1200, itemSize: 200), equals(6)); // 1200/200=6 → 6
   });
 
   testWidgets('empty state shows message when files list is empty', (WidgetTester tester) async {
