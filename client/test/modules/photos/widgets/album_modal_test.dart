@@ -25,6 +25,15 @@ class FakePhotosRepository extends PhotosRepository {
   Future<void> addFileToAlbum(String fileId, String albumId) async {
     addedFiles.add((fileId, albumId));
   }
+
+  @override
+  Future<void> addFilesToAlbums(Iterable<String> fileIds, Iterable<String> albumIds) async {
+    for (final albumId in albumIds) {
+      for (final fileId in fileIds) {
+        addedFiles.add((fileId, albumId));
+      }
+    }
+  }
 }
 
 Widget createTestApp(Widget child) {

@@ -247,6 +247,21 @@ class PhotosRepository {
     await db.execute("INSERT OR IGNORE INTO album_files (album_id, file_id) VALUES (?, ?)", [albumId, fileId]);
   }
 
+  Future<void> addFilesToAlbums(Iterable<String> fileIds, Iterable<String> albumIds) async {
+    AppDatabase? db = DatabaseManager.instance.database;
+    if (db == null) return;
+
+    final paramSets = <List<Object?>>[];
+    for (final albumId in albumIds) {
+      for (final fileId in fileIds) {
+        paramSets.add([albumId, fileId]);
+      }
+    }
+    if (paramSets.isEmpty) return;
+
+    await db.executeBatch("INSERT OR IGNORE INTO album_files (album_id, file_id) VALUES (?, ?)", paramSets);
+  }
+
   Future<void> removeFileFromAlbum(String fileId, String albumId) async {
     AppDatabase? db = DatabaseManager.instance.database;
     if (db == null) return;

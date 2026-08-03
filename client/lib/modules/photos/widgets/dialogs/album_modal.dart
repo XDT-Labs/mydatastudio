@@ -73,11 +73,7 @@ class _AlbumModalState extends State<AlbumModal> {
         (a) => _selectedAlbumIds.contains(a.album.id),
       ).toList();
 
-      for (final albumId in _selectedAlbumIds) {
-        for (final fileId in widget.selectedFileIds) {
-          await _repo.addFileToAlbum(fileId, albumId);
-        }
-      }
+      await _repo.addFilesToAlbums(widget.selectedFileIds, _selectedAlbumIds);
 
       if (mounted) {
         final names = selectedAlbums.map((a) => '"${a.album.name}"').join(', ');
@@ -123,10 +119,7 @@ class _AlbumModalState extends State<AlbumModal> {
       );
 
       await _repo.createAlbum(newAlbum);
-
-      for (final fileId in widget.selectedFileIds) {
-        await _repo.addFileToAlbum(fileId, newAlbum.id);
-      }
+      await _repo.addFilesToAlbums(widget.selectedFileIds, [newAlbum.id]);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
