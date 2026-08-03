@@ -31,20 +31,25 @@ class _TripPlaybackControllerState extends State<TripPlaybackController> {
   double _playbackSpeed = 1.0; // 1.0x, 2.0x, 4.0x
   Timer? _timer;
 
+  bool _areGeoFilesEqual(List<File> a, List<File> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    if (a.isEmpty) return true;
+    return a.first.id == b.first.id && a.last.id == b.last.id;
+  }
+
   @override
   void initState() {
     super.initState();
     if (widget.geoFiles.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _notifyActiveFile();
-      });
+      _notifyActiveFile();
     }
   }
 
   @override
   void didUpdateWidget(TripPlaybackController oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.geoFiles != oldWidget.geoFiles) {
+    if (!_areGeoFilesEqual(widget.geoFiles, oldWidget.geoFiles)) {
       if (_currentIndex >= widget.geoFiles.length) {
         _currentIndex = 0;
       }

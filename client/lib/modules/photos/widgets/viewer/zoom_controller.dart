@@ -9,12 +9,12 @@ class ZoomController extends ChangeNotifier {
   double _zoomLevel;
 
   ZoomController({double initialZoom = 1.0})
-      : _zoomLevel = initialZoom.clamp(minZoom, maxZoom);
+      : _zoomLevel = initialZoom.clamp(minZoom, maxZoom).toDouble();
 
   double get zoomLevel => _zoomLevel;
 
   set zoomLevel(double value) {
-    final clamped = value.clamp(minZoom, maxZoom);
+    final clamped = value.clamp(minZoom, maxZoom).toDouble();
     if (_zoomLevel != clamped) {
       _zoomLevel = clamped;
       notifyListeners();

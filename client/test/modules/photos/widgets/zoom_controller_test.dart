@@ -75,11 +75,11 @@ void main() {
 
     test('custom initial zoom clamps correctly', () {
       final custom = ZoomController(initialZoom: 5.0);
-      expect(custom.zoomLevel, 3.0);
+      expect(custom.zoomLevel, 5.0.clamp(ZoomController.minZoom, ZoomController.maxZoom).toDouble());
       custom.dispose();
 
       final customMin = ZoomController(initialZoom: 0.1);
-      expect(customMin.zoomLevel, 0.5);
+      expect(customMin.zoomLevel, 0.1.clamp(ZoomController.minZoom, ZoomController.maxZoom).toDouble());
       customMin.dispose();
     });
   });

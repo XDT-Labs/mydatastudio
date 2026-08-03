@@ -37,19 +37,23 @@ class _PhotoMapViewState extends State<PhotoMapView> {
   late final MapController _mapController;
   double _currentZoom = 10.0;
   File? _activePlaybackFile;
+  late List<File> _cachedGeoFiles;
 
-  List<File> get _geoFiles {
+  List<File> get _geoFiles => _cachedGeoFiles;
+
+  void _recomputeGeoFiles() {
     final validFiles = widget.files
         .where((f) => f.latitude != null && f.longitude != null)
         .toList();
     validFiles.sort((a, b) => a.dateCreated.compareTo(b.dateCreated));
-    return validFiles;
+    _cachedGeoFiles = validFiles;
   }
 
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
+    _recomputeGeoFiles();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fitBounds();
     });
@@ -59,6 +63,7 @@ class _PhotoMapViewState extends State<PhotoMapView> {
   void didUpdateWidget(PhotoMapView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.files != oldWidget.files) {
+      _recomputeGeoFiles();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _fitBounds();
       });
@@ -362,7 +367,7 @@ class _PhotoMapViewState extends State<PhotoMapView> {
               geoFiles: geo,
               mapController: _mapController,
               onActiveFileChanged: (file) {
-                if (mounted) {
+                if (mounted && _activePlaybackFile?.id != file?.id) {
                   setState(() {
                     _activePlaybackFile = file;
                   });
