@@ -96,7 +96,7 @@ void main() {
 
     // Click first row by tapping file name
     await tester.tap(find.text('july_photo1.jpg'));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(selectedFile, equals(files.first));
   });

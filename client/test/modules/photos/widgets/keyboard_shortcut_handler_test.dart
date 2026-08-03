@@ -116,7 +116,7 @@ void main() {
 
       await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
-      await tester.keyUpEvent(LogicalKeyboardKey.control);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
       await tester.pumpAndSettle();
 
       expect(SelectionService.instance.selectedIds.value, containsAll(['f1', 'f2']));
@@ -130,7 +130,9 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      await tester.sendKeyEvent(LogicalKeyboardKey.question);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+      await tester.sendKeyEvent(LogicalKeyboardKey.slash);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
       await tester.pumpAndSettle();
 
       expect(find.byType(KeyboardShortcutsModal), findsOneWidget);

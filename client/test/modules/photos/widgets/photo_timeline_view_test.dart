@@ -60,8 +60,7 @@ List<File> _createTestFiles() {
   ];
 }
 
-Widget _buildTestableWidget(Widget child,
-    {double width = 1000, double height = 2000}) {
+Widget _buildTestableWidget(Widget child, {double width = 1000, double height = 2000}) {
   return MaterialApp(
     theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
     home: Scaffold(
@@ -94,7 +93,7 @@ void main() {
     expect(find.byType(DateSectionHeader), findsNWidgets(3));
 
     // Should render PhotoGridTile for each file
-    expect(find.byType(PhotoGridTile), findsNWidgets(4));
+    expect(find.byType(PhotoGridTile, skipOffstage: false), findsNWidgets(4));
   });
 
   testWidgets('quick jump bar renders month labels', (WidgetTester tester) async {

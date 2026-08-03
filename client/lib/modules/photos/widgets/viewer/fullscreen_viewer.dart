@@ -62,7 +62,6 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
   late FocusNode _focusNode;
   Timer? _slideshowTimer;
   bool _isSlideshowPlaying = false;
-  bool _showExifOverlay = false;
 
   @override
   void initState() {
@@ -105,8 +104,10 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
   }
 
   void _onZoomControllerChanged() {
-    _transformationController.value = Matrix4.identity()
-      ..scale(_zoomController.zoomLevel);
+    setState(() {
+      _transformationController.value = Matrix4.identity()
+        ..scale(_zoomController.zoomLevel);
+    });
   }
 
   File get _currentMedia {
@@ -153,11 +154,6 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
     });
   }
 
-  void _toggleExifOverlay() {
-    setState(() {
-      _showExifOverlay = !_showExifOverlay;
-    });
-  }
 
   ImageProvider _buildImageProvider(File file) {
     final candidates = [
@@ -233,7 +229,12 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
             },
           ),
           ToggleExifIntent: CallbackAction<ToggleExifIntent>(
-            onInvoke: (_) => _toggleExifOverlay(),
+            onInvoke: (_) {
+              ViewStateService.instance.setInfoMedia(_currentMedia);
+              ViewStateService.instance.toggleInfo();
+              widget.onOpenInfo?.call(_currentMedia);
+              return null;
+            },
           ),
           ZoomInIntent: CallbackAction<ZoomInIntent>(
             onInvoke: (_) => _zoomController.zoomIn(),
@@ -348,15 +349,16 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
                           onPressed: _zoomController.zoomIn,
                         ),
 
-                        // Info overlay toggle
+                        // Info button (opens Info sidebar)
                         IconButton(
                           icon: Icon(
-                            _showExifOverlay ? Icons.info : Icons.info_outline,
+                            Icons.info_outline,
                             color: theme.colorScheme.onSurface,
                           ),
-                          tooltip: 'Toggle EXIF Info',
+                          tooltip: 'Info Details',
                           onPressed: () {
-                            _toggleExifOverlay();
+                            ViewStateService.instance.setInfoMedia(media);
+                            ViewStateService.instance.toggleInfo();
                             widget.onOpenInfo?.call(media);
                           },
                         ),
@@ -437,78 +439,6 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
                     ),
                   ),
                 ],
-
-                // Bottom EXIF Overlay
-                Positioned(
-                  left: 16,
-                  right: 16,
-                  bottom: 16,
-                  child: AnimatedOpacity(
-                    opacity: _showExifOverlay ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 200),
-                    child: IgnorePointer(
-                      ignoring: !_showExifOverlay,
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHighest
-                              .withValues(alpha: 0.85),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: theme.colorScheme.outlineVariant,
-                          ),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              media.name,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                color: theme.colorScheme.onSurface,
-                                fontWeight: FontWeight.bold,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 16,
-                              runSpacing: 8,
-                              children: [
-                                _buildExifItem(
-                                  theme,
-                                  Icons.category_outlined,
-                                  media.contentType,
-                                ),
-                                _buildExifItem(
-                                  theme,
-                                  Icons.data_usage_outlined,
-                                  _formatFileSize(media.size),
-                                ),
-                                _buildExifItem(
-                                  theme,
-                                  Icons.calendar_today_outlined,
-                                  media.dateCreated
-                                      .toString()
-                                      .split('.')
-                                      .first,
-                                ),
-                                if (media.latitude != null &&
-                                    media.longitude != null)
-                                  _buildExifItem(
-                                    theme,
-                                    Icons.location_on_outlined,
-                                    '${media.latitude!.toStringAsFixed(4)}, ${media.longitude!.toStringAsFixed(4)}',
-                                  ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
@@ -548,26 +478,6 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildExifItem(ThemeData theme, IconData icon, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          icon,
-          size: 16,
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurface,
-          ),
-        ),
-      ],
     );
   }
 }

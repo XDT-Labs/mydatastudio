@@ -238,12 +238,17 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                   width: 96,
                   height: 96,
                   color: colorScheme.surfaceContainerHigh,
-                  child: coverFile != null
+                  child: (coverFile != null && ThumbnailResolver.providerFor(coverFile.thumbnail) != null)
                       ? Image(
-                          image: ThumbnailResolver.providerFor(
-                            coverFile.thumbnail,
-                          ) ?? const AssetImage('assets/placeholder.png'),
+                          image: ThumbnailResolver.providerFor(coverFile.thumbnail)!,
                           fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Icon(
+                              Icons.collections_bookmark_outlined,
+                              size: 48,
+                              color: colorScheme.onSurfaceVariant,
+                            );
+                          },
                         )
                       : Icon(
                           Icons.collections_bookmark_outlined,

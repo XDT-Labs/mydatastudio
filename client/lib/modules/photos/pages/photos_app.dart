@@ -183,19 +183,32 @@ class _PhotosAppState extends State<PhotosApp> {
             ],
           ),
           if (_lightboxMedia != null)
-            FullscreenViewer(
-              currentFile: _lightboxMedia!,
-              mediaList: _files,
-              onClose: () => ViewStateService.instance.setLightboxMedia(null),
-              onToggleFavorite: (file) async {
-                await PhotosRepository().toggleFavorite(file.id);
-                final updatedList = await PhotosService.instance.refresh();
-                final updated = updatedList.firstWhere(
-                  (f) => f.id == file.id,
-                  orElse: () => file..isFavorite = !file.isFavorite,
-                );
-                ViewStateService.instance.setLightboxMedia(updated);
-              },
+            Positioned.fill(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: FullscreenViewer(
+                      currentFile: _lightboxMedia!,
+                      mediaList: _files,
+                      onClose: () => ViewStateService.instance.setLightboxMedia(null),
+                      onOpenInfo: (file) => ViewStateService.instance.openInfo(file),
+                      onToggleFavorite: (file) async {
+                        await PhotosRepository().toggleFavorite(file.id);
+                        final updatedList = await PhotosService.instance.refresh();
+                        final updated = updatedList.firstWhere(
+                          (f) => f.id == file.id,
+                          orElse: () => file..isFavorite = !file.isFavorite,
+                        );
+                        ViewStateService.instance.setLightboxMedia(updated);
+                      },
+                    ),
+                  ),
+                  AnimatedInfoPanel(
+                    isOpen: _isInfoOpen,
+                    child: const InfoSidebar(),
+                  ),
+                ],
+              ),
             ),
         ],
       ),

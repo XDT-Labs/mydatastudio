@@ -6,7 +6,7 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_map_view.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/trip_playback_controller.dart';
 
-import '../../../../helpers/fake_tile_provider.dart';
+import '../../../helpers/fake_tile_provider.dart';
 
 List<File> _createTestFilesWithGps() {
   return [

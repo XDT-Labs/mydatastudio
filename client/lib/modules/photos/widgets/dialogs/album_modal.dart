@@ -152,6 +152,8 @@ class _AlbumModalState extends State<AlbumModal> {
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ),
@@ -177,6 +179,8 @@ class _AlbumModalState extends State<AlbumModal> {
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ),
@@ -327,14 +331,16 @@ class _AlbumModalState extends State<AlbumModal> {
               children: [
                 Icon(Icons.library_add_outlined, color: colorScheme.primary),
                 const SizedBox(width: 12),
-                Text(
-                  'Album Management',
-                  style: textTheme.titleLarge?.copyWith(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.bold,
+                Expanded(
+                  child: Text(
+                    'Album Management',
+                    style: textTheme.titleLarge?.copyWith(
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.close),
                   onPressed: () => Navigator.of(context).pop(false),

@@ -59,12 +59,15 @@ class _TripPlaybackControllerState extends State<TripPlaybackController> {
   }
 
   void _notifyActiveFile() {
-    if (widget.geoFiles.isEmpty) {
-      widget.onActiveFileChanged?.call(null);
-      return;
-    }
-    final file = widget.geoFiles[_currentIndex];
-    widget.onActiveFileChanged?.call(file);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.geoFiles.isEmpty) {
+        widget.onActiveFileChanged?.call(null);
+        return;
+      }
+      final file = widget.geoFiles[_currentIndex];
+      widget.onActiveFileChanged?.call(file);
+    });
   }
 
   void _startTimer() {

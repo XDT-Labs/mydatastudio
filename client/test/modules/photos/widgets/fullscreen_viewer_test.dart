@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/widgets/viewer/fullscreen_viewer.dart';
 
-import '../../helpers/file_fixture.dart';
+import '../../../helpers/file_fixture.dart';
 
 void main() {
   group('FullscreenViewer Widget Tests', () {
@@ -73,7 +73,7 @@ void main() {
       expect(find.byTooltip('Zoom In'), findsOneWidget);
       expect(find.byTooltip('Zoom Out'), findsOneWidget);
       expect(find.byTooltip('Start Slideshow'), findsOneWidget);
-      expect(find.byTooltip('Toggle EXIF Info'), findsOneWidget);
+      expect(find.byTooltip('Info Details'), findsOneWidget);
       expect(find.byTooltip('Favorite'), findsOneWidget);
     });
 
@@ -222,33 +222,22 @@ void main() {
       expect(closed, isTrue);
     });
 
-    testWidgets('EXIF overlay toggles', (WidgetTester tester) async {
+    testWidgets('info button triggers onOpenInfo callback', (WidgetTester tester) async {
+      File? openedFile;
       await tester.pumpWidget(
         buildTestWidget(
           currentFile: imageFile1,
           mediaList: mediaList,
           onClose: () {},
+          onOpenInfo: (f) => openedFile = f,
         ),
       );
       await tester.pumpAndSettle();
 
-      // Toggle EXIF overlay on via info button
-      await tester.tap(find.byTooltip('Toggle EXIF Info'));
+      await tester.tap(find.byTooltip('Info Details'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Sunset.jpg'), findsNWidgets(2)); // Title in overlay + potential text
-      expect(find.text('image/jpeg'), findsOneWidget);
-      expect(find.text('2.0 MB'), findsOneWidget);
-      expect(find.text('37.7749, -122.4194'), findsOneWidget);
-
-      // Toggle EXIF overlay off via key 'i'
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyI);
-      await tester.pumpAndSettle();
-
-      final animatedOpacity = tester.widget<AnimatedOpacity>(
-        find.byType(AnimatedOpacity),
-      );
-      expect(animatedOpacity.opacity, 0.0);
+      expect(openedFile, equals(imageFile1));
     });
   });
 }

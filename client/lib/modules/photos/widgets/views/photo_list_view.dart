@@ -23,6 +23,7 @@ class PhotoListView extends StatefulWidget {
     this.onSelectRow,
     this.onToggleFavoriteRow,
     this.onOpenLightboxRow,
+    this.onOpenInfoRow,
     this.onDownloadRow,
   });
 
@@ -33,6 +34,7 @@ class PhotoListView extends StatefulWidget {
   final ValueChanged<File>? onSelectRow;
   final ValueChanged<File>? onToggleFavoriteRow;
   final ValueChanged<File>? onOpenLightboxRow;
+  final ValueChanged<File>? onOpenInfoRow;
   final ValueChanged<File>? onDownloadRow;
 
   @override
@@ -140,7 +142,13 @@ class _PhotoListViewState extends State<PhotoListView> {
                   onTap: () => _onSortHeaderTapped(PhotoSortOrder.title),
                   child: Row(
                     children: [
-                      Text('Thumbnail + Title', style: headerStyle),
+                      Flexible(
+                        child: Text(
+                          'Thumbnail + Title',
+                          style: headerStyle,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                       _buildSortIndicator(PhotoSortOrder.title),
                     ],
                   ),
@@ -179,7 +187,7 @@ class _PhotoListViewState extends State<PhotoListView> {
               ),
               // Column 5: Actions
               SizedBox(
-                width: 120,
+                width: 150,
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: Text('Actions', style: headerStyle),
@@ -238,6 +246,13 @@ class _PhotoListViewState extends State<PhotoListView> {
                     ViewStateService.instance.openLightbox(file);
                   }
                 },
+                onOpenInfo: () {
+                  if (widget.onOpenInfoRow != null) {
+                    widget.onOpenInfoRow!(file);
+                  } else {
+                    ViewStateService.instance.openInfo(file);
+                  }
+                },
                 onDownload: widget.onDownloadRow != null
                     ? () => widget.onDownloadRow!(file)
                     : null,
@@ -260,6 +275,7 @@ class _PhotoListRowTile extends StatefulWidget {
     required this.onSelect,
     required this.onToggleFavorite,
     required this.onOpenLightbox,
+    required this.onOpenInfo,
     this.onDownload,
   });
 
@@ -270,6 +286,7 @@ class _PhotoListRowTile extends StatefulWidget {
   final VoidCallback onSelect;
   final VoidCallback onToggleFavorite;
   final VoidCallback onOpenLightbox;
+  final VoidCallback onOpenInfo;
   final VoidCallback? onDownload;
 
   @override
@@ -474,54 +491,70 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
                 ),
               ),
 
-              // Column 5 (width: 120): Actions (Favorite toggle, expand, download)
+              // Column 5 (width: 150): Actions (Favorite toggle, info, expand, download)
               SizedBox(
-                width: 120,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        widget.file.isFavorite
-                            ? Icons.favorite
-                            : Icons.favorite_border,
-                        color: widget.file.isFavorite
-                            ? colorScheme.error
-                            : colorScheme.onSurfaceVariant,
-                        size: 18,
+                width: 150,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        icon: Icon(
+                          widget.file.isFavorite
+                              ? Icons.favorite
+                              : Icons.favorite_border,
+                          color: widget.file.isFavorite
+                              ? colorScheme.error
+                              : colorScheme.onSurfaceVariant,
+                          size: 18,
+                        ),
+                        onPressed: widget.onToggleFavorite,
+                        tooltip: widget.file.isFavorite
+                            ? 'Remove favorite'
+                            : 'Favorite',
+                        padding: const EdgeInsets.all(4),
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                       ),
-                      onPressed: widget.onToggleFavorite,
-                      tooltip: widget.file.isFavorite
-                          ? 'Remove favorite'
-                          : 'Favorite',
-                      padding: const EdgeInsets.all(4),
-                      constraints: const BoxConstraints(),
-                    ),
-                    const SizedBox(width: 4),
-                    IconButton(
-                      icon: Icon(
-                        Icons.open_in_full,
-                        color: colorScheme.onSurfaceVariant,
-                        size: 18,
+                      const SizedBox(width: 2),
+                      IconButton(
+                        icon: Icon(
+                          Icons.info_outline,
+                          color: colorScheme.onSurfaceVariant,
+                          size: 18,
+                        ),
+                        onPressed: widget.onOpenInfo,
+                        tooltip: 'Info Details',
+                        padding: const EdgeInsets.all(4),
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                       ),
-                      onPressed: widget.onOpenLightbox,
-                      tooltip: 'Expand',
-                      padding: const EdgeInsets.all(4),
-                      constraints: const BoxConstraints(),
-                    ),
-                    const SizedBox(width: 4),
-                    IconButton(
-                      icon: Icon(
-                        Icons.download_outlined,
-                        color: colorScheme.onSurfaceVariant,
-                        size: 18,
+                      const SizedBox(width: 2),
+                      IconButton(
+                        icon: Icon(
+                          Icons.open_in_full,
+                          color: colorScheme.onSurfaceVariant,
+                          size: 18,
+                        ),
+                        onPressed: widget.onOpenLightbox,
+                        tooltip: 'Expand',
+                        padding: const EdgeInsets.all(4),
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                       ),
-                      onPressed: widget.onDownload,
-                      tooltip: 'Download',
-                      padding: const EdgeInsets.all(4),
-                      constraints: const BoxConstraints(),
-                    ),
-                  ],
+                      const SizedBox(width: 2),
+                      IconButton(
+                        icon: Icon(
+                          Icons.download_outlined,
+                          color: colorScheme.onSurfaceVariant,
+                          size: 18,
+                        ),
+                        onPressed: widget.onDownload,
+                        tooltip: 'Download',
+                        padding: const EdgeInsets.all(4),
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

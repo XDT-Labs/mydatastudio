@@ -67,7 +67,7 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
       });
 
       _photosSub = PhotosService.instance.sink.listen((photos) {
-        if (mounted) setState(() => _files = photos ?? []);
+        if (mounted) setState(() => _files = photos);
       });
     });
   }

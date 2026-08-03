@@ -95,14 +95,16 @@ class _ImportDialogState extends State<ImportDialog> {
               children: [
                 Icon(Icons.file_upload_outlined, color: colorScheme.primary),
                 const SizedBox(width: 12),
-                Text(
-                  'Import Photos & Videos',
-                  style: textTheme.titleLarge?.copyWith(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.bold,
+                Expanded(
+                  child: Text(
+                    'Import Photos & Videos',
+                    style: textTheme.titleLarge?.copyWith(
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.close),
                   onPressed: () => Navigator.of(context).pop(false),

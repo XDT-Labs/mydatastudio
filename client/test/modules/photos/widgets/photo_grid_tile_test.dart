@@ -95,13 +95,25 @@ void main() {
     expect(find.byIcon(Icons.favorite_border), findsOneWidget);
     expect(find.byIcon(Icons.open_in_full), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.favorite_border));
+    await gesture.moveTo(tester.getCenter(find.byIcon(Icons.favorite_border)));
+    await tester.pumpAndSettle();
+    await gesture.down(tester.getCenter(find.byIcon(Icons.favorite_border)));
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(favoriteCalled, isTrue);
 
-    await tester.tap(find.byIcon(Icons.radio_button_unchecked));
+    await gesture.moveTo(tester.getCenter(find.byIcon(Icons.radio_button_unchecked)));
+    await tester.pumpAndSettle();
+    await gesture.down(tester.getCenter(find.byIcon(Icons.radio_button_unchecked)));
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(selectCalled, isTrue);
 
-    await tester.tap(find.byIcon(Icons.open_in_full));
+    await gesture.moveTo(tester.getCenter(find.byIcon(Icons.open_in_full)));
+    await tester.pumpAndSettle();
+    await gesture.down(tester.getCenter(find.byIcon(Icons.open_in_full)));
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(lightboxCalled, isTrue);
 
     await gesture.removePointer();
@@ -154,6 +166,7 @@ void main() {
     );
 
     await tester.tap(find.byType(PhotoGridTile));
+    await tester.pump(const Duration(milliseconds: 300));
     expect(tapCalled, isTrue);
   });
 

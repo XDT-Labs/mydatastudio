@@ -122,9 +122,11 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
     // Tap first tile
     await tester.tap(find.byType(PhotoGridTile).first);
+    await tester.pump(const Duration(milliseconds: 300));
     expect(tappedFile, equals(files.first));
   });
 

@@ -268,20 +268,37 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
                                 ),
                               ),
 
-                              // Bottom-right: Expand icon button for lightbox
+                              // Bottom-right: Info icon button & Expand icon button
                               Positioned(
                                 bottom: 4,
                                 right: 4,
-                                child: IconButton(
-                                  icon: const Icon(
-                                    Icons.open_in_full,
-                                    color: Colors.white70,
-                                    size: 18,
-                                  ),
-                                  onPressed: widget.onOpenLightbox,
-                                  tooltip: 'Expand',
-                                  constraints: const BoxConstraints(),
-                                  padding: const EdgeInsets.all(4),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.info_outline,
+                                        color: Colors.white70,
+                                        size: 18,
+                                      ),
+                                      onPressed: widget.onOpenInfo,
+                                      tooltip: 'Info Details',
+                                      constraints: const BoxConstraints(),
+                                      padding: const EdgeInsets.all(4),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.open_in_full,
+                                        color: Colors.white70,
+                                        size: 18,
+                                      ),
+                                      onPressed: widget.onOpenLightbox,
+                                      tooltip: 'Expand',
+                                      constraints: const BoxConstraints(),
+                                      padding: const EdgeInsets.all(4),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
