@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 /// Keyboard shortcuts dialog listing shortcut keys and descriptions.
 class KeyboardShortcutsModal extends StatelessWidget {
@@ -61,10 +62,10 @@ class KeyboardShortcutsModal extends StatelessWidget {
                       ),
                       child: Text(
                         shortcut.keyLabel,
-                        style: textTheme.labelMedium?.copyWith(
+                        style: GoogleFonts.robotoMono(
+                          textStyle: textTheme.labelMedium,
                           color: colorScheme.onSurface,
                           fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace',
                         ),
                       ),
                     ),
