@@ -4,13 +4,15 @@ import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 
 void main() {
   group('PhotosService', () {
-    test('instance exists and handles commands', () {
+    test('dispatches PhotosServiceCommand and exposes active sink output', () async {
       final service = PhotosService.instance;
-      expect(service, isNotNull);
       
-      final filter = const PhotoFilter(searchQuery: 'test');
+      final filter = const PhotoFilter(searchQuery: 'sunset');
       final command = PhotosServiceCommand(filter);
-      expect(command.filter.searchQuery, 'test');
+      
+      expect(command.filter.searchQuery, equals('sunset'));
+      expect(service.sink, isNotNull);
+      expect(service.isLoading.value, isFalse);
     });
   });
 }

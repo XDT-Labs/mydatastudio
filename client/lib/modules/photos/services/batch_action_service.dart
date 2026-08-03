@@ -56,10 +56,10 @@ class BatchActionService {
 
   Future<void> deleteSelected(Set<String> fileIds) async {
     final db = DatabaseManager.instance.database;
-    if (db == null) return;
-    
-    for (String id in fileIds) {
-      await db.execute("UPDATE files SET is_deleted = 1 WHERE id = ?", [id]);
+    if (db != null) {
+      for (String id in fileIds) {
+        await db.execute("UPDATE files SET is_deleted = 1 WHERE id = ?", [id]);
+      }
     }
     SelectionService.instance.deselectAll();
   }
