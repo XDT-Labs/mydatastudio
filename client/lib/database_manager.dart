@@ -509,6 +509,26 @@ class AppDatabase {
         FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
       );
     ''');
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS file_tags (
+        file_id TEXT NOT NULL,
+        tag TEXT NOT NULL,
+        PRIMARY KEY (file_id, tag),
+        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+      );
+    ''');
+    await _db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag);
+    ''');
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS album_files (
+        album_id TEXT NOT NULL,
+        file_id TEXT NOT NULL,
+        PRIMARY KEY (album_id, file_id),
+        FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+      );
+    ''');
     final added = await _addMissingColumns();
 
     // Only on the open that introduces the column, so a large archive pays for
@@ -612,6 +632,11 @@ class AppDatabase {
         // Whether the attachment is part of the message body — a spacer, logo
         // or tracking pixel — rather than something the sender attached.
         'is_inline': 'INTEGER NOT NULL DEFAULT 0',
+        'is_favorite': 'INTEGER NOT NULL DEFAULT 0',
+      },
+      'albums': {
+        'description': 'TEXT',
+        'cover_file_id': 'TEXT',
       },
     };
 
@@ -1175,7 +1200,8 @@ class AppDatabase {
       longitude REAL,
       local_path TEXT,
       content_id TEXT,
-      is_inline INTEGER NOT NULL DEFAULT 0
+      is_inline INTEGER NOT NULL DEFAULT 0,
+      is_favorite INTEGER NOT NULL DEFAULT 0
     );
     ''',
     // folders
@@ -1198,7 +1224,31 @@ class AppDatabase {
     '''
     CREATE TABLE IF NOT EXISTS albums (
       id TEXT PRIMARY KEY,
-      name TEXT NOT NULL
+      name TEXT NOT NULL,
+      description TEXT,
+      cover_file_id TEXT
+    );
+    ''',
+    // file_tags
+    '''
+    CREATE TABLE IF NOT EXISTS file_tags (
+      file_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      PRIMARY KEY (file_id, tag),
+      FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag);
+    ''',
+    // album_files
+    '''
+    CREATE TABLE IF NOT EXISTS album_files (
+      album_id TEXT NOT NULL,
+      file_id TEXT NOT NULL,
+      PRIMARY KEY (album_id, file_id),
+      FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+      FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
     ''',
     // files_embeddings

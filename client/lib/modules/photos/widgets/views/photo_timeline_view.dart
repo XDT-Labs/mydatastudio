@@ -1,0 +1,348 @@
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
+import 'package:mydatastudio/modules/photos/services/selection_service.dart';
+import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
+import 'package:mydatastudio/modules/photos/widgets/tiles/date_section_header.dart';
+import 'package:mydatastudio/modules/photos/widgets/tiles/photo_grid_tile.dart';
+import 'package:mydatastudio/modules/photos/widgets/views/photo_grid.dart';
+import 'package:mydatastudio/modules/photos/widgets/views/timeline_quick_jump.dart';
+
+/// Chronological timeline view widget with year-month grouping and quick-jump sidebar.
+class PhotoTimelineView extends StatefulWidget {
+  const PhotoTimelineView({
+    super.key,
+    required this.files,
+    required this.selectedIds,
+    this.scrollController,
+    this.onTapTile,
+    this.onSelectTile,
+    this.onToggleFavoriteTile,
+    this.onOpenLightboxTile,
+    this.onOpenInfoTile,
+  });
+
+  final List<File> files;
+  final Set<String> selectedIds;
+  final ScrollController? scrollController;
+  final ValueChanged<File>? onTapTile;
+  final ValueChanged<File>? onSelectTile;
+  final ValueChanged<File>? onToggleFavoriteTile;
+  final ValueChanged<File>? onOpenLightboxTile;
+  final ValueChanged<File>? onOpenInfoTile;
+
+  @override
+  State<PhotoTimelineView> createState() => _PhotoTimelineViewState();
+}
+
+class _PhotoTimelineViewState extends State<PhotoTimelineView> {
+  late final ScrollController _scrollController;
+  bool _createdOwnController = false;
+
+  int _activeIndex = 0;
+  List<double> _sectionOffsets = [];
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.scrollController != null) {
+      _scrollController = widget.scrollController!;
+    } else {
+      _scrollController = ScrollController();
+      _createdOwnController = true;
+    }
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    if (_createdOwnController) {
+      _scrollController.dispose();
+    }
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients || _sectionOffsets.isEmpty) return;
+    final offset = _scrollController.offset;
+
+    int newIndex = 0;
+    for (int i = 0; i < _sectionOffsets.length; i++) {
+      if (offset >= _sectionOffsets[i] - 10) {
+        newIndex = i;
+      } else {
+        break;
+      }
+    }
+
+    if (newIndex != _activeIndex) {
+      setState(() {
+        _activeIndex = newIndex;
+      });
+    }
+  }
+
+  void _jumpToSection(int index) {
+    if (index < 0 || index >= _sectionOffsets.length) return;
+    if (!_scrollController.hasClients) return;
+
+    final targetOffset = _sectionOffsets[index].clamp(
+      0.0,
+      _scrollController.position.maxScrollExtent,
+    );
+
+    _scrollController.animateTo(
+      targetOffset,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  Map<String, List<File>> _groupAndSortFiles(List<File> files) {
+    final sorted = List<File>.from(files)
+      ..sort((a, b) => b.dateCreated.compareTo(a.dateCreated));
+
+    final Map<String, List<File>> groups = {};
+    final DateFormat formatter = DateFormat('MMMM yyyy');
+
+    for (final file in sorted) {
+      final key = formatter.format(file.dateCreated);
+      groups.putIfAbsent(key, () => []).add(file);
+    }
+    return groups;
+  }
+
+  List<double> _calculateSectionOffsets(
+    Map<String, List<File>> groups,
+    double mainWidth,
+    int columns,
+  ) {
+    final List<double> offsets = [];
+    double currentOffset = 0.0;
+
+    final usableGridWidth = max(0.0, mainWidth - 16.0);
+    final itemWidth = (usableGridWidth - (columns - 1) * 8.0) / columns;
+    final itemHeight = itemWidth;
+
+    for (final monthFiles in groups.values) {
+      offsets.add(currentOffset);
+
+      const headerHeight = 40.0;
+      final rows = (monthFiles.length / columns).ceil();
+      final gridHeight = rows == 0
+          ? 0.0
+          : 16.0 + rows * itemHeight + (rows - 1) * 8.0;
+
+      currentOffset += headerHeight + gridHeight;
+    }
+
+    return offsets;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    if (widget.files.isEmpty) {
+      return Row(
+        children: [
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.photo_library,
+                    size: 64,
+                    color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No photos found',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          TimelineQuickJump(
+            monthLabels: const [],
+            onJumpTo: (_) {},
+          ),
+        ],
+      );
+    }
+
+    final groups = _groupAndSortFiles(widget.files);
+    final monthLabels = groups.keys.toList();
+    final Map<String, int> photoCounts = {
+      for (final entry in groups.entries) entry.key: entry.value.length
+    };
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final mainWidth = max(0.0, constraints.maxWidth - 48.0);
+        final columns = PhotoGrid.getColumnCount(mainWidth);
+
+        _sectionOffsets = _calculateSectionOffsets(groups, mainWidth, columns);
+
+        final List<Widget> slivers = [];
+
+        groups.forEach((monthYear, monthFiles) {
+          final isGroupAllSelected = monthFiles.every(
+            (f) => widget.selectedIds.contains(f.id),
+          );
+
+          slivers.add(
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: _StickyHeaderDelegate(
+                dateLabel: monthYear,
+                itemCount: monthFiles.length,
+                isSelected: isGroupAllSelected,
+                onSelectAll: (val) {
+                  if (val) {
+                    SelectionService.instance.selectAll(
+                      monthFiles.map((f) => f.id).toList(),
+                    );
+                  } else {
+                    for (final f in monthFiles) {
+                      if (widget.selectedIds.contains(f.id)) {
+                        SelectionService.instance.toggle(f.id);
+                      }
+                    }
+                  }
+                },
+              ),
+            ),
+          );
+
+          slivers.add(
+            SliverPadding(
+              padding: const EdgeInsets.all(8.0),
+              sliver: SliverGrid(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: columns,
+                  crossAxisSpacing: 8.0,
+                  mainAxisSpacing: 8.0,
+                  childAspectRatio: 1.0,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final file = monthFiles[index];
+                    final isSelected = widget.selectedIds.contains(file.id);
+
+                    return PhotoGridTile(
+                      file: file,
+                      isSelected: isSelected,
+                      onTap: () {
+                        if (widget.onTapTile != null) {
+                          widget.onTapTile!(file);
+                        } else {
+                          ViewStateService.instance.setLightboxMedia(file);
+                        }
+                      },
+                      onSelect: () {
+                        if (widget.onSelectTile != null) {
+                          widget.onSelectTile!(file);
+                        } else {
+                          SelectionService.instance.toggle(file.id);
+                        }
+                      },
+                      onToggleFavorite: () {
+                        if (widget.onToggleFavoriteTile != null) {
+                          widget.onToggleFavoriteTile!(file);
+                        } else {
+                          PhotosRepository().toggleFavorite(file.id);
+                        }
+                      },
+                      onOpenLightbox: () {
+                        if (widget.onOpenLightboxTile != null) {
+                          widget.onOpenLightboxTile!(file);
+                        } else {
+                          ViewStateService.instance.setLightboxMedia(file);
+                        }
+                      },
+                      onOpenInfo: () {
+                        if (widget.onOpenInfoTile != null) {
+                          widget.onOpenInfoTile!(file);
+                        } else {
+                          ViewStateService.instance.setInfoMedia(file);
+                          ViewStateService.instance.isInfoOpen.add(true);
+                        }
+                      },
+                    );
+                  },
+                  childCount: monthFiles.length,
+                ),
+              ),
+            ),
+          );
+        });
+
+        return Row(
+          children: [
+            Expanded(
+              child: CustomScrollView(
+                controller: _scrollController,
+                slivers: slivers,
+              ),
+            ),
+            TimelineQuickJump(
+              monthLabels: monthLabels,
+              activeIndex: _activeIndex,
+              onJumpTo: _jumpToSection,
+              photoCounts: photoCounts,
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
+  _StickyHeaderDelegate({
+    required this.dateLabel,
+    required this.itemCount,
+    required this.isSelected,
+    this.onSelectAll,
+  });
+
+  final String dateLabel;
+  final int itemCount;
+  final bool isSelected;
+  final ValueChanged<bool>? onSelectAll;
+
+  @override
+  Widget build(
+      BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return SizedBox(
+      height: 40.0,
+      child: DateSectionHeader(
+        dateLabel: dateLabel,
+        itemCount: itemCount,
+        isSelected: isSelected,
+        onSelectAll: onSelectAll,
+      ),
+    );
+  }
+
+  @override
+  double get minExtent => 40.0;
+
+  @override
+  double get maxExtent => 40.0;
+
+  @override
+  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) {
+    return oldDelegate.dateLabel != dateLabel ||
+        oldDelegate.itemCount != itemCount ||
+        oldDelegate.isSelected != isSelected;
+  }
+}
