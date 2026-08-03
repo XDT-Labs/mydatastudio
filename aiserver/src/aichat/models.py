@@ -32,6 +32,14 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = Field(None, description="Maximum tokens to generate")
     stream: bool = Field(False, description="Stream response as SSE (text/event-stream)")
     api_key: Optional[str] = Field(None, description="API key for cloud providers (e.g., Gemini). Takes precedence over environment variables.")
+    response_format: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "Local GGUF models only. OpenAI-style structured output, e.g. "
+            "{\"type\": \"json_object\", \"schema\": {...}} — llama.cpp grammar-"
+            "constrains generation to the given JSON schema."
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

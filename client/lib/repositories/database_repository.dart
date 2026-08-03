@@ -36,10 +36,16 @@ class DatabaseRepository {
   ///
   /// The `vector_as_f32()` call is skipped gracefully when the sqlite_vector
   /// extension is not loaded (dev/test builds without native assets).
+  ///
+  /// [type] distinguishes what the embedding was computed from — 'file' (the
+  /// default) for the image itself, 'description' for a generated caption's
+  /// text. Both share this table and column, keyed on (file_id, type), so a
+  /// file can carry one row per kind without either overwriting the other.
   Future<void> upsertFileEmbedding(
     String fileId,
-    List<double> embedding,
-  ) async {
+    List<double> embedding, {
+    String type = 'file',
+  }) async {
     // Build JSON array string that sqlite_vector's vector_as_f32() accepts.
     final jsonArray = '[${embedding.join(',')}]';
 
@@ -49,13 +55,13 @@ class DatabaseRepository {
         // Use vector_as_f32() to pack the JSON float array into a BLOB.
         final result = await tx.execute(
           '''
-          INSERT INTO files_embeddings (file_id, qwen3_vl_embedding)
-          SELECT ?, vector_as_f32(?)
+          INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding)
+          SELECT ?, ?, vector_as_f32(?)
           WHERE EXISTS (SELECT 1 FROM files WHERE id = ?)
-          ON CONFLICT(file_id) DO UPDATE SET
+          ON CONFLICT(file_id, type) DO UPDATE SET
             qwen3_vl_embedding = excluded.qwen3_vl_embedding
           ''',
-          [fileId, jsonArray, fileId],
+          [fileId, type, jsonArray, fileId],
         );
         affectedRows = result.affectedRows;
       } catch (e) {
@@ -66,13 +72,13 @@ class DatabaseRepository {
         final blob = Float32List.fromList(embedding).buffer.asUint8List();
         final result = await tx.execute(
           '''
-          INSERT INTO files_embeddings (file_id, qwen3_vl_embedding)
-          SELECT ?, ?
+          INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding)
+          SELECT ?, ?, ?
           WHERE EXISTS (SELECT 1 FROM files WHERE id = ?)
-          ON CONFLICT(file_id) DO UPDATE SET
+          ON CONFLICT(file_id, type) DO UPDATE SET
             qwen3_vl_embedding = excluded.qwen3_vl_embedding
           ''',
-          [fileId, blob, fileId],
+          [fileId, type, blob, fileId],
         );
         affectedRows = result.affectedRows;
       }
@@ -83,11 +89,13 @@ class DatabaseRepository {
     // loudly instead of letting the caller believe the embedding was saved.
     if (affectedRows == 0) {
       logger.w(
-        'upsertFileEmbedding: no row written for fileId=$fileId — '
-        'files row missing or not yet visible to this connection',
+        'upsertFileEmbedding: no row written for fileId=$fileId type=$type '
+        '— files row missing or not yet visible to this connection',
       );
     } else {
-      logger.d('upsertFileEmbedding: fileId=$fileId dim=${embedding.length}');
+      logger.d(
+        'upsertFileEmbedding: fileId=$fileId type=$type dim=${embedding.length}',
+      );
     }
   }
 
@@ -116,19 +124,30 @@ class DatabaseRepository {
   }) async {
     final jsonArray = '[${queryEmbedding.join(',')}]';
 
+    // vector_full_scan computes distance against every row regardless of the
+    // requested count — it's a brute-force scan, not an index — so asking it
+    // for more than [limit] costs nothing extra. That headroom is what lets
+    // the type filter below happen after the scan without under-filling the
+    // result: a file with both a 'file' and a 'description' embedding row
+    // could otherwise place its own duplicate ahead of a genuinely different
+    // file's row within the scan's raw top-N.
     final rows = await db.select(
       '''
-      SELECT e.file_id, v.distance
-      FROM files_embeddings AS e
-      JOIN vector_full_scan(
-        'files_embeddings',
-        'qwen3_vl_embedding',
-        vector_as_f32(?),
-        ?
-      ) AS v ON e.rowid = v.rowid
-      ORDER BY v.distance ASC
+      SELECT file_id, distance FROM (
+        SELECT e.file_id, e.type, v.distance
+        FROM files_embeddings AS e
+        JOIN vector_full_scan(
+          'files_embeddings',
+          'qwen3_vl_embedding',
+          vector_as_f32(?),
+          ?
+        ) AS v ON e.rowid = v.rowid
+      )
+      WHERE type = 'file'
+      ORDER BY distance ASC
+      LIMIT ?
       ''',
-      [jsonArray, limit],
+      [jsonArray, limit * 5, limit],
     );
 
     return rows
@@ -141,12 +160,16 @@ class DatabaseRepository {
         .toList();
   }
 
-  /// Fetches the Qwen3-VL embedding for [fileId].
-  /// Returns null if no embedding exists for this file.
-  Future<List<double>?> getFileEmbedding(String fileId) async {
+  /// Fetches the [type] embedding for [fileId] ('file' by default — the
+  /// image itself, as opposed to a 'description' text embedding).
+  /// Returns null if no embedding exists for this file/type.
+  Future<List<double>?> getFileEmbedding(
+    String fileId, {
+    String type = 'file',
+  }) async {
     final rows = await db.select(
-      'SELECT qwen3_vl_embedding FROM files_embeddings WHERE file_id = ? LIMIT 1',
-      [fileId],
+      'SELECT qwen3_vl_embedding FROM files_embeddings WHERE file_id = ? AND type = ? LIMIT 1',
+      [fileId, type],
     );
     if (rows.isEmpty || rows.first['qwen3_vl_embedding'] == null) return null;
     final blob = rows.first['qwen3_vl_embedding'] as Uint8List;
@@ -163,7 +186,14 @@ class DatabaseRepository {
   }) async {
     final jsonArray = '[${queryEmbedding.join(',')}]';
     final excludeClause = excludeFileId != null ? 'AND e.file_id != ?' : '';
-    final params = [jsonArray, limit, if (excludeFileId != null) excludeFileId];
+    final params = [
+      jsonArray,
+      // See findSimilarFiles: over-fetch from the full scan so filtering to
+      // type='file' afterward can't leave fewer than [limit] real matches.
+      limit * 5,
+      if (excludeFileId != null) excludeFileId,
+      limit,
+    ];
 
     final rows = await db.select('''
       SELECT f.*, v.distance
@@ -176,8 +206,10 @@ class DatabaseRepository {
         ?
       ) AS v ON e.rowid = v.rowid
       WHERE f.is_deleted = 0
+        AND e.type = 'file'
         $excludeClause
       ORDER BY v.distance ASC
+      LIMIT ?
       ''', params);
 
     return rows.map((row) {
@@ -201,7 +233,8 @@ class DatabaseRepository {
       '''
       SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner
       FROM files f
-      LEFT OUTER JOIN files_embeddings fe ON fe.file_id = f.id
+      LEFT OUTER JOIN files_embeddings fe
+        ON fe.file_id = f.id AND fe.type = 'file'
       INNER JOIN collections c ON c.id = f.collection_id
       WHERE (fe.file_id IS NULL OR fe.qwen3_vl_embedding IS NULL)
         AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
@@ -211,23 +244,192 @@ class DatabaseRepository {
       ''',
       [limit],
     );
-    var results =
-        rows.map((row) {
-          final file = File.fromDbMap(row);
-          final fakeCollection = Collection(
-            id: file.collectionId,
-            name: '',
-            path: (row['col_path'] as String?) ?? '',
-            type: '',
-            scanner: (row['scanner'] as String?) ?? '',
-            scanStatus: '',
-            needsReAuth: false,
-            localCopyPath: row['local_copy_path'] as String?,
+    return _filesWithResolvedPaths(rows);
+  }
+
+  /// Files that have failed description generation this many times are
+  /// excluded from [getFilesWithMissingDescriptions] — past this point the
+  /// failure is treated as permanent (unreadable image, unsupported format)
+  /// rather than worth retrying every batch forever.
+  static const maxDescriptionAttempts = 5;
+
+  /// Returns images with no AI-generated description yet, limited to
+  /// [limit] results. Same eligibility rules as
+  /// [getFilesWithMissingEmbeddings] (real images, not deleted, not an
+  /// inline message-body asset), plus excluding files that have already
+  /// exhausted [maxDescriptionAttempts].
+  Future<List<File>> getFilesWithMissingDescriptions({int limit = 10}) async {
+    final rows = await db.select(
+      '''
+      SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner
+      FROM files f
+      INNER JOIN collections c ON c.id = f.collection_id
+      WHERE f.description IS NULL
+        AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
+        AND f.is_deleted = 0
+        AND f.is_inline = 0
+        AND f.description_attempts < ?
+      LIMIT ?
+      ''',
+      [maxDescriptionAttempts, limit],
+    );
+    return _filesWithResolvedPaths(rows);
+  }
+
+  /// Records a failed description-generation attempt for [fileId] so
+  /// [getFilesWithMissingDescriptions] eventually stops re-selecting a file
+  /// that can never succeed.
+  Future<void> incrementDescriptionAttempts(String fileId) async {
+    await db.execute(
+      'UPDATE files SET description_attempts = description_attempts + 1 '
+      'WHERE id = ?',
+      [fileId],
+    );
+  }
+
+  /// Builds [File] models from a `files` query joined with `collections` as
+  /// `col_path`/`local_copy_path`/`scanner`, resolving each file's absolute
+  /// path against a throwaway [Collection] built from those columns.
+  List<File> _filesWithResolvedPaths(List<Map<String, Object?>> rows) {
+    return rows.map((row) {
+      final file = File.fromDbMap(row);
+      final fakeCollection = Collection(
+        id: file.collectionId,
+        name: '',
+        path: (row['col_path'] as String?) ?? '',
+        type: '',
+        scanner: (row['scanner'] as String?) ?? '',
+        scanStatus: '',
+        needsReAuth: false,
+        localCopyPath: row['local_copy_path'] as String?,
+      );
+      file.path = FilePathResolver.absolute(file, fakeCollection);
+      return file;
+    }).toList();
+  }
+
+  /// Persists Gemma's analysis of [fileId]'s image: the generated
+  /// [description] onto `files`, [tags] and [landmarks] into their join
+  /// tables, and the description's own text [embedding] into
+  /// `files_embeddings` as a 'description'-type row (see [upsertFileEmbedding]
+  /// for why 'file' and 'description' can coexist per file).
+  ///
+  /// All in one transaction so a file never ends up with a description but
+  /// no tags, or tags but no embedding, if something fails partway through.
+  Future<void> saveFileDescription(
+    String fileId, {
+    required String description,
+    required List<String> tags,
+    required List<String> landmarks,
+    required List<double> embedding,
+  }) async {
+    final jsonArray = '[${embedding.join(',')}]';
+
+    try {
+      await db.transaction((tx) async {
+        final updated = await tx.execute(
+          'UPDATE files SET description = ? WHERE id = ?',
+          [description, fileId],
+        );
+        if (updated.affectedRows == 0) {
+          // File vanished before analysis finished — nothing left to attach
+          // tags/landmarks/embedding to inside this same transaction.
+          logger.w(
+            'saveFileDescription: fileId=$fileId not found, dropping analysis',
           );
-          file.path = FilePathResolver.absolute(file, fakeCollection);
-          return file;
-        }).toList();
-    return results;
+          return;
+        }
+
+        for (final tag in tags) {
+          await tx.execute(
+            'INSERT OR IGNORE INTO file_tags (file_id, tag) VALUES (?, ?)',
+            [fileId, tag],
+          );
+        }
+        for (final landmark in landmarks) {
+          await tx.execute(
+            'INSERT OR IGNORE INTO file_landmarks (file_id, landmark) VALUES (?, ?)',
+            [fileId, landmark],
+          );
+        }
+
+        try {
+          await tx.execute(
+            '''
+            INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding)
+            VALUES (?, 'description', vector_as_f32(?))
+            ON CONFLICT(file_id, type) DO UPDATE SET
+              qwen3_vl_embedding = excluded.qwen3_vl_embedding
+            ''',
+            [fileId, jsonArray],
+          );
+        } catch (e) {
+          logger.w('vector_as_f32 unavailable, storing raw BLOB: $e');
+          final blob = Float32List.fromList(embedding).buffer.asUint8List();
+          await tx.execute(
+            '''
+            INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding)
+            VALUES (?, 'description', ?)
+            ON CONFLICT(file_id, type) DO UPDATE SET
+              qwen3_vl_embedding = excluded.qwen3_vl_embedding
+            ''',
+            [fileId, blob],
+          );
+        }
+      });
+      logger.d('saveFileDescription: fileId=$fileId saved');
+    } catch (e, stackTrace) {
+      logger.e(
+        'saveFileDescription: failed for fileId=$fileId: $e',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  /// Returns [fileId]'s tags, alphabetically.
+  Future<List<String>> getFileTags(String fileId) async {
+    final rows = await db.select(
+      'SELECT tag FROM file_tags WHERE file_id = ? ORDER BY tag',
+      [fileId],
+    );
+    return rows.map((r) => r['tag'] as String).toList();
+  }
+
+  /// Returns [fileId]'s landmarks, alphabetically.
+  Future<List<String>> getFileLandmarks(String fileId) async {
+    final rows = await db.select(
+      'SELECT landmark FROM file_landmarks WHERE file_id = ? ORDER BY landmark',
+      [fileId],
+    );
+    return rows.map((r) => r['landmark'] as String).toList();
+  }
+
+  /// Adds a single manually-entered [tag] to [fileId]. A no-op if the tag
+  /// is already present (case-sensitive — the UI is responsible for
+  /// case-insensitive dedup against the tags it already has loaded).
+  Future<void> addFileTag(String fileId, String tag) async {
+    await db.execute(
+      'INSERT OR IGNORE INTO file_tags (file_id, tag) VALUES (?, ?)',
+      [fileId, tag],
+    );
+  }
+
+  /// Removes a single [tag] from [fileId] (e.g. the user dismissing a pill
+  /// in the UI). A no-op if the tag isn't present.
+  Future<void> deleteFileTag(String fileId, String tag) async {
+    await db.execute('DELETE FROM file_tags WHERE file_id = ? AND tag = ?', [
+      fileId,
+      tag,
+    ]);
+  }
+
+  /// Removes a single [landmark] from [fileId]. A no-op if not present.
+  Future<void> deleteFileLandmark(String fileId, String landmark) async {
+    await db.execute(
+      'DELETE FROM file_landmarks WHERE file_id = ? AND landmark = ?',
+      [fileId, landmark],
+    );
   }
 
   // ---------------------------------------------------------------------------

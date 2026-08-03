@@ -701,6 +701,60 @@ class TestAttachments:
             )
 
 
+class TestMacBinaryStripping:
+    """
+    Old Mac email clients / AppleTalk gateways sometimes stored attachments
+    wrapped in MacBinary: a 128-byte header (filename, type/creator codes,
+    Finder metadata, data-fork length) prefixed onto the actual file bytes.
+    A MacBinary-wrapped image fails to decode as an image at all until the
+    header is stripped back off.
+    """
+
+    @staticmethod
+    def _macbinary_header(filename: bytes, data_fork_length: int) -> bytes:
+        header = bytearray(128)
+        header[0] = 0  # version
+        header[1] = len(filename)
+        header[2 : 2 + len(filename)] = filename
+        header[74] = 0  # required zero-fill byte
+        header[83:87] = data_fork_length.to_bytes(4, "big")
+        return bytes(header)
+
+    def test_strips_a_genuine_macbinary_wrapper(self):
+        payload = b"\xff\xd8\xff\xe0fake jpeg bytes"
+        wrapped = self._macbinary_header(b"photo.jpg", len(payload)) + payload
+
+        result = PstParser._strip_macbinary_header(wrapped)
+
+        assert result == payload
+
+    def test_passes_through_a_plain_jpeg_unchanged(self):
+        # Real JPEG bytes: version byte(0) happens to be plausible-looking
+        # for byte 0/1, but the zero-fill byte at 74 won't be zero for
+        # arbitrary image data, so this must NOT be treated as MacBinary.
+        plain_jpeg = bytes(range(256)) * 2  # 512 bytes, no MacBinary shape
+        result = PstParser._strip_macbinary_header(plain_jpeg)
+        assert result == plain_jpeg
+
+    def test_passes_through_data_shorter_than_a_macbinary_header(self):
+        short_data = b"\xff\xd8\xff\xe0"
+        assert PstParser._strip_macbinary_header(short_data) == short_data
+
+    def test_passes_through_when_data_fork_length_overruns_the_buffer(self):
+        # A malformed/truncated header shouldn't cause a crash or a
+        # nonsensical slice — leave the data untouched instead.
+        wrapped = self._macbinary_header(b"photo.jpg", 999_999) + b"short tail"
+        assert PstParser._strip_macbinary_header(wrapped) == wrapped
+
+    def test_passes_through_when_zero_fill_byte_is_nonzero(self):
+        wrapped = bytearray(
+            self._macbinary_header(b"photo.jpg", 10) + b"0123456789"
+        )
+        wrapped[74] = 5  # violates the MacBinary zero-fill requirement
+        wrapped = bytes(wrapped)
+        assert PstParser._strip_macbinary_header(wrapped) == wrapped
+
+
 # ---------------------------------------------------------------------------
 # Summary / smoke test
 # ---------------------------------------------------------------------------

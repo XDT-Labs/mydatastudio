@@ -88,6 +88,9 @@ class _RxFilesPage extends State<RxFilesPage> {
   FileAsset? selectedAsset;
   FileAsset? _lastSelectedAsset;
   bool _showLightbox = false;
+  final FocusNode _keyboardFocusNode = FocusNode(
+    debugLabel: 'RxFilesPage keyboard shortcuts',
+  );
 
   @override
   void initState() {
@@ -169,6 +172,7 @@ class _RxFilesPage extends State<RxFilesPage> {
     _selectedCollectionSub?.cancel();
     _scannerSub?.cancel();
     _serviceLoadingSub?.cancel();
+    _keyboardFocusNode.dispose();
     super.dispose();
   }
 
@@ -298,6 +302,7 @@ class _RxFilesPage extends State<RxFilesPage> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Focus(
+        focusNode: _keyboardFocusNode,
         autofocus: true,
         onKeyEvent: (FocusNode node, KeyEvent event) {
           if (event is KeyDownEvent) {
@@ -551,6 +556,10 @@ class _RxFilesPage extends State<RxFilesPage> {
             _lastSelectedAsset = n.asset;
             _showLightbox = false;
           });
+          // Reclaim keyboard focus from whatever sidebar/nav control the
+          // user last clicked, so Space toggles the lightbox instead of
+          // re-activating that control.
+          _keyboardFocusNode.requestFocus();
           return true;
         }
         return false;
@@ -1013,6 +1022,8 @@ class _RxFilesPage extends State<RxFilesPage> {
       '.bmp',
       '.tif',
       '.psd',
+      '.heic',
+      '.heif',
     ].contains(ext);
   }
 
