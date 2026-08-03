@@ -61,14 +61,18 @@ class TagChip extends StatelessWidget {
               ),
               if (onRemove != null) ...[
                 const SizedBox(width: 2),
-                GestureDetector(
-                  onTap: onRemove,
-                  child: Padding(
-                    padding: const EdgeInsets.all(2.0),
-                    child: Icon(
-                      Icons.close,
-                      size: 14,
-                      color: iconColor,
+                Tooltip(
+                  message: 'Remove $tag tag',
+                  child: InkWell(
+                    onTap: onRemove,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4.0),
+                      child: Icon(
+                        Icons.close,
+                        size: 16,
+                        color: iconColor,
+                      ),
                     ),
                   ),
                 ),
