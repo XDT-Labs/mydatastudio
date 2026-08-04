@@ -12,12 +12,15 @@ from typing import Dict, Any, Generator, Optional
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from PIL import Image
-from pillow_heif import register_heif_opener
+try:
+    from pillow_heif import register_heif_opener
 
-# Registers a HEIF/HEIC opener with PIL.Image.open so generate_thumbnail's
-# plain Image.open() branch (below) can decode .heic/.heif bytes with no
-# format-specific code path, the same way it already handles JPEG/PNG/etc.
-register_heif_opener()
+    # Registers a HEIF/HEIC opener with PIL.Image.open so generate_thumbnail's
+    # plain Image.open() branch (below) can decode .heic/.heif bytes with no
+    # format-specific code path, the same way it already handles JPEG/PNG/etc.
+    register_heif_opener()
+except ImportError:
+    pass
 
 from .models import (
     ChatCompletionRequest, EmbeddingV1Request,
