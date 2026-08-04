@@ -94,4 +94,18 @@ class SelectionService {
       selectSingle(file.id);
     }
   }
+
+  /// Handles a user click directly on a checkbox for [file] given [orderedFiles].
+  ///
+  /// - `Shift`: Selects all files between the last selected item and [file].
+  /// - Standard click: Toggles selection of [file] and sets it as last selected.
+  void handleCheckboxTap(File file, List<File> orderedFiles) {
+    final isShift = HardwareKeyboard.instance.isShiftPressed;
+
+    if (isShift && _lastSelectedId != null) {
+      selectRange(_lastSelectedId!, file.id, orderedFiles);
+    } else {
+      toggle(file.id);
+    }
+  }
 }

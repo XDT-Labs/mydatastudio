@@ -20,6 +20,7 @@ void main() {
     late SelectionService service;
 
     setUp(() {
+      TestWidgetsFlutterBinding.ensureInitialized();
       service = SelectionService.instance;
       service.deselectAll();
     });
@@ -69,6 +70,22 @@ void main() {
       service.deselectAll();
       service.selectRange('missing', 'f2', files);
       expect(service.selectedIds.value, equals({'f2'}));
+    });
+
+    test('handleCheckboxTap toggles item on normal tap and updates lastSelectedId', () {
+      final files = [
+        _createTestFile('f1'),
+        _createTestFile('f2'),
+        _createTestFile('f3'),
+      ];
+
+      service.handleCheckboxTap(files[0], files);
+      expect(service.selectedIds.value, equals({'f1'}));
+      expect(service.lastSelectedId, equals('f1'));
+
+      service.handleCheckboxTap(files[2], files);
+      expect(service.selectedIds.value, equals({'f1', 'f3'}));
+      expect(service.lastSelectedId, equals('f3'));
     });
   });
 }

@@ -153,4 +153,23 @@ void main() {
     expect(find.byIcon(Icons.photo_library), findsOneWidget);
     expect(find.text('No photos found'), findsOneWidget);
   });
+
+  testWidgets('renders without overflow in narrow width layout', (WidgetTester tester) async {
+    final files = _createTestFiles();
+
+    // Render in a narrow width (400px) simulating open sidebar
+    await tester.pumpWidget(
+      _buildTestableWidget(
+        PhotoListView(
+          files: files,
+          selectedIds: const {},
+        ),
+        width: 400,
+        height: 600,
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('july_photo1.jpg'), findsOneWidget);
+  });
 }
