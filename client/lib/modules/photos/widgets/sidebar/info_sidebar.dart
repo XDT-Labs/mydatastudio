@@ -1,16 +1,21 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' as io;
 
+import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
 import 'package:mydatastudio/models/tables/album.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/tabbed_metadata_section.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 import 'package:mydatastudio/modules/photos/utils/byte_formatter.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/tag_chip.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 
 /// A right slide-over sidebar for inspecting and editing photo metadata,
 /// tags, and album membership.
@@ -18,9 +23,14 @@ class InfoSidebar extends StatefulWidget {
   const InfoSidebar({
     super.key,
     this.repository,
+    this.tileProvider,
   });
 
   final PhotosRepository? repository;
+
+  /// Optional injected [TileProvider] for the LOCATION tab's map, for widget
+  /// tests (e.g. FakeMemoryTileProvider) to avoid real network requests.
+  final TileProvider? tileProvider;
 
   @override
   State<InfoSidebar> createState() => _InfoSidebarState();
@@ -36,6 +46,10 @@ class _InfoSidebarState extends State<InfoSidebar> {
   List<String> _tags = [];
   List<Album> _allAlbums = [];
   Set<String> _fileAlbumIds = {};
+
+  Collection? _collection;
+  Map<String, IfdTag>? _exifData;
+  bool _loadingExif = false;
 
   @override
   void initState() {
@@ -63,15 +77,58 @@ class _InfoSidebarState extends State<InfoSidebar> {
       _currentFile = file;
       _isEditingTitle = false;
       _titleController.text = file?.name ?? '';
+      _collection = null;
+      _exifData = null;
     });
     if (file != null) {
       _loadTagsAndAlbums(file.id);
+      _loadCollection(file);
+      _loadExif(file);
     } else {
       setState(() {
         _tags = [];
         _allAlbums = [];
         _fileAlbumIds = {};
       });
+    }
+  }
+
+  Future<void> _loadCollection(File file) async {
+    try {
+      final collection = await CollectionRepository().collectionById(
+        file.collectionId,
+      );
+      if (mounted && _currentFile?.id == file.id) {
+        setState(() => _collection = collection);
+      }
+    } catch (_) {
+      // No DB available or the collection was deleted out from under an
+      // open file — the EXIF/Location/Similar tabs just stay hidden.
+    }
+  }
+
+  // The photos module only ever holds images or videos (see
+  // PhotosRepository's `_isMedia` filter), so "not a video" is sufficient.
+  bool _isImage(File file) => !file.contentType.startsWith('video/');
+
+  Future<void> _loadExif(File file) async {
+    if (!_isImage(file)) return;
+
+    // Photos loaded through PhotosRepository already carry an absolute
+    // `path` (see photos_repository.dart's _fileWithAbsolutePath), unlike
+    // the DB-relative paths File models normally hold.
+    final ioFile = io.File(file.path);
+    if (!await ioFile.exists()) return;
+
+    setState(() => _loadingExif = true);
+    try {
+      final exif = await readExifFromFile(ioFile);
+      if (mounted && _currentFile?.id == file.id) {
+        setState(() => _exifData = exif);
+      }
+    } catch (_) {}
+    if (mounted && _currentFile?.id == file.id) {
+      setState(() => _loadingExif = false);
     }
   }
 
@@ -173,12 +230,6 @@ class _InfoSidebarState extends State<InfoSidebar> {
         _fileAlbumIds = fileAlbums.map((a) => a.id).toSet();
       });
     }
-  }
-
-  Future<void> _openInFinder(String path) async {
-    try {
-      await Process.run('open', ['-R', path]);
-    } catch (_) {}
   }
 
   String _formatLocation(double? lat, double? lng) {
@@ -487,39 +538,27 @@ class _InfoSidebarState extends State<InfoSidebar> {
                 ),
               const Divider(height: 24),
 
-              // 7. Action buttons (bottom)
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _openInFinder(file.path),
-                      icon: const Icon(Icons.folder_open, size: 18),
-                      label: const Text('Open in Finder'),
-                    ),
+              // 7. EXIF / Location / Similar tabs (same section used by the
+              // Files module's file details drawer)
+              if (_collection != null) ...[
+                DefaultTabController(
+                  length: _isImage(file) ? 3 : 1,
+                  child: TabbedMetadataSection(
+                    file: file,
+                    collection: _collection!,
+                    exifData: _exifData,
+                    isLoadingExif: _loadingExif,
+                    showExif: _isImage(file),
+                    tileProvider: widget.tileProvider,
+                    onNavigateToFile: (target) {
+                      ViewStateService.instance.openInfo(target);
+                    },
+                    onDeleteFile: (_) {
+                      PhotosService.instance.refresh();
+                    },
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: colorScheme.error,
-                        side: BorderSide(color: colorScheme.error),
-                      ),
-                      onPressed: () async {
-                        final repo = widget.repository ?? PhotosRepository();
-                        await repo.deleteFile(file.id);
-                        await PhotosService.instance.refresh();
-                        ViewStateService.instance.closeInfo();
-                      },
-                      icon: const Icon(Icons.delete_outline, size: 18),
-                      label: const Text('Delete'),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ],
           ),
         ),

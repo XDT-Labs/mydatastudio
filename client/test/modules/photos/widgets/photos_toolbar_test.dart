@@ -71,7 +71,9 @@ void main() {
       expect(find.text('Deselect'), findsOneWidget);
       expect(find.byIcon(Icons.playlist_add), findsOneWidget);
       expect(find.byIcon(Icons.download), findsOneWidget);
-      expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+      // Delete removed from the batch toolbar — deleting is still available
+      // via the keyboard shortcut and the per-item Similar-images tab.
+      expect(find.byIcon(Icons.delete_outline), findsNothing);
 
       // Deselect restores normal mode
       await tester.tap(find.text('Deselect'));
