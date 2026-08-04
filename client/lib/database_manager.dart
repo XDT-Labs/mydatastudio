@@ -1297,6 +1297,10 @@ class AppDatabase {
       description TEXT
     );
     ''',
+    '''
+    CREATE INDEX IF NOT EXISTS idx_files_active_date
+      ON files (is_deleted, is_inline, date_created);
+    ''',
     // folders
     '''
     CREATE TABLE IF NOT EXISTS folders (

@@ -4,7 +4,6 @@ import 'package:latlong2/latlong.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
-import 'package:mydatastudio/modules/photos/widgets/views/trip_playback_controller.dart';
 
 class _PhotoCluster {
   final List<File> files;
@@ -13,8 +12,8 @@ class _PhotoCluster {
   _PhotoCluster({required this.files, required this.center});
 }
 
-/// Interactive map view with geotagged photo markers, simple clustering,
-/// polyline route lines, and trip playback controller.
+/// Interactive map view with geotagged photo markers, clustered as the user
+/// zooms out.
 class PhotoMapView extends StatefulWidget {
   const PhotoMapView({
     super.key,
@@ -36,7 +35,6 @@ class PhotoMapView extends StatefulWidget {
 class _PhotoMapViewState extends State<PhotoMapView> {
   late final MapController _mapController;
   double _currentZoom = 10.0;
-  File? _activePlaybackFile;
   late List<File> _cachedGeoFiles;
   int? _cachedZoomBucket;
   List<_PhotoCluster>? _cachedClusters;
@@ -162,7 +160,6 @@ class _PhotoMapViewState extends State<PhotoMapView> {
   }
 
   Marker _buildSingleMarker(File file, ThemeData theme) {
-    final isActive = _activePlaybackFile?.id == file.id;
     final isSelected = widget.selectedIds.contains(file.id);
     final colorScheme = theme.colorScheme;
 
@@ -178,31 +175,25 @@ class _PhotoMapViewState extends State<PhotoMapView> {
         onTap: () {
           ViewStateService.instance.openInfo(file);
         },
-        child: AnimatedScale(
-          scale: isActive ? 1.25 : 1.0,
-          duration: const Duration(milliseconds: 250),
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: borderColor,
-                width: isSelected ? 3.0 : 2.0,
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: borderColor,
+              width: isSelected ? 3.0 : 2.0,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: colorScheme.primary.withValues(alpha: 0.4),
+                blurRadius: 6,
+                spreadRadius: 1,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: isActive
-                      ? colorScheme.primary.withValues(alpha: 0.8)
-                      : colorScheme.primary.withValues(alpha: 0.4),
-                  blurRadius: isActive ? 12 : 6,
-                  spreadRadius: isActive ? 3 : 1,
-                ),
-              ],
-            ),
-            child: ClipOval(
-              child: _buildThumbnail(file, theme),
-            ),
+            ],
+          ),
+          child: ClipOval(
+            child: _buildThumbnail(file, theme),
           ),
         ),
       ),
@@ -328,70 +319,36 @@ class _PhotoMapViewState extends State<PhotoMapView> {
 
     final initialCenter = LatLng(geo.first.latitude!, geo.first.longitude!);
 
-    return Stack(
+    return FlutterMap(
+      mapController: _mapController,
+      options: MapOptions(
+        initialCenter: initialCenter,
+        initialZoom: _currentZoom,
+        onPositionChanged: (position, hasGesture) {
+          if (position.zoom != _currentZoom) {
+            setState(() {
+              _currentZoom = position.zoom;
+            });
+          }
+        },
+      ),
       children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: initialCenter,
-            initialZoom: _currentZoom,
-            onPositionChanged: (position, hasGesture) {
-              if (position.zoom != _currentZoom) {
-                setState(() {
-                  _currentZoom = position.zoom;
-                });
-              }
-            },
-          ),
-          children: [
-            TileLayer(
-              urlTemplate:
-                  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-              subdomains: const ['a', 'b', 'c', 'd'],
-              userAgentPackageName: 'com.mydatastudio.app',
-              tileProvider: widget.tileProvider,
-            ),
-            if (geo.length >= 2)
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points:
-                        geo.map((f) => LatLng(f.latitude!, f.longitude!)).toList(),
-                    strokeWidth: 3.0,
-                    color: theme.colorScheme.primary.withValues(alpha: 0.5),
-                    pattern: const StrokePattern.dotted(),
-                  ),
-                ],
-              ),
-            MarkerLayer(
-              markers: _buildMarkers(geo, theme),
-            ),
-            SimpleAttributionWidget(
-              source: Text(
-                '© OpenStreetMap contributors, © CARTO',
-                style: TextStyle(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontSize: 10,
-                ),
-              ),
-            ),
-          ],
+        TileLayer(
+          urlTemplate:
+              'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+          subdomains: const ['a', 'b', 'c', 'd'],
+          userAgentPackageName: 'com.mydatastudio.app',
+          tileProvider: widget.tileProvider,
         ),
-        Positioned(
-          bottom: 24,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: TripPlaybackController(
-              geoFiles: geo,
-              mapController: _mapController,
-              onActiveFileChanged: (file) {
-                if (mounted && _activePlaybackFile?.id != file?.id) {
-                  setState(() {
-                    _activePlaybackFile = file;
-                  });
-                }
-              },
+        MarkerLayer(
+          markers: _buildMarkers(geo, theme),
+        ),
+        SimpleAttributionWidget(
+          source: Text(
+            '© OpenStreetMap contributors, © CARTO',
+            style: TextStyle(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontSize: 10,
             ),
           ),
         ),

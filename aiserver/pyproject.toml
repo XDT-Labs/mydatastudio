@@ -58,4 +58,5 @@ dev = [
     "mistral-common>=1.4.4",
     "tiktoken>=0.7.0",
     "protobuf>=5.0.0",
+    "debugpy>=1.8.21",
 ]

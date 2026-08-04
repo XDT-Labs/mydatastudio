@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
 
+import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/models/tables/album.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
@@ -12,8 +13,77 @@ import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/dialogs/album_modal.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/drawer_nav_item.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/drawer_section.dart';
+import 'package:mydatastudio/modules/photos/widgets/drawer/source_group_header.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/storage_meter.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/tag_chip.dart';
+import 'package:mydatastudio/services/get_collections_service.dart';
+
+/// Groups a photo-bearing [Collection] by which scanner produced it, so the
+/// Sources list can show one collapsible header per source type (Local,
+/// Google Drive, Gmail, ...) instead of one row per raw `c.type`.
+enum PhotoSourceGroup { local, gdrive, gmail, yahoo, outlook, other }
+
+PhotoSourceGroup _sourceGroupFor(String scanner) {
+  switch (scanner) {
+    case AppConstants.scannerFileLocal:
+      return PhotoSourceGroup.local;
+    case AppConstants.scannerFileGDrive:
+      return PhotoSourceGroup.gdrive;
+    case AppConstants.scannerEmailGmail:
+      return PhotoSourceGroup.gmail;
+    case AppConstants.scannerEmailYahoo:
+      return PhotoSourceGroup.yahoo;
+    case AppConstants.scannerEmailOutlook:
+    case AppConstants.scannerEmailOutlookPst:
+      return PhotoSourceGroup.outlook;
+    default:
+      return PhotoSourceGroup.other;
+  }
+}
+
+String _sourceGroupLabel(PhotoSourceGroup group) {
+  switch (group) {
+    case PhotoSourceGroup.local:
+      return 'Local Folders';
+    case PhotoSourceGroup.gdrive:
+      return 'Google Drive';
+    case PhotoSourceGroup.gmail:
+      return 'Gmail';
+    case PhotoSourceGroup.yahoo:
+      return 'Yahoo Mail';
+    case PhotoSourceGroup.outlook:
+      return 'Outlook';
+    case PhotoSourceGroup.other:
+      return 'Other';
+  }
+}
+
+IconData _sourceGroupIcon(PhotoSourceGroup group) {
+  switch (group) {
+    case PhotoSourceGroup.local:
+      return Icons.folder;
+    case PhotoSourceGroup.gdrive:
+      return Icons.cloud;
+    case PhotoSourceGroup.gmail:
+    case PhotoSourceGroup.yahoo:
+    case PhotoSourceGroup.outlook:
+      return Icons.email;
+    case PhotoSourceGroup.other:
+      return Icons.device_unknown;
+  }
+}
+
+/// Collection display name — for accounts named `"Drive (user@example.com)"`
+/// this shows just the email, matching FileDrawer/EmailDrawer.
+String _collectionDisplayName(Collection c) {
+  final match = RegExp(r'\(([^)]+)\)').firstMatch(c.name);
+  if (match != null) return match.group(1) ?? c.name;
+  return c.name;
+}
+
+bool _sameIds(Set<String> a, Set<String> b) {
+  return a.length == b.length && a.containsAll(b);
+}
 
 class PhotoDrawer extends StatefulWidget {
   const PhotoDrawer({super.key});
@@ -25,17 +95,20 @@ class PhotoDrawer extends StatefulWidget {
 class _PhotoDrawerState extends State<PhotoDrawer> {
   StreamSubscription<String>? _activeNavSub;
   StreamSubscription<PhotoFilter>? _activeFilterSub;
-  StreamSubscription<Map<String, int>>? _sourceCountsSub;
+  StreamSubscription<Map<String, int>>? _collectionCountsSub;
   StreamSubscription<Map<String, int>>? _tagCountsSub;
   StreamSubscription<Map<String, int>>? _locationCountsSub;
   StreamSubscription<List<File>>? _photosSub;
+  StreamSubscription<List<Collection>>? _collectionsSub;
 
   String _activeNav = 'all';
   PhotoFilter _activeFilter = const PhotoFilter();
-  Map<String, int> _sourceCounts = {};
+  Map<String, int> _collectionPhotoCounts = {};
   Map<String, int> _tagCounts = {};
   Map<String, int> _locationCounts = {};
   List<File> _photos = [];
+  List<Collection> _sourceCollections = [];
+  final Set<PhotoSourceGroup> _collapsedGroups = PhotoSourceGroup.values.toSet();
   List<({Album album, int count})> _albums = [];
 
   int _usedBytes = 0;
@@ -54,19 +127,25 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
         if (mounted) setState(() => _activeNav = nav);
       });
 
-      _activeFilterSub = ViewStateService.instance.activeFilter.listen((filter) {
+      _activeFilterSub = ViewStateService.instance.activeFilter.listen((
+        filter,
+      ) {
         if (mounted) setState(() => _activeFilter = filter);
       });
 
-      _sourceCountsSub = PhotosService.instance.sourceCounts.listen((counts) {
-        if (mounted) setState(() => _sourceCounts = counts);
+      _collectionCountsSub = PhotosService.instance.collectionPhotoCounts.listen((
+        counts,
+      ) {
+        if (mounted) setState(() => _collectionPhotoCounts = counts);
       });
 
       _tagCountsSub = PhotosService.instance.tagCounts.listen((counts) {
         if (mounted) setState(() => _tagCounts = counts);
       });
 
-      _locationCountsSub = PhotosService.instance.locationCounts.listen((counts) {
+      _locationCountsSub = PhotosService.instance.locationCounts.listen((
+        counts,
+      ) {
         if (mounted) setState(() => _locationCounts = counts);
       });
 
@@ -75,6 +154,20 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
           _loadLibraryCounts();
         }
       });
+
+      _collectionsSub = GetCollectionsService.instance.sink.listen((value) {
+        if (mounted) {
+          setState(() {
+            _sourceCollections =
+                value.where((c) => c.type == 'file' || c.type == 'email').toList()
+                  ..sort(
+                    (a, b) =>
+                        a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+                  );
+          });
+        }
+      });
+      GetCollectionsService.instance.invoke(GetCollectionsServiceCommand(null));
 
       _loadAlbums();
       _loadStorage();
@@ -86,10 +179,11 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
   void dispose() {
     _activeNavSub?.cancel();
     _activeFilterSub?.cancel();
-    _sourceCountsSub?.cancel();
+    _collectionCountsSub?.cancel();
     _tagCountsSub?.cancel();
     _locationCountsSub?.cancel();
     _photosSub?.cancel();
+    _collectionsSub?.cancel();
     super.dispose();
   }
 
@@ -131,20 +225,126 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
     return _activeNav != 'all' ||
         _activeFilter.searchQuery.isNotEmpty ||
         _activeFilter.mediaType != null ||
-        _activeFilter.source != null ||
+        _activeFilter.collectionId != null ||
+        (_activeFilter.collectionIds?.isNotEmpty ?? false) ||
         _activeFilter.albumId != null ||
         _activeFilter.tag != null ||
         _activeFilter.location != null ||
         _activeFilter.onlyFavorites;
   }
 
+  void _selectSourceGroup(PhotoSourceGroup group, Set<String> ids) {
+    final isCurrent = _activeFilter.collectionId == null &&
+        _activeFilter.collectionIds != null &&
+        _sameIds(_activeFilter.collectionIds!.toSet(), ids);
+    final newFilter = isCurrent
+        ? const PhotoFilter()
+        : PhotoFilter(collectionIds: ids.toList());
+    ViewStateService.instance.setActiveNav(
+      isCurrent ? 'all' : 'source_group_${group.name}',
+    );
+    ViewStateService.instance.updateFilter(newFilter);
+    PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
+    if (!isCurrent) {
+      setState(() => _collapsedGroups.remove(group));
+    }
+  }
+
+  void _selectCollection(Collection c) {
+    final isCurrent = _activeFilter.collectionId == c.id;
+    final newFilter =
+        isCurrent ? const PhotoFilter() : PhotoFilter(collectionId: c.id);
+    ViewStateService.instance.setActiveNav(
+      isCurrent ? 'all' : 'source_collection_${c.id}',
+    );
+    ViewStateService.instance.updateFilter(newFilter);
+    PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
+  }
+
+  List<Widget> _buildSourceGroups(ThemeData theme, ColorScheme colorScheme) {
+    final Map<PhotoSourceGroup, List<Collection>> grouped = {};
+    for (final c in _sourceCollections) {
+      grouped.putIfAbsent(_sourceGroupFor(c.scanner), () => []).add(c);
+    }
+
+    const order = [
+      PhotoSourceGroup.local,
+      PhotoSourceGroup.gdrive,
+      PhotoSourceGroup.gmail,
+      PhotoSourceGroup.yahoo,
+      PhotoSourceGroup.outlook,
+      PhotoSourceGroup.other,
+    ];
+
+    final widgets = <Widget>[];
+    for (final group in order) {
+      final cols = grouped[group];
+      if (cols == null || cols.isEmpty) continue;
+
+      final ids = cols.map((c) => c.id).toSet();
+      final groupCount = cols.fold<int>(
+        0,
+        (sum, c) => sum + (_collectionPhotoCounts[c.id] ?? 0),
+      );
+      final isGroupActive = _activeFilter.collectionId == null &&
+          _activeFilter.collectionIds != null &&
+          _sameIds(_activeFilter.collectionIds!.toSet(), ids);
+      final isExpanded = !_collapsedGroups.contains(group);
+
+      widgets.add(
+        SourceGroupHeader(
+          label: _sourceGroupLabel(group),
+          icon: _sourceGroupIcon(group),
+          count: groupCount > 0 ? groupCount : null,
+          isActive: isGroupActive,
+          isExpanded: isExpanded,
+          onTap: () => _selectSourceGroup(group, ids),
+          onToggleExpand: () => setState(() {
+            if (isExpanded) {
+              _collapsedGroups.add(group);
+            } else {
+              _collapsedGroups.remove(group);
+            }
+          }),
+        ),
+      );
+
+      if (isExpanded) {
+        widgets.add(
+          Padding(
+            padding: const EdgeInsets.only(left: 16.0, top: 2.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: cols.map((c) {
+                final count = _collectionPhotoCounts[c.id];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 2.0),
+                  child: DrawerNavItem(
+                    label: _collectionDisplayName(c),
+                    icon: _sourceGroupIcon(group),
+                    count: (count != null && count > 0) ? count : null,
+                    isActive: _activeFilter.collectionId == c.id,
+                    onTap: () => _selectCollection(c),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        );
+      }
+      widgets.add(const SizedBox(height: 2));
+    }
+    return widgets;
+  }
+
   Future<void> _showCreateAlbumDialog() async {
     final result = await showDialog<bool>(
       context: context,
-      builder: (context) => AlbumModal(
-        selectedFileIds: SelectionService.instance.selectedIds.value,
-        initialMode: AlbumModalMode.createNew,
-      ),
+      builder:
+          (context) => AlbumModal(
+            selectedFileIds: SelectionService.instance.selectedIds.value,
+            initialMode: AlbumModalMode.createNew,
+          ),
     );
 
     if (result == true) {
@@ -155,23 +355,26 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
   Future<void> _deleteAlbum(String albumId) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Album'),
-        content: const Text('Are you sure you want to delete this album? Photos will not be deleted.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Delete Album'),
+            content: const Text(
+              'Are you sure you want to delete this album? Photos will not be deleted.',
             ),
-            child: const Text('Delete'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.error,
+                ),
+                child: const Text('Delete'),
+              ),
+            ],
           ),
-        ],
-      ),
     );
 
     if (confirmed != true) return;
@@ -184,9 +387,9 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
       await _loadAlbums();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete album: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to delete album: $e')));
       }
     }
   }
@@ -204,7 +407,10 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
           children: [
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8.0,
+                  vertical: 12.0,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -212,7 +418,12 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                     DrawerNavItem(
                       label: 'All Photos',
                       icon: Icons.photo_library,
-                      count: _allCount > 0 ? _allCount : (_photos.isNotEmpty && _activeNav == 'all' ? _photos.length : null),
+                      count:
+                          _allCount > 0
+                              ? _allCount
+                              : (_photos.isNotEmpty && _activeNav == 'all'
+                                  ? _photos.length
+                                  : null),
                       isActive: _activeNav == 'all',
                       onTap: _clearFilters,
                     ),
@@ -221,12 +432,16 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                       label: 'Favorites',
                       icon: Icons.favorite,
                       count: _favoritesCount > 0 ? _favoritesCount : null,
-                      isActive: _activeNav == 'favorites' || _activeFilter.onlyFavorites,
+                      isActive:
+                          _activeNav == 'favorites' ||
+                          _activeFilter.onlyFavorites,
                       onTap: () {
                         const newFilter = PhotoFilter(onlyFavorites: true);
                         ViewStateService.instance.setActiveNav('favorites');
                         ViewStateService.instance.updateFilter(newFilter);
-                        PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
+                        PhotosService.instance.invoke(
+                          PhotosServiceCommand(newFilter),
+                        );
                       },
                     ),
                     const SizedBox(height: 2),
@@ -234,12 +449,16 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                       label: 'Videos',
                       icon: Icons.videocam,
                       count: _videosCount > 0 ? _videosCount : null,
-                      isActive: _activeNav == 'videos' || _activeFilter.mediaType == 'video',
+                      isActive:
+                          _activeNav == 'videos' ||
+                          _activeFilter.mediaType == 'video',
                       onTap: () {
                         const newFilter = PhotoFilter(mediaType: 'video');
                         ViewStateService.instance.setActiveNav('videos');
                         ViewStateService.instance.updateFilter(newFilter);
-                        PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
+                        PhotosService.instance.invoke(
+                          PhotosServiceCommand(newFilter),
+                        );
                       },
                     ),
                     const SizedBox(height: 12),
@@ -251,52 +470,23 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                       title: 'Sources',
                       icon: Icons.cloud_outlined,
                       initiallyExpanded: true,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          DrawerNavItem(
-                            label: 'Local Folders',
-                            icon: Icons.folder,
-                            count: _sourceCounts['local'],
-                            isActive: _activeFilter.source == 'local',
-                            onTap: () {
-                              final isCurrent = _activeFilter.source == 'local';
-                              final newFilter = isCurrent ? const PhotoFilter() : const PhotoFilter(source: 'local');
-                              ViewStateService.instance.setActiveNav(isCurrent ? 'all' : 'source_local');
-                              ViewStateService.instance.updateFilter(newFilter);
-                              PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
-                            },
-                          ),
-                          const SizedBox(height: 2),
-                          DrawerNavItem(
-                            label: 'Google Drive',
-                            icon: Icons.cloud,
-                            count: _sourceCounts['gdrive'] ?? _sourceCounts['drive'],
-                            isActive: _activeFilter.source == 'gdrive',
-                            onTap: () {
-                              final isCurrent = _activeFilter.source == 'gdrive';
-                              final newFilter = isCurrent ? const PhotoFilter() : const PhotoFilter(source: 'gdrive');
-                              ViewStateService.instance.setActiveNav(isCurrent ? 'all' : 'source_gdrive');
-                              ViewStateService.instance.updateFilter(newFilter);
-                              PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
-                            },
-                          ),
-                          const SizedBox(height: 2),
-                          DrawerNavItem(
-                            label: 'Email Attachments',
-                            icon: Icons.email,
-                            count: _sourceCounts['email'] ?? _sourceCounts['gmail'],
-                            isActive: _activeFilter.source == 'email',
-                            onTap: () {
-                              final isCurrent = _activeFilter.source == 'email';
-                              final newFilter = isCurrent ? const PhotoFilter() : const PhotoFilter(source: 'email');
-                              ViewStateService.instance.setActiveNav(isCurrent ? 'all' : 'source_email');
-                              ViewStateService.instance.updateFilter(newFilter);
-                              PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
-                            },
-                          ),
-                        ],
-                      ),
+                      child: _sourceCollections.isEmpty
+                          ? Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12.0,
+                                vertical: 6.0,
+                              ),
+                              child: Text(
+                                'No sources',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            )
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: _buildSourceGroups(theme, colorScheme),
+                            ),
                     ),
                     const SizedBox(height: 12),
                     Divider(height: 1, color: colorScheme.outlineVariant),
@@ -311,11 +501,18 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                         onTap: _showCreateAlbumDialog,
                         borderRadius: BorderRadius.circular(4),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.add, size: 14, color: colorScheme.primary),
+                              Icon(
+                                Icons.add,
+                                size: 14,
+                                color: colorScheme.primary,
+                              ),
                               const SizedBox(width: 2),
                               Text(
                                 '+ New',
@@ -328,43 +525,66 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                           ),
                         ),
                       ),
-                      child: _albums.isEmpty
-                          ? Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
-                              child: Text(
-                                'No albums',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
+                      child:
+                          _albums.isEmpty
+                              ? Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12.0,
+                                  vertical: 6.0,
                                 ),
-                              ),
-                            )
-                          : Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: _albums.map((item) {
-                                final album = item.album;
-                                final count = item.count;
-                                final isActive = _activeFilter.albumId == album.id;
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 2.0),
-                                  child: DrawerNavItem(
-                                    label: album.name,
-                                    icon: Icons.collections_bookmark_outlined,
-                                    count: count > 0 ? count : null,
-                                    isActive: isActive,
-                                    onSecondaryAction: () => _deleteAlbum(album.id),
-                                    secondaryActionTooltip: 'Delete album',
-                                    onTap: () {
-                                      final newFilter = isActive
-                                          ? const PhotoFilter()
-                                          : PhotoFilter(albumId: album.id);
-                                      ViewStateService.instance.setActiveNav(isActive ? 'all' : 'album_${album.id}');
-                                      ViewStateService.instance.updateFilter(newFilter);
-                                      PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
-                                    },
+                                child: Text(
+                                  'No albums',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
                                   ),
-                                );
-                              }).toList(),
-                            ),
+                                ),
+                              )
+                              : Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children:
+                                    _albums.map((item) {
+                                      final album = item.album;
+                                      final count = item.count;
+                                      final isActive =
+                                          _activeFilter.albumId == album.id;
+                                      return Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 2.0,
+                                        ),
+                                        child: DrawerNavItem(
+                                          label: album.name,
+                                          icon:
+                                              Icons
+                                                  .collections_bookmark_outlined,
+                                          count: count > 0 ? count : null,
+                                          isActive: isActive,
+                                          onSecondaryAction:
+                                              () => _deleteAlbum(album.id),
+                                          secondaryActionTooltip:
+                                              'Delete album',
+                                          onTap: () {
+                                            final newFilter =
+                                                isActive
+                                                    ? const PhotoFilter()
+                                                    : PhotoFilter(
+                                                      albumId: album.id,
+                                                    );
+                                            ViewStateService.instance
+                                                .setActiveNav(
+                                                  isActive
+                                                      ? 'all'
+                                                      : 'album_${album.id}',
+                                                );
+                                            ViewStateService.instance
+                                                .updateFilter(newFilter);
+                                            PhotosService.instance.invoke(
+                                              PhotosServiceCommand(newFilter),
+                                            );
+                                          },
+                                        ),
+                                      );
+                                    }).toList(),
+                              ),
                     ),
                     const SizedBox(height: 12),
                     Divider(height: 1, color: colorScheme.outlineVariant),
@@ -375,41 +595,57 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                       title: 'Tags',
                       icon: Icons.label_outlined,
                       initiallyExpanded: false,
-                      child: _tagCounts.isEmpty
-                          ? Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
-                              child: Text(
-                                'No tags',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
+                      child:
+                          _tagCounts.isEmpty
+                              ? Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12.0,
+                                  vertical: 6.0,
+                                ),
+                                child: Text(
+                                  'No tags',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              )
+                              : Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8.0,
+                                  vertical: 4.0,
+                                ),
+                                child: Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children:
+                                      _tagCounts.entries.map((entry) {
+                                        final tag = entry.key;
+                                        final count = entry.value;
+                                        final isActive =
+                                            _activeFilter.tag == tag;
+                                        return TagChip(
+                                          tag: tag,
+                                          count: count,
+                                          isActive: isActive,
+                                          onTap: () {
+                                            final newFilter =
+                                                isActive
+                                                    ? const PhotoFilter()
+                                                    : PhotoFilter(tag: tag);
+                                            ViewStateService.instance
+                                                .setActiveNav(
+                                                  isActive ? 'all' : 'tag_$tag',
+                                                );
+                                            ViewStateService.instance
+                                                .updateFilter(newFilter);
+                                            PhotosService.instance.invoke(
+                                              PhotosServiceCommand(newFilter),
+                                            );
+                                          },
+                                        );
+                                      }).toList(),
                                 ),
                               ),
-                            )
-                          : Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-                              child: Wrap(
-                                spacing: 6,
-                                runSpacing: 6,
-                                children: _tagCounts.entries.map((entry) {
-                                  final tag = entry.key;
-                                  final count = entry.value;
-                                  final isActive = _activeFilter.tag == tag;
-                                  return TagChip(
-                                    tag: tag,
-                                    count: count,
-                                    isActive: isActive,
-                                    onTap: () {
-                                      final newFilter = isActive
-                                          ? const PhotoFilter()
-                                          : PhotoFilter(tag: tag);
-                                      ViewStateService.instance.setActiveNav(isActive ? 'all' : 'tag_$tag');
-                                      ViewStateService.instance.updateFilter(newFilter);
-                                      PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
-                                    },
-                                  );
-                                }).toList(),
-                              ),
-                            ),
                     ),
                     const SizedBox(height: 12),
                     Divider(height: 1, color: colorScheme.outlineVariant),
@@ -420,41 +656,58 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                       title: 'Locations',
                       icon: Icons.place_outlined,
                       initiallyExpanded: false,
-                      child: _locationCounts.isEmpty
-                          ? Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
-                              child: Text(
-                                'No locations',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
+                      child:
+                          _locationCounts.isEmpty
+                              ? Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12.0,
+                                  vertical: 6.0,
                                 ),
-                              ),
-                            )
-                          : Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: _locationCounts.entries.map((entry) {
-                                final loc = entry.key;
-                                final count = entry.value;
-                                final isActive = _activeFilter.location == loc;
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 2.0),
-                                  child: DrawerNavItem(
-                                    label: loc,
-                                    icon: Icons.location_on,
-                                    count: count > 0 ? count : null,
-                                    isActive: isActive,
-                                    onTap: () {
-                                      final newFilter = isActive
-                                          ? const PhotoFilter()
-                                          : PhotoFilter(location: loc);
-                                      ViewStateService.instance.setActiveNav(isActive ? 'all' : 'loc_$loc');
-                                      ViewStateService.instance.updateFilter(newFilter);
-                                      PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
-                                    },
+                                child: Text(
+                                  'No locations',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
                                   ),
-                                );
-                              }).toList(),
-                            ),
+                                ),
+                              )
+                              : Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children:
+                                    _locationCounts.entries.map((entry) {
+                                      final loc = entry.key;
+                                      final count = entry.value;
+                                      final isActive =
+                                          _activeFilter.location == loc;
+                                      return Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 2.0,
+                                        ),
+                                        child: DrawerNavItem(
+                                          label: loc,
+                                          icon: Icons.location_on,
+                                          count: count > 0 ? count : null,
+                                          isActive: isActive,
+                                          onTap: () {
+                                            final newFilter =
+                                                isActive
+                                                    ? const PhotoFilter()
+                                                    : PhotoFilter(
+                                                      location: loc,
+                                                    );
+                                            ViewStateService.instance
+                                                .setActiveNav(
+                                                  isActive ? 'all' : 'loc_$loc',
+                                                );
+                                            ViewStateService.instance
+                                                .updateFilter(newFilter);
+                                            PhotosService.instance.invoke(
+                                              PhotosServiceCommand(newFilter),
+                                            );
+                                          },
+                                        ),
+                                      );
+                                    }).toList(),
+                              ),
                     ),
                     const SizedBox(height: 16),
 

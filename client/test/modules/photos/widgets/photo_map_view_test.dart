@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_map_view.dart';
-import 'package:mydatastudio/modules/photos/widgets/views/trip_playback_controller.dart';
 
 import '../../../helpers/fake_tile_provider.dart';
 
@@ -87,11 +86,10 @@ void main() {
 
     // Map should be rendered
     expect(find.byType(FlutterMap), findsOneWidget);
-    // PolylineLayer and MarkerLayer present
-    expect(find.byType(PolylineLayer), findsOneWidget);
+    // No route lines between photos, and no cross-fade playback controller —
+    // this view only shows geotagged markers, grouped/clustered on zoom.
+    expect(find.byType(PolylineLayer), findsNothing);
     expect(find.byType(MarkerLayer), findsOneWidget);
-    // Trip playback controller present
-    expect(find.byType(TripPlaybackController), findsOneWidget);
   });
 
   testWidgets('markers placed for geotagged files',
@@ -149,28 +147,5 @@ void main() {
     expect(find.byKey(const Key('photo_map_empty_state')), findsOneWidget);
     expect(find.text('No geotagged photos found'), findsOneWidget);
     expect(find.byType(FlutterMap), findsNothing);
-  });
-
-  testWidgets('trip playback controller renders controls',
-      (WidgetTester tester) async {
-    final files = _createTestFilesWithGps();
-
-    await tester.pumpWidget(
-      _buildTestableWidget(
-        PhotoMapView(
-          files: files,
-          selectedIds: const {},
-          tileProvider: FakeMemoryTileProvider(),
-        ),
-      ),
-    );
-    await tester.pump();
-
-    // Verify trip playback controls exist
-    expect(find.byKey(const Key('trip_playback_play_pause_button')), findsOneWidget);
-    expect(find.byKey(const Key('trip_playback_reset_button')), findsOneWidget);
-    expect(find.byKey(const Key('trip_playback_speed_dropdown')), findsOneWidget);
-    expect(find.byKey(const Key('trip_playback_slider')), findsOneWidget);
-    expect(find.text('tokyo_sunset.jpg'), findsOneWidget);
   });
 }

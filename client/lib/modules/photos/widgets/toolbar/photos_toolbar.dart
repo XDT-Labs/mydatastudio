@@ -7,8 +7,6 @@ import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/dialogs/album_modal.dart';
-import 'package:mydatastudio/modules/photos/widgets/dialogs/import_dialog.dart';
-import 'package:mydatastudio/modules/photos/widgets/dialogs/keyboard_shortcuts_modal.dart';
 import 'package:mydatastudio/modules/photos/widgets/toolbar/filter_dropdown.dart';
 
 /// Module-specific top toolbar widget for the Photos app.
@@ -102,13 +100,6 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
         );
       }
     });
-  }
-
-  void _showKeyboardShortcuts(BuildContext context) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => const KeyboardShortcutsModal(),
-    );
   }
 
   Widget _buildNormalToolbar(BuildContext context) {
@@ -260,27 +251,6 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
                   ViewStateService.instance.setViewMode(newSelection.first);
                 }
               },
-            ),
-
-            const SizedBox(width: 8),
-
-            // Import Button
-            IconButton(
-              icon: const Icon(Icons.file_upload_outlined),
-              tooltip: 'Import Photos',
-              onPressed: () {
-                showDialog<void>(
-                  context: context,
-                  builder: (context) => const ImportDialog(),
-                );
-              },
-            ),
-
-            // Shortcuts Button
-            IconButton(
-              icon: const Icon(Icons.keyboard_outlined),
-              tooltip: 'Keyboard Shortcuts',
-              onPressed: () => _showKeyboardShortcuts(context),
             ),
           ],
         );

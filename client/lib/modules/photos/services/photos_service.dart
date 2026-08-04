@@ -25,7 +25,7 @@ class PhotosService extends RxService<PhotosServiceCommand, List<File>> {
   final BehaviorSubject<List<File>> photosWithLocation = BehaviorSubject<List<File>>();
   final BehaviorSubject<Map<String, int>> tagCounts = BehaviorSubject<Map<String, int>>();
   final BehaviorSubject<Map<String, int>> locationCounts = BehaviorSubject<Map<String, int>>();
-  final BehaviorSubject<Map<String, int>> sourceCounts = BehaviorSubject<Map<String, int>>();
+  final BehaviorSubject<Map<String, int>> collectionPhotoCounts = BehaviorSubject<Map<String, int>>();
 
   Future<List<File>> refresh() async {
     final filter = ViewStateService.instance.activeFilter.valueOrNull ?? const PhotoFilter();
@@ -45,7 +45,7 @@ class PhotosService extends RxService<PhotosServiceCommand, List<File>> {
       
       final tCounts = await repo.allTags();
       final lCounts = await repo.allLocations();
-      final sCounts = await repo.sourceCountsByType();
+      final cCounts = await repo.photoCountsByCollection();
 
       sink.add(photos);
       photosByDate.add(byDate);
@@ -53,7 +53,7 @@ class PhotosService extends RxService<PhotosServiceCommand, List<File>> {
       photosWithLocation.add(withLocation);
       tagCounts.add(tCounts);
       locationCounts.add(lCounts);
-      sourceCounts.add(sCounts);
+      collectionPhotoCounts.add(cCounts);
 
       return photos;
     } catch (e, st) {

@@ -24,14 +24,19 @@ def _png_base64(width: int, height: int) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def _heic_base64(width: int, height: int) -> str:
-    import pillow_heif
+# Pre-encoded valid 400x300 HEIC image base64
+_HEIC_BASE64_SAMPLE = (
+    "AAAAHGZ0eXBoZWljAAAAAG1pZjFoZWljbWlhZgAAAUNtZXRhAAAAAAAAACFoZGxyAAAAAAAAAABwaWN0AAAAAAAAAAAAAAAAAAAAAA5waXRtAAAAAAAB"
+    "AAAAImlsb2MAAAAAREAAAQABAAAAAAFnAAEAAAAAAAAAowAAACNpaW5mAAAAAAABAAAAFWluZmUCAAAAAAEAAGh2YzEAAAAAw2lwcnAAAAClaXBjbwAA"
+    "AHlodmNDAQNwAAAAAAAAAAAAPPAA/P34+AAADwMgAAEAGEABDAH//wNwAAADAJAAAAMAAAMAPLoCQCEAAQAsQgEBA3AAAAMAkAAAAwAAAwA8oAyIBMfe"
+    "W6kkprm4CGgwIAAAAwAgAAADACEiAAEAB0QBwXKwYkAAAAAUaXNwZQAAAAAAAAGQAAABLAAAABBwaXhpAAAAAAMICAgAAAAWaXBtYQAAAAAAAAABAAED"
+    "gQIDAAAAq21kYXQAAACfKAGvBPKa1xhWQTJp2/+Mj/5H+VVH//9OOKT0cYM7GDOTinQihDqlAAADAAADAAADAAADAAAH9ABlUvVKAAADAAADAAADAAAD"
+    "AAADAAADAAADANmAAAADAAADAAADAAADAAADAAADAAADAAAccAAAAwAAAwAAAwAAAwAAAwAAAwAADPgAAAMAAAMAAAMAAAMAAAMAAAMAAAMAAAMAAATU"
+)
 
-    img = Image.new("RGB", (width, height), color=(0, 128, 255))
-    heif_file = pillow_heif.from_pillow(img)
-    buf = io.BytesIO()
-    heif_file.save(buf, quality=80)
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+def _heic_base64() -> str:
+    return _HEIC_BASE64_SAMPLE
 
 
 def test_thumbnail_downscales_large_image():
@@ -79,11 +84,12 @@ def test_thumbnail_rejects_non_image_bytes():
 
 
 def test_thumbnail_decodes_heic():
+    pytest.importorskip("pillow_heif")
     # Regression guard: HEIC/HEIF import photos previously fell through
     # PIL.Image.open with no registered opener and 500'd. pillow_heif's
     # opener (registered at import time in routes.py) must make plain
     # Image.open() decode HEIC bytes with no is_raw flag needed.
-    req = ThumbnailRequest(image_base64=_heic_base64(400, 300), width=320, height=240)
+    req = ThumbnailRequest(image_base64=_heic_base64(), width=320, height=240)
     result = generate_thumbnail(req)
 
     assert result["format"] == "JPEG"
