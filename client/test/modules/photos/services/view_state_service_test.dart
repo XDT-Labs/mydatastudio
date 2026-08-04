@@ -28,8 +28,8 @@ void main() {
     });
 
     test('setViewMode changes viewMode', () {
-      service.setViewMode(PhotoViewMode.timeline);
-      expect(service.viewMode.value, equals(PhotoViewMode.timeline));
+      service.setViewMode(PhotoViewMode.list);
+      expect(service.viewMode.value, equals(PhotoViewMode.list));
     });
 
     test('toggleInfo toggles isInfoOpen', () {

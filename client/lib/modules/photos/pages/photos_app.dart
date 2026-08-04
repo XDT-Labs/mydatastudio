@@ -12,7 +12,6 @@ import 'package:mydatastudio/modules/photos/widgets/keyboard_shortcut_handler.da
 import 'package:mydatastudio/modules/photos/widgets/views/photo_grid.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_list_view.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_map_view.dart';
-import 'package:mydatastudio/modules/photos/widgets/views/photo_timeline_view.dart';
 
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 
@@ -97,11 +96,6 @@ class _PhotosAppState extends State<PhotosApp> {
         );
       case PhotoViewMode.list:
         return PhotoListView(
-          files: _files,
-          selectedIds: _selectedIds,
-        );
-      case PhotoViewMode.timeline:
-        return PhotoTimelineView(
           files: _files,
           selectedIds: _selectedIds,
         );

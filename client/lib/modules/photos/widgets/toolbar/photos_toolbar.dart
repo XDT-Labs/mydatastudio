@@ -180,8 +180,7 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
               },
             ),
 
-            if (_currentViewMode == PhotoViewMode.grid ||
-                _currentViewMode == PhotoViewMode.timeline) ...[
+            if (_currentViewMode == PhotoViewMode.grid) ...[
               if (constraints.maxWidth >= 650) ...[
                 const SizedBox(width: 8),
                 Tooltip(
@@ -242,11 +241,6 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
                   value: PhotoViewMode.list,
                   icon: Icon(Icons.view_list, size: 18),
                   tooltip: 'List View',
-                ),
-                ButtonSegment<PhotoViewMode>(
-                  value: PhotoViewMode.timeline,
-                  icon: Icon(Icons.timeline, size: 18),
-                  tooltip: 'Timeline View',
                 ),
                 ButtonSegment<PhotoViewMode>(
                   value: PhotoViewMode.map,

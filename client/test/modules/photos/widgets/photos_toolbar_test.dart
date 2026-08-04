@@ -45,12 +45,6 @@ void main() {
 
       expect(ViewStateService.instance.viewMode.value, PhotoViewMode.list);
 
-      // Tap timeline view segment icon
-      await tester.tap(find.byIcon(Icons.timeline));
-      await tester.pumpAndSettle();
-
-      expect(ViewStateService.instance.viewMode.value, PhotoViewMode.timeline);
-
       // Tap map view segment icon
       await tester.tap(find.byIcon(Icons.map));
       await tester.pumpAndSettle();
