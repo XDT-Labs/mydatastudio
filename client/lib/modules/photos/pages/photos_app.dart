@@ -4,6 +4,7 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
+import 'package:mydatastudio/modules/photos/widgets/dialogs/keyboard_shortcuts_modal.dart';
 import 'package:mydatastudio/modules/photos/widgets/sidebar/animated_info_panel.dart';
 import 'package:mydatastudio/modules/photos/widgets/sidebar/info_sidebar.dart';
 import 'package:mydatastudio/modules/photos/widgets/toolbar/photos_toolbar.dart';
@@ -162,6 +163,20 @@ class _PhotosAppState extends State<PhotosApp> {
             style: textTheme.bodySmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
             ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.keyboard_outlined),
+            tooltip: 'Keyboard Shortcuts',
+            iconSize: 16,
+            padding: const EdgeInsets.all(4),
+            constraints: const BoxConstraints(),
+            onPressed: () {
+              showDialog<void>(
+                context: context,
+                builder: (context) => const KeyboardShortcutsModal(),
+              );
+            },
           ),
         ],
       ),
