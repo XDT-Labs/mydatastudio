@@ -32,6 +32,7 @@ class _PhotosAppState extends State<PhotosApp> {
 
   StreamSubscription? _viewModeSub;
   StreamSubscription? _photosSub;
+  StreamSubscription? _geoFilesSub;
   StreamSubscription? _infoOpenSub;
   StreamSubscription? _lightboxSub;
   StreamSubscription? _filterSub;
@@ -39,6 +40,7 @@ class _PhotosAppState extends State<PhotosApp> {
 
   PhotoViewMode _viewMode = PhotoViewMode.grid;
   List<File> _files = [];
+  List<File> _geoFiles = [];
   bool _isInfoOpen = false;
   File? _lightboxMedia;
   Set<String> _selectedIds = {};
@@ -49,6 +51,7 @@ class _PhotosAppState extends State<PhotosApp> {
     _photosRepo = widget.photosRepository ?? PhotosRepository();
     _viewMode = ViewStateService.instance.viewMode.value;
     _files = PhotosService.instance.sink.valueOrNull ?? [];
+    _geoFiles = PhotosService.instance.photosWithLocation.valueOrNull ?? [];
     _isInfoOpen = ViewStateService.instance.isInfoOpen.value;
     _lightboxMedia = ViewStateService.instance.lightboxMedia.value;
     _selectedIds = SelectionService.instance.selectedIds.value;
@@ -59,6 +62,10 @@ class _PhotosAppState extends State<PhotosApp> {
 
     _photosSub = PhotosService.instance.sink.listen((files) {
       if (mounted) setState(() => _files = files);
+    });
+
+    _geoFilesSub = PhotosService.instance.photosWithLocation.listen((files) {
+      if (mounted) setState(() => _geoFiles = files);
     });
 
     _infoOpenSub = ViewStateService.instance.isInfoOpen.listen((isOpen) {
@@ -82,6 +89,7 @@ class _PhotosAppState extends State<PhotosApp> {
   void dispose() {
     _viewModeSub?.cancel();
     _photosSub?.cancel();
+    _geoFilesSub?.cancel();
     _infoOpenSub?.cancel();
     _lightboxSub?.cancel();
     _filterSub?.cancel();
@@ -108,7 +116,7 @@ class _PhotosAppState extends State<PhotosApp> {
         );
       case PhotoViewMode.map:
         return PhotoMapView(
-          files: _files,
+          files: _geoFiles,
           selectedIds: _selectedIds,
         );
     }
