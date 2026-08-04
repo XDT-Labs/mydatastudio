@@ -7,6 +7,7 @@ import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/models/photo_section.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
@@ -273,6 +274,126 @@ void main() {
       ].map((f) => f.name).toList();
 
       expect(allNames, ['5.jpg', '4.jpg', '3.jpg', '2.jpg', '1.jpg']);
+    });
+  });
+
+  group('PhotosRepository collection filtering', () {
+    // The Photos sidebar's Sources list filters by collection (a single
+    // collection when a user clicks one account, a group of collections
+    // when they click a source-type header). This used to filter on
+    // `c.type`, a column that only ever holds 'file'/'email'/etc — never
+    // the scanner-derived values ('local', 'gdrive', ...) the sidebar sent,
+    // so the filter silently matched nothing.
+    late io.Directory tempDir;
+    late DatabaseManager databaseManager;
+    late AppDatabase db;
+    late PhotosRepository photos;
+
+    setUp(() async {
+      tempDir = await io.Directory.systemTemp.createTemp(
+        'mydatastudio_photos_collections_',
+      );
+
+      const MethodChannel channel = MethodChannel(
+        'plugins.flutter.io/path_provider',
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+            return tempDir.path;
+          });
+
+      databaseManager = DatabaseManager.instance;
+      await databaseManager.initializeDatabase();
+      db = databaseManager.database!;
+      photos = PhotosRepository();
+
+      await CollectionRepository(db).addCollection(
+        Collection(
+          id: 'local-1',
+          name: 'Local',
+          path: tempDir.path,
+          type: 'file',
+          scanner: 'file.local',
+          scanStatus: 'idle',
+          needsReAuth: false,
+          localCopyPath: tempDir.path,
+        ),
+      );
+      await CollectionRepository(db).addCollection(
+        Collection(
+          id: 'gmail-1',
+          name: 'Gmail (one@example.com)',
+          path: tempDir.path,
+          type: 'email',
+          scanner: 'email.gmail',
+          scanStatus: 'idle',
+          needsReAuth: false,
+          localCopyPath: tempDir.path,
+        ),
+      );
+      await CollectionRepository(db).addCollection(
+        Collection(
+          id: 'gmail-2',
+          name: 'Gmail (two@example.com)',
+          path: tempDir.path,
+          type: 'email',
+          scanner: 'email.gmail',
+          scanStatus: 'idle',
+          needsReAuth: false,
+          localCopyPath: tempDir.path,
+        ),
+      );
+    });
+
+    tearDown(() async {
+      databaseManager.dispose();
+      if (tempDir.existsSync()) {
+        try {
+          tempDir.deleteSync(recursive: true);
+        } catch (_) {}
+      }
+    });
+
+    Future<void> addFile(String collectionId, String name) async {
+      await FileDesktopRepository(db).create(
+        File(
+          id: '$collectionId:$name',
+          name: name,
+          path: name,
+          parent: '',
+          dateCreated: DateTime.now(),
+          dateLastModified: DateTime.now(),
+          collectionId: collectionId,
+          contentType: FilesConstants.mimeTypeImage,
+          size: 3,
+          isDeleted: false,
+          isInline: false,
+        ),
+      );
+    }
+
+    test('collectionId filters to a single collection', () async {
+      await addFile('local-1', 'a.jpg');
+      await addFile('gmail-1', 'b.jpg');
+      await addFile('gmail-2', 'c.jpg');
+
+      final names = (await photos.photos(
+        filter: const PhotoFilter(collectionId: 'gmail-1'),
+      )).map((f) => f.name).toSet();
+
+      expect(names, {'b.jpg'});
+    });
+
+    test('collectionIds filters to every collection in the list', () async {
+      await addFile('local-1', 'a.jpg');
+      await addFile('gmail-1', 'b.jpg');
+      await addFile('gmail-2', 'c.jpg');
+
+      final names = (await photos.photos(
+        filter: const PhotoFilter(collectionIds: ['gmail-1', 'gmail-2']),
+      )).map((f) => f.name).toSet();
+
+      expect(names, {'b.jpg', 'c.jpg'});
     });
   });
 }

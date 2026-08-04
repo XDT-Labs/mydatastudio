@@ -52,9 +52,13 @@ class PhotosRepository {
       ]);
     }
 
-    if (filter.source != null) {
-      q += " AND c.type = ?";
-      params.add(filter.source);
+    if (filter.collectionId != null) {
+      q += " AND f.collection_id = ?";
+      params.add(filter.collectionId);
+    } else if (filter.collectionIds != null && filter.collectionIds!.isNotEmpty) {
+      final placeholders = List.filled(filter.collectionIds!.length, '?').join(',');
+      q += " AND f.collection_id IN ($placeholders)";
+      params.addAll(filter.collectionIds!);
     }
 
     if (filter.albumId != null) {
@@ -311,24 +315,23 @@ class PhotosRepository {
     return result;
   }
 
-  Future<Map<String, int>> sourceCountsByType() async {
+  Future<Map<String, int>> photoCountsByCollection() async {
     AppDatabase? db = DatabaseManager.instance.database;
     if (db == null) return {};
 
     final rows = await db.select(
       '''
-      SELECT c.type, COUNT(f.id) as count 
-      FROM collections c 
-      JOIN files f ON f.collection_id = c.id 
+      SELECT f.collection_id, COUNT(f.id) as count
+      FROM files f
       WHERE 1=1 $_excludeInline $_excludeDeleted AND $_isMedia
-      GROUP BY c.type
+      GROUP BY f.collection_id
     ''',
       [FilesConstants.mimeTypeImage],
     );
 
     Map<String, int> result = {};
     for (var r in rows) {
-      result[r['type'] as String] = r['count'] as int;
+      result[r['collection_id'] as String] = r['count'] as int;
     }
     return result;
   }

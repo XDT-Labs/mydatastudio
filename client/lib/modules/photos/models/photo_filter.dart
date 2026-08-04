@@ -5,7 +5,8 @@ const Object _sentinel = Object();
 class PhotoFilter {
   final String searchQuery;
   final String? mediaType;
-  final String? source;
+  final String? collectionId;
+  final List<String>? collectionIds;
   final String? albumId;
   final String? tag;
   final String? location;
@@ -15,7 +16,8 @@ class PhotoFilter {
   const PhotoFilter({
     this.searchQuery = '',
     this.mediaType,
-    this.source,
+    this.collectionId,
+    this.collectionIds,
     this.albumId,
     this.tag,
     this.location,
@@ -26,7 +28,8 @@ class PhotoFilter {
   PhotoFilter copyWith({
     String? searchQuery,
     Object? mediaType = _sentinel,
-    Object? source = _sentinel,
+    Object? collectionId = _sentinel,
+    Object? collectionIds = _sentinel,
     Object? albumId = _sentinel,
     Object? tag = _sentinel,
     Object? location = _sentinel,
@@ -36,7 +39,12 @@ class PhotoFilter {
     return PhotoFilter(
       searchQuery: searchQuery ?? this.searchQuery,
       mediaType: mediaType == _sentinel ? this.mediaType : mediaType as String?,
-      source: source == _sentinel ? this.source : source as String?,
+      collectionId: collectionId == _sentinel
+          ? this.collectionId
+          : collectionId as String?,
+      collectionIds: collectionIds == _sentinel
+          ? this.collectionIds
+          : collectionIds as List<String>?,
       albumId: albumId == _sentinel ? this.albumId : albumId as String?,
       tag: tag == _sentinel ? this.tag : tag as String?,
       location: location == _sentinel ? this.location : location as String?,
