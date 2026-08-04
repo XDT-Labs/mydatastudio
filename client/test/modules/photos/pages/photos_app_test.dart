@@ -10,7 +10,6 @@ import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/sidebar/animated_info_panel.dart';
 import 'package:mydatastudio/modules/photos/widgets/toolbar/photos_toolbar.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_list_view.dart';
-import 'package:mydatastudio/modules/photos/widgets/views/photo_timeline_view.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_map_view.dart';
 
 Widget createTestApp(Widget child) {
@@ -51,11 +50,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(PhotoListView), findsOneWidget);
-
-      ViewStateService.instance.setViewMode(PhotoViewMode.timeline);
-      await tester.pumpAndSettle();
-
-      expect(find.byType(PhotoTimelineView), findsOneWidget);
 
       ViewStateService.instance.setViewMode(PhotoViewMode.map);
       await tester.pumpAndSettle();

@@ -7,6 +7,7 @@ import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/tiles/date_section_header.dart';
 import 'package:mydatastudio/modules/photos/widgets/tiles/photo_grid_tile.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_grid.dart';
+import 'package:mydatastudio/modules/photos/widgets/views/timeline_quick_jump.dart';
 
 List<File> _createTestFiles() {
   return [
@@ -158,5 +159,25 @@ void main() {
     expect(tiles[0].isSelected, isTrue);
     expect(tiles[1].isSelected, isFalse);
     expect(tiles[2].isSelected, isFalse);
+  });
+
+  testWidgets('renders timeline quick jump bar and jump interaction', (WidgetTester tester) async {
+    final files = _createTestFiles();
+
+    await tester.pumpWidget(
+      _buildTestableWidget(
+        PhotoGrid(
+          files: files,
+          selectedIds: const {},
+        ),
+      ),
+    );
+
+    expect(find.byType(TimelineQuickJump), findsOneWidget);
+    expect(find.text('Jul'), findsOneWidget);
+    expect(find.text('Jun'), findsOneWidget);
+
+    await tester.tap(find.text('Jun'));
+    await tester.pumpAndSettle();
   });
 }
