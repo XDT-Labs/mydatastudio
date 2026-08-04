@@ -45,6 +45,7 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
 
   int _activeIndex = 0;
   List<double> _sectionOffsets = [];
+  final Map<String, GlobalKey> _headerKeys = {};
 
   StreamSubscription<double>? _gridSizeSub;
   double _gridItemSize = 160.0;
@@ -117,7 +118,7 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
     }
   }
 
-  void _jumpToSection(int index) {
+  void _jumpToSection(int index, List<String> monthLabels) {
     if (index < 0 || index >= _sectionOffsets.length) return;
     if (!_scrollController.hasClients) return;
 
@@ -126,11 +127,23 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
       _scrollController.position.maxScrollExtent,
     );
 
-    _scrollController.animateTo(
-      targetOffset,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
+    // Estimated offsets drift from real layout once lazily-built grid
+    // content is involved, so jump to the estimate first, then let the
+    // header's own GlobalKey correct the final position once it's laid out.
+    _scrollController.jumpTo(targetOffset);
+
+    final label = index < monthLabels.length ? monthLabels[index] : null;
+    final key = label != null ? _headerKeys[label] : null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = key?.currentContext;
+      if (context == null || !mounted) return;
+      Scrollable.ensureVisible(
+        context,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+        alignment: 0.0,
+      );
+    });
   }
 
   Map<String, List<File>> _groupAndSortFiles(List<File> files) {
@@ -225,31 +238,41 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
 
         final List<Widget> slivers = [];
 
+        void selectAllForGroup(List<File> monthFiles, bool val) {
+          if (val) {
+            SelectionService.instance.selectAll(
+              monthFiles.map((f) => f.id).toList(),
+            );
+          } else {
+            for (final f in monthFiles) {
+              if (widget.selectedIds.contains(f.id)) {
+                SelectionService.instance.toggle(f.id);
+              }
+            }
+          }
+        }
+
         groups.forEach((monthYear, monthFiles) {
           final isGroupAllSelected = monthFiles.every(
             (f) => widget.selectedIds.contains(f.id),
           );
 
+          // Plain inline header (not pinned): the single overlay header
+          // below provides the "sticky" appearance without the stacking
+          // bug multiple pinned SliverPersistentHeaders would cause.
           slivers.add(
-            SliverPersistentHeader(
-              pinned: true,
-              delegate: _StickyHeaderDelegate(
-                dateLabel: monthYear,
-                itemCount: monthFiles.length,
-                isSelected: isGroupAllSelected,
-                onSelectAll: (val) {
-                  if (val) {
-                    SelectionService.instance.selectAll(
-                      monthFiles.map((f) => f.id).toList(),
-                    );
-                  } else {
-                    for (final f in monthFiles) {
-                      if (widget.selectedIds.contains(f.id)) {
-                        SelectionService.instance.toggle(f.id);
-                      }
-                    }
-                  }
-                },
+            SliverToBoxAdapter(
+              child: KeyedSubtree(
+                key: _headerKeys.putIfAbsent(monthYear, () => GlobalKey()),
+                child: SizedBox(
+                  height: 40.0,
+                  child: DateSectionHeader(
+                    dateLabel: monthYear,
+                    itemCount: monthFiles.length,
+                    isSelected: isGroupAllSelected,
+                    onSelectAll: (val) => selectAllForGroup(monthFiles, val),
+                  ),
+                ),
               ),
             ),
           );
@@ -287,64 +310,48 @@ class _PhotoTimelineViewState extends State<PhotoTimelineView> {
           );
         });
 
+        final activeIndex = _activeIndex.clamp(0, monthLabels.length - 1);
+        final activeMonth = monthLabels[activeIndex];
+        final activeFiles = groups[activeMonth]!;
+        final isActiveGroupAllSelected = activeFiles.every(
+          (f) => widget.selectedIds.contains(f.id),
+        );
+
         return Row(
           children: [
             Expanded(
-              child: CustomScrollView(
-                controller: _scrollController,
-                slivers: slivers,
+              child: Stack(
+                children: [
+                  CustomScrollView(
+                    controller: _scrollController,
+                    slivers: slivers,
+                  ),
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: SizedBox(
+                      height: 40.0,
+                      child: DateSectionHeader(
+                        dateLabel: activeMonth,
+                        itemCount: activeFiles.length,
+                        isSelected: isActiveGroupAllSelected,
+                        onSelectAll: (val) => selectAllForGroup(activeFiles, val),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             TimelineQuickJump(
               monthLabels: monthLabels,
               activeIndex: _activeIndex,
-              onJumpTo: _jumpToSection,
+              onJumpTo: (index) => _jumpToSection(index, monthLabels),
               photoCounts: photoCounts,
             ),
           ],
         );
       },
     );
-  }
-}
-
-class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
-  _StickyHeaderDelegate({
-    required this.dateLabel,
-    required this.itemCount,
-    required this.isSelected,
-    this.onSelectAll,
-  });
-
-  final String dateLabel;
-  final int itemCount;
-  final bool isSelected;
-  final ValueChanged<bool>? onSelectAll;
-
-  @override
-  Widget build(
-      BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return SizedBox(
-      height: 40.0,
-      child: DateSectionHeader(
-        dateLabel: dateLabel,
-        itemCount: itemCount,
-        isSelected: isSelected,
-        onSelectAll: onSelectAll,
-      ),
-    );
-  }
-
-  @override
-  double get minExtent => 40.0;
-
-  @override
-  double get maxExtent => 40.0;
-
-  @override
-  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) {
-    return oldDelegate.dateLabel != dateLabel ||
-        oldDelegate.itemCount != itemCount ||
-        oldDelegate.isSelected != isSelected;
   }
 }
