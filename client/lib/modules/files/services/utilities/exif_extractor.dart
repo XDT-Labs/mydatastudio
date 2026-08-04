@@ -1,5 +1,4 @@
 import 'dart:io' as io;
-import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:exif/exif.dart';
 import 'package:mydatastudio/app_logger.dart';
@@ -9,24 +8,38 @@ import 'package:mydatastudio/app_logger.dart';
 final AppLogger _logger = AppLogger(null);
 
 class ExifExtractor {
-  Future<Map<String, dynamic>?> extractLatLng(File file) async {
+  /// Takes an absolute filesystem path rather than a [File] model — scanner
+  /// isolates only have the model's DB-relative `path` on hand, and passing
+  /// that straight to `io.File` would resolve against the isolate's cwd
+  /// instead of the collection root.
+  Future<Map<String, dynamic>> extractLatLng(
+    String absolutePath,
+    String contentType,
+  ) async {
     Map<String, dynamic> metadata = {};
 
-    if (file.contentType == FilesConstants.mimeTypeImage) {
-      var localFile = io.File(file.path);
+    if (contentType == FilesConstants.mimeTypeImage) {
+      var localFile = io.File(absolutePath);
       if (localFile.existsSync()) {
-        Map<String, IfdTag> exif = await readExifFromFile(io.File(file.path));
-        if (exif.containsKey('GPS GPSLatitude') &&
-            exif.containsKey('GPS GPSLongitude')) {
-          var lat = exifGPSToLatitude(exif);
-          var lng = exifGPSToLongitude(exif);
-          metadata['latitude'] = lat;
-          metadata['longitude'] = lng;
+        try {
+          Map<String, IfdTag> exif = await readExifFromFile(localFile);
+          if (exif.containsKey('GPS GPSLatitude') &&
+              exif.containsKey('GPS GPSLongitude')) {
+            var lat = exifGPSToLatitude(exif);
+            var lng = exifGPSToLongitude(exif);
+            metadata['latitude'] = lat;
+            metadata['longitude'] = lng;
+          }
+        } catch (e) {
+          // Formats the `exif` package doesn't understand (some RAW/HEIC
+          // variants) throw instead of returning an empty map — this is a
+          // best-effort extraction, not a scan-blocking failure.
+          _logger.w('ExifExtractor: failed to read EXIF for $absolutePath: $e');
         }
       }
     }
     _logger.d('ExifExtractor: extracted ${metadata.length} tags');
-    return Future(() => metadata);
+    return metadata;
   }
 
   double exifGPSToLatitude(Map<String, IfdTag> tags) {

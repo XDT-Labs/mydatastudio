@@ -266,6 +266,8 @@ class FileDesktopRepository {
           "thumbnail = COALESCE(excluded.thumbnail, files.thumbnail), "
           "download_url = excluded.download_url, "
           "email_id = excluded.email_id, "
+          "latitude = excluded.latitude, "
+          "longitude = excluded.longitude, "
           "content_id = excluded.content_id, "
           "is_inline = excluded.is_inline, "
           "is_deleted = 0",
