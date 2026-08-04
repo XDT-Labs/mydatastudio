@@ -231,9 +231,8 @@ class _PhotoGridState extends State<PhotoGrid> {
 
           // 1. Date section header
           slivers.add(
-            SliverPersistentHeader(
-              pinned: true,
-              delegate: _StickyHeaderDelegate(
+            SliverToBoxAdapter(
+              child: DateSectionHeader(
                 dateLabel: monthYear,
                 itemCount: monthFiles.length,
                 isSelected: isGroupAllSelected,
@@ -304,46 +303,5 @@ class _PhotoGridState extends State<PhotoGrid> {
         );
       },
     );
-  }
-}
-
-class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
-  _StickyHeaderDelegate({
-    required this.dateLabel,
-    required this.itemCount,
-    required this.isSelected,
-    this.onSelectAll,
-  });
-
-  final String dateLabel;
-  final int itemCount;
-  final bool isSelected;
-  final ValueChanged<bool>? onSelectAll;
-
-  @override
-  Widget build(
-      BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return SizedBox(
-      height: 40.0,
-      child: DateSectionHeader(
-        dateLabel: dateLabel,
-        itemCount: itemCount,
-        isSelected: isSelected,
-        onSelectAll: onSelectAll,
-      ),
-    );
-  }
-
-  @override
-  double get minExtent => 40.0;
-
-  @override
-  double get maxExtent => 40.0;
-
-  @override
-  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) {
-    return oldDelegate.dateLabel != dateLabel ||
-        oldDelegate.itemCount != itemCount ||
-        oldDelegate.isSelected != isSelected;
   }
 }
