@@ -53,23 +53,41 @@ Measured on this archive with the fixed model:
 |---|---|---|---|
 | Descriptions (text) | 2,338 | 0.28 s each | ~11 min |
 | Emails (text) | 1,279 | 0.28 s each | ~6 min |
-| Images (vision) | 2,373 | ~21 s each | **~14 hours** |
+| Images (vision) | 2,373 | 3.8 s each | **~2.5 hours** |
 
-Text is quick; images are the whole cost. The vision tower runs on CPU — MPS is
-disabled in `load_transformers_embedding_model` because Apple Silicon has a
-PyTorch memory bug with Qwen-VL's 3D position embeddings — and `FileBytesLoader`
-sends the file at full resolution, which for Qwen-VL's dynamic-resolution
-processor means a 24-megapixel photo becomes far more visual tokens than the
-model needs for a similarity vector.
+Text is quick; images are the whole cost, and they run on CPU — MPS is disabled
+in `load_transformers_embedding_model` because Apple Silicon has a PyTorch
+memory bug with Qwen-VL's 3D position embeddings.
 
-**Downsizing before embedding is the obvious win and is not implemented.** A
-long edge of ~1,024 px would cut the image pass by roughly an order of magnitude
-at negligible cost to retrieval quality — the vector describes the scene, not
-the pixels. Worth doing before, not after, a 14-hour run.
+The image figure already includes the resolution bound added in `VisionImage`.
+Without it the same six sample photos took 10.9 s each rather than 3.8 s, which
+would have made this a 7.2-hour pass.
+
+Worth knowing where that saving actually comes from, because the obvious
+explanation is wrong: Qwen-VL's processor caps its own input at `max_pixels`
+(~1.3 MP), so a 20 MP photo was never costing the vision tower 20 MP of work.
+The cost was base64-encoding a 12 MB JPEG, pushing it through a JSON body, and
+decoding it again — the sample payload fell from 47,964 KB to 912 KB. Because
+the bound sits just under the processor's own ceiling, it discards only detail
+the model would have discarded anyway.
 
 The rebuild is incremental and resumable, and search degrades gracefully while
 it runs: a file with no vector is simply absent from the semantic pass and stays
 fully reachable by keyword.
+
+## Regenerating descriptions (optional, separate)
+
+`files.description` is **not** affected by the embedding bug and does not need
+clearing. If you do want the AI captions regenerated — they now reach Gemma
+bounded to 1024 px rather than full-size, which mainly makes them faster to
+produce, not better — that is a separate delete:
+
+```bash
+sqlite3 ~/Library/Application\ Support/com.xdtlabs.mydatastudio.dev/data/mydata.db "UPDATE files SET description = NULL, description_attempts = 0; DELETE FROM file_tags; DELETE FROM file_landmarks;"
+```
+
+Only do this if you have a reason to. It discards work that is currently good,
+and description generation is slower per image than embedding.
 
 ## Checking it worked
 

@@ -7,6 +7,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/modules/files/services/utilities/file_bytes_loader.dart';
+import 'package:mydatastudio/modules/files/services/utilities/vision_image.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/services/embedding_message_handler.dart';
@@ -249,7 +250,25 @@ class EmbeddingIsolate {
           }
           try {
             final start = DateTime.now();
-            final bytes = await FileBytesLoader.load(file, repo, logger);
+            final rawBytes = await FileBytesLoader.load(file, repo, logger);
+
+            // Bounded before it crosses to the model. The vision tower's cost
+            // scales with pixel count, so a full-resolution photo spent well
+            // over a minute here for a vector that describes the same scene as
+            // one built from 1024px. It also converts RAW and HEIC, which the
+            // embedding endpoint can decode but only slowly, from files that
+            // routinely run 30-100MB.
+            final bytes =
+                rawBytes == null
+                    ? null
+                    : await VisionImage.prepare(
+                      rawBytes,
+                      file.name,
+                      serviceUrl: serviceUrl!,
+                      serviceToken: serviceToken,
+                      logger: logger,
+                    );
+
             final embedding =
                 bytes == null
                     ? null
