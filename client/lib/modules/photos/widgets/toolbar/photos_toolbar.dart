@@ -125,8 +125,10 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
                     hintText: 'Search photos...',
                     prefixIcon: const Icon(Icons.search, size: 20),
                     isDense: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: colorScheme.outlineVariant),
@@ -190,7 +192,8 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
                           data: SliderTheme.of(context).copyWith(
                             trackHeight: 2,
                             thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 6),
+                              enabledThumbRadius: 6,
+                            ),
                           ),
                           child: Slider(
                             value: _gridItemSize,
@@ -319,19 +322,18 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
       height: 56,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: isBatchMode
-            ? colorScheme.primaryContainer
-            : colorScheme.surfaceContainerLow,
+        color:
+            isBatchMode
+                ? colorScheme.primaryContainer
+                : colorScheme.surfaceContainerLow,
         border: Border(
-          bottom: BorderSide(
-            color: colorScheme.outlineVariant,
-            width: 1.0,
-          ),
+          bottom: BorderSide(color: colorScheme.outlineVariant, width: 1.0),
         ),
       ),
-      child: isBatchMode
-          ? _buildBatchToolbar(context)
-          : _buildNormalToolbar(context),
+      child:
+          isBatchMode
+              ? _buildBatchToolbar(context)
+              : _buildNormalToolbar(context),
     );
   }
 }

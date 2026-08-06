@@ -18,8 +18,6 @@ class _FolderTreeState extends State<FolderTree> {
     //final dataProvider = Provider.of<DataProvider>(context, listen: false);
     //final theme = Theme.of(context);
 
-    return const Column(children: [
-      Text("Tree View"),
-    ]);
+    return const Column(children: [Text("Tree View")]);
   }
 }

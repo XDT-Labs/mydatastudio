@@ -41,9 +41,7 @@ class FileBytesLoader {
   ) async {
     final collection = await repo.getCollection(file.collectionId);
     if (collection == null) {
-      logger.w(
-        "Collection not found for GDrive file: ${file.path}. Skipping.",
-      );
+      logger.w("Collection not found for GDrive file: ${file.path}. Skipping.");
       return null;
     }
 
@@ -101,9 +99,9 @@ class FileBytesLoader {
                   .get(fileId, downloadOptions: drive.DownloadOptions.fullMedia)
                   .timeout(const Duration(seconds: 30))
               as drive.Media;
-      return await http.ByteStream(media.stream).toBytes().timeout(
-        const Duration(minutes: 5),
-      );
+      return await http.ByteStream(
+        media.stream,
+      ).toBytes().timeout(const Duration(minutes: 5));
     } catch (e) {
       logger.e("Error downloading GDrive file: $e");
       return null;

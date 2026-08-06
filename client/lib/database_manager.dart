@@ -17,6 +17,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:mydatastudio/modules/files/services/embedding_isolate.dart';
 import 'package:mydatastudio/modules/files/services/file_description_isolate.dart';
 import 'package:mydatastudio/modules/email/services/email_embedding_isolate.dart';
+import 'package:mydatastudio/modules/email/services/searchable_body.dart';
 import 'package:mydatastudio/modules/search/services/contact_repository.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:uuid/uuid.dart';
@@ -675,11 +676,25 @@ class AppDatabase {
   /// the main-isolate write relay, so a trigger cannot be bypassed — whereas a
   /// Dart-side call is one thing a sixth scanner can forget to make.
   Future<void> _createSearchIndexes() async {
+    // An earlier version indexed `plain_body`, which left HTML-only mail — a
+    // third of a real archive — with no searchable body at all. `IF NOT
+    // EXISTS` cannot widen an existing virtual table, so the old shape is
+    // dropped and rebuilt; `_backfillSearchIndexes` repopulates it.
+    final ftsColumns = await _db.select('PRAGMA table_info(emails_fts)');
+    final indexesBodyText = ftsColumns.any((r) => r['name'] == 'body_text');
+    if (ftsColumns.isNotEmpty && !indexesBodyText) {
+      logger.i('AppDatabase: rebuilding emails_fts to index body_text');
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_ai');
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_au');
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_ad');
+      await _db.execute('DROP TABLE IF EXISTS emails_fts');
+    }
+
     // unicode61 + remove_diacritics: "resume" should find "résumé", and a
     // personal archive is exactly where accented names turn up.
     await _db.execute('''
       CREATE VIRTUAL TABLE IF NOT EXISTS emails_fts USING fts5(
-        subject, "from", "to", cc, plain_body,
+        subject, "from", "to", cc, body_text,
         content='emails', content_rowid='rowid',
         tokenize='unicode61 remove_diacritics 2'
       );
@@ -698,28 +713,28 @@ class AppDatabase {
     // leaves stale terms pointing at a row that no longer matches.
     await _db.execute('''
       CREATE TRIGGER IF NOT EXISTS emails_fts_ai AFTER INSERT ON emails BEGIN
-        INSERT INTO emails_fts(rowid, subject, "from", "to", cc, plain_body)
+        INSERT INTO emails_fts(rowid, subject, "from", "to", cc, body_text)
         VALUES (new.rowid, new.subject, new."from", new."to", new.cc,
-                new.plain_body);
+                new.body_text);
       END;
     ''');
     await _db.execute('''
       CREATE TRIGGER IF NOT EXISTS emails_fts_ad AFTER DELETE ON emails BEGIN
         INSERT INTO emails_fts(emails_fts, rowid, subject, "from", "to", cc,
-                               plain_body)
+                               body_text)
         VALUES ('delete', old.rowid, old.subject, old."from", old."to", old.cc,
-                old.plain_body);
+                old.body_text);
       END;
     ''');
     await _db.execute('''
       CREATE TRIGGER IF NOT EXISTS emails_fts_au AFTER UPDATE ON emails BEGIN
         INSERT INTO emails_fts(emails_fts, rowid, subject, "from", "to", cc,
-                               plain_body)
+                               body_text)
         VALUES ('delete', old.rowid, old.subject, old."from", old."to", old.cc,
-                old.plain_body);
-        INSERT INTO emails_fts(rowid, subject, "from", "to", cc, plain_body)
+                old.body_text);
+        INSERT INTO emails_fts(rowid, subject, "from", "to", cc, body_text)
         VALUES (new.rowid, new.subject, new."from", new."to", new.cc,
-                new.plain_body);
+                new.body_text);
       END;
     ''');
 
@@ -793,7 +808,7 @@ class AppDatabase {
   /// keyword search; it does not stop the app opening, and the next version
   /// bump re-attempts it.
   Future<void> _backfillSearchIndexes() async {
-    const searchIndexVersion = 2;
+    const searchIndexVersion = 3;
 
     final rows = await _db.select('PRAGMA user_version');
     final current = rows.isEmpty ? 0 : (rows.first.values.first as int? ?? 0);
@@ -801,6 +816,23 @@ class AppDatabase {
 
     try {
       logger.i('AppDatabase: building full-text search indexes...');
+
+      // The triggers must not fire while the backfill runs. Each UPDATE would
+      // issue an FTS5 'delete' carrying the row's old values, and retracting
+      // terms that were never inserted — which is the case for an index just
+      // recreated empty — corrupts it outright (SQLITE_CORRUPT), taking the
+      // whole migration down with it.
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_ai');
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_au');
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_ad');
+
+      // Must precede the rebuild: 'rebuild' reads body_text straight off the
+      // content table, so an unpopulated column would index nothing at all.
+      await _backfillEmailBodyText();
+
+      // Restored before the rebuild so no write can slip through unindexed.
+      await _createSearchIndexes();
+
       await _db.execute("INSERT INTO emails_fts(emails_fts) VALUES('rebuild')");
       await _db.execute("INSERT INTO files_fts(files_fts) VALUES('rebuild')");
       await ContactRepository(this).backfillFromEmails();
@@ -811,6 +843,56 @@ class AppDatabase {
         'AppDatabase: failed to build full-text search indexes: $e',
         error: e,
         stackTrace: stackTrace,
+      );
+    }
+  }
+
+  /// Populates `emails.body_text` for mail stored before the column existed.
+  ///
+  /// Reads in pages and pulls only the three columns involved — bodies are the
+  /// bulk of an archive, and loading every one at once to derive a fourth
+  /// column would be a needless multi-gigabyte read.
+  ///
+  /// Rows where `plain_body` already has content are handled in SQL, since
+  /// that is the majority and needs no HTML parsing. Only the HTML-only
+  /// remainder — around a third of a real archive — comes back to Dart.
+  Future<void> _backfillEmailBodyText() async {
+    final copied = await _db.execute(
+      "UPDATE emails SET body_text = plain_body "
+      "WHERE body_text IS NULL AND plain_body IS NOT NULL AND plain_body <> ''",
+    );
+    logger.i(
+      'AppDatabase: body_text copied from plain_body for '
+      '${copied.affectedRows} emails',
+    );
+
+    var stripped = 0;
+    while (true) {
+      final rows = await _db.select(
+        "SELECT id, html_body FROM emails "
+        "WHERE body_text IS NULL AND html_body IS NOT NULL AND html_body <> '' "
+        "LIMIT 200",
+      );
+      if (rows.isEmpty) break;
+
+      await _db.transaction((tx) async {
+        for (final row in rows) {
+          final text = bodyTextFrom(null, row['html_body'] as String?);
+          // Written even when extraction yields nothing — an empty string
+          // still marks the row as processed, and leaving it null would make
+          // this loop reselect the same page forever.
+          await tx.execute('UPDATE emails SET body_text = ? WHERE id = ?', [
+            text,
+            row['id'],
+          ]);
+        }
+      });
+      stripped += rows.length;
+    }
+
+    if (stripped > 0) {
+      logger.i(
+        'AppDatabase: body_text extracted from HTML for $stripped emails',
       );
     }
   }
@@ -893,9 +975,19 @@ class AppDatabase {
         // getFilesWithMissingDescriptions forever.
         'description_attempts': 'INTEGER NOT NULL DEFAULT 0',
       },
-      'albums': {
-        'description': 'TEXT',
-        'cover_file_id': 'TEXT',
+      'albums': {'description': 'TEXT', 'cover_file_id': 'TEXT'},
+      'emails': {
+        // The body text keyword search actually indexes: `plain_body` when the
+        // sender provided one, otherwise the HTML body with its markup
+        // stripped. A third of the mail in a real archive arrives HTML-only,
+        // and indexing `plain_body` alone left every word of it unsearchable.
+        //
+        // Materialised rather than computed in the FTS declaration because
+        // external-content FTS5 reads columns by name — `'rebuild'` issues its
+        // own SELECT, so an expression would apply to trigger-written rows and
+        // not to rebuilt ones, leaving the index quietly inconsistent with
+        // itself.
+        'body_text': 'TEXT',
       },
     };
 

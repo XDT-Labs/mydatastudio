@@ -81,17 +81,21 @@ class LocalLlmContentGenerator implements ContentGenerator {
     try {
       final url = MainApp.llmServiceUrl.valueOrNull;
       if (url != null) {
-        final headers = aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull);
+        final headers = aiServerAuthHeaders(
+          MainApp.llmServiceToken.valueOrNull,
+        );
         final completionId = _activeCompletionId;
         await http
             .post(
               Uri.parse('$url/v1/chat/stop'),
-              headers: completionId != null
-                  ? {...headers, 'Content-Type': 'application/json'}
-                  : headers,
-              body: completionId != null
-                  ? jsonEncode({'id': completionId})
-                  : null,
+              headers:
+                  completionId != null
+                      ? {...headers, 'Content-Type': 'application/json'}
+                      : headers,
+              body:
+                  completionId != null
+                      ? jsonEncode({'id': completionId})
+                      : null,
             )
             .timeout(const Duration(seconds: 2));
       }
@@ -132,7 +136,9 @@ class LocalLlmContentGenerator implements ContentGenerator {
       if (message is UserMessage) {
         final attachments = List<Uint8List>.from(pendingAttachments);
         pendingAttachments = [];
-        logger.d('[ATTACH] sendRequest: ${attachments.length} attachment(s), text="${message.text}"');
+        logger.d(
+          '[ATTACH] sendRequest: ${attachments.length} attachment(s), text="${message.text}"',
+        );
 
         if (attachments.isNotEmpty) {
           // Multimodal: build OpenAI content array with images first, then text
@@ -171,7 +177,8 @@ class LocalLlmContentGenerator implements ContentGenerator {
       request.body = jsonEncode({
         'model': model ?? '',
         if (modelPath != null && modelPath!.isNotEmpty) 'model_path': modelPath,
-        if (mmprojPath != null && mmprojPath!.isNotEmpty) 'mmproj_path': mmprojPath,
+        if (mmprojPath != null && mmprojPath!.isNotEmpty)
+          'mmproj_path': mmprojPath,
         if (apiKey != null && apiKey!.isNotEmpty) 'api_key': apiKey,
         'messages': requestMessages,
         'stream': true,
@@ -189,13 +196,15 @@ class LocalLlmContentGenerator implements ContentGenerator {
           // 409 means the server's single generation slot is taken. The UI
           // already guards this via isProcessing, so reaching it means two
           // senders raced — say so plainly rather than dumping the JSON body.
-          _errorController.add(ContentGeneratorError(
-            streamedResponse.statusCode == 409
-                ? 'The model is already generating a response. '
-                    'Wait for it to finish, or press stop.'
-                : 'Failed to get response: ${streamedResponse.statusCode} — $body',
-            StackTrace.current,
-          ));
+          _errorController.add(
+            ContentGeneratorError(
+              streamedResponse.statusCode == 409
+                  ? 'The model is already generating a response. '
+                      'Wait for it to finish, or press stop.'
+                  : 'Failed to get response: ${streamedResponse.statusCode} — $body',
+              StackTrace.current,
+            ),
+          );
           return;
         }
 
@@ -229,8 +238,10 @@ class LocalLlmContentGenerator implements ContentGenerator {
               final usage = parsed['usage'] as Map<String, dynamic>?;
               if (usage != null) {
                 lastUsage = {
-                  'prompt_tokens': (usage['prompt_tokens'] as num?)?.toInt() ?? 0,
-                  'completion_tokens': (usage['completion_tokens'] as num?)?.toInt() ?? 0,
+                  'prompt_tokens':
+                      (usage['prompt_tokens'] as num?)?.toInt() ?? 0,
+                  'completion_tokens':
+                      (usage['completion_tokens'] as num?)?.toInt() ?? 0,
                   'total_tokens': (usage['total_tokens'] as num?)?.toInt() ?? 0,
                 };
               }

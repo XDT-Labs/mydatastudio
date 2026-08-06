@@ -77,7 +77,9 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
   }
 
   void _updateCurrentIndex() {
-    final idx = widget.mediaList.indexWhere((f) => f.id == widget.currentFile.id);
+    final idx = widget.mediaList.indexWhere(
+      (f) => f.id == widget.currentFile.id,
+    );
     _currentIndex = idx != -1 ? idx : 0;
   }
 
@@ -109,9 +111,10 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
     final cy = _viewportSize.height > 0 ? _viewportSize.height / 2 : 0.0;
 
     setState(() {
-      _transformationController.value = Matrix4.identity()
-        ..translate(cx * (1 - s), cy * (1 - s))
-        ..scale(s, s, 1.0);
+      _transformationController.value =
+          Matrix4.identity()
+            ..translate(cx * (1 - s), cy * (1 - s))
+            ..scale(s, s, 1.0);
     });
   }
 
@@ -136,7 +139,8 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
     if (widget.mediaList.isEmpty) return;
     setState(() {
       _currentIndex =
-          (_currentIndex - 1 + widget.mediaList.length) % widget.mediaList.length;
+          (_currentIndex - 1 + widget.mediaList.length) %
+          widget.mediaList.length;
       _zoomController.reset();
     });
     final prev = _currentMedia;
@@ -144,11 +148,13 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
     SelectionService.instance.selectSingle(prev.id);
   }
 
-
   final Map<String, ImageProvider> _imageProviderCache = {};
 
   ImageProvider _imageProviderFor(File file) {
-    return _imageProviderCache.putIfAbsent(file.id, () => _buildImageProvider(file));
+    return _imageProviderCache.putIfAbsent(
+      file.id,
+      () => _buildImageProvider(file),
+    );
   }
 
   ImageProvider _buildImageProvider(File file) {
@@ -200,16 +206,23 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
 
     return Shortcuts(
       shortcuts: <ShortcutActivator, Intent>{
-        const SingleActivator(LogicalKeyboardKey.arrowRight): const NextMediaIntent(),
-        const SingleActivator(LogicalKeyboardKey.arrowLeft): const PreviousMediaIntent(),
-        const SingleActivator(LogicalKeyboardKey.escape): const CloseViewerIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyI): const ToggleExifIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowRight):
+            const NextMediaIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft):
+            const PreviousMediaIntent(),
+        const SingleActivator(LogicalKeyboardKey.escape):
+            const CloseViewerIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyI):
+            const ToggleExifIntent(),
         const SingleActivator(LogicalKeyboardKey.equal): const ZoomInIntent(),
-        const SingleActivator(LogicalKeyboardKey.equal, shift: true): const ZoomInIntent(),
+        const SingleActivator(LogicalKeyboardKey.equal, shift: true):
+            const ZoomInIntent(),
         const SingleActivator(LogicalKeyboardKey.add): const ZoomInIntent(),
         const SingleActivator(LogicalKeyboardKey.minus): const ZoomOutIntent(),
-        const SingleActivator(LogicalKeyboardKey.numpadAdd): const ZoomInIntent(),
-        const SingleActivator(LogicalKeyboardKey.numpadSubtract): const ZoomOutIntent(),
+        const SingleActivator(LogicalKeyboardKey.numpadAdd):
+            const ZoomInIntent(),
+        const SingleActivator(LogicalKeyboardKey.numpadSubtract):
+            const ZoomOutIntent(),
         const CharacterActivator('+'): const ZoomInIntent(),
         const CharacterActivator('='): const ZoomInIntent(),
         const CharacterActivator('-'): const ZoomOutIntent(),
@@ -252,43 +265,52 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
               children: [
                 // Center Media Content
                 Center(
-                  child: isVideo
-                      ? _buildVideoPlaceholder(theme, media)
-                      : LayoutBuilder(
-                          builder: (context, constraints) {
-                            _viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
-                            return InteractiveViewer(
-                              transformationController: _transformationController,
-                              minScale: ZoomController.minZoom,
-                              maxScale: ZoomController.maxZoom,
-                              child: Image(
-                                image: _imageProviderFor(media),
-                                fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Center(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.broken_image,
-                                          size: 64,
-                                          color: theme.colorScheme.error,
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          media.name,
-                                          style: theme.textTheme.bodyMedium?.copyWith(
-                                            color: theme.colorScheme.onErrorContainer,
+                  child:
+                      isVideo
+                          ? _buildVideoPlaceholder(theme, media)
+                          : LayoutBuilder(
+                            builder: (context, constraints) {
+                              _viewportSize = Size(
+                                constraints.maxWidth,
+                                constraints.maxHeight,
+                              );
+                              return InteractiveViewer(
+                                transformationController:
+                                    _transformationController,
+                                minScale: ZoomController.minZoom,
+                                maxScale: ZoomController.maxZoom,
+                                child: Image(
+                                  image: _imageProviderFor(media),
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Center(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.broken_image,
+                                            size: 64,
+                                            color: theme.colorScheme.error,
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              ),
-                            );
-                          },
-                        ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            media.name,
+                                            style: theme.textTheme.bodyMedium
+                                                ?.copyWith(
+                                                  color:
+                                                      theme
+                                                          .colorScheme
+                                                          .onErrorContainer,
+                                                ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                              );
+                            },
+                          ),
                 ),
 
                 // Top Navigation Bar
@@ -360,15 +382,16 @@ class _FullscreenViewerState extends State<FullscreenViewer> {
                             media.isFavorite
                                 ? Icons.favorite
                                 : Icons.favorite_border,
-                            color: media.isFavorite
-                                ? Colors.red
-                                : theme.colorScheme.onSurface,
+                            color:
+                                media.isFavorite
+                                    ? Colors.red
+                                    : theme.colorScheme.onSurface,
                           ),
-                          tooltip: media.isFavorite
-                              ? 'Remove from favorites'
-                              : 'Favorite',
-                          onPressed: () =>
-                              widget.onToggleFavorite?.call(media),
+                          tooltip:
+                              media.isFavorite
+                                  ? 'Remove from favorites'
+                                  : 'Favorite',
+                          onPressed: () => widget.onToggleFavorite?.call(media),
                         ),
 
                         // Download button

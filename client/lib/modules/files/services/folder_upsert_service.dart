@@ -19,18 +19,15 @@ class FolderUpsertService
 
     Folder? folder;
     try {
-      folder = await retryOnLock(
-        () async {
-          Folder? existing = await repo.getByPath(command.folder);
-          if (existing == null) {
-            return await repo.create(command.folder);
-          } else {
-            command.folder.id = existing.id; // Preserve existing database ID
-            return await repo.update(command.folder);
-          }
-        },
-        label: 'FolderUpsertService',
-      );
+      folder = await retryOnLock(() async {
+        Folder? existing = await repo.getByPath(command.folder);
+        if (existing == null) {
+          return await repo.create(command.folder);
+        } else {
+          command.folder.id = existing.id; // Preserve existing database ID
+          return await repo.update(command.folder);
+        }
+      }, label: 'FolderUpsertService');
       if (folder != null) {
         sink.add(folder);
       }

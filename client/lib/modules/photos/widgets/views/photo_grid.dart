@@ -163,9 +163,8 @@ class _PhotoGridState extends State<PhotoGrid> {
 
       const headerHeight = 40.0;
       final rows = (monthFiles.length / columns).ceil();
-      final gridHeight = rows == 0
-          ? 0.0
-          : 16.0 + rows * itemHeight + (rows - 1) * 8.0;
+      final gridHeight =
+          rows == 0 ? 0.0 : 16.0 + rows * itemHeight + (rows - 1) * 8.0;
 
       currentOffset += headerHeight + gridHeight;
     }
@@ -188,7 +187,9 @@ class _PhotoGridState extends State<PhotoGrid> {
                   Icon(
                     Icons.photo_library,
                     size: 64,
-                    color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                    color: theme.colorScheme.onSurfaceVariant.withValues(
+                      alpha: 0.5,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Text(
@@ -201,10 +202,7 @@ class _PhotoGridState extends State<PhotoGrid> {
               ),
             ),
           ),
-          TimelineQuickJump(
-            monthLabels: const [],
-            onJumpTo: (_) {},
-          ),
+          TimelineQuickJump(monthLabels: const [], onJumpTo: (_) {}),
         ],
       );
     }
@@ -212,13 +210,16 @@ class _PhotoGridState extends State<PhotoGrid> {
     final groups = _groupByMonthYear(widget.files);
     final monthLabels = groups.keys.toList();
     final Map<String, int> photoCounts = {
-      for (final entry in groups.entries) entry.key: entry.value.length
+      for (final entry in groups.entries) entry.key: entry.value.length,
     };
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final mainWidth = max(0.0, constraints.maxWidth - 48.0);
-        final columns = PhotoGrid.getColumnCount(mainWidth, itemSize: _gridItemSize);
+        final columns = PhotoGrid.getColumnCount(
+          mainWidth,
+          itemSize: _gridItemSize,
+        );
 
         _sectionOffsets = _calculateSectionOffsets(groups, mainWidth, columns);
 
@@ -262,24 +263,21 @@ class _PhotoGridState extends State<PhotoGrid> {
                   mainAxisSpacing: 8.0,
                   childAspectRatio: 1.0,
                 ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final file = monthFiles[index];
-                    final isSelected = widget.selectedIds.contains(file.id);
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final file = monthFiles[index];
+                  final isSelected = widget.selectedIds.contains(file.id);
 
-                    return buildWiredPhotoGridTile(
-                      file: file,
-                      isSelected: isSelected,
-                      allFiles: widget.files,
-                      onTapTile: widget.onTapTile,
-                      onSelectTile: widget.onSelectTile,
-                      onToggleFavoriteTile: widget.onToggleFavoriteTile,
-                      onOpenLightboxTile: widget.onOpenLightboxTile,
-                      onOpenInfoTile: widget.onOpenInfoTile,
-                    );
-                  },
-                  childCount: monthFiles.length,
-                ),
+                  return buildWiredPhotoGridTile(
+                    file: file,
+                    isSelected: isSelected,
+                    allFiles: widget.files,
+                    onTapTile: widget.onTapTile,
+                    onSelectTile: widget.onSelectTile,
+                    onToggleFavoriteTile: widget.onToggleFavoriteTile,
+                    onOpenLightboxTile: widget.onOpenLightboxTile,
+                    onOpenInfoTile: widget.onOpenInfoTile,
+                  );
+                }, childCount: monthFiles.length),
               ),
             ),
           );

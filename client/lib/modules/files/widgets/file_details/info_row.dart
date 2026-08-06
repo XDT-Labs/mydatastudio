@@ -49,10 +49,7 @@ Widget infoRowSelectable(String label, String value) {
           ),
         ),
         const SizedBox(height: 2),
-        SelectableText(
-          value,
-          style: const TextStyle(fontSize: 11),
-        ),
+        SelectableText(value, style: const TextStyle(fontSize: 11)),
       ],
     ),
   );

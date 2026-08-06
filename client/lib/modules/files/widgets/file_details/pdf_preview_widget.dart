@@ -91,10 +91,7 @@ class _PdfPreviewWidgetState extends State<PdfPreviewWidget> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(
-              height: widget.previewHeight,
-              child: _buildViewer(),
-            ),
+            SizedBox(height: widget.previewHeight, child: _buildViewer()),
             if (_totalPages > 0) _buildNavBar(),
           ],
         ),

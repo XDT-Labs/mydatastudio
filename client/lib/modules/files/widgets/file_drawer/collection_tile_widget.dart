@@ -85,11 +85,18 @@ class CollectionTileWidget extends StatelessWidget {
             if (value == 'sync') onSync();
             if (value == 'delete') onDelete();
           },
-          itemBuilder: (context) => [
-            if (showSync)
-              const PopupMenuItem<String>(value: 'sync', child: Text('Sync')),
-            const PopupMenuItem<String>(value: 'delete', child: Text('Delete')),
-          ],
+          itemBuilder:
+              (context) => [
+                if (showSync)
+                  const PopupMenuItem<String>(
+                    value: 'sync',
+                    child: Text('Sync'),
+                  ),
+                const PopupMenuItem<String>(
+                  value: 'delete',
+                  child: Text('Delete'),
+                ),
+              ],
         ),
         onTap: onTap,
       ),

@@ -121,7 +121,10 @@ class _AiChatDrawerState extends State<AiChatDrawer> {
               borderRadius: BorderRadius.circular(10),
               onPressed: streaming ? null : _newConversation,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: _newBtnBg,
                   borderRadius: BorderRadius.circular(10),
@@ -129,7 +132,11 @@ class _AiChatDrawerState extends State<AiChatDrawer> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.add, color: streaming ? _accentColor : _textMuted, size: 16),
+                    Icon(
+                      Icons.add,
+                      color: streaming ? _accentColor : _textMuted,
+                      size: 16,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       'New Conversation',
@@ -150,29 +157,30 @@ class _AiChatDrawerState extends State<AiChatDrawer> {
 
           // Conversation list
           Expanded(
-            child: _conversations.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No conversations yet',
-                      style: TextStyle(color: _textMuted, fontSize: 13),
+            child:
+                _conversations.isEmpty
+                    ? const Center(
+                      child: Text(
+                        'No conversations yet',
+                        style: TextStyle(color: _textMuted, fontSize: 13),
+                      ),
+                    )
+                    : ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: _conversations.length,
+                      itemBuilder: (context, index) {
+                        final conv = _conversations[index];
+                        final isActive = conv.id == _activeId;
+                        return _ConversationTile(
+                          conversation: conv,
+                          isActive: isActive,
+                          disabled: streaming,
+                          formattedDate: _formatDate(conv.updatedAt),
+                          onTap: () => _selectConversation(conv),
+                          onDelete: () => _deleteConversation(conv),
+                        );
+                      },
                     ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: _conversations.length,
-                    itemBuilder: (context, index) {
-                      final conv = _conversations[index];
-                      final isActive = conv.id == _activeId;
-                      return _ConversationTile(
-                        conversation: conv,
-                        isActive: isActive,
-                        disabled: streaming,
-                        formattedDate: _formatDate(conv.updatedAt),
-                        onTap: () => _selectConversation(conv),
-                        onDelete: () => _deleteConversation(conv),
-                      );
-                    },
-                  ),
           ),
         ],
       ),
@@ -212,68 +220,78 @@ class _ConversationTileState extends State<_ConversationTile> {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
         child: AccessibleTap(
-        enabled: !widget.disabled,
-        selected: widget.isActive,
-        label: '${widget.conversation.name}, ${widget.formattedDate}',
-        mergeSemantics: false,
-        borderRadius: BorderRadius.circular(8),
-        onPressed: widget.disabled ? null : widget.onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: widget.isActive
-                ? _activeItemBg
-                : _hovering
-                    ? const Color(0xFF141414)
-                    : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: ExcludeSemantics(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      widget.conversation.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: widget.isActive ? _textPrimary : const Color(0xFFE5E5EA),
-                        fontSize: 13,
-                        fontWeight: widget.isActive ? FontWeight.w500 : FontWeight.w400,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      widget.formattedDate,
-                      style: const TextStyle(color: _textMuted, fontSize: 11),
-                    ),
-                  ],
-                ),
-                ),
-              ),
-              if ((_hovering || widget.isActive) && !widget.disabled)
-                AccessibleTap(
-                  label: 'Delete conversation',
-                  borderRadius: BorderRadius.circular(6),
-                  onPressed: widget.onDelete,
-                  child: Container(
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.only(left: 6),
-                    child: const Icon(
-                      Icons.close,
-                      size: 14,
-                      color: _accentColor,
+          enabled: !widget.disabled,
+          selected: widget.isActive,
+          label: '${widget.conversation.name}, ${widget.formattedDate}',
+          mergeSemantics: false,
+          borderRadius: BorderRadius.circular(8),
+          onPressed: widget.disabled ? null : widget.onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color:
+                  widget.isActive
+                      ? _activeItemBg
+                      : _hovering
+                      ? const Color(0xFF141414)
+                      : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ExcludeSemantics(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.conversation.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color:
+                                widget.isActive
+                                    ? _textPrimary
+                                    : const Color(0xFFE5E5EA),
+                            fontSize: 13,
+                            fontWeight:
+                                widget.isActive
+                                    ? FontWeight.w500
+                                    : FontWeight.w400,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.formattedDate,
+                          style: const TextStyle(
+                            color: _textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-            ],
+                if ((_hovering || widget.isActive) && !widget.disabled)
+                  AccessibleTap(
+                    label: 'Delete conversation',
+                    borderRadius: BorderRadius.circular(6),
+                    onPressed: widget.onDelete,
+                    child: Container(
+                      alignment: Alignment.center,
+                      padding: const EdgeInsets.only(left: 6),
+                      child: const Icon(
+                        Icons.close,
+                        size: 14,
+                        color: _accentColor,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
-      ),
       ),
     );
   }

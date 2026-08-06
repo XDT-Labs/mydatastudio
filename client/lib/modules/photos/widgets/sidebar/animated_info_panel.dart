@@ -21,18 +21,13 @@ class AnimatedInfoPanel extends StatelessWidget {
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeInOut,
       width: isOpen ? width : 0.0,
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainer,
-      ),
+      decoration: BoxDecoration(color: colorScheme.surfaceContainer),
       clipBehavior: Clip.hardEdge,
       child: OverflowBox(
         minWidth: width,
         maxWidth: width,
         alignment: Alignment.topLeft,
-        child: SizedBox(
-          width: width,
-          child: child,
-        ),
+        child: SizedBox(width: width, child: child),
       ),
     );
   }

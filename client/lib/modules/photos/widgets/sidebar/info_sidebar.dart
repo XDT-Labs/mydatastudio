@@ -20,11 +20,7 @@ import 'package:mydatastudio/repositories/collection_repository.dart';
 /// A right slide-over sidebar for inspecting and editing photo metadata,
 /// tags, and album membership.
 class InfoSidebar extends StatefulWidget {
-  const InfoSidebar({
-    super.key,
-    this.repository,
-    this.tileProvider,
-  });
+  const InfoSidebar({super.key, this.repository, this.tileProvider});
 
   final PhotosRepository? repository;
 
@@ -161,23 +157,25 @@ class _InfoSidebarState extends State<InfoSidebar> {
     final nextFile = updatedFile ?? await repo.getFile(fileId);
 
     if (mounted && (nextFile != null || _currentFile?.id == fileId)) {
-      final fileToPublish = nextFile ?? File(
-        id: _currentFile!.id,
-        name: newName,
-        collectionId: _currentFile!.collectionId,
-        path: _currentFile!.path,
-        parent: _currentFile!.parent,
-        size: _currentFile!.size,
-        contentType: _currentFile!.contentType,
-        dateCreated: _currentFile!.dateCreated,
-        dateLastModified: _currentFile!.dateLastModified,
-        thumbnail: _currentFile!.thumbnail,
-        latitude: _currentFile!.latitude,
-        longitude: _currentFile!.longitude,
-        isFavorite: _currentFile!.isFavorite,
-        isDeleted: _currentFile!.isDeleted,
-        description: _currentFile!.description,
-      );
+      final fileToPublish =
+          nextFile ??
+          File(
+            id: _currentFile!.id,
+            name: newName,
+            collectionId: _currentFile!.collectionId,
+            path: _currentFile!.path,
+            parent: _currentFile!.parent,
+            size: _currentFile!.size,
+            contentType: _currentFile!.contentType,
+            dateCreated: _currentFile!.dateCreated,
+            dateLastModified: _currentFile!.dateLastModified,
+            thumbnail: _currentFile!.thumbnail,
+            latitude: _currentFile!.latitude,
+            longitude: _currentFile!.longitude,
+            isFavorite: _currentFile!.isFavorite,
+            isDeleted: _currentFile!.isDeleted,
+            description: _currentFile!.description,
+          );
 
       setState(() {
         _currentFile = fileToPublish;
@@ -307,11 +305,12 @@ class _InfoSidebarState extends State<InfoSidebar> {
                               fit: BoxFit.cover,
                               width: double.infinity,
                               height: double.infinity,
-                              errorBuilder: (ctx, err, stack) => Icon(
-                                isVideo ? Icons.videocam : Icons.image,
-                                size: 48,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
+                              errorBuilder:
+                                  (ctx, err, stack) => Icon(
+                                    isVideo ? Icons.videocam : Icons.image,
+                                    size: 48,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
                             )
                           else
                             Icon(
@@ -414,14 +413,8 @@ class _InfoSidebarState extends State<InfoSidebar> {
               ),
               const SizedBox(height: 8),
               const _MetadataRow(label: 'Resolution', value: 'Unknown'),
-              _MetadataRow(
-                label: 'File Size',
-                value: formatBytes(file.size),
-              ),
-              _MetadataRow(
-                label: 'Content Type',
-                value: file.contentType,
-              ),
+              _MetadataRow(label: 'File Size', value: formatBytes(file.size)),
+              _MetadataRow(label: 'Content Type', value: file.contentType),
               _MetadataRow(
                 label: 'Date Created',
                 value: DateFormat.yMMMd().add_jm().format(file.dateCreated),
@@ -430,10 +423,7 @@ class _InfoSidebarState extends State<InfoSidebar> {
                 label: 'Location',
                 value: _formatLocation(file.latitude, file.longitude),
               ),
-              _MetadataRow(
-                label: 'Source',
-                value: file.collectionId,
-              ),
+              _MetadataRow(label: 'Source', value: file.collectionId),
               const Divider(height: 24),
 
               // 5. Tags section
@@ -462,13 +452,14 @@ class _InfoSidebarState extends State<InfoSidebar> {
                 Wrap(
                   spacing: 6.0,
                   runSpacing: 6.0,
-                  children: _tags.map((tag) {
-                    return TagChip(
-                      tag: tag,
-                      onTap: () {},
-                      onRemove: () => _removeTag(tag),
-                    );
-                  }).toList(),
+                  children:
+                      _tags.map((tag) {
+                        return TagChip(
+                          tag: tag,
+                          onTap: () {},
+                          onRemove: () => _removeTag(tag),
+                        );
+                      }).toList(),
                 ),
               const SizedBox(height: 8),
               Row(
@@ -492,10 +483,7 @@ class _InfoSidebarState extends State<InfoSidebar> {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  TextButton(
-                    onPressed: _addTag,
-                    child: const Text('Add'),
-                  ),
+                  TextButton(onPressed: _addTag, child: const Text('Add')),
                 ],
               ),
               const Divider(height: 24),
@@ -519,22 +507,24 @@ class _InfoSidebarState extends State<InfoSidebar> {
                 )
               else
                 Column(
-                  children: _allAlbums.map((album) {
-                    final isMember = _fileAlbumIds.contains(album.id);
-                    return CheckboxListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        album.name,
-                        style: textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurface,
-                        ),
-                      ),
-                      value: isMember,
-                      onChanged: (checked) =>
-                          _toggleAlbum(album, checked ?? false),
-                    );
-                  }).toList(),
+                  children:
+                      _allAlbums.map((album) {
+                        final isMember = _fileAlbumIds.contains(album.id);
+                        return CheckboxListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            album.name,
+                            style: textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
+                          value: isMember,
+                          onChanged:
+                              (checked) =>
+                                  _toggleAlbum(album, checked ?? false),
+                        );
+                      }).toList(),
                 ),
               const Divider(height: 24),
 
@@ -568,10 +558,7 @@ class _InfoSidebarState extends State<InfoSidebar> {
 }
 
 class _MetadataRow extends StatelessWidget {
-  const _MetadataRow({
-    required this.label,
-    required this.value,
-  });
+  const _MetadataRow({required this.label, required this.value});
 
   final String label;
   final String value;

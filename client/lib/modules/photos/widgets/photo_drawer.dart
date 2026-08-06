@@ -108,7 +108,8 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
   Map<String, int> _locationCounts = {};
   List<File> _photos = [];
   List<Collection> _sourceCollections = [];
-  final Set<PhotoSourceGroup> _collapsedGroups = PhotoSourceGroup.values.toSet();
+  final Set<PhotoSourceGroup> _collapsedGroups =
+      PhotoSourceGroup.values.toSet();
   List<({Album album, int count})> _albums = [];
 
   int _usedBytes = 0;
@@ -133,11 +134,10 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
         if (mounted) setState(() => _activeFilter = filter);
       });
 
-      _collectionCountsSub = PhotosService.instance.collectionPhotoCounts.listen((
-        counts,
-      ) {
-        if (mounted) setState(() => _collectionPhotoCounts = counts);
-      });
+      _collectionCountsSub = PhotosService.instance.collectionPhotoCounts
+          .listen((counts) {
+            if (mounted) setState(() => _collectionPhotoCounts = counts);
+          });
 
       _tagCountsSub = PhotosService.instance.tagCounts.listen((counts) {
         if (mounted) setState(() => _tagCounts = counts);
@@ -159,7 +159,9 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
         if (mounted) {
           setState(() {
             _sourceCollections =
-                value.where((c) => c.type == 'file' || c.type == 'email').toList()
+                value
+                    .where((c) => c.type == 'file' || c.type == 'email')
+                    .toList()
                   ..sort(
                     (a, b) =>
                         a.name.toLowerCase().compareTo(b.name.toLowerCase()),
@@ -234,12 +236,14 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
   }
 
   void _selectSourceGroup(PhotoSourceGroup group, Set<String> ids) {
-    final isCurrent = _activeFilter.collectionId == null &&
+    final isCurrent =
+        _activeFilter.collectionId == null &&
         _activeFilter.collectionIds != null &&
         _sameIds(_activeFilter.collectionIds!.toSet(), ids);
-    final newFilter = isCurrent
-        ? const PhotoFilter()
-        : PhotoFilter(collectionIds: ids.toList());
+    final newFilter =
+        isCurrent
+            ? const PhotoFilter()
+            : PhotoFilter(collectionIds: ids.toList());
     ViewStateService.instance.setActiveNav(
       isCurrent ? 'all' : 'source_group_${group.name}',
     );
@@ -286,7 +290,8 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
         0,
         (sum, c) => sum + (_collectionPhotoCounts[c.id] ?? 0),
       );
-      final isGroupActive = _activeFilter.collectionId == null &&
+      final isGroupActive =
+          _activeFilter.collectionId == null &&
           _activeFilter.collectionIds != null &&
           _sameIds(_activeFilter.collectionIds!.toSet(), ids);
       final isExpanded = !_collapsedGroups.contains(group);
@@ -299,13 +304,14 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
           isActive: isGroupActive,
           isExpanded: isExpanded,
           onTap: () => _selectSourceGroup(group, ids),
-          onToggleExpand: () => setState(() {
-            if (isExpanded) {
-              _collapsedGroups.add(group);
-            } else {
-              _collapsedGroups.remove(group);
-            }
-          }),
+          onToggleExpand:
+              () => setState(() {
+                if (isExpanded) {
+                  _collapsedGroups.add(group);
+                } else {
+                  _collapsedGroups.remove(group);
+                }
+              }),
         ),
       );
 
@@ -315,19 +321,20 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
             padding: const EdgeInsets.only(left: 16.0, top: 2.0),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              children: cols.map((c) {
-                final count = _collectionPhotoCounts[c.id];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 2.0),
-                  child: DrawerNavItem(
-                    label: _collectionDisplayName(c),
-                    icon: _sourceGroupIcon(group),
-                    count: (count != null && count > 0) ? count : null,
-                    isActive: _activeFilter.collectionId == c.id,
-                    onTap: () => _selectCollection(c),
-                  ),
-                );
-              }).toList(),
+              children:
+                  cols.map((c) {
+                    final count = _collectionPhotoCounts[c.id];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 2.0),
+                      child: DrawerNavItem(
+                        label: _collectionDisplayName(c),
+                        icon: _sourceGroupIcon(group),
+                        count: (count != null && count > 0) ? count : null,
+                        isActive: _activeFilter.collectionId == c.id,
+                        onTap: () => _selectCollection(c),
+                      ),
+                    );
+                  }).toList(),
             ),
           ),
         );
@@ -470,23 +477,27 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                       title: 'Sources',
                       icon: Icons.cloud_outlined,
                       initiallyExpanded: true,
-                      child: _sourceCollections.isEmpty
-                          ? Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12.0,
-                                vertical: 6.0,
-                              ),
-                              child: Text(
-                                'No sources',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
+                      child:
+                          _sourceCollections.isEmpty
+                              ? Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12.0,
+                                  vertical: 6.0,
+                                ),
+                                child: Text(
+                                  'No sources',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              )
+                              : Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: _buildSourceGroups(
+                                  theme,
+                                  colorScheme,
                                 ),
                               ),
-                            )
-                          : Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: _buildSourceGroups(theme, colorScheme),
-                            ),
                     ),
                     const SizedBox(height: 12),
                     Divider(height: 1, color: colorScheme.outlineVariant),

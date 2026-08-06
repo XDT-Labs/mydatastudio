@@ -114,9 +114,10 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(4),
               border: Border.all(
-                color: widget.isSelected
-                    ? colorScheme.primary
-                    : Colors.transparent,
+                color:
+                    widget.isSelected
+                        ? colorScheme.primary
+                        : Colors.transparent,
                 width: 2,
               ),
             ),
@@ -132,23 +133,29 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
                       onDoubleTap: widget.onOpenLightbox,
                       onSecondaryTap: widget.onOpenInfo,
                       behavior: HitTestBehavior.opaque,
-                      child: imageProvider != null
-                          ? Image(
-                              image: imageProvider,
-                              fit: BoxFit.cover,
-                              frameBuilder: (context, child, frame,
-                                  wasSynchronouslyLoaded) {
-                                if (wasSynchronouslyLoaded) return child;
-                                return AnimatedOpacity(
-                                  opacity: frame == null ? 0 : 1,
-                                  duration: const Duration(milliseconds: 200),
-                                  child: child,
-                                );
-                              },
-                              errorBuilder: (context, error, stackTrace) =>
-                                  _buildFallback(colorScheme, isVideo),
-                            )
-                          : _buildFallback(colorScheme, isVideo),
+                      child:
+                          imageProvider != null
+                              ? Image(
+                                image: imageProvider,
+                                fit: BoxFit.cover,
+                                frameBuilder: (
+                                  context,
+                                  child,
+                                  frame,
+                                  wasSynchronouslyLoaded,
+                                ) {
+                                  if (wasSynchronouslyLoaded) return child;
+                                  return AnimatedOpacity(
+                                    opacity: frame == null ? 0 : 1,
+                                    duration: const Duration(milliseconds: 200),
+                                    child: child,
+                                  );
+                                },
+                                errorBuilder:
+                                    (context, error, stackTrace) =>
+                                        _buildFallback(colorScheme, isVideo),
+                              )
+                              : _buildFallback(colorScheme, isVideo),
                     ),
                   ),
 
@@ -210,162 +217,176 @@ class _PhotoGridTileState extends State<PhotoGridTile> {
                             ),
                             child: Stack(
                               children: [
-                              // Top-left: Selection checkbox
-                              Positioned(
-                                top: 4,
-                                left: 4,
-                                child: IconButton(
-                                  icon: Icon(
-                                    widget.isSelected
-                                        ? Icons.check_circle
-                                        : Icons.radio_button_unchecked,
-                                    color: widget.isSelected
-                                        ? colorScheme.primary
-                                        : Colors.white70,
+                                // Top-left: Selection checkbox
+                                Positioned(
+                                  top: 4,
+                                  left: 4,
+                                  child: IconButton(
+                                    icon: Icon(
+                                      widget.isSelected
+                                          ? Icons.check_circle
+                                          : Icons.radio_button_unchecked,
+                                      color:
+                                          widget.isSelected
+                                              ? colorScheme.primary
+                                              : Colors.white70,
+                                    ),
+                                    onPressed: widget.onSelect,
+                                    tooltip:
+                                        widget.isSelected
+                                            ? 'Deselect'
+                                            : 'Select',
+                                    constraints: const BoxConstraints(),
+                                    padding: const EdgeInsets.all(4),
                                   ),
-                                  onPressed: widget.onSelect,
-                                  tooltip: widget.isSelected
-                                      ? 'Deselect'
-                                      : 'Select',
-                                  constraints: const BoxConstraints(),
-                                  padding: const EdgeInsets.all(4),
                                 ),
-                              ),
 
-                              // Top-right: Favorite heart toggle
-                              Positioned(
-                                top: 4,
-                                right: 4,
-                                child: IconButton(
-                                  icon: Icon(
-                                    isFav
-                                        ? Icons.favorite
-                                        : Icons.favorite_border,
-                                    color: isFav
-                                        ? Colors.red
-                                        : Colors.white70,
+                                // Top-right: Favorite heart toggle
+                                Positioned(
+                                  top: 4,
+                                  right: 4,
+                                  child: IconButton(
+                                    icon: Icon(
+                                      isFav
+                                          ? Icons.favorite
+                                          : Icons.favorite_border,
+                                      color:
+                                          isFav ? Colors.red : Colors.white70,
+                                    ),
+                                    onPressed: widget.onToggleFavorite,
+                                    tooltip:
+                                        isFav
+                                            ? 'Remove from favorites'
+                                            : 'Favorite',
+                                    constraints: const BoxConstraints(),
+                                    padding: const EdgeInsets.all(4),
                                   ),
-                                  onPressed: widget.onToggleFavorite,
-                                  tooltip: isFav
-                                      ? 'Remove from favorites'
-                                      : 'Favorite',
-                                  constraints: const BoxConstraints(),
-                                  padding: const EdgeInsets.all(4),
                                 ),
-                              ),
 
-                              // Bottom-left: Video duration / Location badges
-                              Positioned(
-                                bottom: 6,
-                                left: 6,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (isVideo)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withValues(alpha: 0.7),
-                                          borderRadius:
-                                              BorderRadius.circular(4),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Icon(
-                                              Icons.play_arrow,
-                                              size: 14,
-                                              color: Colors.white,
+                                // Bottom-left: Video duration / Location badges
+                                Positioned(
+                                  bottom: 6,
+                                  left: 6,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (isVideo)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withValues(
+                                              alpha: 0.7,
                                             ),
-                                            const SizedBox(width: 2),
-                                            Text(
-                                              '0:32',
-                                              style: theme
-                                                  .textTheme.labelSmall
-                                                  ?.copyWith(
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.play_arrow,
+                                                size: 14,
                                                 color: Colors.white,
-                                                fontSize: 10,
                                               ),
-                                            ),
-                                          ],
+                                              const SizedBox(width: 2),
+                                              Text(
+                                                '0:32',
+                                                style: theme
+                                                    .textTheme
+                                                    .labelSmall
+                                                    ?.copyWith(
+                                                      color: Colors.white,
+                                                      fontSize: 10,
+                                                    ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
+                                      if (isVideo && hasLocation)
+                                        const SizedBox(width: 4),
+                                      if (hasLocation)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withValues(
+                                              alpha: 0.7,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.location_on,
+                                                size: 14,
+                                                color: Colors.white,
+                                              ),
+                                              const SizedBox(width: 2),
+                                              Text(
+                                                'Location',
+                                                style: theme
+                                                    .textTheme
+                                                    .labelSmall
+                                                    ?.copyWith(
+                                                      color: Colors.white,
+                                                      fontSize: 10,
+                                                    ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+
+                                // Bottom-right: Info icon button & Expand icon button
+                                Positioned(
+                                  bottom: 4,
+                                  right: 4,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.info_outline,
+                                          color: Colors.white70,
+                                          size: 18,
+                                        ),
+                                        onPressed: widget.onOpenInfo,
+                                        tooltip: 'Info Details',
+                                        constraints: const BoxConstraints(),
+                                        padding: const EdgeInsets.all(4),
                                       ),
-                                    if (isVideo && hasLocation)
                                       const SizedBox(width: 4),
-                                    if (hasLocation)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withValues(alpha: 0.7),
-                                          borderRadius:
-                                              BorderRadius.circular(4),
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.open_in_full,
+                                          color: Colors.white70,
+                                          size: 18,
                                         ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Icon(
-                                              Icons.location_on,
-                                              size: 14,
-                                              color: Colors.white,
-                                            ),
-                                            const SizedBox(width: 2),
-                                            Text(
-                                              'Location',
-                                              style: theme
-                                                  .textTheme.labelSmall
-                                                  ?.copyWith(
-                                                color: Colors.white,
-                                                fontSize: 10,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                        onPressed: widget.onOpenLightbox,
+                                        tooltip: 'Expand',
+                                        constraints: const BoxConstraints(),
+                                        padding: const EdgeInsets.all(4),
                                       ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
-
-                              // Bottom-right: Info icon button & Expand icon button
-                              Positioned(
-                                bottom: 4,
-                                right: 4,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.info_outline,
-                                        color: Colors.white70,
-                                        size: 18,
-                                      ),
-                                      onPressed: widget.onOpenInfo,
-                                      tooltip: 'Info Details',
-                                      constraints: const BoxConstraints(),
-                                      padding: const EdgeInsets.all(4),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.open_in_full,
-                                        color: Colors.white70,
-                                        size: 18,
-                                      ),
-                                      onPressed: widget.onOpenLightbox,
-                                      tooltip: 'Expand',
-                                      constraints: const BoxConstraints(),
-                                      padding: const EdgeInsets.all(4),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
                   ),
                 ],
               ),

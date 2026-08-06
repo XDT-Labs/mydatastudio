@@ -99,28 +99,16 @@ class _PhotosAppState extends State<PhotosApp> {
   Widget _buildActiveView() {
     switch (_viewMode) {
       case PhotoViewMode.grid:
-        return PhotoGrid(
-          files: _files,
-          selectedIds: _selectedIds,
-        );
+        return PhotoGrid(files: _files, selectedIds: _selectedIds);
       case PhotoViewMode.list:
-        return PhotoListView(
-          files: _files,
-          selectedIds: _selectedIds,
-        );
+        return PhotoListView(files: _files, selectedIds: _selectedIds);
       case PhotoViewMode.map:
-        return PhotoMapView(
-          files: _geoFiles,
-          selectedIds: _selectedIds,
-        );
+        return PhotoMapView(files: _geoFiles, selectedIds: _selectedIds);
     }
   }
 
   Widget _buildInfoPanel() {
-    return AnimatedInfoPanel(
-      isOpen: _isInfoOpen,
-      child: const InfoSidebar(),
-    );
+    return AnimatedInfoPanel(isOpen: _isInfoOpen, child: const InfoSidebar());
   }
 
   Widget _buildStatusBar(BuildContext context) {
@@ -128,13 +116,14 @@ class _PhotosAppState extends State<PhotosApp> {
     final colorScheme = theme.colorScheme;
     final textTheme = theme.textTheme;
 
-    final videoCount = _files.where((f) {
-      final mime = f.contentType;
-      return mime.startsWith('video/') ||
-          f.name.endsWith('.mp4') ||
-          f.name.endsWith('.mov') ||
-          f.name.endsWith('.avi');
-    }).length;
+    final videoCount =
+        _files.where((f) {
+          final mime = f.contentType;
+          return mime.startsWith('video/') ||
+              f.name.endsWith('.mp4') ||
+              f.name.endsWith('.mov') ||
+              f.name.endsWith('.avi');
+        }).length;
     final photoCount = _files.length - videoCount;
 
     String countText = '$photoCount photos, $videoCount videos';
@@ -147,9 +136,7 @@ class _PhotosAppState extends State<PhotosApp> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainer,
-        border: Border(
-          top: BorderSide(color: colorScheme.outlineVariant),
-        ),
+        border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
       ),
       child: Row(
         children: [
@@ -196,9 +183,7 @@ class _PhotosAppState extends State<PhotosApp> {
               Expanded(
                 child: Row(
                   children: [
-                    Expanded(
-                      child: _buildActiveView(),
-                    ),
+                    Expanded(child: _buildActiveView()),
                     _buildInfoPanel(),
                   ],
                 ),
@@ -214,11 +199,15 @@ class _PhotosAppState extends State<PhotosApp> {
                     child: FullscreenViewer(
                       currentFile: _lightboxMedia!,
                       mediaList: _files,
-                      onClose: () => ViewStateService.instance.setLightboxMedia(null),
-                      onOpenInfo: (file) => ViewStateService.instance.openInfo(file),
+                      onClose:
+                          () =>
+                              ViewStateService.instance.setLightboxMedia(null),
+                      onOpenInfo:
+                          (file) => ViewStateService.instance.openInfo(file),
                       onToggleFavorite: (file) async {
                         await _photosRepo.toggleFavorite(file.id);
-                        final updatedList = await PhotosService.instance.refresh();
+                        final updatedList =
+                            await PhotosService.instance.refresh();
                         final updated = updatedList.firstWhere(
                           (f) => f.id == file.id,
                           orElse: () => file..isFavorite = !file.isFavorite,

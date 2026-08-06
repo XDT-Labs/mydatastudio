@@ -36,7 +36,9 @@ class AttachmentThumbnailWidget extends StatelessWidget {
     final result = await OpenFilex.open(file.path);
     if (result.type != ResultType.done) {
       messenger.showSnackBar(
-        SnackBar(content: Text('Could not open ${file.name}: ${result.message}')),
+        SnackBar(
+          content: Text('Could not open ${file.name}: ${result.message}'),
+        ),
       );
     }
   }
