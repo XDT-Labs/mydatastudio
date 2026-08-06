@@ -369,6 +369,15 @@ void main() {
             FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
           )
         ''');
+        // A database old enough to predate files.description also predates
+        // files_fts, which indexes that column. Dropping the column while the
+        // triggers are live is a state no real install can reach — the
+        // indexes are created after the column is added — so drop them too
+        // rather than testing against a shape that cannot occur.
+        await appDb.rawDb.execute('DROP TRIGGER IF EXISTS files_fts_ai');
+        await appDb.rawDb.execute('DROP TRIGGER IF EXISTS files_fts_au');
+        await appDb.rawDb.execute('DROP TRIGGER IF EXISTS files_fts_ad');
+        await appDb.rawDb.execute('DROP TABLE IF EXISTS files_fts');
         await appDb.rawDb.execute('ALTER TABLE files DROP COLUMN description');
         await appDb.rawDb.execute('DROP TABLE file_tags');
         await appDb.rawDb.execute('DROP TABLE file_landmarks');
@@ -410,6 +419,15 @@ void main() {
             type TEXT NOT NULL DEFAULT 'file'
           )
         ''');
+        // A database old enough to predate files.description also predates
+        // files_fts, which indexes that column. Dropping the column while the
+        // triggers are live is a state no real install can reach — the
+        // indexes are created after the column is added — so drop them too
+        // rather than testing against a shape that cannot occur.
+        await appDb.rawDb.execute('DROP TRIGGER IF EXISTS files_fts_ai');
+        await appDb.rawDb.execute('DROP TRIGGER IF EXISTS files_fts_au');
+        await appDb.rawDb.execute('DROP TRIGGER IF EXISTS files_fts_ad');
+        await appDb.rawDb.execute('DROP TABLE IF EXISTS files_fts');
         await appDb.rawDb.execute('ALTER TABLE files DROP COLUMN description');
         await appDb.rawDb.execute('DROP TABLE file_tags');
         await appDb.rawDb.execute('DROP TABLE file_landmarks');
@@ -452,6 +470,105 @@ void main() {
       PathProviderPlatform.instance = oldPlatform;
     });
 
+    test(
+      'emails_fts triggers track insert, update and delete',
+      () async {
+        // Sync is by SQL trigger rather than from Dart precisely so no write
+        // path can skip it: six scanners reach `emails` through the write
+        // relay, and a Dart-side index call is the thing a seventh forgets.
+        // If these triggers stop firing, mail stays in the database but
+        // silently vanishes from keyword search — visible in the UI, absent
+        // from results, with nothing logged.
+        final supportDir = await getApplicationSupportDirectory();
+        const dbName = 'fts_trigger_test.db';
+        final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+        if (dbFile.existsSync()) dbFile.deleteSync();
+
+        final appDb = await AppDatabase.create(null, supportDir.path, dbName);
+
+        await _insertEmail(appDb, id: 'e1', subject: 'Quarterly report');
+        expect(await _ftsMatches(appDb, 'quarterly'), 1);
+
+        // An external-content update must retract the OLD terms; passing the
+        // new values to the 'delete' command would leave 'quarterly' indexed
+        // against a row that no longer says it.
+        await appDb.rawDb.execute(
+          "UPDATE emails SET subject = 'Annual report' WHERE id = 'e1'",
+        );
+        expect(await _ftsMatches(appDb, 'quarterly'), 0);
+        expect(await _ftsMatches(appDb, 'annual'), 1);
+
+        await appDb.rawDb.execute("DELETE FROM emails WHERE id = 'e1'");
+        expect(await _ftsMatches(appDb, 'annual'), 0);
+
+        await appDb.close();
+        if (dbFile.existsSync()) dbFile.deleteSync();
+      },
+    );
+
+    test(
+      'search indexes backfill mail that predates them',
+      () async {
+        // The triggers only see writes made after they exist. Without the
+        // one-time rebuild, every message already in an upgraded archive is
+        // invisible to keyword search forever — the failure looks like
+        // "search is broken for old mail only", which is the hardest kind to
+        // notice in testing and the most common in the field.
+        final supportDir = await getApplicationSupportDirectory();
+        const dbName = 'fts_backfill_test.db';
+        final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+        if (dbFile.existsSync()) dbFile.deleteSync();
+
+        var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+
+        // Reproduce a pre-index archive: rows present, triggers and index
+        // gone, and the migration marked as not-yet-run.
+        await appDb.rawDb.execute('DROP TRIGGER IF EXISTS emails_fts_ai');
+        await appDb.rawDb.execute('DROP TRIGGER IF EXISTS emails_fts_au');
+        await appDb.rawDb.execute('DROP TRIGGER IF EXISTS emails_fts_ad');
+        await _insertEmail(appDb, id: 'old-1', subject: 'Graduation speech');
+        expect(await _ftsMatches(appDb, 'graduation'), 0);
+        await appDb.rawDb.execute('PRAGMA user_version = 1');
+        await appDb.close();
+
+        // Reopening is what an upgraded install does.
+        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        expect(await _ftsMatches(appDb, 'graduation'), 1);
+
+        await appDb.close();
+        if (dbFile.existsSync()) dbFile.deleteSync();
+      },
+    );
+
+    test(
+      'search schema survives repeated opens',
+      () async {
+        // AppDatabase.create runs initSchema on two connections, and every
+        // launch runs it again. A CREATE that is not IF NOT EXISTS, or a
+        // rebuild that is not version-gated, would throw on the second pass —
+        // breaking app start rather than just search.
+        final supportDir = await getApplicationSupportDirectory();
+        const dbName = 'search_idempotency_test.db';
+        final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+        if (dbFile.existsSync()) dbFile.deleteSync();
+
+        var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        await appDb.close();
+        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        await appDb.close();
+        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+
+        final tables = (await appDb.rawDb.select(
+          "SELECT name FROM sqlite_master WHERE name IN "
+          "('emails_fts', 'files_fts', 'contacts')",
+        )).map((r) => r['name'] as String).toSet();
+        expect(tables, containsAll(['emails_fts', 'files_fts', 'contacts']));
+
+        await appDb.close();
+        if (dbFile.existsSync()) dbFile.deleteSync();
+      },
+    );
+
     test('startBackgroundServices should be deferred when vault is locked and start when unlocked', () async {
       final supportPath = await getApplicationSupportDirectory();
       final configFile = io.File(p.join(supportPath.path, 'config.json'));
@@ -476,4 +593,27 @@ void main() {
 Future<Set<String>> _fileColumns(AppDatabase db) async {
   final rows = await db.rawDb.select('PRAGMA table_info(files)');
   return rows.map((r) => r['name'] as String).toSet();
+}
+
+/// Number of `emails_fts` rows matching [match].
+Future<int> _ftsMatches(AppDatabase db, String match) async {
+  final rows = await db.rawDb.select(
+    'SELECT count(*) AS c FROM emails_fts WHERE emails_fts MATCH ?',
+    [match],
+  );
+  return rows.first['c'] as int;
+}
+
+Future<void> _insertEmail(
+  AppDatabase db, {
+  required String id,
+  required String subject,
+  String from = 'bob@example.com',
+  String body = '',
+}) async {
+  await db.rawDb.execute(
+    'INSERT INTO emails (id, collection_id, date, "from", "to", subject, '
+    'plain_body) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [id, 'col-1', 0, from, 'me@example.com', subject, body],
+  );
 }

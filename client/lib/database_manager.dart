@@ -17,6 +17,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:mydatastudio/modules/files/services/embedding_isolate.dart';
 import 'package:mydatastudio/modules/files/services/file_description_isolate.dart';
 import 'package:mydatastudio/modules/email/services/email_embedding_isolate.dart';
+import 'package:mydatastudio/modules/search/services/contact_repository.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:uuid/uuid.dart';
 
@@ -572,6 +573,14 @@ class AppDatabase {
     }
 
     await _reapOrphanedArtifacts();
+
+    // Strictly after _addMissingColumns: files_fts indexes `description`, a
+    // column added long after the initial schema. Creating the trigger that
+    // reads `new.description` before that ALTER lands would build it against
+    // a table that has no such column, and the failure would surface later as
+    // a broken INSERT on an upgraded install only.
+    await _createSearchIndexes();
+    await _backfillSearchIndexes();
   }
 
   /// One-time sweep of artifacts stranded by the delete paths before they
@@ -645,6 +654,164 @@ class AppDatabase {
     }
     if (reaped > 0) {
       logger.i("AppDatabase: reaped $reaped orphaned thumbnails from disk");
+    }
+  }
+
+  /// Creates the keyword-search indexes: two FTS5 virtual tables and the
+  /// derived `contacts` index.
+  ///
+  /// Deliberately not part of [schemaDDL]. That list only runs for a brand-new
+  /// database, so an existing install would never see these; running them here
+  /// covers both cases from one place. Every statement is `IF NOT EXISTS`,
+  /// which matters because [create] calls [initSchema] on two connections.
+  ///
+  /// Both FTS5 tables are **external-content** (`content='<table>'`): FTS5
+  /// stores only the inverted index and reads column values back from the real
+  /// row. Storing the text twice would roughly double the database for an
+  /// archive whose bulk is already email bodies.
+  ///
+  /// Sync is by trigger rather than from the write paths in Dart. Every scanner
+  /// (Gmail, Yahoo, Outlook, PST, local FS, Drive) reaches these tables through
+  /// the main-isolate write relay, so a trigger cannot be bypassed — whereas a
+  /// Dart-side call is one thing a sixth scanner can forget to make.
+  Future<void> _createSearchIndexes() async {
+    // unicode61 + remove_diacritics: "resume" should find "résumé", and a
+    // personal archive is exactly where accented names turn up.
+    await _db.execute('''
+      CREATE VIRTUAL TABLE IF NOT EXISTS emails_fts USING fts5(
+        subject, "from", "to", cc, plain_body,
+        content='emails', content_rowid='rowid',
+        tokenize='unicode61 remove_diacritics 2'
+      );
+    ''');
+    await _db.execute('''
+      CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
+        name, path, description,
+        content='files', content_rowid='rowid',
+        tokenize='unicode61 remove_diacritics 2'
+      );
+    ''');
+
+    // An external-content delete must replay the OLD column values: FTS5 keeps
+    // no copy of the row, so it can only find the terms to retract by being
+    // handed what they were. Passing new values, or omitting them, silently
+    // leaves stale terms pointing at a row that no longer matches.
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS emails_fts_ai AFTER INSERT ON emails BEGIN
+        INSERT INTO emails_fts(rowid, subject, "from", "to", cc, plain_body)
+        VALUES (new.rowid, new.subject, new."from", new."to", new.cc,
+                new.plain_body);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS emails_fts_ad AFTER DELETE ON emails BEGIN
+        INSERT INTO emails_fts(emails_fts, rowid, subject, "from", "to", cc,
+                               plain_body)
+        VALUES ('delete', old.rowid, old.subject, old."from", old."to", old.cc,
+                old.plain_body);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS emails_fts_au AFTER UPDATE ON emails BEGIN
+        INSERT INTO emails_fts(emails_fts, rowid, subject, "from", "to", cc,
+                               plain_body)
+        VALUES ('delete', old.rowid, old.subject, old."from", old."to", old.cc,
+                old.plain_body);
+        INSERT INTO emails_fts(rowid, subject, "from", "to", cc, plain_body)
+        VALUES (new.rowid, new.subject, new."from", new."to", new.cc,
+                new.plain_body);
+      END;
+    ''');
+
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS files_fts_ai AFTER INSERT ON files BEGIN
+        INSERT INTO files_fts(rowid, name, path, description)
+        VALUES (new.rowid, new.name, new.path, new.description);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS files_fts_ad AFTER DELETE ON files BEGIN
+        INSERT INTO files_fts(files_fts, rowid, name, path, description)
+        VALUES ('delete', old.rowid, old.name, old.path, old.description);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS files_fts_au AFTER UPDATE ON files BEGIN
+        INSERT INTO files_fts(files_fts, rowid, name, path, description)
+        VALUES ('delete', old.rowid, old.name, old.path, old.description);
+        INSERT INTO files_fts(rowid, name, path, description)
+        VALUES (new.rowid, new.name, new.path, new.description);
+      END;
+    ''');
+
+    // `address` is stored already-lowercased and is the identity key: the same
+    // mailbox reaches us in several casings, and real archives already carry
+    // such duplicates. `display_name` keeps human casing for presentation.
+    //
+    // This one cannot be trigger-maintained like the FTS5 tables above —
+    // populating it means parsing RFC 5322 (`Name <addr@host>`) and splitting
+    // the comma-joined `to`/`cc` lists, neither of which is expressible in SQL.
+    // See ContactIndexer.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS contacts (
+        address        TEXT PRIMARY KEY,
+        display_name   TEXT,
+        local_part     TEXT NOT NULL,
+        message_count  INTEGER NOT NULL DEFAULT 0,
+        sent_count     INTEGER NOT NULL DEFAULT 0,
+        first_seen     INTEGER,
+        last_seen      INTEGER
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS contacts_name_idx '
+      'ON contacts (display_name COLLATE NOCASE);',
+    );
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS contacts_local_idx '
+      'ON contacts (local_part COLLATE NOCASE);',
+    );
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS contacts_rank_idx '
+      'ON contacts (message_count DESC);',
+    );
+  }
+
+  /// Populates the FTS5 indexes for rows that predate them.
+  ///
+  /// The triggers in [_createSearchIndexes] only see writes from the moment
+  /// they exist, so every email and file already in the archive is invisible to
+  /// keyword search until this runs once.
+  ///
+  /// Gated on `PRAGMA user_version` for the same reasons as
+  /// [_reapOrphanedArtifacts]: `'rebuild'` re-tokenizes every row of both
+  /// tables, which is real work on a large archive, and the gate is also what
+  /// stops it running twice given [create] calls [initSchema] on two
+  /// connections.
+  ///
+  /// Failure here is deliberately not fatal. An empty or partial index degrades
+  /// keyword search; it does not stop the app opening, and the next version
+  /// bump re-attempts it.
+  Future<void> _backfillSearchIndexes() async {
+    const searchIndexVersion = 2;
+
+    final rows = await _db.select('PRAGMA user_version');
+    final current = rows.isEmpty ? 0 : (rows.first.values.first as int? ?? 0);
+    if (current >= searchIndexVersion) return;
+
+    try {
+      logger.i('AppDatabase: building full-text search indexes...');
+      await _db.execute("INSERT INTO emails_fts(emails_fts) VALUES('rebuild')");
+      await _db.execute("INSERT INTO files_fts(files_fts) VALUES('rebuild')");
+      await ContactRepository(this).backfillFromEmails();
+      await _db.execute('PRAGMA user_version = $searchIndexVersion');
+      logger.i('AppDatabase: full-text search indexes built');
+    } catch (e, stackTrace) {
+      logger.e(
+        'AppDatabase: failed to build full-text search indexes: $e',
+        error: e,
+        stackTrace: stackTrace,
+      );
     }
   }
 
