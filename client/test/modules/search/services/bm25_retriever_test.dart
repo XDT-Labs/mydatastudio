@@ -444,10 +444,62 @@ void main() {
       ).search(QueryParser.parse('sunset'), onlySource: SearchResultType.file);
 
       expect(filesOnly.results.map((r) => r.id), ['f1']);
-      // The restricted total counts only that archive, so the facet's own
-      // number stays consistent once it is selected.
-      expect(filesOnly.total, 1);
-      expect(filesOnly.emailTotal, 0);
+      await db.close();
+    });
+
+    test('selecting a facet keeps every other facet countable', () async {
+      // The dead end this exists for: choosing a facet used to stop the other
+      // archives being counted, so an empty facet showed "All 0 / Emails 0 /
+      // Photos & Files 0" and left no control to get back — one click into a
+      // state with no way out. Counting stays unrestricted; only retrieval
+      // narrows.
+      final db = await _freshDb('bm25_facet_counts_survive_test.db');
+      for (var i = 0; i < 3; i++) {
+        await _addFile(
+          db,
+          id: 'f$i',
+          name: 'sunset$i.jpg',
+          description: 'sunset',
+        );
+      }
+
+      // Mail has nothing matching — the empty-facet case from the report.
+      final emailsOnly = await Bm25Retriever(
+        db,
+      ).search(QueryParser.parse('sunset'), onlySource: SearchResultType.email);
+
+      expect(emailsOnly.results, isEmpty);
+      expect(emailsOnly.emailTotal, 0);
+      // Still reported, so "Photos & Files 3" stays visible and clickable.
+      expect(emailsOnly.fileTotal, 3);
+      expect(emailsOnly.total, 3);
+      await db.close();
+    });
+
+    test('a restricted search does not page the archive it skipped', () async {
+      // Totals are deliberately unrestricted, which leaves an untouched cursor
+      // for the unfetched source. Without knowing which source is in scope,
+      // that reads as pending work and the scroll listener asks forever.
+      final db = await _freshDb('bm25_restricted_hasmore_test.db');
+      for (var i = 0; i < 5; i++) {
+        await _addFile(
+          db,
+          id: 'f$i',
+          name: 'sunset$i.jpg',
+          description: 'sunset',
+        );
+        await _addEmail(db, id: 'e$i', from: 'a@x.com', subject: 'sunset');
+      }
+
+      final emailsOnly = await Bm25Retriever(db).search(
+        QueryParser.parse('sunset'),
+        limit: 10,
+        onlySource: SearchResultType.email,
+      );
+
+      expect(emailsOnly.results.length, 5);
+      expect(emailsOnly.fileTotal, 5, reason: 'file count still displayed');
+      expect(emailsOnly.hasMore, isFalse, reason: 'files are not being paged');
       await db.close();
     });
   });

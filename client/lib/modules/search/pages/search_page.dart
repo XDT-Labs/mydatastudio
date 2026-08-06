@@ -161,18 +161,15 @@ class _SearchPageState extends State<SearchPage> {
     if (_lastRunQuery.isEmpty) {
       return const _NoQueryYetView();
     }
-    if (_results.isEmpty) {
-      // Still waiting on the first response for this query — nothing to
-      // call "empty" yet, so this is loading, not a real zero-result state.
-      if (_isLoading) {
-        return const Center(child: CircularProgressIndicator());
-      }
-      final lastQuery = SearchService.instance.lastQuery;
-      return _EmptyResultsView(
-        query: _lastRunQuery,
-        hasFilters: lastQuery?.hasFilters ?? false,
-      );
+    // Still waiting on the first response for this query — nothing to call
+    // "empty" yet, so this is loading, not a real zero-result state.
+    if (_results.isEmpty && _isLoading) {
+      return const Center(child: CircularProgressIndicator());
     }
+    // Everything else keeps the chrome. An empty facet used to replace the
+    // whole page, taking the filter chips and facet bar with it — selecting
+    // "Emails 0" left no control to get back to "All", which is a dead end
+    // reachable in one click.
     return _buildResults(context);
   }
 
@@ -209,13 +206,14 @@ class _SearchPageState extends State<SearchPage> {
         Expanded(
           child:
               filtered.isEmpty
-                  ? Center(
-                    child: Text(
-                      'No results in this category',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
+                  ? _EmptyResultsView(
+                    query: _lastRunQuery,
+                    hasFilters: lastQuery?.hasFilters ?? false,
+                    // A facet with nothing in it, while other facets do have
+                    // matches, is a different situation from a query that
+                    // found nothing anywhere — and the way out differs too.
+                    otherFacetsHaveResults:
+                        _facet != SearchFacet.all && _results.total > 0,
                   )
                   : ListView.separated(
                     controller: _scrollController,
@@ -326,10 +324,20 @@ class _NoQueryYetView extends StatelessWidget {
 }
 
 class _EmptyResultsView extends StatelessWidget {
-  const _EmptyResultsView({required this.query, required this.hasFilters});
+  const _EmptyResultsView({
+    required this.query,
+    required this.hasFilters,
+    this.otherFacetsHaveResults = false,
+  });
 
   final String query;
   final bool hasFilters;
+
+  /// True when this facet is empty but the query matched elsewhere. Says so
+  /// explicitly rather than claiming the query found nothing — the facet bar
+  /// above is still showing non-zero counts, and a message contradicting it
+  /// reads as a bug.
+  final bool otherFacetsHaveResults;
 
   @override
   Widget build(BuildContext context) {
@@ -349,22 +357,26 @@ class _EmptyResultsView extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'No results for "$query"',
+              otherFacetsHaveResults
+                  ? 'Nothing here for "$query"'
+                  : 'No results for "$query"',
               textAlign: TextAlign.center,
               style: theme.textTheme.titleMedium?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
-            if (hasFilters) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Your filters may be narrowing the results.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
+            const SizedBox(height: 8),
+            Text(
+              otherFacetsHaveResults
+                  ? 'Other categories above still have matches.'
+                  : hasFilters
+                  ? 'Your filters may be narrowing the results.'
+                  : '',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
               ),
-            ],
+            ),
           ],
         ),
       ),

@@ -95,25 +95,53 @@ class SearchResults {
   final int emailOffset;
   final int fileOffset;
 
+  /// Which single archive [results] was restricted to, or null for everything.
+  ///
+  /// Kept because the totals above are deliberately *unrestricted* — the facet
+  /// bar must keep showing every archive's count while one is selected. That
+  /// makes an untouched cursor for an unfetched source look like pending work,
+  /// so [hasMore] needs to know which sources are actually in play.
+  final SearchResultType? sourceFilter;
+
   const SearchResults({
     required this.results,
     this.emailTotal = 0,
     this.fileTotal = 0,
     this.emailOffset = 0,
     this.fileOffset = 0,
+    this.sourceFilter,
   });
 
   static const empty = SearchResults(results: []);
 
-  /// Total matches in the archive — what every count in the UI reports.
+  /// Matches across every archive — the "All" count.
   int get total => emailTotal + fileTotal;
+
+  /// Matches within the currently selected facet.
+  int get totalInScope {
+    switch (sourceFilter) {
+      case SearchResultType.email:
+        return emailTotal;
+      case SearchResultType.file:
+        return fileTotal;
+      case null:
+        return total;
+    }
+  }
 
   /// How many are currently loaded. An implementation detail, not something
   /// to put in front of the user.
   int get loadedCount => results.length;
 
-  /// Whether another page remains to fetch.
-  bool get hasMore => emailOffset < emailTotal || fileOffset < fileTotal;
+  /// Whether another page remains to fetch, considering only sources being
+  /// retrieved.
+  bool get hasMore {
+    final emailPending =
+        sourceFilter != SearchResultType.file && emailOffset < emailTotal;
+    final filePending =
+        sourceFilter != SearchResultType.email && fileOffset < fileTotal;
+    return emailPending || filePending;
+  }
 
   bool get isEmpty => results.isEmpty;
 
@@ -125,6 +153,7 @@ class SearchResults {
       fileTotal: page.fileTotal,
       emailOffset: page.emailOffset,
       fileOffset: page.fileOffset,
+      sourceFilter: page.sourceFilter,
     );
   }
 }

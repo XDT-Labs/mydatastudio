@@ -41,26 +41,18 @@ class Bm25Retriever {
     int fileOffset = 0,
     SearchResultType? onlySource,
   }) async {
-    final wantsEmails =
-        _sourceWanted(query, SearchResultType.email) &&
-        onlySource != SearchResultType.file;
-    final wantsFiles =
-        _sourceWanted(query, SearchResultType.file) &&
-        onlySource != SearchResultType.email;
-
     final match = _toMatchExpression(query.freeText);
 
-    final emailWhere = wantsEmails ? _emailWhere(query) : null;
-    final fileWhere = wantsFiles ? _fileWhere(query) : null;
-
-    final emails =
-        emailWhere == null
-            ? <SearchResult>[]
-            : await _searchEmails(emailWhere, match, limit, emailOffset);
-    final files =
-        fileWhere == null
-            ? <SearchResult>[]
-            : await _searchFiles(fileWhere, match, limit, fileOffset);
+    // Built without regard to [onlySource]: the counts below feed the facet
+    // bar, which has to keep reporting every archive's total even while one is
+    // selected. Zeroing the others would strand a user who picked a facet with
+    // no results — the control they need to leave it would show 0 too.
+    final emailWhere =
+        _sourceWanted(query, SearchResultType.email)
+            ? _emailWhere(query)
+            : null;
+    final fileWhere =
+        _sourceWanted(query, SearchResultType.file) ? _fileWhere(query) : null;
 
     // Counted separately rather than inferred from the returned rows. A source
     // that filled its page is indistinguishable from one that happened to
@@ -74,6 +66,21 @@ class Bm25Retriever {
         fileWhere == null
             ? 0
             : await _count('files', 'files_fts', 'f', fileWhere, match);
+
+    // Only row retrieval honours [onlySource]. Counting is unrestricted.
+    final fetchEmails =
+        emailWhere != null && onlySource != SearchResultType.file;
+    final fetchFiles =
+        fileWhere != null && onlySource != SearchResultType.email;
+
+    final emails =
+        !fetchEmails
+            ? <SearchResult>[]
+            : await _searchEmails(emailWhere, match, limit, emailOffset);
+    final files =
+        !fetchFiles
+            ? <SearchResult>[]
+            : await _searchFiles(fileWhere, match, limit, fileOffset);
 
     // Interleaved by rank rather than grouped by type: grouping would bury the
     // best answer under a section header, and a photo query should lead with
@@ -90,6 +97,10 @@ class Bm25Retriever {
       fileTotal: fileTotal,
       emailOffset: emailOffset + page.where((r) => r.isEmail).length,
       fileOffset: fileOffset + page.where((r) => r.isFile).length,
+      // Carried so `hasMore` only considers sources actually being fetched.
+      // Without it a restricted search would see an untouched cursor against a
+      // full total and ask for pages forever.
+      sourceFilter: onlySource,
     );
   }
 
