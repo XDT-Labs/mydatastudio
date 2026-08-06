@@ -148,6 +148,7 @@ flutter:
     - assets/
     - app/aiserver-macos.zip
     - assets/images/google-drive.png
+    - assets/gazetteer/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware

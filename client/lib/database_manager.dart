@@ -19,6 +19,7 @@ import 'package:mydatastudio/modules/files/services/file_description_isolate.dar
 import 'package:mydatastudio/modules/email/services/email_embedding_isolate.dart';
 import 'package:mydatastudio/modules/email/services/searchable_body.dart';
 import 'package:mydatastudio/modules/search/services/contact_repository.dart';
+import 'package:mydatastudio/modules/search/services/place_repository.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:uuid/uuid.dart';
 
@@ -238,6 +239,21 @@ class DatabaseManager {
     _repository = DatabaseRepository(appDatabase!);
 
     isInitializedNotifier.value = true;
+
+    // Not awaited: a first launch imports ~70k gazetteer rows, and no part of
+    // startup depends on them. The import runs in one transaction, so another
+    // connection sees either no gazetteer or all of it — never a half-loaded
+    // one that would resolve `near:banff` to nothing and quietly demote it to
+    // free text. Skipped under test, where the asset bundle is not present and
+    // the tables are built per-test anyway.
+    if (!isTesting) {
+      unawaited(
+        PlaceRepository(appDatabase!).importIfEmpty().catchError((Object e) {
+          logger.w('DatabaseManager: gazetteer import failed, near: disabled: $e');
+          return 0;
+        }),
+      );
+    }
 
     // If vault is already unlocked at initialization (e.g. auto-login flow), start background services.
     if (!isTesting && VaultManager.instance.isUnlocked) {
@@ -582,6 +598,51 @@ class AppDatabase {
     // a broken INSERT on an upgraded install only.
     await _createSearchIndexes();
     await _backfillSearchIndexes();
+    await _createGeoIndexes();
+  }
+
+  /// Creates the gazetteer table and the coordinate index `near:` scans.
+  ///
+  /// Separate from [_createSearchIndexes] because nothing here is a text index:
+  /// `near:banff` is answered by turning one place name into a centre point and
+  /// running a radius against coordinates already on `files`.
+  ///
+  /// The rows are loaded separately — see [GazetteerImporter]. Reading a bundled
+  /// asset needs the Flutter binding, and scanner isolates open their own
+  /// [AppDatabase] (and so run this method) without one.
+  ///
+  /// No spatial index exists to build: resqlite's SQLite is compiled with
+  /// `SQLITE_ENABLE_MATH_FUNCTIONS` but not R-Tree, so a radius is a
+  /// bounding-box scan narrowed by haversine in SQL. That is cheap here — a few
+  /// float comparisons per row, against 10% of the library that carries GPS at
+  /// all — and it is why H3 cells would buy nothing.
+  Future<void> _createGeoIndexes() async {
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS places (
+        id         INTEGER PRIMARY KEY,
+        name       TEXT NOT NULL,
+        ascii_name TEXT NOT NULL,
+        latitude   REAL NOT NULL,
+        longitude  REAL NOT NULL,
+        country    TEXT,
+        admin1     TEXT,
+        population INTEGER
+      );
+    ''');
+    // Both spellings are indexed: a query may type either "Zürich" or "Zurich",
+    // and only `ascii_name` holds the second.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS places_ascii_idx '
+      'ON places (ascii_name COLLATE NOCASE);',
+    );
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS places_name_idx '
+      'ON places (name COLLATE NOCASE);',
+    );
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_files_geo '
+      'ON files (latitude, longitude);',
+    );
   }
 
   /// One-time sweep of artifacts stranded by the delete paths before they

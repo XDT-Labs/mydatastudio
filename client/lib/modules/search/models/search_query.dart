@@ -35,13 +35,52 @@ class QueryFilter {
   final int? radiusKm;
   final bool negated;
 
+  /// Centre point for a [FilterField.near] filter, once a gazetteer lookup has
+  /// found one. Null until then, and null forever for a place name the
+  /// gazetteer does not carry.
+  ///
+  /// Parsing is deterministic and synchronous; resolving a name to coordinates
+  /// is a database query. Keeping the result on the filter rather than in a
+  /// parallel structure means the retriever still takes a [ParsedQuery], and
+  /// there is no way to hand it a query whose geo terms were never resolved.
+  final double? latitude;
+  final double? longitude;
+
+  /// How the resolved place is shown back to the user — "Banff, CA" — so a
+  /// chip can say which of several namesakes was picked.
+  final String? placeLabel;
+
   const QueryFilter({
     required this.field,
     required this.value,
     this.dateValue,
     this.radiusKm,
     this.negated = false,
+    this.latitude,
+    this.longitude,
+    this.placeLabel,
   });
+
+  /// This filter with a gazetteer hit attached.
+  QueryFilter resolvedTo({
+    required double latitude,
+    required double longitude,
+    required String placeLabel,
+  }) {
+    return QueryFilter(
+      field: field,
+      value: value,
+      dateValue: dateValue,
+      radiusKm: radiusKm,
+      negated: negated,
+      latitude: latitude,
+      longitude: longitude,
+      placeLabel: placeLabel,
+    );
+  }
+
+  /// Whether this filter carries a centre point to measure a radius from.
+  bool get hasCoordinates => latitude != null && longitude != null;
 
   @override
   bool operator ==(Object other) {
@@ -50,11 +89,23 @@ class QueryFilter {
         other.value == value &&
         other.dateValue == dateValue &&
         other.radiusKm == radiusKm &&
-        other.negated == negated;
+        other.negated == negated &&
+        other.latitude == latitude &&
+        other.longitude == longitude &&
+        other.placeLabel == placeLabel;
   }
 
   @override
-  int get hashCode => Object.hash(field, value, dateValue, radiusKm, negated);
+  int get hashCode => Object.hash(
+    field,
+    value,
+    dateValue,
+    radiusKm,
+    negated,
+    latitude,
+    longitude,
+    placeLabel,
+  );
 
   @override
   String toString() {
@@ -62,6 +113,7 @@ class QueryFilter {
     final buf = StringBuffer('$sign${field.name}:$value');
     if (dateValue != null) buf.write(' (date=$dateValue)');
     if (radiusKm != null) buf.write(' (radiusKm=$radiusKm)');
+    if (hasCoordinates) buf.write(' (@$latitude,$longitude)');
     return buf.toString();
   }
 }
@@ -81,6 +133,18 @@ class ParsedQuery {
 
   bool get hasFilters => filters.isNotEmpty;
   bool get hasFreeText => freeText.isNotEmpty;
+
+  /// [raw] is deliberately not replaceable: it is what the user typed, and it
+  /// is what re-running the search has to start from. A resolution pass that
+  /// rewrote it would make the query in the search box drift away from the
+  /// query in the URL.
+  ParsedQuery copyWith({List<QueryFilter>? filters, String? freeText}) {
+    return ParsedQuery(
+      filters: filters ?? this.filters,
+      freeText: freeText ?? this.freeText,
+      raw: raw,
+    );
+  }
 
   /// A field may repeat (`from:a from:b`); callers OR these together rather
   /// than treating the second as overriding the first.

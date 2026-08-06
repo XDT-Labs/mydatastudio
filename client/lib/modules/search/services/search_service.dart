@@ -2,6 +2,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/search/models/search_query.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
+import 'package:mydatastudio/modules/search/services/near_resolver.dart';
 import 'package:mydatastudio/modules/search/services/query_parser.dart';
 import 'package:mydatastudio/modules/search/services/retrievers/bm25_retriever.dart';
 import 'package:mydatastudio/services/rx_service.dart';
@@ -43,7 +44,6 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
     isLoading.add(true);
     try {
       final parsed = QueryParser.parse(command.rawQuery);
-      lastQuery = parsed;
       _database = command.database;
       _sourceFilter = command.sourceFilter;
 
@@ -51,14 +51,26 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
       // the absence of a query — returning "no results found" for it reads as
       // a failure rather than a blank slate.
       if (!parsed.hasFilters && !parsed.hasFreeText) {
+        lastQuery = parsed;
         _accumulated = SearchResults.empty;
         sink.add(_accumulated);
         return _accumulated;
       }
 
-      _accumulated = await Bm25Retriever(
-        command.database,
-      ).search(parsed, limit: command.limit, onlySource: command.sourceFilter);
+      // `near:` is the one filter parsing cannot finish on its own — a place
+      // name only becomes a constraint once the gazetteer has turned it into a
+      // point. Resolving here, before anything is retrieved, is what lets a
+      // name nothing recognises fall back to free text instead of constraining
+      // the query to zero rows. [lastQuery] holds the *resolved* query so
+      // paging and facet re-queries reuse the lookup rather than repeating it.
+      final resolved = await NearResolver(command.database).resolve(parsed);
+      lastQuery = resolved;
+
+      _accumulated = await Bm25Retriever(command.database).search(
+        resolved,
+        limit: command.limit,
+        onlySource: command.sourceFilter,
+      );
 
       sink.add(_accumulated);
       return _accumulated;

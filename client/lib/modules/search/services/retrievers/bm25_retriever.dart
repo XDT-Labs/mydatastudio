@@ -1,6 +1,7 @@
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/search/models/search_query.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
+import 'package:mydatastudio/modules/search/services/geo.dart';
 
 /// Lexical retrieval over the FTS5 indexes, ranked by `bm25()`.
 ///
@@ -26,6 +27,14 @@ class Bm25Retriever {
   /// Modest because the list pages as it scrolls — the first screenful should
   /// arrive fast and the rest follows on demand.
   static const pageSize = 200;
+
+  /// Radius for a `near:` term that does not name one (`near:banff:50` does).
+  ///
+  /// 25 km is roughly "this trip" rather than "this town": EXIF coordinates are
+  /// where the shutter fired, not where the user thinks they were, and a
+  /// tighter radius drops the hike, the drive out, and the restaurant one
+  /// valley over — all of which belong to the same set of photos.
+  static const defaultRadiusKm = 25;
 
   /// Fetches one page of results.
   ///
@@ -270,16 +279,7 @@ class Bm25Retriever {
       where,
       params,
     );
-    // Landmark matching only. The gazetteer + haversine radius lands in
-    // Phase 3; until then a place name that is not a recognised landmark
-    // falls through to free text rather than silently matching nothing.
-    _addJoinTable(
-      query,
-      FilterField.near,
-      'SELECT file_id FROM file_landmarks WHERE landmark LIKE ? COLLATE NOCASE',
-      where,
-      params,
-    );
+    _addNear(query, where, params);
 
     for (final f in query.filtersFor(FilterField.type)) {
       final predicate = _contentTypePredicate(f.value.toLowerCase());
@@ -371,6 +371,59 @@ class Bm25Retriever {
     for (final f in query.filtersFor(field)) {
       where.add('f.id ${f.negated ? 'NOT IN' : 'IN'} ($subquery)');
       params.add(f.value);
+    }
+  }
+
+  /// Builds the `near:` predicate: a radius around a resolved place, OR'd with
+  /// a vision-detected landmark of the same name.
+  ///
+  /// OR'd rather than either-or because they answer different questions about
+  /// the same word. `near:rome` should return both the photos whose GPS puts
+  /// them in Rome and the photos where the model recognised a Roman landmark —
+  /// and on this archive the overlap is small, since only ~10% of images carry
+  /// GPS at all and none of the cloud or email sources do.
+  ///
+  /// A filter reaching here that carries no coordinates is a landmark-only
+  /// term: [NearResolver] has already dropped the ones nothing could resolve.
+  void _addNear(
+    ParsedQuery query,
+    List<String> where,
+    List<Object?> params,
+  ) {
+    for (final f in query.filtersFor(FilterField.near)) {
+      final alternatives = <String>[
+        'f.id IN (SELECT file_id FROM file_landmarks '
+            'WHERE landmark LIKE ? COLLATE NOCASE)',
+      ];
+      params.add(f.value);
+
+      if (f.hasCoordinates) {
+        final lat = f.latitude!;
+        final lng = f.longitude!;
+        final radiusKm = (f.radiusKm ?? defaultRadiusKm).toDouble();
+        final box = GeoRadius.boundingBox(lat, lng, radiusKm);
+
+        // The bounding box is what makes this cheap — it is an index range on
+        // (latitude, longitude), and it drops almost everything before a single
+        // trig function runs. The haversine that follows is what makes it
+        // correct, since a rectangle in degrees always over-covers a circle in
+        // kilometres.
+        alternatives.add(
+          '(f.latitude BETWEEN ? AND ? AND f.longitude BETWEEN ? AND ? '
+          'AND ${GeoRadius.haversineSql('f.latitude', 'f.longitude')} <= ?)',
+        );
+        params.addAll([
+          box.minLatitude,
+          box.maxLatitude,
+          box.minLongitude,
+          box.maxLongitude,
+          ...GeoRadius.haversineParams(lat, lng),
+          radiusKm,
+        ]);
+      }
+
+      final clause = '(${alternatives.join(' OR ')})';
+      where.add(f.negated ? 'NOT $clause' : clause);
     }
   }
 
