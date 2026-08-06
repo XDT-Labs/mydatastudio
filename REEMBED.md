@@ -53,14 +53,23 @@ Measured on this archive with the fixed model:
 |---|---|---|---|
 | Descriptions (text) | 2,338 | 0.28 s each | ~11 min |
 | Emails (text) | 1,279 | 0.28 s each | ~6 min |
-| Images (vision) | 2,373 | see below | the long pole |
+| Images (vision) | 2,373 | ~21 s each | **~14 hours** |
 
-Text is quick. Images run the vision tower on CPU — MPS is disabled in
-`load_transformers_embedding_model` because Apple Silicon has a PyTorch memory
-bug with Qwen-VL's 3D position embeddings — so budget hours, not minutes, and
-expect the fans. It is incremental and resumable: search degrades gracefully
-while it runs, because a file with no vector is simply absent from the semantic
-pass and still fully reachable by keyword.
+Text is quick; images are the whole cost. The vision tower runs on CPU — MPS is
+disabled in `load_transformers_embedding_model` because Apple Silicon has a
+PyTorch memory bug with Qwen-VL's 3D position embeddings — and `FileBytesLoader`
+sends the file at full resolution, which for Qwen-VL's dynamic-resolution
+processor means a 24-megapixel photo becomes far more visual tokens than the
+model needs for a similarity vector.
+
+**Downsizing before embedding is the obvious win and is not implemented.** A
+long edge of ~1,024 px would cut the image pass by roughly an order of magnitude
+at negligible cost to retrieval quality — the vector describes the scene, not
+the pixels. Worth doing before, not after, a 14-hour run.
+
+The rebuild is incremental and resumable, and search degrades gracefully while
+it runs: a file with no vector is simply absent from the semantic pass and stays
+fully reachable by keyword.
 
 ## Checking it worked
 

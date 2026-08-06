@@ -125,6 +125,12 @@ class VectorRetriever {
       return const [];
     }
 
+    // Sorted globally only so the return value has a defined order. Callers
+    // must not read across sources from it: a text query scores mail
+    // (same-modal) systematically higher than photos (cross-modal), so this
+    // ordering says more about which encoder produced a vector than about
+    // relevance. HybridRanker partitions by source before fusing, and this
+    // sort is what leaves each partition correctly ordered within itself.
     hits.sort((a, b) => b.similarity.compareTo(a.similarity));
     return hits;
   }

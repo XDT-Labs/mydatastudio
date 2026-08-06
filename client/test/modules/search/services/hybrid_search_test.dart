@@ -94,23 +94,29 @@ void main() {
     _createdDbs.clear();
   });
 
-  test('a semantic match with none of the query words still surfaces', () async {
-    // The reason the vector pass exists at all. A photo whose file name is
-    // IMG_0001.jpg and whose description never says "graduation" is invisible
-    // to keyword search, and it is exactly the thing a personal archive is
-    // asked for years later.
-    final db = await _freshDb('hybrid_semantic_only_test.db');
-    await _addCollection(db, 'c1', 'file.local');
-    await _addFile(db, id: 'lexical', name: 'graduation.jpg');
-    await _addFile(db, id: 'semantic', vector: _vector(0));
+  test(
+    'a semantic match with none of the query words still surfaces',
+    () async {
+      // The reason the vector pass exists at all. A photo whose file name is
+      // IMG_0001.jpg and whose description never says "graduation" is invisible
+      // to keyword search, and it is exactly the thing a personal archive is
+      // asked for years later.
+      final db = await _freshDb('hybrid_semantic_only_test.db');
+      await _addCollection(db, 'c1', 'file.local');
+      await _addFile(db, id: 'lexical', name: 'graduation.jpg');
+      await _addFile(db, id: 'semantic', vector: _vector(0));
 
-    final results = await _service(
-      _vector(0),
-    ).invoke(SearchCommand('graduation', db));
+      final results = await _service(
+        _vector(0),
+      ).invoke(SearchCommand('graduation', db));
 
-    expect(results.results.map((r) => r.id), containsAll(['lexical', 'semantic']));
-    await db.close();
-  });
+      expect(
+        results.results.map((r) => r.id),
+        containsAll(['lexical', 'semantic']),
+      );
+      await db.close();
+    },
+  );
 
   test('a hard filter still excludes a perfect semantic match', () async {
     // The invariant the whole design rests on, checked at the level where
@@ -146,7 +152,12 @@ void main() {
     final db = await _freshDb('hybrid_tier_test.db');
     await _addCollection(db, 'c1', 'file.local');
     await _addFile(db, id: 'plain', vector: _vector(0));
-    await _addFile(db, id: 'favorite', isFavorite: 1, vector: _vector(0, lean: 0.95));
+    await _addFile(
+      db,
+      id: 'favorite',
+      isFavorite: 1,
+      vector: _vector(0, lean: 0.95),
+    );
 
     final results = await _service(
       _vector(0),
@@ -161,7 +172,12 @@ void main() {
     final db = await _freshDb('hybrid_attachment_tier_test.db');
     await _addCollection(db, 'c1', 'file.local');
     await _addCollection(db, 'c2', 'email.gmail');
-    await _addFile(db, id: 'kept', collectionId: 'c1', vector: _vector(0, lean: 0.9));
+    await _addFile(
+      db,
+      id: 'kept',
+      collectionId: 'c1',
+      vector: _vector(0, lean: 0.9),
+    );
     await _addFile(db, id: 'attached', collectionId: 'c2', vector: _vector(0));
 
     final results = await _service(
@@ -226,6 +242,54 @@ void main() {
     }
     expect(all.length, 25);
     expect(service.hasMore, isFalse);
+    await db.close();
+  });
+
+  test('mail does not displace photos by being same-modal', () async {
+    // A text query compared against an email body is same-modal; against a
+    // photo it is cross-modal, and cross-modal similarities are structurally
+    // lower — measured on the real archive, ~0.36 against images versus
+    // ~0.41-0.51 against text. Ranked in one list by raw similarity, every
+    // email outranks every photo no matter which answers the query, and
+    // "family pictures" fills with marketing mail. Fusion must therefore rank
+    // each modality within itself.
+    //
+    // The vectors reproduce that gap: every email beats every photo on raw
+    // cosine. The email count matters — with only a handful the tier boost
+    // alone rescues the photos and the test passes either way, proving
+    // nothing. Twenty-five is enough that a merged list buries the best photo
+    // deeper than a 1.2x multiplier can climb back out of, so this fails
+    // without the per-modality split.
+    final db = await _freshDb('hybrid_modality_test.db');
+    await _addCollection(db, 'c1', 'file.local');
+    for (var i = 0; i < 3; i++) {
+      await _addFile(
+        db,
+        id: 'photo$i',
+        vector: _vector(0, lean: 0.30 - i * 0.02),
+      );
+    }
+    for (var i = 0; i < 25; i++) {
+      await db.rawDb.execute(
+        'INSERT INTO emails (id, collection_id, date, "from", "to", subject, '
+        "plain_body, has_attachments, is_deleted) VALUES (?, 'c1', ?, "
+        "'ads@shop.com', 'me@x.com', 'wallpaper sale', 'body', 0, 0)",
+        ['mail$i', _recent],
+      );
+      await db.rawDb.execute(
+        'INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding) '
+        'VALUES (?, vector_as_f32(?))',
+        ['mail$i', '[${_vector(0, lean: 0.90 - i * 0.005).join(',')}]'],
+      );
+    }
+
+    final results = await _service(
+      _vector(0),
+    ).invoke(SearchCommand('family pictures', db));
+
+    // The best photo must reach the top despite every email scoring higher on
+    // raw cosine.
+    expect(results.results.first.isFile, isTrue);
     await db.close();
   });
 

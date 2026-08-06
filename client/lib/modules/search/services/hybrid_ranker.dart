@@ -19,7 +19,11 @@ class HybridRanker {
   /// Deliberately flat. Weighting one retriever up before there is real usage
   /// data would just encode a guess; flat weights make it obvious from the
   /// results which retriever is misbehaving.
-  static const retrieverWeights = {'bm25': 1.0, 'vector': 1.0};
+  static const retrieverWeights = {
+    'bm25': 1.0,
+    'vector_file': 1.0,
+    'vector_email': 1.0,
+  };
 
   /// Ranks the union of [lexical] and [vector], loading any vector-only hit
   /// that the lexical pass never returned.
@@ -54,9 +58,30 @@ class HybridRanker {
       );
     }
 
+    // Mail and photos get their own vector lists rather than one merged one.
+    //
+    // A text query against an email body is a *same-modal* comparison; against
+    // a photo it is cross-modal, and cross-modal similarities are structurally
+    // lower — measured on this archive, the same query tops out around 0.36
+    // against image vectors and 0.41–0.51 against text. Ranked in one list by
+    // raw similarity, mail therefore displaces photos regardless of which
+    // actually answers the query, and a search for family pictures fills up
+    // with marketing email.
+    //
+    // Splitting them means only a hit's rank *within its own modality* counts,
+    // which is precisely what RRF exists to exploit: the best photo and the
+    // best email arrive at fusion as equals, and the tier multipliers — not an
+    // artifact of which encoder produced the vector — decide between them.
     final fused = RankFusion.fuse({
       'bm25': [for (final r in lexical) r.key],
-      'vector': [for (final h in vector) '${h.type.name}:${h.id}'],
+      'vector_file': [
+        for (final h in vector)
+          if (h.type == SearchResultType.file) '${h.type.name}:${h.id}',
+      ],
+      'vector_email': [
+        for (final h in vector)
+          if (h.type == SearchResultType.email) '${h.type.name}:${h.id}',
+      ],
     }, weights: retrieverWeights);
 
     final ranked = <SearchResult>[];
