@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:image/image.dart' as img;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/modules/files/services/utilities/vision_image.dart';
@@ -44,9 +47,9 @@ void main() {
     );
 
     expect(prepared, isNotNull);
-    expect(_longestEdge(prepared!), VisionImage.maxEdge);
+    expect(_longestEdge(prepared!.bytes), VisionImage.maxEdge);
     expect(
-      prepared.length,
+      prepared.bytes.length,
       lessThan(original.length),
       reason: 'the payload crossing to the subprocess should shrink too',
     );
@@ -66,8 +69,8 @@ void main() {
       logger: logger,
     );
 
-    final wide = img.decodeImage(Uint8List.fromList(landscape!))!;
-    final tall = img.decodeImage(Uint8List.fromList(portrait!))!;
+    final wide = img.decodeImage(Uint8List.fromList(landscape!.bytes))!;
+    final tall = img.decodeImage(Uint8List.fromList(portrait!.bytes))!;
     expect(wide.width, VisionImage.maxEdge);
     expect(wide.height, closeTo(VisionImage.maxEdge / 2, 2));
     expect(tall.height, VisionImage.maxEdge);
@@ -88,7 +91,7 @@ void main() {
       logger: logger,
     );
 
-    expect(prepared, same(original));
+    expect(prepared!.bytes, same(original));
   });
 
   test('rotation is baked in before the EXIF tag is dropped', () async {
@@ -105,7 +108,7 @@ void main() {
       logger: logger,
     );
 
-    final result = img.decodeImage(Uint8List.fromList(prepared!))!;
+    final result = img.decodeImage(Uint8List.fromList(prepared!.bytes))!;
     expect(
       result.height,
       greaterThan(result.width),
@@ -127,9 +130,66 @@ void main() {
         logger: logger,
       );
 
-      expect(prepared, same(garbage));
+      expect(prepared!.bytes, same(garbage));
     },
   );
+
+  test('a converted RAW file is renamed to match its new bytes', () async {
+    // The regression this exists for. The aiserver picks its decoder from the
+    // extension — decode_base64_image routes .nef to rawpy by name alone — so
+    // handing it JPEG bytes still called DSC_3753.nef produced "Unsupported
+    // file format or not RAW file" and cost that photo its embedding. Every
+    // RAW file in the library failed this way.
+    final jpegBack = base64Encode(_jpeg(1024, 683));
+    final client = MockClient((request) async {
+      expect(request.url.path, '/util/thumbnail');
+      expect(jsonDecode(request.body)['is_raw'], isTrue);
+      return http.Response(jsonEncode({'thumbnail': jpegBack}), 200);
+    });
+
+    final prepared = await VisionImage.prepare(
+      Uint8List.fromList(List.filled(64, 0x42)),
+      'DSC_3753.nef',
+      serviceUrl: 'http://127.0.0.1:1',
+      logger: logger,
+      client: client,
+    );
+
+    expect(prepared, isNotNull);
+    expect(
+      prepared!.fileName,
+      'DSC_3753.jpg',
+      reason: 'the name must describe the bytes, not the source file',
+    );
+  });
+
+  test('a locally-resized image is renamed too', () async {
+    // Same invariant on the path that never leaves the process. PNG bytes are
+    // re-encoded as JPEG, so a .png name would misdescribe them — harmless
+    // today because only RAW is routed by extension, but the pairing is what
+    // keeps that from mattering.
+    final prepared = await VisionImage.prepare(
+      _jpeg(3000, 2000),
+      'screenshot.png',
+      serviceUrl: 'http://127.0.0.1:1',
+      logger: logger,
+    );
+
+    expect(prepared!.fileName, 'screenshot.jpg');
+  });
+
+  test('a passed-through image keeps its original name', () async {
+    // Untouched bytes must keep their own name — renaming a HEIC that was
+    // never converted would point the server at the wrong decoder.
+    final prepared = await VisionImage.prepare(
+      _jpeg(800, 600),
+      'small.png',
+      serviceUrl: 'http://127.0.0.1:1',
+      logger: logger,
+    );
+
+    expect(prepared!.fileName, 'small.png');
+  });
 
   test(
     'a RAW file with no reachable service yields null, not raw bytes',

@@ -277,14 +277,14 @@ class FileDescriptionIsolate {
               continue;
             }
 
-            final bytes = await VisionImage.prepare(
+            final prepared = await VisionImage.prepare(
               rawBytes,
               file.name,
               serviceUrl: serviceUrl!,
               serviceToken: serviceToken,
               logger: logger,
             );
-            if (bytes == null) {
+            if (prepared == null) {
               logger.w(
                 "Skipped file whose image format couldn't be converted: "
                 "${file.path}",
@@ -294,7 +294,7 @@ class FileDescriptionIsolate {
             }
 
             final analysis = await _describeImage(
-              bytes,
+              prepared.bytes,
               serviceUrl!,
               serviceToken,
               logger,

@@ -258,7 +258,7 @@ class EmbeddingIsolate {
             // one built from 1024px. It also converts RAW and HEIC, which the
             // embedding endpoint can decode but only slowly, from files that
             // routinely run 30-100MB.
-            final bytes =
+            final prepared =
                 rawBytes == null
                     ? null
                     : await VisionImage.prepare(
@@ -269,12 +269,16 @@ class EmbeddingIsolate {
                       logger: logger,
                     );
 
+            // `prepared.fileName`, not `file.name`. The aiserver chooses its
+            // decoder from the extension, so a converted .nef still called
+            // .nef sends JPEG bytes to rawpy and loses that photo its
+            // embedding.
             final embedding =
-                bytes == null
+                prepared == null
                     ? null
                     : await _generateEmbedding(
-                      bytes,
-                      file.name,
+                      prepared.bytes,
+                      prepared.fileName,
                       serviceUrl!,
                       serviceToken,
                       logger,

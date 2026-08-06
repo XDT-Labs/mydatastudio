@@ -30,6 +30,22 @@ import 'package:path/path.dart' as p;
 /// only handles what Pillow's default opener understands and fails outright on
 /// them, and the Dart `image` package cannot decode them at all. Those go to
 /// the aiserver, which has rawpy and pillow-heif.
+class PreparedImage {
+  final List<int> bytes;
+
+  /// A name describing [bytes] — **not** always the source file's.
+  ///
+  /// The aiserver picks its decoder from the extension: `decode_base64_image`
+  /// routes `.nef`/`.cr2`/`.dng`/... to rawpy purely by name. So a converted
+  /// RAW file still called `DSC_3753.nef` gets JPEG bytes handed to a RAW
+  /// decoder, which fails with "Unsupported file format or not RAW file" and
+  /// silently costs that photo its embedding. Carrying the name beside the
+  /// bytes is what keeps the two from disagreeing.
+  final String fileName;
+
+  const PreparedImage(this.bytes, this.fileName);
+}
+
 class VisionImage {
   /// Longest edge, in pixels, an image is reduced to.
   ///
@@ -53,20 +69,21 @@ class VisionImage {
   /// original bytes instead — the model can very likely still read a format
   /// the Dart decoder happens not to know, and refusing to embed it would be a
   /// worse outcome than sending it full-size.
-  static Future<List<int>?> prepare(
+  static Future<PreparedImage?> prepare(
     List<int> bytes,
     String fileName, {
     required String serviceUrl,
     String? serviceToken,
     required AppLogger logger,
     int maxEdge = maxEdge,
+    http.Client? client,
   }) async {
     final ext = p.extension(fileName).toLowerCase();
     final isRaw = rawImageExtensions.contains(ext);
     final isHeic = heicImageExtensions.contains(ext);
 
     if (isRaw || isHeic) {
-      return _convertViaService(
+      final converted = await _convertViaService(
         bytes,
         fileName,
         isRaw: isRaw,
@@ -74,15 +91,23 @@ class VisionImage {
         serviceToken: serviceToken,
         logger: logger,
         maxEdge: maxEdge,
+        client: client,
       );
+      if (converted == null) return null;
+      return PreparedImage(converted, _asJpegName(fileName));
     }
 
     return _resizeLocally(bytes, fileName, logger: logger, maxEdge: maxEdge);
   }
 
+  /// The same base name with a `.jpg` extension, for bytes that have been
+  /// re-encoded. See [PreparedImage.fileName].
+  static String _asJpegName(String fileName) =>
+      '${p.withoutExtension(fileName)}.jpg';
+
   /// Decodes and downscales in-process. Cheaper than a round trip, and the
   /// isolate this runs on has nothing else to do while it waits.
-  static List<int> _resizeLocally(
+  static PreparedImage _resizeLocally(
     List<int> bytes,
     String fileName, {
     required AppLogger logger,
@@ -92,7 +117,7 @@ class VisionImage {
       logger.w(
         'VisionImage: $fileName over ${maxDecodeBytes ~/ (1024 * 1024)}MB, sending as-is',
       );
-      return bytes;
+      return PreparedImage(bytes, fileName);
     }
 
     try {
@@ -101,11 +126,11 @@ class VisionImage {
       final decoded = img.decodeImage(
         bytes is Uint8List ? bytes : Uint8List.fromList(bytes),
       );
-      if (decoded == null) return bytes;
+      if (decoded == null) return PreparedImage(bytes, fileName);
 
       final longest =
           decoded.width > decoded.height ? decoded.width : decoded.height;
-      if (longest <= maxEdge) return bytes;
+      if (longest <= maxEdge) return PreparedImage(bytes, fileName);
 
       // Orientation is baked before the resize, not skipped. Re-encoding drops
       // the EXIF orientation tag, so a portrait photo stored as a rotated
@@ -117,12 +142,15 @@ class VisionImage {
           upright.width >= upright.height
               ? img.copyResize(upright, width: maxEdge)
               : img.copyResize(upright, height: maxEdge);
-      return img.encodeJpg(resized, quality: 90);
+      return PreparedImage(
+        img.encodeJpg(resized, quality: 90),
+        _asJpegName(fileName),
+      );
     } catch (e) {
       // See [prepare]: the model's decoder is more capable than this one, so a
       // local failure is a reason to skip the resize, not the file.
       logger.w('VisionImage: could not resize $fileName, sending as-is: $e');
-      return bytes;
+      return PreparedImage(bytes, fileName);
     }
   }
 
@@ -138,23 +166,23 @@ class VisionImage {
     String? serviceToken,
     required AppLogger logger,
     required int maxEdge,
+    http.Client? client,
   }) async {
+    final post = client?.post ?? http.post;
     try {
-      final response = await http
-          .post(
-            Uri.parse('$serviceUrl/util/thumbnail'),
-            headers: {
-              'Content-Type': 'application/json',
-              ...aiServerAuthHeaders(serviceToken),
-            },
-            body: jsonEncode({
-              'image_base64': base64Encode(bytes),
-              'is_raw': isRaw,
-              'width': maxEdge,
-              'height': maxEdge,
-            }),
-          )
-          .timeout(const Duration(seconds: 60));
+      final response = await post(
+        Uri.parse('$serviceUrl/util/thumbnail'),
+        headers: {
+          'Content-Type': 'application/json',
+          ...aiServerAuthHeaders(serviceToken),
+        },
+        body: jsonEncode({
+          'image_base64': base64Encode(bytes),
+          'is_raw': isRaw,
+          'width': maxEdge,
+          'height': maxEdge,
+        }),
+      ).timeout(const Duration(seconds: 60));
 
       if (response.statusCode != 200) {
         logger.e(
