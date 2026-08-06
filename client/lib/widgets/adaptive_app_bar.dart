@@ -70,8 +70,20 @@ class AdaptiveAppBar extends StatelessWidget implements PreferredSizeWidget {
                         color: themeData.colorScheme.onSurface,
                         fontSize: 13,
                       ),
+                      textInputAction: TextInputAction.search,
+                      // Search is reached from here rather than from a nav
+                      // entry: this field is already present on every screen,
+                      // and search is something you invoke from wherever you
+                      // are, not a place you navigate to.
+                      onSubmitted: (value) {
+                        final query = value.trim();
+                        if (query.isEmpty) return;
+                        GoRouter.of(
+                          context,
+                        ).push('/search?q=${Uri.encodeQueryComponent(query)}');
+                      },
                       decoration: InputDecoration(
-                        hintText: 'Search files...',
+                        hintText: 'Search everything...',
                         hintStyle: TextStyle(
                           color: themeData.colorScheme.onSurfaceVariant
                               .withOpacity(0.6),

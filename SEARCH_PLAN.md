@@ -1,6 +1,6 @@
 # Unified Search — Implementation Plan
 
-Status: **Phase 1 implemented** (query parser, address parser, FTS5 indexes + triggers + backfill, contacts index). Phases 2+ still proposal.
+Status: **Phases 1–2 implemented.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, contacts index. Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phases 3+ still proposal.
 Scope: cross-collection search over photos/images, documents, emails, and (later) social posts.
 
 ---
