@@ -284,6 +284,96 @@ void main() {
     });
   });
 
+  group('result limits and totals', () {
+    test('a source that fills its limit reports itself truncated', () async {
+      // The regression this exists for: `tag:nature` matched 1,100+ photos,
+      // returned exactly the limit, and reported truncated=false — because
+      // truncation was inferred from list length, and a list capped AT the
+      // limit is not longer THAN the limit. The banner warning the user they
+      // were seeing a slice never appeared, which is the one job it had.
+      final db = await _freshDb('bm25_truncation_test.db');
+      for (var i = 0; i < 12; i++) {
+        await _addFile(
+          db,
+          id: 'f$i',
+          name: 'photo$i.jpg',
+          description: 'a mountain landscape',
+        );
+      }
+
+      final results = await Bm25Retriever(
+        db,
+      ).search(QueryParser.parse('mountain'), limit: 5);
+
+      expect(results.results.length, 5);
+      expect(results.truncated, isTrue);
+      expect(results.grandTotal, 12);
+      await db.close();
+    });
+
+    test('a complete result set is not marked truncated', () async {
+      final db = await _freshDb('bm25_not_truncated_test.db');
+      for (var i = 0; i < 3; i++) {
+        await _addFile(
+          db,
+          id: 'f$i',
+          name: 'photo$i.jpg',
+          description: 'a mountain landscape',
+        );
+      }
+
+      final results = await Bm25Retriever(
+        db,
+      ).search(QueryParser.parse('mountain'), limit: 5);
+
+      expect(results.truncated, isFalse);
+      expect(results.grandTotal, 3);
+      await db.close();
+    });
+
+    test('facet counts describe the page, not the corpus', () async {
+      // Both sources can fill the limit independently, so the merged page
+      // holds a mix. Counting the pre-merge lists would have the facet bar
+      // promise rows that scrolling never reaches.
+      final db = await _freshDb('bm25_facet_counts_test.db');
+      for (var i = 0; i < 6; i++) {
+        await _addEmail(db, id: 'e$i', from: 'a@x.com', subject: 'sunset');
+        await _addFile(
+          db,
+          id: 'f$i',
+          name: 'sunset$i.jpg',
+          description: 'sunset',
+        );
+      }
+
+      final results = await Bm25Retriever(
+        db,
+      ).search(QueryParser.parse('sunset'), limit: 4);
+
+      expect(results.results.length, 4);
+      expect(results.emailCount + results.fileCount, 4);
+      // The corpus totals stay honest about everything that matched.
+      expect(results.grandTotal, 12);
+      await db.close();
+    });
+
+    test('totals count matches the limit never returned', () async {
+      final db = await _freshDb('bm25_totals_test.db');
+      for (var i = 0; i < 9; i++) {
+        await _addEmail(db, id: 'e$i', from: 'bulk@x.com', subject: 'notice');
+      }
+
+      final results = await Bm25Retriever(
+        db,
+      ).search(QueryParser.parse('from:bulk@x.com'), limit: 2);
+
+      expect(results.results.length, 2);
+      expect(results.emailTotal, 9);
+      expect(results.truncated, isTrue);
+      await db.close();
+    });
+  });
+
   group('query robustness', () {
     test('FTS5 syntax in user input does not throw', () async {
       // Input reaches FTS5 as a query *language*. A trailing AND, a stray

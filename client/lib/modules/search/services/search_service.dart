@@ -66,5 +66,12 @@ class SearchCommand implements RxCommand {
   final AppDatabase database;
   final int limit;
 
-  SearchCommand(this.rawQuery, this.database, {this.limit = 100});
+  /// Defaults to the retriever's own limit rather than restating a number
+  /// here — two independently-maintained defaults is how one of them ends up
+  /// quietly capping results the other thought it was returning.
+  SearchCommand(
+    this.rawQuery,
+    this.database, {
+    this.limit = Bm25Retriever.defaultLimit,
+  });
 }

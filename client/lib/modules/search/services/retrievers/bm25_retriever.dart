@@ -21,31 +21,90 @@ class Bm25Retriever {
   static const _emailWeights = '10.0, 3.0, 3.0, 1.0, 1.0';
   static const _fileWeights = '3.0, 1.0, 5.0';
 
-  Future<SearchResults> search(ParsedQuery query, {int limit = 100}) async {
+  /// How many ranked rows a single search returns.
+  ///
+  /// Generous rather than page-sized: this is a personal archive on a desktop,
+  /// `ListView.builder` renders lazily, and a thousand result objects cost
+  /// almost nothing. The old value of 100 silently hid the other thousand
+  /// matches of a common tag.
+  static const defaultLimit = 500;
+
+  Future<SearchResults> search(
+    ParsedQuery query, {
+    int limit = defaultLimit,
+  }) async {
     final wantsEmails = _sourceWanted(query, SearchResultType.email);
     final wantsFiles = _sourceWanted(query, SearchResultType.file);
 
     final match = _toMatchExpression(query.freeText);
 
+    final emailWhere = wantsEmails ? _emailWhere(query) : null;
+    final fileWhere = wantsFiles ? _fileWhere(query) : null;
+
     final emails =
-        wantsEmails
-            ? await _searchEmails(query, match, limit)
-            : <SearchResult>[];
+        emailWhere == null
+            ? <SearchResult>[]
+            : await _searchEmails(emailWhere, match, limit);
     final files =
-        wantsFiles ? await _searchFiles(query, match, limit) : <SearchResult>[];
+        fileWhere == null
+            ? <SearchResult>[]
+            : await _searchFiles(fileWhere, match, limit);
+
+    // Counted separately rather than inferred from the returned rows. A source
+    // that filled its LIMIT is indistinguishable from one that happened to
+    // return exactly that many, so deriving truncation from list length misses
+    // the case it exists for — a tag matching 1,100 photos returned exactly
+    // `limit` rows and reported itself complete.
+    final emailTotal =
+        emailWhere == null
+            ? 0
+            : await _count('emails', 'emails_fts', 'e', emailWhere, match);
+    final fileTotal =
+        fileWhere == null
+            ? 0
+            : await _count('files', 'files_fts', 'f', fileWhere, match);
 
     // Interleaved by rank rather than grouped by type: grouping would bury the
     // best answer under a section header, and a photo query should lead with
     // photos because they scored highest, not because a tab was selected.
     final merged = [...emails, ...files]
       ..sort((a, b) => b.score.compareTo(a.score));
+    final page = merged.take(limit).toList();
 
+    // Counted over the page, not the pre-merge lists: the facet bar filters
+    // what was actually loaded, so counting anything else makes it promise
+    // rows that scrolling will never reach.
     return SearchResults(
-      results: merged.take(limit).toList(),
-      emailCount: emails.length,
-      fileCount: files.length,
-      truncated: merged.length > limit,
+      results: page,
+      emailCount: page.where((r) => r.isEmail).length,
+      fileCount: page.where((r) => r.isFile).length,
+      emailTotal: emailTotal,
+      fileTotal: fileTotal,
+      truncated: emailTotal + fileTotal > page.length,
     );
+  }
+
+  /// Total rows matching [where], ignoring the result limit.
+  Future<int> _count(
+    String table,
+    String ftsTable,
+    String alias,
+    _SourceFilter where,
+    String? match,
+  ) async {
+    final rows =
+        match != null
+            ? await db.select(
+              'SELECT COUNT(*) AS c FROM $ftsTable '
+              'JOIN $table AS $alias ON $alias.rowid = $ftsTable.rowid '
+              'WHERE $ftsTable MATCH ? AND ${where.sql}',
+              [match, ...where.params],
+            )
+            : await db.select(
+              'SELECT COUNT(*) AS c FROM $table AS $alias WHERE ${where.sql}',
+              where.params,
+            );
+    return (rows.first['c'] as num?)?.toInt() ?? 0;
   }
 
   /// Whether [type] should be queried at all.
@@ -73,11 +132,20 @@ class Bm25Retriever {
     return positive.any(namesType);
   }
 
-  Future<List<SearchResult>> _searchEmails(
-    ParsedQuery query,
-    String? match,
-    int limit,
-  ) async {
+  /// Builds the email `WHERE` clause, or null when no mail can satisfy the
+  /// query at all.
+  ///
+  /// Split out from the row query so the count above runs against exactly the
+  /// same predicate — a total derived from a different clause than the rows is
+  /// worse than no total.
+  _SourceFilter? _emailWhere(ParsedQuery query) {
+    // A `tag:`/`near:` query is about files; mail cannot satisfy it, and
+    // returning mail anyway would look like the filter was ignored.
+    if (query.filtersFor(FilterField.tag).any((f) => !f.negated) ||
+        query.filtersFor(FilterField.near).any((f) => !f.negated)) {
+      return null;
+    }
+
     final where = <String>['e.is_deleted = 0'];
     final params = <Object?>[];
 
@@ -99,12 +167,16 @@ class Bm25Retriever {
       if (v == 'read') where.add('e.is_read = ${f.negated ? 0 : 1}');
     }
 
-    // A `tag:`/`near:` query is about files; mail cannot satisfy it, and
-    // returning mail anyway would look like the filter was ignored.
-    if (query.filtersFor(FilterField.tag).any((f) => !f.negated) ||
-        query.filtersFor(FilterField.near).any((f) => !f.negated)) {
-      return const [];
-    }
+    return _SourceFilter(where.join(' AND '), params);
+  }
+
+  Future<List<SearchResult>> _searchEmails(
+    _SourceFilter filter,
+    String? match,
+    int limit,
+  ) async {
+    final where = [filter.sql];
+    final params = filter.params;
 
     final rows =
         match != null
@@ -150,11 +222,18 @@ class Bm25Retriever {
     }).toList();
   }
 
-  Future<List<SearchResult>> _searchFiles(
-    ParsedQuery query,
-    String? match,
-    int limit,
-  ) async {
+  /// Builds the file `WHERE` clause, or null when no file can satisfy the
+  /// query. See [_emailWhere] for why this is separate from the row query.
+  _SourceFilter? _fileWhere(ParsedQuery query) {
+    // Mail-only fields cannot be satisfied by a file.
+    if (query.filtersFor(FilterField.from).any((f) => !f.negated) ||
+        query.filtersFor(FilterField.to).any((f) => !f.negated) ||
+        query.filtersFor(FilterField.cc).any((f) => !f.negated) ||
+        query.filtersFor(FilterField.has).any((f) => !f.negated) ||
+        query.filtersFor(FilterField.is_).any((f) => !f.negated)) {
+      return null;
+    }
+
     // is_inline excludes message-body assets — spacers, logos, tracking
     // pixels. The embedding pipeline already skips them for the same reason;
     // without this every result page fills with newsletter furniture.
@@ -187,14 +266,16 @@ class Bm25Retriever {
       where.add(f.negated ? 'NOT ($predicate)' : predicate);
     }
 
-    // Mail-only fields cannot be satisfied by a file.
-    if (query.filtersFor(FilterField.from).any((f) => !f.negated) ||
-        query.filtersFor(FilterField.to).any((f) => !f.negated) ||
-        query.filtersFor(FilterField.cc).any((f) => !f.negated) ||
-        query.filtersFor(FilterField.has).any((f) => !f.negated) ||
-        query.filtersFor(FilterField.is_).any((f) => !f.negated)) {
-      return const [];
-    }
+    return _SourceFilter(where.join(' AND '), params);
+  }
+
+  Future<List<SearchResult>> _searchFiles(
+    _SourceFilter filter,
+    String? match,
+    int limit,
+  ) async {
+    final where = [filter.sql];
+    final params = filter.params;
 
     final rows =
         match != null
@@ -346,4 +427,14 @@ class Bm25Retriever {
     final value = (raw as num?)?.toDouble() ?? 0.0;
     return -value;
   }
+}
+
+/// A built `WHERE` clause and its bound parameters.
+///
+/// Exists so the row query and the `COUNT(*)` behind it are guaranteed to run
+/// against the same predicate rather than two separately-maintained copies.
+class _SourceFilter {
+  final String sql;
+  final List<Object?> params;
+  const _SourceFilter(this.sql, this.params);
 }

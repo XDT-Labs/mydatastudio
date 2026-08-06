@@ -68,8 +68,19 @@ class SearchResult {
 /// so "Emails 112" can never disagree with what scrolling actually shows.
 class SearchResults {
   final List<SearchResult> results;
+
+  /// Counts *within* [results] — what the facet bar filters. Deliberately not
+  /// corpus totals: a facet promising more rows than scrolling can reach is a
+  /// worse lie than no count at all.
   final int emailCount;
   final int fileCount;
+
+  /// Counts across the whole archive, ignoring the result limit. These are what
+  /// the UI reports to the user, and they are computed by their own `COUNT(*)`
+  /// rather than inferred from [results] — a source that filled its limit is
+  /// indistinguishable from one that happened to return exactly that many.
+  final int emailTotal;
+  final int fileTotal;
 
   /// True when the ranked list was cut off by a limit. The UI has to say so:
   /// a user reading a truncated set as complete is the failure mode behind
@@ -80,15 +91,18 @@ class SearchResults {
     required this.results,
     required this.emailCount,
     required this.fileCount,
+    this.emailTotal = 0,
+    this.fileTotal = 0,
     this.truncated = false,
   });
 
-  static const empty = SearchResults(
-    results: [],
-    emailCount: 0,
-    fileCount: 0,
-  );
+  static const empty = SearchResults(results: [], emailCount: 0, fileCount: 0);
 
+  /// How many results are loaded and shown.
   int get total => results.length;
+
+  /// How many exist in the archive, which may be far more than [total].
+  int get grandTotal => emailTotal + fileTotal;
+
   bool get isEmpty => results.isEmpty;
 }

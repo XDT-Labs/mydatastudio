@@ -182,7 +182,8 @@ class _SearchPageState extends State<SearchPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
             child: Text(
-              'Showing the first ${_results.results.length} of many matches',
+              'Showing the first ${_results.results.length} '
+              'of ${_results.grandTotal} matches',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.tertiary,
               ),
