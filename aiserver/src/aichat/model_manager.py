@@ -11,7 +11,7 @@ from PIL import Image
 import base64
 import io
 from typing import Any, List, Optional
-from transformers import AutoModel, AutoProcessor
+from transformers import AutoModelForImageTextToText, AutoProcessor
 from qwen_vl_utils import process_vision_info
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -218,13 +218,35 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
         model_path = model_id
 
     print(f"[EMBEDDING] Loading from {model_path}...")
-    model = AutoModel.from_pretrained(
+    # AutoModel is wrong for this checkpoint and fails *silently*. Qwen3-VL
+    # Embedding declares Qwen3VLForConditionalGeneration, whose state dict nests
+    # the language model under `model.language_model.*`; AutoModel resolves to
+    # the bare Qwen3VLModel, which expects `language_model.*`. Every one of the
+    # 625 language-model tensors therefore fails to match, gets dropped, and is
+    # replaced by a fresh random initialisation — so the model still loads, still
+    # returns 2048 normalised floats, and every one of them is noise.
+    model, loading_info = AutoModelForImageTextToText.from_pretrained(
         model_path,
-        dtype=torch.float16 if device != "cpu" else torch.float32
-    ).to(device)
+        dtype=torch.float16 if device != "cpu" else torch.float32,
+        output_loading_info=True,
+    )
+    model = model.to(device)
+
+    # Fail loudly rather than serve noise. Randomly-initialised weights are not
+    # a degraded mode: the embeddings are meaningless, they are meaningless
+    # *differently* on every process launch (so vectors written by one run can
+    # never be compared with another's), and nothing downstream can detect it —
+    # cosine similarity over garbage still returns plausible-looking numbers.
+    missing = loading_info.get("missing_keys") or []
+    if missing:
+        raise RuntimeError(
+            f"Embedding model {model_id} loaded with {len(missing)} randomly "
+            f"initialised tensors (e.g. {missing[:3]}). Its embeddings would be "
+            "noise. This means the checkpoint does not match the model class."
+        )
 
     processor = AutoProcessor.from_pretrained(model_path)
-    
+
     print(f"[EMBEDDING] Transformers model {model_id} loaded successfully.")
     return model, processor
 
@@ -288,11 +310,16 @@ def generate_transformers_multimodal_embedding(
         return_tensors="pt"
     ).to(device)
     
+    # `.model` rather than the model itself: the checkpoint's class is a
+    # generation head, whose forward returns vocabulary logits. The embedding
+    # lives one level down, in the base model's hidden states.
+    encoder = model.model
+
     try:
         with torch.no_grad():
-            outputs = model(**inputs)
-            # Last Token Pooling ([EOS]) as per research
-            # Qwen3-VL-Embedding returns the embedding in the last hidden state of the [EOS] token
+            outputs = encoder(**inputs)
+            # Last Token Pooling ([EOS]), which is what the checkpoint's own
+            # 1_Pooling/config.json specifies ("pooling_mode": "lasttoken").
             embeddings = outputs.last_hidden_state[:, -1, :]
 
             # Normalize the embedding
@@ -306,7 +333,7 @@ def generate_transformers_multimodal_embedding(
             model.to(cpu_device)
             inputs_cpu = {k: (v.to(cpu_device) if isinstance(v, torch.Tensor) else v) for k, v in inputs.items()}
             with torch.no_grad():
-                outputs = model(**inputs_cpu)
+                outputs = model.model(**inputs_cpu)
                 embeddings = outputs.last_hidden_state[:, -1, :]
                 embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
             return embeddings[0].tolist()
