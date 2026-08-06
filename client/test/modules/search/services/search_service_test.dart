@@ -2,6 +2,7 @@ import 'dart:io' as io;
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:logger/logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/search/models/search_query.dart';
 import 'package:mydatastudio/modules/search/services/search_service.dart';
@@ -87,6 +88,15 @@ void main() {
   test('a storage failure surfaces as empty rather than a hang', () async {
     // Parsing is total, so anything thrown here is storage-level. The page
     // must not be left spinning on it.
+    //
+    // SearchService logs that failure at error level, by design. Silenced for
+    // the duration of this test only: a passing run that prints a red block
+    // and a stack trace reads as a crash, and the noise buries real failures
+    // in the suite output.
+    final previousLevel = Logger.level;
+    Logger.level = Level.off;
+    addTearDown(() => Logger.level = previousLevel);
+
     final db = await _freshDb('search_service_failure_test.db');
     await db.close(); // querying a closed database throws
 
