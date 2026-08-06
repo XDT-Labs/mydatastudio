@@ -52,7 +52,8 @@ class Place {
   }
 
   /// How the resolved place is shown back to the user.
-  String get label => country == null || country!.isEmpty ? name : '$name, $country';
+  String get label =>
+      country == null || country!.isEmpty ? name : '$name, $country';
 
   @override
   String toString() => 'Place($label @ $latitude,$longitude)';

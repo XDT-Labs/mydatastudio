@@ -249,7 +249,9 @@ class DatabaseManager {
     if (!isTesting) {
       unawaited(
         PlaceRepository(appDatabase!).importIfEmpty().catchError((Object e) {
-          logger.w('DatabaseManager: gazetteer import failed, near: disabled: $e');
+          logger.w(
+            'DatabaseManager: gazetteer import failed, near: disabled: $e',
+          );
           return 0;
         }),
       );

@@ -44,7 +44,11 @@ class GeoRadius {
   /// corners. Being generous here can only cost a few extra distance
   /// computations, whereas being tight by a rounding error would drop a
   /// genuine match with no way to notice.
-  static GeoBox boundingBox(double latitude, double longitude, double radiusKm) {
+  static GeoBox boundingBox(
+    double latitude,
+    double longitude,
+    double radiusKm,
+  ) {
     final deltaLat = radiusKm / kmPerDegreeLatitude;
     final minLat = latitude - deltaLat;
     final maxLat = latitude + deltaLat;
@@ -90,12 +94,7 @@ class GeoRadius {
 
   /// Great-circle distance in kilometres. The Dart twin of [haversineSql],
   /// kept so the SQL can be checked against something independently derived.
-  static double distanceKm(
-    double lat1,
-    double lng1,
-    double lat2,
-    double lng2,
-  ) {
+  static double distanceKm(double lat1, double lng1, double lat2, double lng2) {
     final cosine =
         math.cos(_radians(lat1)) *
             math.cos(_radians(lat2)) *

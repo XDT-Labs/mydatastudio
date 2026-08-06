@@ -1,6 +1,11 @@
 # Unified Search — Implementation Plan
 
-Status: **Phases 1–2 implemented.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, contacts index. Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phases 3+ still proposal.
+Status: **Phases 1–3 implemented.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, contacts index. Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phases 4+ still proposal.
+
+Two Phase 3 details differ from what is written below, both deliberate and both explained where they are implemented:
+
+- **Recency decay is floored at 0.75.** §5b's unclamped `1 / (1 + ln(1 + age_days/365))` reaches 0.26 at 17 years, and RRF scores sit in a band roughly 1.6% wide between adjacent ranks — so unfloored it stops being the "mild" decay §5b asks for and becomes the primary sort key, burying exactly the decades-old artifact a personal archive exists to hold. The floor keeps the spread at 1.33x, mild next to the tier spread of 1.9x, which *is* meant to dominate.
+- **Fused searches page from memory, then hand back to lexical.** A reciprocal-rank score cannot be computed one page at a time, so a window of each retriever is fetched and ranked in one pass; once it is exhausted, lexical paging resumes from where the window ended and skips anything already shown. Totals count semantic-only hits separately from lexical ones, because the FTS cursor can never reach a row FTS does not match.
 Scope: cross-collection search over photos/images, documents, emails, and (later) social posts.
 
 ---

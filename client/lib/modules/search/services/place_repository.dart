@@ -79,7 +79,9 @@ class PlaceRepository {
       // A missing gazetteer costs `near:` and nothing else — every other kind
       // of search still works — so this must not take the database open down
       // with it.
-      logger.w('PlaceRepository: gazetteer asset unavailable, near: disabled: $e');
+      logger.w(
+        'PlaceRepository: gazetteer asset unavailable, near: disabled: $e',
+      );
       return 0;
     }
 

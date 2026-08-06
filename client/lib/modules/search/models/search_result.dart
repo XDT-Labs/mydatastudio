@@ -1,3 +1,5 @@
+import 'package:mydatastudio/modules/search/services/result_ranking.dart';
+
 /// Which archive a result came from. Drives tile rendering and the facet
 /// counts, and is the seam a future social-posts source plugs into.
 enum SearchResultType { email, file }
@@ -41,6 +43,12 @@ class SearchResult {
 
   final String? thumbnail;
 
+  /// How much deliberate human investment this artifact represents, which
+  /// multiplies the fused score. Computed where the row is read, because the
+  /// signals it derives from (favourited, in an album, which scanner brought
+  /// it in) are columns rather than anything recoverable later.
+  final SourceTier tier;
+
   const SearchResult({
     required this.id,
     required this.type,
@@ -52,10 +60,32 @@ class SearchResult {
     this.collectionId,
     this.contentType,
     this.thumbnail,
+    this.tier = SourceTier.correspondence,
   });
 
   bool get isEmail => type == SearchResultType.email;
   bool get isFile => type == SearchResultType.file;
+
+  /// Identity across both archives. Fusion ranks mail and files in one list,
+  /// so an id alone is not enough to key on.
+  String get key => '${type.name}:$id';
+
+  /// This result with [score] replaced — used when fusion recomputes ranking.
+  SearchResult withScore(double newScore) {
+    return SearchResult(
+      id: id,
+      type: type,
+      title: title,
+      score: newScore,
+      subtitle: subtitle,
+      snippet: snippet,
+      date: date,
+      collectionId: collectionId,
+      contentType: contentType,
+      thumbnail: thumbnail,
+      tier: tier,
+    );
+  }
 
   @override
   String toString() =>
@@ -103,6 +133,26 @@ class SearchResults {
   /// so [hasMore] needs to know which sources are actually in play.
   final SearchResultType? sourceFilter;
 
+  /// Fused results already retrieved and ranked but not yet published.
+  ///
+  /// Fusion has to rank a whole window at once — a reciprocal-rank score is
+  /// meaningless without the other retriever's list — so a fused search fetches
+  /// far more than it shows and pages through the ranking in memory. The
+  /// per-source cursors below cannot express that: they track rows consumed
+  /// from SQL, which for a fused head runs ahead of what the user has seen.
+  final int rankedRemaining;
+
+  /// How many of [emailTotal]/[fileTotal] the semantic pass contributed and no
+  /// keyword matched.
+  ///
+  /// Counted *inside* the totals — they are what the user is told — but held
+  /// separately because the per-source cursors track rows consumed from the
+  /// FTS index, and no amount of paging that index will ever reach a row it
+  /// does not match. Without subtracting these, [hasMore] stays true forever
+  /// and the list asks for pages that cannot exist.
+  final int emailSemanticOnly;
+  final int fileSemanticOnly;
+
   const SearchResults({
     required this.results,
     this.emailTotal = 0,
@@ -110,6 +160,9 @@ class SearchResults {
     this.emailOffset = 0,
     this.fileOffset = 0,
     this.sourceFilter,
+    this.rankedRemaining = 0,
+    this.emailSemanticOnly = 0,
+    this.fileSemanticOnly = 0,
   });
 
   static const empty = SearchResults(results: []);
@@ -136,10 +189,13 @@ class SearchResults {
   /// Whether another page remains to fetch, considering only sources being
   /// retrieved.
   bool get hasMore {
+    if (rankedRemaining > 0) return true;
     final emailPending =
-        sourceFilter != SearchResultType.file && emailOffset < emailTotal;
+        sourceFilter != SearchResultType.file &&
+        emailOffset < emailTotal - emailSemanticOnly;
     final filePending =
-        sourceFilter != SearchResultType.email && fileOffset < fileTotal;
+        sourceFilter != SearchResultType.email &&
+        fileOffset < fileTotal - fileSemanticOnly;
     return emailPending || filePending;
   }
 
@@ -154,6 +210,9 @@ class SearchResults {
       emailOffset: page.emailOffset,
       fileOffset: page.fileOffset,
       sourceFilter: page.sourceFilter,
+      rankedRemaining: page.rankedRemaining,
+      emailSemanticOnly: page.emailSemanticOnly,
+      fileSemanticOnly: page.fileSemanticOnly,
     );
   }
 }

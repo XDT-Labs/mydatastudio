@@ -1,16 +1,17 @@
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/search/models/search_query.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
-import 'package:mydatastudio/modules/search/services/geo.dart';
+import 'package:mydatastudio/modules/search/services/result_ranking.dart';
+import 'package:mydatastudio/modules/search/services/search_filters.dart';
 
 /// Lexical retrieval over the FTS5 indexes, ranked by `bm25()`.
 ///
 /// Two things this deliberately does not do. It does not fold hard filters
-/// into the score — they become `WHERE` clauses, so `from:bob` makes mail from
-/// anyone else impossible rather than merely unlikely. And it does not require
-/// free text: a query that is nothing but filters is a legitimate browse
-/// ("everything from this person"), so it falls through to a filter-only scan
-/// ordered by date instead of returning nothing.
+/// into the score — they become `WHERE` clauses (see [SearchFilters]), so
+/// `from:bob` makes mail from anyone else impossible rather than merely
+/// unlikely. And it does not require free text: a query that is nothing but
+/// filters is a legitimate browse ("everything from this person"), so it falls
+/// through to a filter-only scan ordered by date instead of returning nothing.
 class Bm25Retriever {
   final AppDatabase db;
 
@@ -28,14 +29,6 @@ class Bm25Retriever {
   /// arrive fast and the rest follows on demand.
   static const pageSize = 200;
 
-  /// Radius for a `near:` term that does not name one (`near:banff:50` does).
-  ///
-  /// 25 km is roughly "this trip" rather than "this town": EXIF coordinates are
-  /// where the shutter fired, not where the user thinks they were, and a
-  /// tighter radius drops the hike, the drive out, and the restaurant one
-  /// valley over — all of which belong to the same set of photos.
-  static const defaultRadiusKm = 25;
-
   /// Fetches one page of results.
   ///
   /// [emailOffset]/[fileOffset] are the per-source cursors carried by the
@@ -50,18 +43,14 @@ class Bm25Retriever {
     int fileOffset = 0,
     SearchResultType? onlySource,
   }) async {
-    final match = _toMatchExpression(query.freeText);
+    final match = toMatchExpression(query.freeText);
 
     // Built without regard to [onlySource]: the counts below feed the facet
     // bar, which has to keep reporting every archive's total even while one is
     // selected. Zeroing the others would strand a user who picked a facet with
     // no results — the control they need to leave it would show 0 too.
-    final emailWhere =
-        _sourceWanted(query, SearchResultType.email)
-            ? _emailWhere(query)
-            : null;
-    final fileWhere =
-        _sourceWanted(query, SearchResultType.file) ? _fileWhere(query) : null;
+    final emailWhere = SearchFilters.forEmails(query);
+    final fileWhere = SearchFilters.forFiles(query);
 
     // Counted separately rather than inferred from the returned rows. A source
     // that filled its page is indistinguishable from one that happened to
@@ -118,7 +107,7 @@ class Bm25Retriever {
     String table,
     String ftsTable,
     String alias,
-    _SourceFilter where,
+    SourceFilter where,
     String? match,
   ) async {
     final rows =
@@ -136,346 +125,214 @@ class Bm25Retriever {
     return (rows.first['c'] as num?)?.toInt() ?? 0;
   }
 
-  /// Whether [type] should be queried at all.
-  ///
-  /// `type:` selects a *source*, not a row predicate — `type:email` must not
-  /// merely rank files lower, it must exclude them. A negated `-type:email`
-  /// inverts that.
-  bool _sourceWanted(ParsedQuery query, SearchResultType type) {
-    final typeFilters = query.filtersFor(FilterField.type);
-    if (typeFilters.isEmpty) return true;
-
-    const emailAliases = {'email', 'mail', 'message'};
-    bool namesType(QueryFilter f) {
-      final v = f.value.toLowerCase();
-      return type == SearchResultType.email
-          ? emailAliases.contains(v)
-          : !emailAliases.contains(v);
-    }
-
-    final positive = typeFilters.where((f) => !f.negated).toList();
-    final negative = typeFilters.where((f) => f.negated).toList();
-
-    if (negative.any(namesType)) return false;
-    if (positive.isEmpty) return true;
-    return positive.any(namesType);
-  }
-
-  /// Builds the email `WHERE` clause, or null when no mail can satisfy the
-  /// query at all.
-  ///
-  /// Split out from the row query so the count above runs against exactly the
-  /// same predicate — a total derived from a different clause than the rows is
-  /// worse than no total.
-  _SourceFilter? _emailWhere(ParsedQuery query) {
-    // A `tag:`/`near:` query is about files; mail cannot satisfy it, and
-    // returning mail anyway would look like the filter was ignored.
-    if (query.filtersFor(FilterField.tag).any((f) => !f.negated) ||
-        query.filtersFor(FilterField.near).any((f) => !f.negated)) {
-      return null;
-    }
-
-    final where = <String>['e.is_deleted = 0'];
-    final params = <Object?>[];
-
-    _addLike(query, FilterField.from, 'e."from"', where, params);
-    _addLike(query, FilterField.to, 'e."to"', where, params);
-    _addLike(query, FilterField.cc, 'e.cc', where, params);
-    _addLike(query, FilterField.subject, 'e.subject', where, params);
-    _addDateRange(query, 'e.date', where, params);
-    _addCollection(query, 'e.collection_id', where, params);
-
-    for (final f in query.filtersFor(FilterField.has)) {
-      if (f.value.toLowerCase().startsWith('attach')) {
-        where.add('e.has_attachments = ${f.negated ? 0 : 1}');
-      }
-    }
-    for (final f in query.filtersFor(FilterField.is_)) {
-      final v = f.value.toLowerCase();
-      if (v == 'unread') where.add('e.is_read = ${f.negated ? 1 : 0}');
-      if (v == 'read') where.add('e.is_read = ${f.negated ? 0 : 1}');
-    }
-
-    return _SourceFilter(where.join(' AND '), params);
-  }
-
   Future<List<SearchResult>> _searchEmails(
-    _SourceFilter filter,
+    SourceFilter filter,
     String? match,
     int limit,
     int offset,
   ) async {
-    final where = [filter.sql];
-    final params = filter.params;
-
     final rows =
         match != null
             ? await db.select(
               '''
-            SELECT e.id, e.subject, e."from", e.date, e.snippet,
-                   e.collection_id, bm25(emails_fts, $_emailWeights) AS score
+            SELECT $_emailColumns,
+                   bm25(emails_fts, $_emailWeights) AS score
             FROM emails_fts
             JOIN emails e ON e.rowid = emails_fts.rowid
-            WHERE emails_fts MATCH ? AND ${where.join(' AND ')}
+            WHERE emails_fts MATCH ? AND ${filter.sql}
             ORDER BY score ASC
             LIMIT ? OFFSET ?
             ''',
-              [match, ...params, limit, offset],
+              [match, ...filter.params, limit, offset],
             )
             : await db.select(
               '''
-            SELECT e.id, e.subject, e."from", e.date, e.snippet,
-                   e.collection_id, 0.0 AS score
+            SELECT $_emailColumns, 0.0 AS score
             FROM emails e
-            WHERE ${where.join(' AND ')}
+            WHERE ${filter.sql}
             ORDER BY e.date DESC
             LIMIT ? OFFSET ?
             ''',
-              [...params, limit, offset],
+              [...filter.params, limit, offset],
             );
 
-    return rows.map((row) {
-      final date = row['date'] as int?;
-      return SearchResult(
-        id: row['id'] as String,
-        type: SearchResultType.email,
-        title:
-            (row['subject'] as String?)?.trim().isNotEmpty == true
-                ? row['subject'] as String
-                : '(no subject)',
-        subtitle: row['from'] as String?,
-        snippet: row['snippet'] as String?,
-        date: date == null ? null : DateTime.fromMillisecondsSinceEpoch(date),
-        score: _normalizeScore(row['score']),
-        collectionId: row['collection_id'] as String?,
-      );
-    }).toList();
-  }
-
-  /// Builds the file `WHERE` clause, or null when no file can satisfy the
-  /// query. See [_emailWhere] for why this is separate from the row query.
-  _SourceFilter? _fileWhere(ParsedQuery query) {
-    // Mail-only fields cannot be satisfied by a file.
-    if (query.filtersFor(FilterField.from).any((f) => !f.negated) ||
-        query.filtersFor(FilterField.to).any((f) => !f.negated) ||
-        query.filtersFor(FilterField.cc).any((f) => !f.negated) ||
-        query.filtersFor(FilterField.has).any((f) => !f.negated) ||
-        query.filtersFor(FilterField.is_).any((f) => !f.negated)) {
-      return null;
-    }
-
-    // is_inline excludes message-body assets — spacers, logos, tracking
-    // pixels. The embedding pipeline already skips them for the same reason;
-    // without this every result page fills with newsletter furniture.
-    final where = <String>['f.is_deleted = 0', 'f.is_inline = 0'];
-    final params = <Object?>[];
-
-    _addDateRange(query, 'f.date_created', where, params);
-    _addCollection(query, 'f.collection_id', where, params);
-    _addJoinTable(
-      query,
-      FilterField.tag,
-      'SELECT file_id FROM file_tags WHERE tag LIKE ? COLLATE NOCASE',
-      where,
-      params,
-    );
-    _addNear(query, where, params);
-
-    for (final f in query.filtersFor(FilterField.type)) {
-      final predicate = _contentTypePredicate(f.value.toLowerCase());
-      if (predicate == null) continue;
-      where.add(f.negated ? 'NOT ($predicate)' : predicate);
-    }
-
-    return _SourceFilter(where.join(' AND '), params);
+    return rows.map(emailFromRow).toList();
   }
 
   Future<List<SearchResult>> _searchFiles(
-    _SourceFilter filter,
+    SourceFilter filter,
     String? match,
     int limit,
     int offset,
   ) async {
-    final where = [filter.sql];
-    final params = filter.params;
-
     final rows =
         match != null
             ? await db.select(
               '''
-            SELECT f.id, f.name, f.path, f.description, f.content_type,
-                   f.date_created, f.thumbnail, f.collection_id,
+            SELECT $_fileColumns,
                    bm25(files_fts, $_fileWeights) AS score
             FROM files_fts
             JOIN files f ON f.rowid = files_fts.rowid
-            WHERE files_fts MATCH ? AND ${where.join(' AND ')}
+            LEFT JOIN collections c ON c.id = f.collection_id
+            WHERE files_fts MATCH ? AND ${filter.sql}
             ORDER BY score ASC
             LIMIT ? OFFSET ?
             ''',
-              [match, ...params, limit, offset],
+              [match, ...filter.params, limit, offset],
             )
             : await db.select(
               '''
-            SELECT f.id, f.name, f.path, f.description, f.content_type,
-                   f.date_created, f.thumbnail, f.collection_id, 0.0 AS score
+            SELECT $_fileColumns, 0.0 AS score
             FROM files f
-            WHERE ${where.join(' AND ')}
+            LEFT JOIN collections c ON c.id = f.collection_id
+            WHERE ${filter.sql}
             ORDER BY f.date_created DESC
             LIMIT ? OFFSET ?
             ''',
-              [...params, limit, offset],
+              [...filter.params, limit, offset],
             );
 
-    return rows.map((row) {
-      final date = row['date_created'] as int?;
-      return SearchResult(
-        id: row['id'] as String,
-        type: SearchResultType.file,
-        title: row['name'] as String? ?? '(unnamed)',
-        subtitle: row['path'] as String?,
-        snippet: row['description'] as String?,
-        date: date == null ? null : DateTime.fromMillisecondsSinceEpoch(date),
-        score: _normalizeScore(row['score']),
-        collectionId: row['collection_id'] as String?,
-        contentType: row['content_type'] as String?,
-        thumbnail: row['thumbnail'] as String?,
+    return rows.map(fileFromRow).toList();
+  }
+
+  /// Loads results by id, for hits the vector pass found that the lexical pass
+  /// never returned.
+  ///
+  /// Fusion ranks the union of both retrievers' lists, so a semantically strong
+  /// match containing none of the query's words has to be materialised from
+  /// somewhere — and it has to come back shaped exactly like a lexical hit,
+  /// tier included, or the same photo would score differently depending on
+  /// which retriever happened to surface it.
+  Future<Map<String, SearchResult>> loadByIds({
+    List<String> fileIds = const [],
+    List<String> emailIds = const [],
+  }) async {
+    final loaded = <String, SearchResult>{};
+
+    if (fileIds.isNotEmpty) {
+      final rows = await db.select(
+        'SELECT $_fileColumns, 0.0 AS score FROM files f '
+        'LEFT JOIN collections c ON c.id = f.collection_id '
+        'WHERE f.id IN (${_placeholders(fileIds.length)})',
+        fileIds,
       );
-    }).toList();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Filter builders. Repeats of one field OR together; distinct fields AND.
-  // ---------------------------------------------------------------------------
-
-  void _addLike(
-    ParsedQuery query,
-    FilterField field,
-    String column,
-    List<String> where,
-    List<Object?> params,
-  ) {
-    for (final f in query.filtersFor(field)) {
-      final clause = '$column LIKE ? COLLATE NOCASE';
-      where.add(f.negated ? 'NOT ($clause)' : clause);
-      params.add('%${f.value}%');
-    }
-  }
-
-  void _addJoinTable(
-    ParsedQuery query,
-    FilterField field,
-    String subquery,
-    List<String> where,
-    List<Object?> params,
-  ) {
-    for (final f in query.filtersFor(field)) {
-      where.add('f.id ${f.negated ? 'NOT IN' : 'IN'} ($subquery)');
-      params.add(f.value);
-    }
-  }
-
-  /// Builds the `near:` predicate: a radius around a resolved place, OR'd with
-  /// a vision-detected landmark of the same name.
-  ///
-  /// OR'd rather than either-or because they answer different questions about
-  /// the same word. `near:rome` should return both the photos whose GPS puts
-  /// them in Rome and the photos where the model recognised a Roman landmark —
-  /// and on this archive the overlap is small, since only ~10% of images carry
-  /// GPS at all and none of the cloud or email sources do.
-  ///
-  /// A filter reaching here that carries no coordinates is a landmark-only
-  /// term: [NearResolver] has already dropped the ones nothing could resolve.
-  void _addNear(
-    ParsedQuery query,
-    List<String> where,
-    List<Object?> params,
-  ) {
-    for (final f in query.filtersFor(FilterField.near)) {
-      final alternatives = <String>[
-        'f.id IN (SELECT file_id FROM file_landmarks '
-            'WHERE landmark LIKE ? COLLATE NOCASE)',
-      ];
-      params.add(f.value);
-
-      if (f.hasCoordinates) {
-        final lat = f.latitude!;
-        final lng = f.longitude!;
-        final radiusKm = (f.radiusKm ?? defaultRadiusKm).toDouble();
-        final box = GeoRadius.boundingBox(lat, lng, radiusKm);
-
-        // The bounding box is what makes this cheap — it is an index range on
-        // (latitude, longitude), and it drops almost everything before a single
-        // trig function runs. The haversine that follows is what makes it
-        // correct, since a rectangle in degrees always over-covers a circle in
-        // kilometres.
-        alternatives.add(
-          '(f.latitude BETWEEN ? AND ? AND f.longitude BETWEEN ? AND ? '
-          'AND ${GeoRadius.haversineSql('f.latitude', 'f.longitude')} <= ?)',
-        );
-        params.addAll([
-          box.minLatitude,
-          box.maxLatitude,
-          box.minLongitude,
-          box.maxLongitude,
-          ...GeoRadius.haversineParams(lat, lng),
-          radiusKm,
-        ]);
+      for (final row in rows) {
+        final result = fileFromRow(row);
+        loaded[result.key] = result;
       }
-
-      final clause = '(${alternatives.join(' OR ')})';
-      where.add(f.negated ? 'NOT $clause' : clause);
     }
+
+    if (emailIds.isNotEmpty) {
+      final rows = await db.select(
+        'SELECT $_emailColumns, 0.0 AS score FROM emails e '
+        'WHERE e.id IN (${_placeholders(emailIds.length)})',
+        emailIds,
+      );
+      for (final row in rows) {
+        final result = emailFromRow(row);
+        loaded[result.key] = result;
+      }
+    }
+
+    return loaded;
   }
 
-  void _addDateRange(
+  /// Which of [ids] the lexical query also matches.
+  ///
+  /// Used to keep the reported totals exact. A vector hit that BM25 would have
+  /// found anyway is already inside `emailTotal`/`fileTotal`; counting it again
+  /// as a semantic addition would overstate the result count by however many
+  /// the two retrievers agreed on — and a count the user cannot reach by
+  /// scrolling is the bug they notice.
+  Future<Set<String>> matchingIds(
     ParsedQuery query,
-    String column,
-    List<String> where,
-    List<Object?> params,
-  ) {
-    for (final f in query.filtersFor(FilterField.after)) {
-      if (f.dateValue == null) continue;
-      where.add('$column >= ?');
-      params.add(f.dateValue!.millisecondsSinceEpoch);
-    }
-    for (final f in query.filtersFor(FilterField.before)) {
-      if (f.dateValue == null) continue;
-      where.add('$column < ?');
-      params.add(f.dateValue!.millisecondsSinceEpoch);
-    }
+    SearchResultType type,
+    List<String> ids,
+  ) async {
+    final match = toMatchExpression(query.freeText);
+    if (ids.isEmpty || match == null) return const {};
+
+    final filter =
+        type == SearchResultType.email
+            ? SearchFilters.forEmails(query)
+            : SearchFilters.forFiles(query);
+    if (filter == null) return const {};
+
+    final table = type == SearchResultType.email ? 'emails' : 'files';
+    final ftsTable =
+        type == SearchResultType.email ? 'emails_fts' : 'files_fts';
+    final alias = type == SearchResultType.email ? 'e' : 'f';
+
+    final rows = await db.select(
+      'SELECT $alias.id AS id FROM $ftsTable '
+      'JOIN $table AS $alias ON $alias.rowid = $ftsTable.rowid '
+      'WHERE $ftsTable MATCH ? AND ${filter.sql} '
+      'AND $alias.id IN (${_placeholders(ids.length)})',
+      [match, ...filter.params, ...ids],
+    );
+    return {for (final row in rows) row['id'] as String};
   }
 
-  void _addCollection(
-    ParsedQuery query,
-    String column,
-    List<String> where,
-    List<Object?> params,
-  ) {
-    for (final f in query.filtersFor(FilterField.in_)) {
-      const sub = 'SELECT id FROM collections WHERE name LIKE ? COLLATE NOCASE';
-      where.add('$column ${f.negated ? 'NOT IN' : 'IN'} ($sub)');
-      params.add('%${f.value}%');
-    }
+  static String _placeholders(int count) => List.filled(count, '?').join(', ');
+
+  static const _fileColumns =
+      'f.id, f.name, f.path, f.description, f.content_type, f.date_created, '
+      'f.thumbnail, f.collection_id, f.is_favorite, c.scanner, '
+      'EXISTS(SELECT 1 FROM album_files af WHERE af.file_id = f.id) AS in_album';
+
+  static const _emailColumns =
+      'e.id, e.subject, e."from", e.date, e.snippet, e.collection_id';
+
+  static SearchResult fileFromRow(Map<String, Object?> row) {
+    final date = row['date_created'] as int?;
+    return SearchResult(
+      id: row['id'] as String,
+      type: SearchResultType.file,
+      title: row['name'] as String? ?? '(unnamed)',
+      subtitle: row['path'] as String?,
+      snippet: row['description'] as String?,
+      date: date == null ? null : DateTime.fromMillisecondsSinceEpoch(date),
+      score: _normalizeScore(row['score']),
+      collectionId: row['collection_id'] as String?,
+      contentType: row['content_type'] as String?,
+      thumbnail: row['thumbnail'] as String?,
+      tier: _fileTier(row),
+    );
   }
 
-  String? _contentTypePredicate(String value) {
-    switch (value) {
-      case 'image':
-      case 'photo':
-        return "(f.content_type LIKE 'image/%' "
-            "OR f.content_type = 'application/image')";
-      case 'video':
-        return "f.content_type LIKE 'video/%'";
-      case 'pdf':
-        return "f.content_type LIKE '%pdf%'";
-      case 'document':
-      case 'doc':
-        return "(f.content_type LIKE '%pdf%' "
-            "OR f.content_type LIKE '%word%' "
-            "OR f.content_type LIKE 'text/%')";
-      default:
-        return null;
-    }
+  static SearchResult emailFromRow(Map<String, Object?> row) {
+    final date = row['date'] as int?;
+    return SearchResult(
+      id: row['id'] as String,
+      type: SearchResultType.email,
+      title:
+          (row['subject'] as String?)?.trim().isNotEmpty == true
+              ? row['subject'] as String
+              : '(no subject)',
+      subtitle: row['from'] as String?,
+      snippet: row['snippet'] as String?,
+      date: date == null ? null : DateTime.fromMillisecondsSinceEpoch(date),
+      score: _normalizeScore(row['score']),
+      collectionId: row['collection_id'] as String?,
+    );
+  }
+
+  /// Which tier a file's score is multiplied by.
+  ///
+  /// Favouriting or filing something into an album is the only *explicit*
+  /// signal a user ever gives about their own archive, so it outranks
+  /// everything else. Below that, where the file came from stands in: a file
+  /// on disk or a personal cloud drive was kept deliberately, whereas an
+  /// attachment on someone else's mail arrived whether the user wanted it or
+  /// not.
+  static SourceTier _fileTier(Map<String, Object?> row) {
+    final favorite = (row['is_favorite'] as num?)?.toInt() == 1;
+    final inAlbum = (row['in_album'] as num?)?.toInt() == 1;
+    if (favorite || inAlbum) return SourceTier.curatedByUser;
+
+    final scanner = row['scanner'] as String? ?? '';
+    if (scanner.startsWith('email.')) return SourceTier.receivedAttachment;
+    return SourceTier.personalArchive;
   }
 
   /// Builds a syntactically safe FTS5 `MATCH` expression, or null when there
@@ -486,7 +343,7 @@ class Bm25Retriever {
   /// a thrown exception mid-typing. Quoting each token turns every term into a
   /// literal phrase, which both removes the syntax surface and gives the
   /// implicit-AND behaviour a user expects from a search box.
-  static String? _toMatchExpression(String freeText) {
+  static String? toMatchExpression(String freeText) {
     final tokens =
         freeText
             .split(RegExp(r'\s+'))
@@ -502,14 +359,4 @@ class Bm25Retriever {
     final value = (raw as num?)?.toDouble() ?? 0.0;
     return -value;
   }
-}
-
-/// A built `WHERE` clause and its bound parameters.
-///
-/// Exists so the row query and the `COUNT(*)` behind it are guaranteed to run
-/// against the same predicate rather than two separately-maintained copies.
-class _SourceFilter {
-  final String sql;
-  final List<Object?> params;
-  const _SourceFilter(this.sql, this.params);
 }
