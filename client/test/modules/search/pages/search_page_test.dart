@@ -224,8 +224,8 @@ void main() {
           _buildTestableWidget(
             SearchFacetBar(
               total: 7,
-              emailCount: 4,
-              fileCount: 3,
+              emailTotal: 4,
+              fileTotal: 3,
               selected: SearchFacet.all,
               onSelected: (_) {},
             ),
@@ -246,8 +246,8 @@ void main() {
         _buildTestableWidget(
           SearchFacetBar(
             total: 2,
-            emailCount: 1,
-            fileCount: 1,
+            emailTotal: 1,
+            fileTotal: 1,
             selected: SearchFacet.all,
             onSelected: (f) => selected = f,
           ),
@@ -258,18 +258,14 @@ void main() {
       expect(selected, SearchFacet.email);
     });
 
-    test('filterResultsByFacet narrows the displayed list client-side', () {
-      final results = [_email(id: 'e1'), _file(id: 'f1'), _file(id: 'f2')];
-
-      expect(filterResultsByFacet(results, SearchFacet.all), results);
-      expect(
-        filterResultsByFacet(results, SearchFacet.email).map((r) => r.id),
-        ['e1'],
-      );
-      expect(filterResultsByFacet(results, SearchFacet.file).map((r) => r.id), [
-        'f1',
-        'f2',
-      ]);
+    test('a facet maps to the source retrieval is restricted to', () {
+      // Facets re-query rather than slicing the loaded rows. The counts on the
+      // bar are archive totals, so selecting "Photos & Files 1,134" has to be
+      // able to reach all of them — slicing could only ever show the pages
+      // already fetched alongside the mail.
+      expect(sourceTypeForFacet(SearchFacet.all), isNull);
+      expect(sourceTypeForFacet(SearchFacet.email), SearchResultType.email);
+      expect(sourceTypeForFacet(SearchFacet.file), SearchResultType.file);
     });
   });
 

@@ -66,43 +66,65 @@ class SearchResult {
 ///
 /// Counts come from the same query as the results rather than a second pass,
 /// so "Emails 112" can never disagree with what scrolling actually shows.
+/// The loaded page(s) of a search plus the counts describing the whole match
+/// set behind them.
+///
+/// Every count here is a **corpus total**, not a count of what is loaded. With
+/// infinite scroll every match is reachable, so a facet reading "Photos & Files
+/// 500" beside a set of 1,134 would be understating the archive to describe an
+/// implementation detail. The user asked how many matches exist; that is the
+/// number to show.
 class SearchResults {
+  /// Every result loaded so far — grows as further pages are appended.
   final List<SearchResult> results;
 
-  /// Counts *within* [results] — what the facet bar filters. Deliberately not
-  /// corpus totals: a facet promising more rows than scrolling can reach is a
-  /// worse lie than no count at all.
-  final int emailCount;
-  final int fileCount;
-
-  /// Counts across the whole archive, ignoring the result limit. These are what
-  /// the UI reports to the user, and they are computed by their own `COUNT(*)`
-  /// rather than inferred from [results] — a source that filled its limit is
-  /// indistinguishable from one that happened to return exactly that many.
+  /// Matches across the whole archive, ignoring pagination. Computed by their
+  /// own `COUNT(*)` rather than inferred from [results], because a source that
+  /// filled its page is indistinguishable from one that happened to return
+  /// exactly that many rows.
   final int emailTotal;
   final int fileTotal;
 
-  /// True when the ranked list was cut off by a limit. The UI has to say so:
-  /// a user reading a truncated set as complete is the failure mode behind
-  /// "summarise all of my mail from X" quietly summarising fifty messages.
-  final bool truncated;
+  /// How many rows of each source have been consumed — the cursor the next
+  /// page resumes from.
+  ///
+  /// Per-source rather than one global offset because the two sources are
+  /// ranked independently and merged. Having taken the best `emailOffset`
+  /// emails and best `fileOffset` files, the next best overall results are
+  /// exactly what follows each of those cursors.
+  final int emailOffset;
+  final int fileOffset;
 
   const SearchResults({
     required this.results,
-    required this.emailCount,
-    required this.fileCount,
     this.emailTotal = 0,
     this.fileTotal = 0,
-    this.truncated = false,
+    this.emailOffset = 0,
+    this.fileOffset = 0,
   });
 
-  static const empty = SearchResults(results: [], emailCount: 0, fileCount: 0);
+  static const empty = SearchResults(results: []);
 
-  /// How many results are loaded and shown.
-  int get total => results.length;
+  /// Total matches in the archive — what every count in the UI reports.
+  int get total => emailTotal + fileTotal;
 
-  /// How many exist in the archive, which may be far more than [total].
-  int get grandTotal => emailTotal + fileTotal;
+  /// How many are currently loaded. An implementation detail, not something
+  /// to put in front of the user.
+  int get loadedCount => results.length;
+
+  /// Whether another page remains to fetch.
+  bool get hasMore => emailOffset < emailTotal || fileOffset < fileTotal;
 
   bool get isEmpty => results.isEmpty;
+
+  /// This set with [page] appended and its cursors advanced.
+  SearchResults append(SearchResults page) {
+    return SearchResults(
+      results: [...results, ...page.results],
+      emailTotal: page.emailTotal,
+      fileTotal: page.fileTotal,
+      emailOffset: page.emailOffset,
+      fileOffset: page.fileOffset,
+    );
+  }
 }

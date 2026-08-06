@@ -21,20 +21,32 @@ class Bm25Retriever {
   static const _emailWeights = '10.0, 3.0, 3.0, 1.0, 1.0';
   static const _fileWeights = '3.0, 1.0, 5.0';
 
-  /// How many ranked rows a single search returns.
+  /// Rows fetched per page.
   ///
-  /// Generous rather than page-sized: this is a personal archive on a desktop,
-  /// `ListView.builder` renders lazily, and a thousand result objects cost
-  /// almost nothing. The old value of 100 silently hid the other thousand
-  /// matches of a common tag.
-  static const defaultLimit = 500;
+  /// Modest because the list pages as it scrolls — the first screenful should
+  /// arrive fast and the rest follows on demand.
+  static const pageSize = 200;
 
+  /// Fetches one page of results.
+  ///
+  /// [emailOffset]/[fileOffset] are the per-source cursors carried by the
+  /// previous page (see [SearchResults.emailOffset]). [onlySource] restricts
+  /// retrieval to one archive, which is what selecting a facet does: it
+  /// re-queries rather than slicing the loaded page, so picking "Emails 112"
+  /// can reach all 112 rather than only those that fit alongside the files.
   Future<SearchResults> search(
     ParsedQuery query, {
-    int limit = defaultLimit,
+    int limit = pageSize,
+    int emailOffset = 0,
+    int fileOffset = 0,
+    SearchResultType? onlySource,
   }) async {
-    final wantsEmails = _sourceWanted(query, SearchResultType.email);
-    final wantsFiles = _sourceWanted(query, SearchResultType.file);
+    final wantsEmails =
+        _sourceWanted(query, SearchResultType.email) &&
+        onlySource != SearchResultType.file;
+    final wantsFiles =
+        _sourceWanted(query, SearchResultType.file) &&
+        onlySource != SearchResultType.email;
 
     final match = _toMatchExpression(query.freeText);
 
@@ -44,17 +56,16 @@ class Bm25Retriever {
     final emails =
         emailWhere == null
             ? <SearchResult>[]
-            : await _searchEmails(emailWhere, match, limit);
+            : await _searchEmails(emailWhere, match, limit, emailOffset);
     final files =
         fileWhere == null
             ? <SearchResult>[]
-            : await _searchFiles(fileWhere, match, limit);
+            : await _searchFiles(fileWhere, match, limit, fileOffset);
 
     // Counted separately rather than inferred from the returned rows. A source
-    // that filled its LIMIT is indistinguishable from one that happened to
-    // return exactly that many, so deriving truncation from list length misses
-    // the case it exists for — a tag matching 1,100 photos returned exactly
-    // `limit` rows and reported itself complete.
+    // that filled its page is indistinguishable from one that happened to
+    // return exactly that many, and these totals are what every count in the
+    // UI reports.
     final emailTotal =
         emailWhere == null
             ? 0
@@ -71,16 +82,14 @@ class Bm25Retriever {
       ..sort((a, b) => b.score.compareTo(a.score));
     final page = merged.take(limit).toList();
 
-    // Counted over the page, not the pre-merge lists: the facet bar filters
-    // what was actually loaded, so counting anything else makes it promise
-    // rows that scrolling will never reach.
+    // Each cursor advances by however many rows of that source survived the
+    // merge — exactly what this page consumed from it.
     return SearchResults(
       results: page,
-      emailCount: page.where((r) => r.isEmail).length,
-      fileCount: page.where((r) => r.isFile).length,
       emailTotal: emailTotal,
       fileTotal: fileTotal,
-      truncated: emailTotal + fileTotal > page.length,
+      emailOffset: emailOffset + page.where((r) => r.isEmail).length,
+      fileOffset: fileOffset + page.where((r) => r.isFile).length,
     );
   }
 
@@ -174,6 +183,7 @@ class Bm25Retriever {
     _SourceFilter filter,
     String? match,
     int limit,
+    int offset,
   ) async {
     final where = [filter.sql];
     final params = filter.params;
@@ -188,9 +198,9 @@ class Bm25Retriever {
             JOIN emails e ON e.rowid = emails_fts.rowid
             WHERE emails_fts MATCH ? AND ${where.join(' AND ')}
             ORDER BY score ASC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             ''',
-              [match, ...params, limit],
+              [match, ...params, limit, offset],
             )
             : await db.select(
               '''
@@ -199,9 +209,9 @@ class Bm25Retriever {
             FROM emails e
             WHERE ${where.join(' AND ')}
             ORDER BY e.date DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             ''',
-              [...params, limit],
+              [...params, limit, offset],
             );
 
     return rows.map((row) {
@@ -273,6 +283,7 @@ class Bm25Retriever {
     _SourceFilter filter,
     String? match,
     int limit,
+    int offset,
   ) async {
     final where = [filter.sql];
     final params = filter.params;
@@ -288,9 +299,9 @@ class Bm25Retriever {
             JOIN files f ON f.rowid = files_fts.rowid
             WHERE files_fts MATCH ? AND ${where.join(' AND ')}
             ORDER BY score ASC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             ''',
-              [match, ...params, limit],
+              [match, ...params, limit, offset],
             )
             : await db.select(
               '''
@@ -299,9 +310,9 @@ class Bm25Retriever {
             FROM files f
             WHERE ${where.join(' AND ')}
             ORDER BY f.date_created DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             ''',
-              [...params, limit],
+              [...params, limit, offset],
             );
 
     return rows.map((row) {

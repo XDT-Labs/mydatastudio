@@ -1,43 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
 
-/// Which slice of an already-fetched result set is on screen.
+/// Which archive the result list is restricted to.
 enum SearchFacet { all, email, file }
 
-/// Applies [facet] to [results] in memory.
-///
-/// The counts on [SearchFacetBar] come from the same query that produced
-/// [results] ([SearchResults.emailCount]/[fileCount]), so switching facets
-/// only needs to re-slice what's already loaded — re-querying per facet
-/// would just re-derive numbers the result set already carries.
-List<SearchResult> filterResultsByFacet(
-  List<SearchResult> results,
-  SearchFacet facet,
-) {
+/// The source type [facet] restricts retrieval to, or null for everything.
+SearchResultType? sourceTypeForFacet(SearchFacet facet) {
   switch (facet) {
     case SearchFacet.all:
-      return results;
+      return null;
     case SearchFacet.email:
-      return results.where((r) => r.isEmail).toList();
+      return SearchResultType.email;
     case SearchFacet.file:
-      return results.where((r) => r.isFile).toList();
+      return SearchResultType.file;
   }
 }
 
 /// Type-count tabs above the result list: All / Emails / Photos & Files.
+///
+/// Counts are archive totals, not counts of what happens to be loaded. The
+/// list pages in as it scrolls, so every match is reachable and reporting the
+/// loaded subset would understate the archive to describe an implementation
+/// detail. Selecting a facet re-queries that source rather than slicing the
+/// loaded rows — otherwise "Photos & Files 1,134" could only ever show the
+/// few hundred already fetched alongside the mail.
 class SearchFacetBar extends StatelessWidget {
   const SearchFacetBar({
     super.key,
     required this.total,
-    required this.emailCount,
-    required this.fileCount,
+    required this.emailTotal,
+    required this.fileTotal,
     required this.selected,
     required this.onSelected,
   });
 
   final int total;
-  final int emailCount;
-  final int fileCount;
+  final int emailTotal;
+  final int fileTotal;
   final SearchFacet selected;
   final ValueChanged<SearchFacet> onSelected;
 
@@ -56,14 +55,14 @@ class SearchFacetBar extends StatelessWidget {
         ),
         _FacetChip(
           label: 'Emails',
-          count: emailCount,
+          count: emailTotal,
           facet: SearchFacet.email,
           selected: selected,
           onSelected: onSelected,
         ),
         _FacetChip(
           label: 'Photos & Files',
-          count: fileCount,
+          count: fileTotal,
           facet: SearchFacet.file,
           selected: selected,
           onSelected: onSelected,

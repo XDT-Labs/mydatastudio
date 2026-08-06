@@ -277,20 +277,20 @@ void main() {
 
       final results = await _search(db, 'sunset');
 
-      expect(results.emailCount, 1);
-      expect(results.fileCount, 1);
+      expect(results.emailTotal, 1);
+      expect(results.fileTotal, 1);
       expect(results.results.length, 2);
       await db.close();
     });
   });
 
   group('result limits and totals', () {
-    test('a source that fills its limit reports itself truncated', () async {
-      // The regression this exists for: `tag:nature` matched 1,100+ photos,
-      // returned exactly the limit, and reported truncated=false — because
-      // truncation was inferred from list length, and a list capped AT the
-      // limit is not longer THAN the limit. The banner warning the user they
-      // were seeing a slice never appeared, which is the one job it had.
+    test('a source that fills its page still reports the true total', () async {
+      // The regression this exists for: `tag:nature` matched 1,134 photos,
+      // returned exactly the limit, and reported itself complete — because
+      // the total was inferred from list length, and a list capped AT the
+      // limit is not longer THAN the limit. Totals now come from COUNT(*),
+      // which is also what the facet bar shows the user.
       final db = await _freshDb('bm25_truncation_test.db');
       for (var i = 0; i < 12; i++) {
         await _addFile(
@@ -306,12 +306,12 @@ void main() {
       ).search(QueryParser.parse('mountain'), limit: 5);
 
       expect(results.results.length, 5);
-      expect(results.truncated, isTrue);
-      expect(results.grandTotal, 12);
+      expect(results.total, 12);
+      expect(results.hasMore, isTrue);
       await db.close();
     });
 
-    test('a complete result set is not marked truncated', () async {
+    test('a fully-loaded result set reports no further pages', () async {
       final db = await _freshDb('bm25_not_truncated_test.db');
       for (var i = 0; i < 3; i++) {
         await _addFile(
@@ -326,15 +326,15 @@ void main() {
         db,
       ).search(QueryParser.parse('mountain'), limit: 5);
 
-      expect(results.truncated, isFalse);
-      expect(results.grandTotal, 3);
+      expect(results.hasMore, isFalse);
+      expect(results.total, 3);
       await db.close();
     });
 
-    test('facet counts describe the page, not the corpus', () async {
-      // Both sources can fill the limit independently, so the merged page
-      // holds a mix. Counting the pre-merge lists would have the facet bar
-      // promise rows that scrolling never reaches.
+    test('counts describe the archive, not the loaded page', () async {
+      // With infinite scroll every match is reachable, so reporting the loaded
+      // subset would understate the archive to describe an implementation
+      // detail. The user asked how many matches exist.
       final db = await _freshDb('bm25_facet_counts_test.db');
       for (var i = 0; i < 6; i++) {
         await _addEmail(db, id: 'e$i', from: 'a@x.com', subject: 'sunset');
@@ -351,9 +351,10 @@ void main() {
       ).search(QueryParser.parse('sunset'), limit: 4);
 
       expect(results.results.length, 4);
-      expect(results.emailCount + results.fileCount, 4);
-      // The corpus totals stay honest about everything that matched.
-      expect(results.grandTotal, 12);
+      // Loaded four; the counts still describe all twelve.
+      expect(results.total, 12);
+      expect(results.emailTotal, 6);
+      expect(results.fileTotal, 6);
       await db.close();
     });
 
@@ -369,7 +370,84 @@ void main() {
 
       expect(results.results.length, 2);
       expect(results.emailTotal, 9);
-      expect(results.truncated, isTrue);
+      expect(results.hasMore, isTrue);
+      await db.close();
+    });
+  });
+
+  group('pagination', () {
+    test('paging walks the whole match set exactly once', () async {
+      // The property that matters for infinite scroll: every match appears,
+      // and none appears twice. Per-source cursors are what make that hold —
+      // the two archives are ranked independently and merged, so one global
+      // offset would skip rows from whichever source lost the merge.
+      final db = await _freshDb('bm25_paging_walk_test.db');
+      for (var i = 0; i < 7; i++) {
+        await _addEmail(db, id: 'e$i', from: 'a@x.com', subject: 'sunset');
+      }
+      for (var i = 0; i < 8; i++) {
+        await _addFile(
+          db,
+          id: 'f$i',
+          name: 'sunset$i.jpg',
+          description: 'sunset',
+        );
+      }
+
+      final retriever = Bm25Retriever(db);
+      final parsed = QueryParser.parse('sunset');
+      final seen = <String>[];
+      var emailOffset = 0;
+      var fileOffset = 0;
+
+      for (var page = 0; page < 10; page++) {
+        final result = await retriever.search(
+          parsed,
+          limit: 4,
+          emailOffset: emailOffset,
+          fileOffset: fileOffset,
+        );
+        seen.addAll(result.results.map((r) => r.id));
+        emailOffset = result.emailOffset;
+        fileOffset = result.fileOffset;
+        if (!result.hasMore) break;
+      }
+
+      expect(seen.length, 15);
+      expect(seen.toSet().length, 15, reason: 'no result appears twice');
+      await db.close();
+    });
+
+    test('a cursor past the end returns nothing and reports no more', () async {
+      final db = await _freshDb('bm25_paging_end_test.db');
+      await _addFile(db, id: 'f1', name: 'a.jpg', description: 'sunset');
+
+      final result = await Bm25Retriever(
+        db,
+      ).search(QueryParser.parse('sunset'), limit: 10, fileOffset: 5);
+
+      expect(result.results, isEmpty);
+      // The total still describes the archive even when this page is empty.
+      expect(result.total, 1);
+      await db.close();
+    });
+
+    test('onlySource restricts retrieval to one archive', () async {
+      // What a facet selection does. Slicing the loaded page instead would cap
+      // "Photos & Files" at whatever fitted alongside the mail.
+      final db = await _freshDb('bm25_only_source_test.db');
+      await _addEmail(db, id: 'e1', from: 'a@x.com', subject: 'sunset');
+      await _addFile(db, id: 'f1', name: 'sunset.jpg', description: 'sunset');
+
+      final filesOnly = await Bm25Retriever(
+        db,
+      ).search(QueryParser.parse('sunset'), onlySource: SearchResultType.file);
+
+      expect(filesOnly.results.map((r) => r.id), ['f1']);
+      // The restricted total counts only that archive, so the facet's own
+      // number stays consistent once it is selected.
+      expect(filesOnly.total, 1);
+      expect(filesOnly.emailTotal, 0);
       await db.close();
     });
   });

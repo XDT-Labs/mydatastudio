@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/search/models/search_query.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
+import 'package:mydatastudio/modules/search/services/retrievers/bm25_retriever.dart';
 import 'package:mydatastudio/modules/search/services/search_service.dart';
 import 'package:mydatastudio/modules/search/widgets/search_facet_bar.dart';
 import 'package:mydatastudio/modules/search/widgets/search_filter_chips.dart';
@@ -26,12 +27,17 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   late final TextEditingController _controller;
+  final ScrollController _scrollController = ScrollController();
   StreamSubscription<SearchResults>? _resultsSub;
   StreamSubscription<bool>? _loadingSub;
 
   SearchResults _results = SearchResults.empty;
   bool _isLoading = false;
   SearchFacet _facet = SearchFacet.all;
+
+  /// Distance from the bottom at which the next page is requested. Far enough
+  /// ahead that the fetch usually lands before the user reaches the end.
+  static const _loadMoreThreshold = 600.0;
 
   /// The last query actually run (trimmed), distinct from what's currently
   /// typed. An empty value means "nothing has been searched yet" — the
@@ -43,15 +49,11 @@ class _SearchPageState extends State<SearchPage> {
     super.initState();
     _controller = TextEditingController(text: widget.initialQuery);
 
+    _scrollController.addListener(_onScroll);
+
     _resultsSub = SearchService.instance.sink.listen((results) {
       if (!mounted) return;
-      setState(() {
-        _results = results;
-        // A fresh result set invalidates whatever slice was picked for the
-        // previous one — staying on "Emails" after a query with zero emails
-        // would silently show an empty list under a non-empty facet bar.
-        _facet = SearchFacet.all;
-      });
+      setState(() => _results = results);
     });
     _loadingSub = SearchService.instance.isLoading.listen((loading) {
       if (mounted) setState(() => _isLoading = loading);
@@ -68,8 +70,30 @@ class _SearchPageState extends State<SearchPage> {
   void dispose() {
     _resultsSub?.cancel();
     _loadingSub?.cancel();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Requests the next page as the list nears its end.
+  ///
+  /// The service guards against re-entry, which matters because this fires on
+  /// every scroll frame — one flick past the threshold would otherwise queue a
+  /// page per frame and append each of them.
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (position.pixels < position.maxScrollExtent - _loadMoreThreshold) return;
+    if (!SearchService.instance.hasMore) return;
+    SearchService.instance.loadMore();
+  }
+
+  void _onFacetSelected(SearchFacet facet) {
+    setState(() => _facet = facet);
+    // Re-query rather than slice: the counts are archive totals, so choosing
+    // a facet has to be able to reach every one of them.
+    SearchService.instance.setSourceFilter(sourceTypeForFacet(facet));
   }
 
   void _runSearch(String rawQuery) {
@@ -155,7 +179,9 @@ class _SearchPageState extends State<SearchPage> {
   Widget _buildResults(BuildContext context) {
     final theme = Theme.of(context);
     final lastQuery = SearchService.instance.lastQuery;
-    final filtered = filterResultsByFacet(_results.results, _facet);
+    // The service already restricted retrieval to the selected facet, so what
+    // arrived is what belongs on screen.
+    final filtered = _results.results;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -172,23 +198,14 @@ class _SearchPageState extends State<SearchPage> {
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
           child: SearchFacetBar(
             total: _results.total,
-            emailCount: _results.emailCount,
-            fileCount: _results.fileCount,
+            emailTotal: _results.emailTotal,
+            fileTotal: _results.fileTotal,
             selected: _facet,
-            onSelected: (facet) => setState(() => _facet = facet),
+            onSelected: _onFacetSelected,
           ),
         ),
-        if (_results.truncated)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-            child: Text(
-              'Showing the first ${_results.results.length} '
-              'of ${_results.grandTotal} matches',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.tertiary,
-              ),
-            ),
-          ),
+        // No "showing the first N of M" line: the facet counts already state
+        // the real totals, and the list reaches all of them as it scrolls.
         Expanded(
           child:
               filtered.isEmpty
@@ -201,8 +218,10 @@ class _SearchPageState extends State<SearchPage> {
                     ),
                   )
                   : ListView.separated(
+                    controller: _scrollController,
                     padding: const EdgeInsets.only(bottom: 16),
-                    itemCount: filtered.length,
+                    // One extra row for the paging footer.
+                    itemCount: filtered.length + 1,
                     separatorBuilder:
                         (_, _) => Divider(
                           height: 1,
@@ -210,9 +229,16 @@ class _SearchPageState extends State<SearchPage> {
                             alpha: 0.3,
                           ),
                         ),
-                    itemBuilder:
-                        (context, index) =>
-                            SearchResultTile(result: filtered[index]),
+                    itemBuilder: (context, index) {
+                      if (index == filtered.length) {
+                        return _PagingFooter(
+                          hasMore: SearchService.instance.hasMore,
+                          loadedCount: filtered.length,
+                          total: _results.total,
+                        );
+                      }
+                      return SearchResultTile(result: filtered[index]);
+                    },
                   ),
         ),
       ],
@@ -340,6 +366,59 @@ class _EmptyResultsView extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The row below the last result: a spinner while the next page loads, or a
+/// quiet end-of-list marker once everything has been fetched.
+///
+/// The end marker states the count so a long scroll ends with confirmation
+/// that the list really is complete, rather than just stopping.
+class _PagingFooter extends StatelessWidget {
+  const _PagingFooter({
+    required this.hasMore,
+    required this.loadedCount,
+    required this.total,
+  });
+
+  final bool hasMore;
+  final int loadedCount;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    if (hasMore) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    // Nothing to say when everything fits on one page — the list speaks for
+    // itself and a footer would just be furniture.
+    if (loadedCount >= total && total <= Bm25Retriever.pageSize) {
+      return const SizedBox(height: 8);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: Center(
+        child: Text(
+          'All $total results',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ),
     );

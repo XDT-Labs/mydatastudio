@@ -73,3 +73,7 @@ analyzer_output.txt
 test*.txt
 *.db
 aiserver/aichat.egg-info/
+
+# Test-run artifacts: flutter test mocks path_provider to the CWD,
+# so every run that opens a real AppDatabase drops a .db here.
+client/data/
