@@ -293,6 +293,47 @@ void main() {
     await db.close();
   });
 
+  test('"photos" in the query excludes mail rather than ranking it', () async {
+    // Reported from real use: "white dog photos" returned marketing email
+    // interleaved with the dog pictures. The word names the kind of thing
+    // wanted, so it has to constrain — ranking mail lower still leaves it in
+    // the list, and a reranker cannot fix a result set that should not have
+    // contained mail in the first place.
+    //
+    // The email vectors here beat every photo on raw cosine, so nothing but a
+    // hard exclusion keeps them out.
+    final db = await _freshDb('hybrid_modality_word_test.db');
+    await _addCollection(db, 'c1', 'file.local');
+    await _addFile(
+      db,
+      id: 'dog',
+      description: 'a white dog',
+      vector: _vector(0),
+    );
+    for (var i = 0; i < 5; i++) {
+      await db.rawDb.execute(
+        'INSERT INTO emails (id, collection_id, date, "from", "to", subject, '
+        "plain_body, has_attachments, is_deleted) VALUES (?, 'c1', ?, "
+        "'ads@shop.com', 'me@x.com', 'wallpaper photos sale', "
+        "'white dog photos', 0, 0)",
+        ['mail$i', _recent],
+      );
+      await db.rawDb.execute(
+        'INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding) '
+        'VALUES (?, vector_as_f32(?))',
+        ['mail$i', '[${_vector(0, lean: 0.99).join(',')}]'],
+      );
+    }
+
+    final results = await _service(
+      _vector(0),
+    ).invoke(SearchCommand('white dog photos', db));
+
+    expect(results.results.every((r) => r.isFile), isTrue);
+    expect(results.emailTotal, 0);
+    await db.close();
+  });
+
   test('an unavailable embedder leaves lexical search untouched', () async {
     // Degrading is fine; breaking is not. With the AI subprocess down this has
     // to behave exactly like the lexical-only search that shipped before it.

@@ -104,7 +104,16 @@ class _SearchPageState extends State<SearchPage> {
       // successful submit will pick it up.
       return;
     }
-    SearchService.instance.invoke(SearchCommand(rawQuery, database));
+    // The selected facet rides along. Without it a new query ran unrestricted
+    // while the chip stayed lit, so "Photos & Files" could sit highlighted
+    // above a list of mail — the UI claiming a filter it was not applying.
+    SearchService.instance.invoke(
+      SearchCommand(
+        rawQuery,
+        database,
+        sourceFilter: sourceTypeForFacet(_facet),
+      ),
+    );
   }
 
   void _onSubmitted(String value) {

@@ -112,6 +112,7 @@ class QueryParser {
       i = k;
     }
 
+    _consumeModalityWords(filters, textWords);
     _consumeBareYear(filters, textWords);
 
     return ParsedQuery(
@@ -201,6 +202,89 @@ class QueryParser {
     }
 
     return null;
+  }
+
+  /// Words that name a kind of thing rather than describe one, and the
+  /// `type:` value each resolves to.
+  ///
+  /// Deliberately narrow. These are nouns whose *only* ordinary reading in a
+  /// search box is "show me this kind of item" — nobody searching "photos"
+  /// wants a mail thread that mentions the word. Words like "document",
+  /// "file" and "message" are left out precisely because they do read as
+  /// ordinary content: "the document you sent" is a description of an email,
+  /// not a request to filter by type. Those stay available as explicit
+  /// `type:document` filters.
+  static const _modalityWords = {
+    'photo': 'image',
+    'photos': 'image',
+    'picture': 'image',
+    'pictures': 'image',
+    'pic': 'image',
+    'pics': 'image',
+    'image': 'image',
+    'images': 'image',
+    'video': 'video',
+    'videos': 'video',
+    'email': 'email',
+    'emails': 'email',
+    'mail': 'email',
+  };
+
+  /// Promotes "photos"/"emails"/... in free text to the `type:` filter the
+  /// user plainly meant, and drops the word from the text.
+  ///
+  /// "white dog photos" should not rank mail below photos, it should exclude
+  /// it — the word is a statement about *what kind of thing* to return, and
+  /// treating it as a ranking term instead let marketing email that happened
+  /// to contain "photos" sit among the results. This is the same promotion
+  /// [_consumeBareYear] does for a year, for the same reason: the user
+  /// expressed a constraint in the words they already knew.
+  ///
+  /// Dropping the word from the text is what makes the rest of the query
+  /// stronger, not weaker. "photos" matches almost nothing useful lexically,
+  /// and leaving it in would also drag the vector query away from "white dog"
+  /// — the part that actually describes the picture.
+  ///
+  /// Skipped entirely when the query already carries an explicit `type:`,
+  /// which is the user being specific and should not be second-guessed.
+  static void _consumeModalityWords(
+    List<QueryFilter> filters,
+    List<String> textWords,
+  ) {
+    if (filters.any((f) => f.field == FilterField.type)) return;
+
+    // A filter that already pins the source wins outright, because promoting
+    // against it produces a query nothing can satisfy: `from:` excludes files
+    // (there is no sender on a file) while `type:image` excludes mail, so
+    // "photos from bob" would return zero rows rather than bob's mail. A
+    // guess must never be able to empty a result set an explicit filter was
+    // going to fill.
+    const sourcePinning = {
+      FilterField.from,
+      FilterField.to,
+      FilterField.cc,
+      FilterField.has,
+      FilterField.is_,
+      FilterField.tag,
+      FilterField.near,
+    };
+    if (filters.any((f) => sourcePinning.contains(f.field))) return;
+
+    // Every distinct kind named is kept, so "photos and videos" widens to both
+    // rather than resolving to whichever came first.
+    final found = <String>{};
+    textWords.removeWhere((word) {
+      final type = _modalityWords[word.toLowerCase()];
+      if (type == null) return false;
+      found.add(type);
+      return true;
+    });
+
+    // A query that was *only* modality words ("photos") still means something
+    // — browse every photo — so the filter is kept even with no text left.
+    for (final type in found) {
+      filters.add(QueryFilter(field: FilterField.type, value: type));
+    }
   }
 
   /// A standalone 4-digit word in free text implies an `after`/`before`

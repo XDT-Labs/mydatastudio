@@ -119,6 +119,8 @@ void main() {
 
   group('QueryParser.parse - bare year in free text', () {
     test('standalone 4-digit year becomes an implicit after/before range', () {
+      // "pictures" is promoted to type:image and leaves the text — see the
+      // modality group below. What remains is the year handling under test.
       final result = QueryParser.parse('party pictures from 2026');
       expect(
         result.filtersFor(FilterField.after).single.dateValue,
@@ -130,7 +132,7 @@ void main() {
       );
       // Only the year token is removed - "from" is an English word here,
       // not a field name, and must stay in the free text.
-      expect(result.freeText, 'party pictures from');
+      expect(result.freeText, 'party from');
     });
 
     test(
@@ -147,7 +149,9 @@ void main() {
           ),
         ]);
         expect(result.filtersFor(FilterField.before), isEmpty);
-        expect(result.freeText, 'pictures 2026');
+        // "pictures" has become type:image by this point, so only the
+        // untouched year is left in the text.
+        expect(result.freeText, '2026');
       },
     );
 
@@ -164,6 +168,91 @@ void main() {
       final result = QueryParser.parse('model 3050');
       expect(result.hasFilters, isFalse);
       expect(result.freeText, 'model 3050');
+    });
+  });
+
+  group('QueryParser.parse - modality words in free text', () {
+    test('"photos" constrains to images instead of ranking', () {
+      // Reported from real use: "white dog photos" put marketing email among
+      // the photos, because "photos" was only a ranking term and any message
+      // containing the word competed for the top. It is not a description of
+      // the thing wanted, it is a statement of what kind of thing to return.
+      final result = QueryParser.parse('white dog photos');
+
+      expect(result.filtersFor(FilterField.type), [
+        const QueryFilter(field: FilterField.type, value: 'image'),
+      ]);
+      // Dropped from the text on purpose: it matches nothing useful lexically
+      // and would drag the vector query away from "white dog", which is the
+      // part that actually describes the picture.
+      expect(result.freeText, 'white dog');
+    });
+
+    test('every spelling of the same modality resolves alike', () {
+      for (final word in ['photo', 'pictures', 'pics', 'images']) {
+        final result = QueryParser.parse('beach $word');
+        expect(
+          result.filtersFor(FilterField.type).single.value,
+          'image',
+          reason: '"$word" should name the image modality',
+        );
+        expect(result.freeText, 'beach');
+      }
+    });
+
+    test('naming two kinds widens to both rather than picking one', () {
+      final result = QueryParser.parse('vacation photos videos');
+      expect(result.filtersFor(FilterField.type).map((f) => f.value).toSet(), {
+        'image',
+        'video',
+      });
+      expect(result.freeText, 'vacation');
+    });
+
+    test('a query that is only a modality word still filters', () {
+      // "photos" alone is a legitimate browse of every photo, so the filter
+      // survives even with nothing left to rank by.
+      final result = QueryParser.parse('photos');
+      expect(result.filtersFor(FilterField.type).single.value, 'image');
+      expect(result.freeText, isEmpty);
+      expect(result.hasFilters, isTrue);
+    });
+
+    test('an explicit type: is never second-guessed', () {
+      final result = QueryParser.parse('type:pdf photos');
+      expect(result.filtersFor(FilterField.type), [
+        const QueryFilter(field: FilterField.type, value: 'pdf'),
+      ]);
+      expect(result.freeText, 'photos');
+    });
+
+    test('a filter that pins the source suppresses the guess entirely', () {
+      // The guess must never be able to empty a result set an explicit filter
+      // was going to fill. `from:` excludes files outright (a file has no
+      // sender) and `type:image` excludes mail, so promoting here would make
+      // "photos from bob" match nothing at all.
+      final result = QueryParser.parse('from:bob@x.com landscape photos');
+      expect(result.filtersFor(FilterField.type), isEmpty);
+      expect(result.freeText, 'landscape photos');
+
+      final tagged = QueryParser.parse('tag:nature emails');
+      expect(tagged.filtersFor(FilterField.type), isEmpty);
+      expect(tagged.freeText, 'emails');
+    });
+
+    test('ordinary content words are left alone', () {
+      // "document", "file" and "message" read as descriptions of content at
+      // least as often as requests to filter — "the document you sent" is
+      // about an email, not a demand for PDFs.
+      final result = QueryParser.parse('the document you sent');
+      expect(result.filtersFor(FilterField.type), isEmpty);
+      expect(result.freeText, 'the document you sent');
+    });
+
+    test('matching is case-insensitive', () {
+      final result = QueryParser.parse('Family Pictures');
+      expect(result.filtersFor(FilterField.type).single.value, 'image');
+      expect(result.freeText, 'Family');
     });
   });
 
