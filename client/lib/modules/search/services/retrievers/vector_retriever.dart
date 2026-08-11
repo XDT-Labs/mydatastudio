@@ -1,6 +1,6 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/search/models/search_query.dart';
@@ -65,10 +65,69 @@ class VectorRetriever {
 
   VectorRetriever(this.db, this.embed);
 
-  /// Candidates returned per source. Deep enough that rank fusion has real
-  /// material to work with, shallow enough that nothing past it would have
-  /// survived fusion anyway.
-  static const candidateLimit = 300;
+  /// Ceiling on candidates returned per source — a guard against unbounded
+  /// memory, not the relevance gate. [similarityFloorRatio] is the gate.
+  ///
+  /// It has to be a ceiling rather than a cap, because `SearchService` holds
+  /// the whole fused list and pages *within* it: whatever is dropped here is
+  /// not "page two", it is unreachable. At 300 an archive holding 1,200 real
+  /// matches could surface only a quarter of them, and nothing would tell the
+  /// user the rest existed.
+  ///
+  /// Raising it is close to free. Mode A has already read and scored up to
+  /// [modeACandidateCap] blobs before this applies, so a larger slice costs no
+  /// extra I/O. Mode B passes it to `vector_full_scan`, which computes a
+  /// distance for every row regardless — the bound only limits how many
+  /// `(rowid, distance)` pairs come back, and no blobs travel with them.
+  static const candidateLimit = 2000;
+
+  /// How far above its modality's *background* similarity a hit must score to
+  /// survive, as a fraction of the distance from that background to the best
+  /// hit. The floor is `median + ratio * (best - median)`.
+  ///
+  /// The baseline is the whole point, and anchoring at zero instead was a real
+  /// bug. Cosine has no meaningful origin here: a text query scores every
+  /// email somewhat highly simply because both sides are text. Measured on
+  /// this archive, the *median* email scores 0.334 against an arbitrary query
+  /// while the median photo scores 0.205. So `0.75 * best` is genuinely
+  /// selective for photographs and barely above ordinary for mail — searching
+  /// `white dog` kept 31 emails, of which one was about dogs and the rest were
+  /// "Today is the day!", "Happy 4/20!" and a run of word-trivia newsletters.
+  /// Recentred on the median it keeps exactly the one about dogs.
+  ///
+  /// It sharpens real mail queries rather than trading them away:
+  /// `flight confirmation` goes from 310 emails to 6, and those 6 are the
+  /// eTickets.
+  ///
+  /// Fixing this in the retriever matters more than it looks, because
+  /// `HybridRanker` fuses each modality as its own ranked list: whatever
+  /// survives here becomes rank 1 of `vector_email` and is therefore fused as
+  /// an equal of the best photograph, however irrelevant it is.
+  ///
+  /// Which is also the limit of what this can do. The floor is derived from
+  /// the modality's own best hit, so a modality always contributes *something*
+  /// — it cannot recognise that it has nothing to say. That is not a gap
+  /// waiting on a better statistic: measured across six queries,
+  /// `(top - median) / (p90 - median)` for mail ranged 2.33 to 4.76 and was
+  /// **highest** on the queries where mail was least relevant, so the shape of
+  /// the distribution does not reveal whether the top hit means anything.
+  /// Keeping the residual one or two out of the first page is a ranking
+  /// concern, not a retrieval one.
+  static const similarityFloorRatio = 0.75;
+
+  /// Below this many candidates the floor is not applied at all.
+  ///
+  /// The floor reads the median as an estimate of "what this query scores
+  /// against nothing in particular", and that estimate is only meaningful when
+  /// most of the sample *is* nothing in particular. On a handful of candidates
+  /// the median is one of the answers: at three hits the median is the second,
+  /// so the floor lands above it and every search returns exactly one result.
+  ///
+  /// It also keeps the floor away from the case it reasons badly about — a
+  /// selective filter, where the candidate set is already all relevant and
+  /// there is no background to stand out from. `tag:nature` narrowing to a
+  /// dozen photos should show a dozen photos.
+  static const minimumCandidatesForFloor = 50;
 
   /// Ceiling on rows read in Mode A.
   ///
@@ -246,7 +305,7 @@ class VectorRetriever {
       for (final entry in best.entries)
         VectorHit(type: type, id: entry.key, similarity: entry.value),
     ]..sort((a, b) => b.similarity.compareTo(a.similarity));
-    return hits.take(limit).toList();
+    return floorAndCap(hits, limit);
   }
 
   /// Mode B: the extension already ranked these; collapse duplicates and map
@@ -270,7 +329,51 @@ class VectorRetriever {
       for (final entry in best.entries)
         VectorHit(type: type, id: entry.key, similarity: entry.value),
     ]..sort((a, b) => b.similarity.compareTo(a.similarity));
-    return hits.take(limit).toList();
+    return floorAndCap(hits, limit);
+  }
+
+  /// Drops hits that do not stand far enough above the background, then
+  /// applies the ceiling.
+  ///
+  /// [hits] must already be sorted best-first and hold a single modality.
+  /// Both the best score and the median are read from it, so mixing sources
+  /// here would measure photographs against a scale set by mail — the failure
+  /// `HybridRanker`'s split vector lists exist to prevent. Each caller handles
+  /// one [SearchResultType], which is what satisfies this.
+  ///
+  /// The median is taken over what was retrieved rather than over the table.
+  /// In Mode A that is the whole filtered candidate set, so it is the real
+  /// median. In Mode B it is the top N the extension returned; while N covers
+  /// the corpus — it does today, at 2,000 against ~4,700 file and ~1,300 email
+  /// vectors, because the ceiling exceeds both — that is also the real median.
+  /// Past that point the sample skews high, which biases the floor *upward*
+  /// and prunes harder. §12's 50k tripwire is where that starts to matter.
+  ///
+  /// A spread of zero or less means every candidate scored alike and there is
+  /// no signal to separate: scaling would then invert the comparison, since
+  /// 0.75 of a negative number is larger than the number. The floor is skipped
+  /// in that case and the ceiling alone applies.
+  @visibleForTesting
+  static List<VectorHit> floorAndCap(List<VectorHit> hits, int limit) {
+    if (hits.isEmpty) return const [];
+    if (hits.length < minimumCandidatesForFloor) {
+      return hits.take(limit).toList();
+    }
+
+    final best = hits.first.similarity;
+    final baseline = hits[hits.length ~/ 2].similarity;
+    final spread = best - baseline;
+    if (spread <= 0) return hits.take(limit).toList();
+
+    final floor = baseline + spread * similarityFloorRatio;
+    final kept = <VectorHit>[];
+    for (final hit in hits) {
+      // Sorted, so the first hit below the floor ends it.
+      if (hit.similarity < floor) break;
+      kept.add(hit);
+      if (kept.length == limit) break;
+    }
+    return kept;
   }
 
   /// Reads a stored vector without copying it.

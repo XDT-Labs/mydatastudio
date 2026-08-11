@@ -703,3 +703,256 @@ Two consequences worth accepting up front:
 Stating that unambiguously because §11 originally recommended deferring it and shipping landmarks first. That recommendation is **withdrawn**: the measured landmark data is famous structures (Colosseum, Versailles, Neuschwanstein), containing no towns or regions, so a landmarks-only `near:` cannot answer `near:banff` — the spec's own example. Landmarks are a useful *secondary* source, not a substitute.
 
 Phase 3 ships both sources: `places` (step 1, primary) and `file_landmarks` (step 2, secondary). Gazetteer import is a one-time asset load alongside the FTS5 backfill.
+
+---
+
+## 15. As-built — the retrieval and ranking pipeline
+
+Written after Phases 1–3 shipped. **Where this section and §§4–5 disagree, this
+one is correct**: those describe intent, this describes what the code does and
+why the constants hold the values they do. Every number below was measured
+against the dev archive (2,338 photo-description vectors, 2,373 image vectors,
+1,279 email vectors), not chosen by feel.
+
+### 15a. The pipeline, end to end
+
+```
+raw query
+  │
+  ├─ QueryParser.parse ......... query_parser.dart
+  │     filters (type:, tag:, from:, after:, near:, is:)
+  │     modality words stripped from free text -> preferredTypes
+  │     bare years, quoted phrases, near: radius
+  │
+  ├─ Bm25Retriever.search ...... retrievers/bm25_retriever.dart
+  │     files_fts + emails_fts, FTS5 implicit AND
+  │     ONE merged list, files and emails interleaved by score
+  │     paged; own cursor per source
+  │
+  ├─ VectorRetriever.search .... retrievers/vector_retriever.dart
+  │     QueryEmbedder -> POST /util/embedding (Qwen3-VL, 2048-d)
+  │     Mode A (filters) | Mode B (no filters)
+  │     per modality: dedupe by id -> sort -> floorAndCap
+  │
+  ├─ HybridRanker.fuse ......... hybrid_ranker.dart
+  │     RankFusion.fuse over THREE lists: bm25, vector_file, vector_email
+  │     then ResultRanking.adjust as multipliers, then re-sort
+  │
+  └─ SearchService ............. search_service.dart
+        holds the whole fused list in _ranked; _sliceRanked pages within it
+```
+
+**The single most important structural fact:** `SearchService` pages *within*
+the fused list. Anything a retriever drops is not "page two" — it is
+unreachable, and nothing tells the user it existed. Every limit in the vector
+path is therefore a ceiling on total recall, not a page size.
+
+### 15b. Every tunable constant, and why it is what it is
+
+| Constant | Value | File | Why |
+|---|---|---|---|
+| `RankFusion.k` | 60 | `rank_fusion.dart:14` | Standard RRF default. Ranks are stored **0-based** (`FusedRank.ranks` = "how many beat this one") and converted with `+ 1` at the one place it matters. Scoring off the stored value hands the top result `1/k` instead of `1/(k+1)` — the classic RRF bug. |
+| `HybridRanker.retrieverWeights` | all 1.0 | `hybrid_ranker.dart:23` | Flat on purpose — weighting before real usage data just encodes a guess. |
+| `SearchService.fusionWindow` | 500 | `search_service.dart:39` | Lexical rows entering fusion. |
+| `VectorRetriever.candidateLimit` | 2000 | `vector_retriever.dart:82` | Memory **ceiling**, not the relevance gate. Was 300; see 15d. |
+| `VectorRetriever.similarityFloorRatio` | 0.75 | `vector_retriever.dart:116` | Fraction of the *background-to-best* span a hit must clear. See 15e. |
+| `VectorRetriever.minimumCandidatesForFloor` | 50 | `vector_retriever.dart:130` | Below this the median *is* one of the answers. See 15e. |
+| `VectorRetriever.modeACandidateCap` | 4000 | `vector_retriever.dart:140` | ~32 MB of blobs — where reading them stops being free. |
+| `ResultRanking.tierMultiplier` | 1.5 / 1.2 / 1.0 / 0.8 | `result_ranking.dart:30` | Unchanged from §5b. |
+| recency decay | `1/(1+ln(1+age/365))`, floored **0.75** | `result_ranking.dart` | The floor is load-bearing: without it a 2009 photo cannot outrank recent marketing mail. |
+| `ResultRanking.modalityPreferenceBoost` | **3.0** | `result_ranking.dart:93` | Was 1.4, which could not overcome double-listing. See 15f. |
+| `EmbeddingModel.revision` | 2 | `services/embedding_model.dart:33` | Bump on anything that changes what a vector *means*. See 15g. |
+
+### 15c. Filters constrain, never rank
+
+The load-bearing invariant, shared by both retrievers through `SearchFilters`
+(`search_filters.dart`). A row failing a filter must be **absent**, not merely
+lower. `is_inline = 1` and `is_deleted = 1` are excluded everywhere, including
+inside Mode B's post-scan `WHERE` — `vector_full_scan` cannot be pre-filtered,
+so dropping that clause as "no filters means no clause" silently fills results
+with newsletter logos.
+
+Modality words are the deliberate exception, and the distinction is subtle:
+
+- `type:image` (explicit) — a **filter**. Nothing else comes back.
+- `"family photos"` — a **preference**. `QueryParser._extractModality` strips
+  `photos` from the free text and records `preferredTypes = {image}`.
+- `"photos"` alone, with nothing left after stripping — promoted to a real
+  `type:` filter, because a bare modality word is a browse.
+
+Stripping the word from the free text is not cosmetic. FTS5 ANDs its terms, and
+an AI image description never contains the word "photos", so leaving it in
+excluded exactly the photographs being searched for.
+
+**This has a consequence worth remembering when reading measurements:** the app
+never searches the string the user typed. `"Family Photos"` is searched as
+`family`. Any benchmark run against the literal typed string is measuring a
+query that never executes.
+
+### 15d. Why `candidateLimit` is a ceiling, not a cap
+
+At 300 it silently truncated real results. Measured: `snow mountains` clears the
+floor on 481 photos and every one is on topic — 1,035 of 2,338 descriptions
+mention mountains or snow — so a cap of 300 discarded 181 correct answers with
+no indication they existed.
+
+Raising it is close to free:
+
+- **Mode A** has already read and scored up to `modeACandidateCap` blobs before
+  the limit applies. A larger slice costs no extra I/O.
+- **Mode B** passes `limit * 5` (files) or `limit * 2` (emails) to
+  `vector_full_scan`, which computes a distance for **every** row regardless.
+  The bound only limits how many `(rowid, distance)` pairs come back; no blobs
+  travel with them.
+
+The `* 5` over-fetch is not slack — a file carries both an image vector and a
+description vector, and both compete for slots in the raw top-N before
+deduplication collapses them.
+
+### 15e. The similarity floor
+
+`floorAndCap` (`vector_retriever.dart`), applied **per modality**, inside each
+of `_rankInDart` (Mode A) and `_rankFromDistance` (Mode B):
+
+```
+baseline = median(retrieved similarities)
+floor    = baseline + similarityFloorRatio * (best - baseline)
+```
+
+Three properties, each of which was a bug before it was a rule:
+
+**1. Relative, not absolute.** Cosine's usable range moves with the query. 0.51
+was right for `white dog` and returns nothing for a vaguer one.
+
+**2. Recentred on the median, not on zero.** Cosine has no meaningful origin
+here. A text query scores *every* email somewhat highly because both sides are
+text — the median email scores **0.334** against an arbitrary query where the
+median photo scores **0.205**. Anchored at zero, `0.75 * best` is genuinely
+selective for photographs and barely above ordinary for mail:
+
+| query | emails kept, zero-anchored | recentred |
+|---|---|---|
+| `white dog` | 31 (one about dogs; rest "Happy 4/20!", word-trivia) | **1** |
+| `family` | 143 | **2** |
+| `flight confirmation` | 310 | **6** (the actual eTickets) |
+
+**3. Per modality, never global.** Text-vs-text reaches ~0.51 here while
+text-vs-image tops out ~0.36. A single floor taken from the best email sits
+above *every* photograph — the exact failure `HybridRanker`'s split vector
+lists exist to prevent, reintroduced one layer down. `similarity_floor_test.dart`
+asserts this directly.
+
+**Guard:** below `minimumCandidatesForFloor` the floor is skipped entirely. The
+median only estimates a background when most of the sample *is* background; at
+three hits the median is the second one, and every search returned exactly one
+result. It also keeps the floor away from the case it reasons badly about — a
+selective filter, where the candidate set is already all relevant.
+
+**Known limits, measured, not hypothetical:**
+
+- *A modality cannot detect that it has nothing to say.* The floor derives from
+  that modality's own best hit, so something always survives. This is not
+  waiting on a cleverer statistic: `(top-median)/(p90-median)` for mail ranged
+  **2.33 – 4.76** across six queries and was **highest** where mail was least
+  relevant. The distribution does not reveal whether the top hit means
+  anything. In practice the residual is 1–3 emails and at least loosely on
+  topic.
+- *It costs recall when the archive is dense in the topic.* `snow mountains`
+  went 481 → 107 kept, because a median dragged upward by 1,035 mountain photos
+  raises the floor against the very photos wanted. **If this becomes the
+  complaint, move the baseline from the median to the 25th percentile** — a
+  one-line change in `floorAndCap`.
+- *The median is taken over what was retrieved, not the table.* Mode A sees the
+  whole filtered set, so it is exact. Mode B sees the top N; while N covers the
+  corpus (it does today — 2,000 against ~4,700 file and ~1,300 email vectors)
+  it is also exact. Past that the sample skews high, biasing the floor
+  **upward** and pruning harder. §12's 50k tripwire is where that starts.
+
+### 15f. Fusion, and the double-listing trap
+
+`RankFusion.fuse` **adds** contributions; nothing overrides anything:
+
+```
+score(d) = Σ_lists  weight / (k + rank_in_that_list)
+```
+
+The three lists are `bm25` (one merged list holding **both** files and emails),
+`vector_file`, and `vector_email`. Mail and photos get separate vector lists
+because cross-modal similarity is structurally lower — ranked in one list by raw
+similarity, mail displaces photos regardless of relevance, and a search for
+family pictures fills with marketing email.
+
+A row present in two lists collects from both, and that is where the last bug
+lived. Searching `family`:
+
+- 107 emails contain the word; only **7 of 2,338 files** do.
+- The top marketing email was in `bm25` **and** `vector_email` → `1/61 + 1/61 = 0.033`.
+- A family photograph, found only by the vector pass because its description
+  does not contain "family", tops out at `1/61 = 0.016`.
+
+A 2× structural gap that a 1.4× preference could not close — the email was
+winning on being double-counted, not on relevance. `modalityPreferenceBoost` is
+now **3.0**, sized against that worst case: the 11th and last surviving photo,
+personal-archive tier, old enough to take the full recency floor, scores
+`1/71 * 3.0 * 1.2 * 0.75 = 0.038` and clears 0.033.
+
+It remains a **preference, not a block sort** — an explicit product decision.
+The multiplier scales the fused score, so it lifts the whole photo list without
+flattening it, and a genuinely weak photograph stays weak: that same email still
+beats a photo at vector rank 300 (0.0075). The same boost is applied in
+`Bm25Retriever`'s lexical-only path so the ordering survives the AI subprocess
+being down.
+
+**Ordering note:** similarity does not survive to the final sort. It decides a
+hit's rank *within its own retriever*; RRF converts rank to score and the value
+is discarded. The final `ranked.sort` is on `RRF × tier × recency × modality`.
+Past roughly rank 30 the multipliers, not relevance, decide local ordering — a
+curated photo at rank 100 beats a received attachment at rank 240. Bounded, not
+inverted.
+
+### 15g. Embedding provenance
+
+Every vector records the pipeline that produced it in `model_version`
+(`EmbeddingModel.current`, e.g. `Qwen/Qwen3-VL-Embedding-2B@2`). The embedding
+isolates treat anything else — including the `NULL` an existing row gets when
+the column is added — as work to redo, so **adding the column is the
+migration**. No manual DELETE, no way to forget.
+
+This exists because of a silent catastrophe: `AutoModel.from_pretrained`
+resolved to a class the checkpoint does not declare, discarding **625
+language-model tensors** and randomly initialising them. Every vector was noise;
+cosine over two incompatible spaces returns plausible numbers rather than an
+error, so nothing downstream could detect it. Fixed in `7ac9c99`
+(`AutoModelForImageTextToText` + a hard failure on missing keys). Verified after
+rebuild: a stored description vector against a freshly computed one scores
+**1.0000**, where it had been −0.02.
+
+**Bump `EmbeddingModel.revision` for anything that changes what a vector
+means** — a different checkpoint, different pooling, a new prompt template,
+another loader fix. Description vectors are rebuilt before image vectors
+deliberately: text costs ~0.28 s against ~3.8 s, and the description vector is
+the stronger signal for a text query, beating the image vector on **44 of 45**
+photos measured.
+
+### 15h. Where to start when this misbehaves
+
+| Symptom | Look here first |
+|---|---|
+| Irrelevant results of the *right* kind (swans for "white dog") | `similarityFloorRatio` — raise it, or move the baseline to p25 |
+| Too few results; known matches missing | `minimumCandidatesForFloor`, then the floor's dense-topic recall loss (15e) |
+| Results capped at a suspiciously round number | `candidateLimit`, and remember `_ranked` pages within itself |
+| Mail intruding on a photo query | 15f — check whether the offender is double-listed before touching the floor |
+| Photos not leading a "photos" query | `modalityPreferenceBoost`; confirm `QueryParser` actually set `preferredTypes` |
+| A modality vanishing entirely | The floor must be per-modality. This is what `similarity_floor_test.dart` guards |
+| Everything semantically wrong | `model_version` — check for `NULL` rows and unstamped vectors |
+| `near:` silently doing nothing | The gazetteer asset. Import fails **open**; `pubspec.dev.yaml` is the source of truth, since the launch task regenerates `pubspec.yaml` from it |
+
+**Measurement discipline:** benchmark the string the parser produces, not the
+string the user typed (15c), and score each modality separately — a mixed list
+sorted by raw similarity says more about which encoder produced a vector than
+about relevance.
+
+Tests: `client/test/modules/search/` — `similarity_floor_test.dart` (the floor,
+including the per-modality trap), `vector_retriever_test.dart` (both modes),
+`hybrid_search_test.dart` (fusion, tiers, pagination totals),
+`rank_fusion_test.dart`, `result_ranking_test.dart`, `query_parser_test.dart`.

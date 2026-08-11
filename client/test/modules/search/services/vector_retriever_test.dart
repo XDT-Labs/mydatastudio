@@ -183,6 +183,11 @@ void main() {
         _embedder(_vector(0)),
       ).search(QueryParser.parse('tag:nature sunset'));
 
+      // All three survive: three candidates is below
+      // `minimumCandidatesForFloor`, so the similarity floor does not apply.
+      // A median taken over three answers is one of the answers, and a filter
+      // this narrow has already done the excluding. What the floor does on a
+      // real candidate set is covered in similarity_floor_test.
       expect(hits.map((h) => h.id), ['near', 'mid', 'far']);
       expect(hits.first.similarity, closeTo(1.0, 1e-5));
       await db.close();
@@ -290,6 +295,8 @@ void main() {
       ).search(QueryParser.parse('sunset'));
 
       expect(hits.first.id, 'near');
+      // Two candidates is below `minimumCandidatesForFloor`, so this asserts
+      // ordering only — see similarity_floor_test for the floor itself.
       expect(hits.map((h) => h.id), contains('far'));
       await db.close();
     });

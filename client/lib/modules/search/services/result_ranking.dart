@@ -71,12 +71,26 @@ class ResultRanking {
   /// belongs in the results too — and has to stay reachable under the Emails
   /// facet, which a `type:` filter would zero out entirely.
   ///
-  /// 1.4x is chosen to be decisive without being absolute. Stacked on the tier
-  /// boost a local photo reaches 1.68x against mail's 1.0x, which reliably
-  /// leads a fused band; but an email the retrievers rank far above every photo
-  /// can still surface, which is the whole point of preferring rather than
-  /// filtering.
-  static const modalityPreferenceBoost = 1.4;
+  /// 1.4x was too small, because of how the fused score it multiplies is
+  /// built. An email can appear in *both* the lexical list and its own vector
+  /// list, and RRF adds the two contributions: at rank 1 in each that is
+  /// 1/61 + 1/61 = 0.033, twice what a photograph found only by the vector
+  /// pass can reach. Searching `family photos` on this archive, the leading
+  /// marketing mail was in both lists while the family photographs were in
+  /// neither's lexical half — 7 of 2,338 files match the word "family", where
+  /// 107 emails do. 1.4x could not close a 2x gap, so the photographs lost.
+  ///
+  /// 3.0x is sized against that worst case rather than guessed. The 11th and
+  /// last surviving photo, in the personal-archive tier and old enough to take
+  /// the full recency floor, scores 1/71 * 3.0 * 1.2 * 0.75 = 0.038 and clears
+  /// the double-listed email's 0.033.
+  ///
+  /// It stays a preference, not a block sort: the multiplier scales the fused
+  /// score, so it lifts the whole photo list without flattening it, and a
+  /// genuinely weak photograph stays weak. That same email still beats a photo
+  /// at vector rank 300 (0.0075), which is the intended outcome — obvious
+  /// family photos first, everything else interleaved on merit.
+  static const modalityPreferenceBoost = 3.0;
 
   /// [fusedScore] scaled by the tier boost, the recency decay, and — when the
   /// query named a kind of thing — the modality preference.
