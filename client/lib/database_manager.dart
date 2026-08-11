@@ -547,6 +547,7 @@ class AppDatabase {
       CREATE TABLE IF NOT EXISTS emails_embeddings (
         email_id TEXT PRIMARY KEY,
         qwen3_vl_embedding BLOB,
+        model_version TEXT,
         FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
       );
     ''');
@@ -1039,6 +1040,18 @@ class AppDatabase {
         'description_attempts': 'INTEGER NOT NULL DEFAULT 0',
       },
       'albums': {'description': 'TEXT', 'cover_file_id': 'TEXT'},
+      // Which embedding pipeline produced the vector in this row. See
+      // EmbeddingModel: two vectors are only comparable when built the same
+      // way, and nothing downstream can detect otherwise — cosine over
+      // incompatible spaces returns plausible numbers, not an error.
+      //
+      // Nullable on purpose, and that is the migration. Every row already in
+      // these tables was written before the loader fix and holds noise; adding
+      // the column leaves them NULL, which reads as "unknown pipeline", which
+      // the embedding isolates treat as work to redo. The archive re-embeds
+      // itself on the next launch with no hand-written DELETE.
+      'files_embeddings': {'model_version': 'TEXT'},
+      'emails_embeddings': {'model_version': 'TEXT'},
       'emails': {
         // The body text keyword search actually indexes: `plain_body` when the
         // sender provided one, otherwise the HTML body with its markup
@@ -1682,6 +1695,7 @@ class AppDatabase {
       file_id TEXT NOT NULL,
       type TEXT NOT NULL DEFAULT 'file',
       qwen3_vl_embedding BLOB,
+      model_version TEXT,
       PRIMARY KEY (file_id, type),
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
@@ -1715,6 +1729,7 @@ class AppDatabase {
     CREATE TABLE IF NOT EXISTS emails_embeddings (
       email_id TEXT PRIMARY KEY,
       qwen3_vl_embedding BLOB,
+      model_version TEXT,
       FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
     );
     ''',

@@ -19,11 +19,15 @@ Future<void> handleEmbeddingMessage(
   final table = message['table'] as String;
   final id = message['id'] as String;
   final embedding = (message['embedding'] as List).cast<double>();
+  // Which kind of vector this is — the image itself ('file', the default) or
+  // its description's text. Both live in files_embeddings keyed by
+  // (file_id, type), so losing this would have one overwrite the other.
+  final embeddingType = message['embeddingType'] as String? ?? 'file';
 
   try {
     switch (table) {
       case 'files_embeddings':
-        await repo.upsertFileEmbedding(id, embedding);
+        await repo.upsertFileEmbedding(id, embedding, type: embeddingType);
         break;
       case 'emails_embeddings':
         await repo.upsertEmailEmbedding(id, embedding);
