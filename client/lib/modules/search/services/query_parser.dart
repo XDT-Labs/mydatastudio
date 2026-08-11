@@ -4,6 +4,7 @@ const Map<String, FilterField> _fieldNames = {
   'from': FilterField.from,
   'to': FilterField.to,
   'cc': FilterField.cc,
+  'participant': FilterField.participant,
   'subject': FilterField.subject,
   'has': FilterField.has,
   'is': FilterField.is_,

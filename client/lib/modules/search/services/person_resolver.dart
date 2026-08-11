@@ -30,17 +30,25 @@ class PersonResolver {
   /// Prepositions that make the following words a person rather than a topic,
   /// and the field each constrains.
   ///
-  /// `with` and `between` are in §2b's pattern list and deliberately not here.
-  /// They mean correspondence in *either* direction, which is an OR across
-  /// three columns rather than a filter on one, and there is no filter field
-  /// that expresses it today. They are also the ambiguous ones — "photos with
-  /// mike in them" is not a mail query at all — so inferring a hard filter from
-  /// them is the case most likely to silently return nothing. Left for a
-  /// `participant:` field that means what they mean.
+  /// `with` and `between` map to [FilterField.participant] rather than to
+  /// `from:`, because they do not name a direction. "My emails with Sarah" is
+  /// the whole correspondence, and a thread alternates direction with every
+  /// reply — resolved to `from:` it would return half of it.
   static const _triggers = <String, FilterField>{
     'from': FilterField.from,
     'to': FilterField.to,
+    'with': FilterField.participant,
+    'between': FilterField.participant,
   };
+
+  /// Joins a second person onto a participant constraint: "between mike **and**
+  /// sarah".
+  ///
+  /// Only for [FilterField.participant]. "from mike and sarah" means either —
+  /// a message has one sender — while "between mike and sarah" means both, and
+  /// those are opposite combinators. Consuming `and` for the directional fields
+  /// would silently turn one into the other.
+  static const _conjunction = 'and';
 
   /// Longest name to try. Four covers "mike nimer", "jean claude van damme",
   /// and stops the scan running away into the rest of the sentence.
@@ -111,6 +119,17 @@ class PersonResolver {
       // demand the word "from" of every row — it joins terms with an implicit
       // AND — and mail whose body never says "from" would drop out.
       i += match.wordCount + 1;
+
+      // "between mike and sarah" — each further person is its own constraint,
+      // AND'd by SearchFilters because they arrive under different source text.
+      while (field == FilterField.participant &&
+          i < words.length &&
+          words[i].toLowerCase() == _conjunction) {
+        final next = await _longestNameAfter(words, i, field);
+        if (next == null) break;
+        added.addAll(next.filters);
+        i += next.wordCount + 1;
+      }
     }
 
     if (added.isEmpty) return query;
@@ -165,11 +184,18 @@ class PersonResolver {
   }
 
   /// How many words after [triggerIndex] are available to a name, stopping
-  /// before the next trigger word.
+  /// before the next trigger word or conjunction.
+  ///
+  /// Stopping at `and` matters for both readings. For a participant query it is
+  /// the boundary between two people. For a directional one — "from mike and
+  /// sarah" — it keeps "mike and sarah" from being offered to the index as a
+  /// single name, which a display name containing either word could match by
+  /// accident.
   static int _runLengthAfter(List<String> words, int triggerIndex) {
     var length = 0;
     for (var j = triggerIndex + 1; j < words.length; j++) {
-      if (_triggers.containsKey(words[j].toLowerCase())) break;
+      final word = words[j].toLowerCase();
+      if (_triggers.containsKey(word) || word == _conjunction) break;
       length++;
       if (length == _maxNameWords) break;
     }

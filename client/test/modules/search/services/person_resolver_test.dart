@@ -211,6 +211,93 @@ void main() {
     });
   });
 
+  group('PersonResolver — with/between become participant', () {
+    test('with matches the person in any role, not just as sender', () async {
+      // "My emails with Sarah" is the whole correspondence. A thread alternates
+      // direction with every reply, so resolving this to from: would return
+      // half of it and look like missing mail.
+      final resolved = await _resolve('emails with sarah chen');
+      expect(resolved.filtersFor(FilterField.participant).map((f) => f.value), [
+        'sarah@example.com',
+      ]);
+      expect(resolved.filtersFor(FilterField.from), isEmpty);
+
+      final sql = SearchFilters.forEmails(resolved)!.sql;
+      expect(sql, contains('e."from" LIKE'));
+      expect(sql, contains('e."to" LIKE'));
+      expect(sql, contains('e.cc LIKE'));
+    });
+
+    test('between resolves both people, and requires both', () async {
+      final resolved = await _resolve(
+        'emails between mike jones and sarah chen',
+      );
+      expect(
+        resolved
+            .filtersFor(FilterField.participant)
+            .map((f) => f.value)
+            .toSet(),
+        {'mike.jones@corp.com', 'sarah@example.com'},
+      );
+      expect(resolved.freeText, isEmpty);
+
+      // Two people means both were there. OR'ing them would answer with every
+      // message either of them ever touched — not a conversation between them,
+      // and a far larger set than the question implies.
+      final filter = SearchFilters.forEmails(resolved)!;
+      expect(filter.sql, contains(') AND ('));
+      expect(filter.params.length, 6, reason: 'three columns per person');
+    });
+
+    test(
+      "one person's several addresses stay OR'd inside their own clause",
+      () async {
+        // The counterpart to the test above: AND across people, OR within one.
+        // A message carries one sender, so AND'ing an individual's addresses
+        // matches nothing at all.
+        final resolved = await _resolve('emails with mike nimer');
+        expect(resolved.filtersFor(FilterField.participant).length, 2);
+
+        final filter = SearchFilters.forEmails(resolved)!;
+        expect(filter.sql, isNot(contains(') AND (')));
+        expect(filter.params.length, 6);
+      },
+    );
+
+    test('and is not consumed for a directional field', () async {
+      // "from mike and sarah" means either — a message has one sender — while
+      // "between mike and sarah" means both. Treating them alike would silently
+      // swap one combinator for the other.
+      final resolved = await _resolve('emails from mike jones and sarah chen');
+      expect(resolved.filtersFor(FilterField.from).map((f) => f.value), [
+        'mike.jones@corp.com',
+      ]);
+      expect(resolved.filtersFor(FilterField.participant), isEmpty);
+      expect(resolved.freeText, 'and sarah chen');
+    });
+
+    test('a participant query cannot be satisfied by a file', () async {
+      // Mail-only, like from:/to:/cc:. Returning photos for "emails with sarah"
+      // would look like the filter was ignored.
+      final resolved = await _resolve('emails with sarah chen');
+      expect(SearchFilters.forFiles(resolved), isNull);
+    });
+
+    test(
+      'participant: is typeable, and typed repeats OR like any field',
+      () async {
+        // Nothing the user types carries source text, so they form one group.
+        // That keeps the documented behaviour for repeats of a typed field.
+        final typed = QueryParser.parse(
+          'participant:a@x.com participant:b@x.com',
+        );
+        final filter = SearchFilters.forEmails(typed)!;
+        expect(filter.sql, isNot(contains(') AND (')));
+        expect(filter.params.length, 6);
+      },
+    );
+  });
+
   group('PersonResolver — the chip stays correctable', () {
     test('an inferred filter carries the words it came from', () async {
       // Removing a chip works by deleting the token it came from. A resolved

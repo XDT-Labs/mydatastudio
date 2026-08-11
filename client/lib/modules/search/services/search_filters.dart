@@ -70,6 +70,7 @@ class SearchFilters {
     _addLike(query, FilterField.from, 'e."from"', where, params);
     _addLike(query, FilterField.to, 'e."to"', where, params);
     _addLike(query, FilterField.cc, 'e.cc', where, params);
+    _addParticipant(query, where, params);
     _addLike(query, FilterField.subject, 'e.subject', where, params);
     _addDateRange(query, 'e.date', where, params);
     _addCollection(query, 'e.collection_id', where, params);
@@ -96,6 +97,7 @@ class SearchFilters {
     if (query.filtersFor(FilterField.from).any((f) => !f.negated) ||
         query.filtersFor(FilterField.to).any((f) => !f.negated) ||
         query.filtersFor(FilterField.cc).any((f) => !f.negated) ||
+        query.filtersFor(FilterField.participant).any((f) => !f.negated) ||
         query.filtersFor(FilterField.has).any((f) => !f.negated) ||
         query.filtersFor(FilterField.is_).any((f) => !f.negated)) {
       return null;
@@ -125,6 +127,61 @@ class SearchFilters {
     }
 
     return SourceFilter(where.join(' AND '), params);
+  }
+
+  /// `participant:` — anyone on the message, in any role.
+  ///
+  /// Each term matches across sender, recipients and copies, because that is
+  /// what "with" and "between" mean: correspondence is bidirectional, and a
+  /// thread alternates direction with every reply. Expressed as `from:` or
+  /// `to:` it would return half of each conversation.
+  ///
+  /// Combination is the part that differs from every other field, and it has to:
+  /// **OR within one person, AND across people.** One person owning three
+  /// addresses means "any of these three" — AND'ing them matches nothing, since
+  /// a message carries one sender. Two *different* people means "both were
+  /// there" — OR'ing them would answer "emails between mike and sarah" with
+  /// every message either of them ever touched, which is not a conversation
+  /// between them and is a far larger set than the question implies.
+  ///
+  /// The grouping key is [QueryFilter.sourceText], the phrase each filter was
+  /// resolved from: every address for one name shares one phrase, and a second
+  /// person arrives with a different one. Filters the user typed carry no
+  /// source text, so they land in a single group and OR — which is the
+  /// documented behaviour for repeats of any typed field.
+  static void _addParticipant(
+    ParsedQuery query,
+    List<String> where,
+    List<Object?> params,
+  ) {
+    final all = query.filtersFor(FilterField.participant);
+    if (all.isEmpty) return;
+
+    const columns = ['e."from"', 'e."to"', 'e.cc'];
+    final anyRole =
+        '(${columns.map((c) => '$c LIKE ? COLLATE NOCASE').join(' OR ')})';
+    List<Object?> valueFor(QueryFilter f) =>
+        List.filled(columns.length, '%${f.value}%');
+
+    final groups = <String?, List<QueryFilter>>{};
+    for (final f in all.where((f) => !f.negated)) {
+      groups.putIfAbsent(f.sourceText, () => []).add(f);
+    }
+    for (final group in groups.values) {
+      final ors = List.filled(group.length, anyRole).join(' OR ');
+      where.add(group.length == 1 ? ors : '($ors)');
+      for (final f in group) {
+        params.addAll(valueFor(f));
+      }
+    }
+
+    // Exclusions AND, for the same reason they do everywhere else: "not with
+    // mike and not with sarah" excludes both, and OR'ing it would excuse any
+    // message that merely lacked one of them.
+    for (final f in all.where((f) => f.negated)) {
+      where.add('NOT $anyRole');
+      params.addAll(valueFor(f));
+    }
   }
 
   /// Repeats of one field OR together; negations AND.

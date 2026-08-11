@@ -1,6 +1,8 @@
 # Unified Search — Implementation Plan
 
-Status: **Phases 1–3 implemented.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, contacts index. Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phases 4+ still proposal.
+Status: **Phases 1–3 implemented.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 6 — decided but not built (§16). Phases 4, 5, 7 still proposal.
+
+Person resolution deliberately requires a preposition: a bare name in free text is *not* treated as a person. §2b's "n-gram matching plus the prepositional patterns" reads either way, and this is the reading whose failure mode is visible — a hard filter removes results silently, so searching for the word "mike" must not narrow the archive to one person's mail without saying so.
 
 Two Phase 3 details differ from what is written below, both deliberate and both explained where they are implemented:
 

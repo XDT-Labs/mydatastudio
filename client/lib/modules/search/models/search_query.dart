@@ -4,6 +4,14 @@ enum FilterField {
   from,
   to,
   cc,
+
+  /// Anyone on the message, in any role — sender, recipient or copied.
+  ///
+  /// What `with` and `between` mean. Correspondence is bidirectional and a
+  /// thread alternates direction with every reply, so "my emails with Sarah"
+  /// cannot be expressed as `from:` or `to:` without losing half the thread.
+  participant,
+
   subject,
   has,
   is_,
