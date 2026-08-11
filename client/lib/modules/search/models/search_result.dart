@@ -70,6 +70,24 @@ class SearchResult {
   /// so an id alone is not enough to key on.
   String get key => '${type.name}:$id';
 
+  /// The kind of thing this is, in the vocabulary a query uses when it names
+  /// one ("photos", "emails"). Matches the values `type:` accepts, so a stated
+  /// preference and a result can be compared without a translation table.
+  ///
+  /// `application/image` is not a typo — it is what this archive's scanners
+  /// actually wrote for most of its 2,411 pictures, and a check for `image/`
+  /// alone would miss almost every photo in it.
+  String get modality {
+    if (isEmail) return 'email';
+    final mime = contentType?.toLowerCase() ?? '';
+    if (mime.startsWith('image/') || mime == 'application/image')
+      return 'image';
+    if (mime.startsWith('video/') || mime == 'application/video')
+      return 'video';
+    if (mime.contains('pdf')) return 'pdf';
+    return 'file';
+  }
+
   /// This result with [score] replaced — used when fusion recomputes ranking.
   SearchResult withScore(double newScore) {
     return SearchResult(

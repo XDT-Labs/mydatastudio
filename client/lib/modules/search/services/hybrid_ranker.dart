@@ -1,3 +1,4 @@
+import 'package:mydatastudio/modules/search/models/search_query.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
 import 'package:mydatastudio/modules/search/services/rank_fusion.dart';
 import 'package:mydatastudio/modules/search/services/result_ranking.dart';
@@ -34,6 +35,7 @@ class HybridRanker {
     required List<SearchResult> lexical,
     required List<VectorHit> vector,
     required Bm25Retriever loader,
+    ParsedQuery? query,
     DateTime? now,
   }) async {
     final byKey = {for (final r in lexical) r.key: r};
@@ -97,6 +99,7 @@ class HybridRanker {
             tier: result.tier,
             date: result.date,
             now: now,
+            matchesPreferredType: query?.prefers(result.modality),
           ),
         ),
       );

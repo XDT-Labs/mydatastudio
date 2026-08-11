@@ -121,6 +121,7 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
         lexical: lexical.results,
         vector: hits,
         loader: retriever,
+        query: resolved,
       );
       _ranked = ranked;
 

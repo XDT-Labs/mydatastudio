@@ -117,22 +117,25 @@ void main() {
   });
 
   group('failing open', () {
-    test('an unavailable embedder yields no hits rather than throwing', () async {
-      // The AI subprocess may not be up, may not have the embedding model, or
-      // may be mid-restart. Search has to keep working: degrading to lexical
-      // is a worse search, a thrown exception is a broken one.
-      final db = await _freshDb('vec_no_embedder_test.db');
-      await _addFile(db, id: 'f1');
-      await _addFileVector(db, 'f1', _vector(0));
+    test(
+      'an unavailable embedder yields no hits rather than throwing',
+      () async {
+        // The AI subprocess may not be up, may not have the embedding model, or
+        // may be mid-restart. Search has to keep working: degrading to lexical
+        // is a worse search, a thrown exception is a broken one.
+        final db = await _freshDb('vec_no_embedder_test.db');
+        await _addFile(db, id: 'f1');
+        await _addFileVector(db, 'f1', _vector(0));
 
-      final hits = await VectorRetriever(
-        db,
-        _embedder(null),
-      ).search(QueryParser.parse('sunset'));
+        final hits = await VectorRetriever(
+          db,
+          _embedder(null),
+        ).search(QueryParser.parse('sunset'));
 
-      expect(hits, isEmpty);
-      await db.close();
-    });
+        expect(hits, isEmpty);
+        await db.close();
+      },
+    );
 
     test('an embedder that throws yields no hits', () async {
       final db = await _freshDb('vec_embedder_throws_test.db');
@@ -314,7 +317,12 @@ void main() {
       final db = await _freshDb('vec_mode_b_dedup_test.db');
       await _addFile(db, id: 'f1');
       await _addFileVector(db, 'f1', _vector(0));
-      await _addFileVector(db, 'f1', _vector(0, lean: 0.9), type: 'description');
+      await _addFileVector(
+        db,
+        'f1',
+        _vector(0, lean: 0.9),
+        type: 'description',
+      );
 
       final hits = await VectorRetriever(
         db,

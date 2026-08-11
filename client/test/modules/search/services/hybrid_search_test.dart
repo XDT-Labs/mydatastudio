@@ -293,44 +293,47 @@ void main() {
     await db.close();
   });
 
-  test('"photos" in the query excludes mail rather than ranking it', () async {
-    // Reported from real use: "white dog photos" returned marketing email
-    // interleaved with the dog pictures. The word names the kind of thing
-    // wanted, so it has to constrain — ranking mail lower still leaves it in
-    // the list, and a reranker cannot fix a result set that should not have
-    // contained mail in the first place.
+  test('"photos" leads with photos but still returns the mail', () async {
+    // The requirement in the user's own words: both returned, obvious photos
+    // first, and the Emails facet still usable. A type: filter would satisfy
+    // "photos first" by deleting the mail — and zero the facet with it — so
+    // the modality signal has to reorder rather than exclude.
     //
-    // The email vectors here beat every photo on raw cosine, so nothing but a
-    // hard exclusion keeps them out.
-    final db = await _freshDb('hybrid_modality_word_test.db');
+    // The mail here is a genuinely strong match: it says "family photos" in
+    // both subject and body, which is exactly the message a user searching
+    // this would also want to find.
+    final db = await _freshDb('hybrid_modality_pref_test.db');
     await _addCollection(db, 'c1', 'file.local');
     await _addFile(
       db,
-      id: 'dog',
-      description: 'a white dog',
-      vector: _vector(0),
+      id: 'photo',
+      name: 'IMG_2201.jpg',
+      description: 'a family standing together outdoors',
+      vector: _vector(0, lean: 0.8),
     );
-    for (var i = 0; i < 5; i++) {
-      await db.rawDb.execute(
-        'INSERT INTO emails (id, collection_id, date, "from", "to", subject, '
-        "plain_body, has_attachments, is_deleted) VALUES (?, 'c1', ?, "
-        "'ads@shop.com', 'me@x.com', 'wallpaper photos sale', "
-        "'white dog photos', 0, 0)",
-        ['mail$i', _recent],
-      );
-      await db.rawDb.execute(
-        'INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding) '
-        'VALUES (?, vector_as_f32(?))',
-        ['mail$i', '[${_vector(0, lean: 0.99).join(',')}]'],
-      );
-    }
+    await db.rawDb.execute(
+      'INSERT INTO emails (id, collection_id, date, "from", "to", subject, '
+      "plain_body, has_attachments, is_deleted) VALUES ('m1', 'c1', ?, "
+      "'aunt@x.com', 'me@x.com', 'family photos from the reunion', "
+      "'here are the family photos', 0, 0)",
+      [_recent],
+    );
+    await db.rawDb.execute(
+      'INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding) '
+      'VALUES (?, vector_as_f32(?))',
+      ['m1', '[${_vector(0).join(',')}]'],
+    );
 
     final results = await _service(
       _vector(0),
-    ).invoke(SearchCommand('white dog photos', db));
+    ).invoke(SearchCommand('family photos', db));
 
-    expect(results.results.every((r) => r.isFile), isTrue);
-    expect(results.emailTotal, 0);
+    // Both present...
+    expect(results.results.map((r) => r.id), containsAll(['photo', 'm1']));
+    // ...the photo first, despite the email scoring higher on raw cosine...
+    expect(results.results.first.id, 'photo');
+    // ...and the Emails facet still has something behind it.
+    expect(results.emailTotal, greaterThan(0));
     await db.close();
   });
 

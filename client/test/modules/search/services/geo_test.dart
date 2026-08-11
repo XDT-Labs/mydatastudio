@@ -17,7 +17,10 @@ void main() {
       const metresPerDegreeLat = 111.32;
       final northLat = lat + radiusKm / metresPerDegreeLat;
       expect(box.maxLatitude, greaterThanOrEqualTo(northLat));
-      expect(box.minLatitude, lessThanOrEqualTo(lat - radiusKm / metresPerDegreeLat));
+      expect(
+        box.minLatitude,
+        lessThanOrEqualTo(lat - radiusKm / metresPerDegreeLat),
+      );
 
       // A point due east at the radius must fall inside the longitude span.
       var eastLng = lng;
@@ -50,11 +53,14 @@ void main() {
       expect(box.minLatitude, greaterThanOrEqualTo(-90.0));
     });
 
-    test('falls back to the whole globe rather than wrapping the antimeridian', () {
-      final box = GeoRadius.boundingBox(-16.5, 179.9, 200.0);
-      expect(box.minLongitude, -180.0);
-      expect(box.maxLongitude, 180.0);
-    });
+    test(
+      'falls back to the whole globe rather than wrapping the antimeridian',
+      () {
+        final box = GeoRadius.boundingBox(-16.5, 179.9, 200.0);
+        expect(box.minLongitude, -180.0);
+        expect(box.maxLongitude, 180.0);
+      },
+    );
   });
 
   group('distanceKm', () {
@@ -63,14 +69,24 @@ void main() {
       // terms sum to a hair above 1.0, acos of which is NaN, and every
       // comparison against NaN is false — so the row that matched best is the
       // one row silently dropped.
-      final d = GeoRadius.distanceKm(51.17622, -115.56982, 51.17622, -115.56982);
+      final d = GeoRadius.distanceKm(
+        51.17622,
+        -115.56982,
+        51.17622,
+        -115.56982,
+      );
       expect(d.isNaN, isFalse);
       expect(d, closeTo(0.0, 1e-6));
     });
 
     test('matches a known great-circle distance', () {
       // Banff to Calgary, ~114 km by great circle.
-      final d = GeoRadius.distanceKm(51.17622, -115.56982, 51.05011, -114.08529);
+      final d = GeoRadius.distanceKm(
+        51.17622,
+        -115.56982,
+        51.05011,
+        -114.08529,
+      );
       expect(d, closeTo(104.0, 6.0));
     });
 

@@ -112,13 +112,14 @@ class QueryParser {
       i = k;
     }
 
-    _consumeModalityWords(filters, textWords);
+    final preferredTypes = _extractModality(filters, textWords);
     _consumeBareYear(filters, textWords);
 
     return ParsedQuery(
       filters: filters,
       freeText: textWords.join(' '),
       raw: input,
+      preferredTypes: preferredTypes,
     );
   }
 
@@ -207,13 +208,19 @@ class QueryParser {
   /// Words that name a kind of thing rather than describe one, and the
   /// `type:` value each resolves to.
   ///
-  /// Deliberately narrow. These are nouns whose *only* ordinary reading in a
-  /// search box is "show me this kind of item" — nobody searching "photos"
-  /// wants a mail thread that mentions the word. Words like "document",
-  /// "file" and "message" are left out precisely because they do read as
-  /// ordinary content: "the document you sent" is a description of an email,
-  /// not a request to filter by type. Those stay available as explicit
-  /// `type:document` filters.
+  /// Deliberately narrow. These are nouns whose ordinary reading in a search
+  /// box is "show me this kind of item", so a query containing one should
+  /// *lead* with that kind. Words like "document", "file" and "message" are
+  /// left out because they read as content at least as often as intent — "the
+  /// document you sent" describes an email — and even a mild boost on those
+  /// would reorder results for a phrase the user never meant as a hint. They
+  /// stay available as explicit `type:document` filters.
+  ///
+  /// This list is a floor, not a vocabulary. It cannot cover "snapshots",
+  /// "stills", or any of this in another language; the query planner in §2c of
+  /// the search plan is what generalises it, and this stays as the offline
+  /// answer for when the model is unavailable. Because the signal only reorders
+  /// and never excludes, a word the list misses costs ranking, not results.
   static const _modalityWords = {
     'photo': 'image',
     'photos': 'image',
@@ -230,61 +237,59 @@ class QueryParser {
     'mail': 'email',
   };
 
-  /// Promotes "photos"/"emails"/... in free text to the `type:` filter the
-  /// user plainly meant, and drops the word from the text.
+  /// The kinds of thing the query named, as `type:` values.
   ///
-  /// "white dog photos" should not rank mail below photos, it should exclude
-  /// it — the word is a statement about *what kind of thing* to return, and
-  /// treating it as a ranking term instead let marketing email that happened
-  /// to contain "photos" sit among the results. This is the same promotion
-  /// [_consumeBareYear] does for a year, for the same reason: the user
-  /// expressed a constraint in the words they already knew.
+  /// Usually a *preference* rather than a filter — see
+  /// [ParsedQuery.preferredTypes]. "family photos" leads with photographs but
+  /// still returns the thread those photos were sent in, and the Emails facet
+  /// still holds them. Constraining instead would zero that facet and turn the
+  /// control the user needs into a dead end.
   ///
-  /// Dropping the word from the text is what makes the rest of the query
-  /// stronger, not weaker. "photos" matches almost nothing useful lexically,
-  /// and leaving it in would also drag the vector query away from "white dog"
-  /// — the part that actually describes the picture.
+  /// The word itself is removed from the free text, and that is load-bearing
+  /// rather than tidiness. FTS5 joins terms with an implicit AND, so leaving
+  /// "photos" in demands that a row contain it — and an AI image description
+  /// says "a family standing together outdoors", never "photos". Keeping the
+  /// word would exclude from the lexical pass exactly the photographs the
+  /// query is asking for, while the mail that says "family photos" sails
+  /// through. Removing it costs nothing: an email about family photos contains
+  /// "family" too.
   ///
-  /// Skipped entirely when the query already carries an explicit `type:`,
-  /// which is the user being specific and should not be second-guessed.
-  static void _consumeModalityWords(
+  /// One exception, and it inverts the rule. A query that is *only* modality
+  /// words has nothing left to search for once they are removed, and "photos"
+  /// on its own is not a ranking hint — it is a request to browse every photo.
+  /// That becomes a real `type:` filter.
+  ///
+  /// Returns nothing when the query already carries an explicit `type:`, which
+  /// is the user being specific and outranks anything inferred from prose.
+  static Set<String> _extractModality(
     List<QueryFilter> filters,
     List<String> textWords,
   ) {
-    if (filters.any((f) => f.field == FilterField.type)) return;
+    if (filters.any((f) => f.field == FilterField.type)) return const {};
 
-    // A filter that already pins the source wins outright, because promoting
-    // against it produces a query nothing can satisfy: `from:` excludes files
-    // (there is no sender on a file) while `type:image` excludes mail, so
-    // "photos from bob" would return zero rows rather than bob's mail. A
-    // guess must never be able to empty a result set an explicit filter was
-    // going to fill.
-    const sourcePinning = {
-      FilterField.from,
-      FilterField.to,
-      FilterField.cc,
-      FilterField.has,
-      FilterField.is_,
-      FilterField.tag,
-      FilterField.near,
-    };
-    if (filters.any((f) => sourcePinning.contains(f.field))) return;
-
-    // Every distinct kind named is kept, so "photos and videos" widens to both
-    // rather than resolving to whichever came first.
     final found = <String>{};
-    textWords.removeWhere((word) {
+    final remaining = <String>[];
+    for (final word in textWords) {
       final type = _modalityWords[word.toLowerCase()];
-      if (type == null) return false;
-      found.add(type);
-      return true;
-    });
-
-    // A query that was *only* modality words ("photos") still means something
-    // — browse every photo — so the filter is kept even with no text left.
-    for (final type in found) {
-      filters.add(QueryFilter(field: FilterField.type, value: type));
+      if (type != null) {
+        found.add(type);
+      } else {
+        remaining.add(word);
+      }
     }
+    if (found.isEmpty) return const {};
+
+    textWords
+      ..clear()
+      ..addAll(remaining);
+
+    if (remaining.isEmpty) {
+      for (final type in found) {
+        filters.add(QueryFilter(field: FilterField.type, value: type));
+      }
+      return const {};
+    }
+    return found;
   }
 
   /// A standalone 4-digit word in free text implies an `after`/`before`

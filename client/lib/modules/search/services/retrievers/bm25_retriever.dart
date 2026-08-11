@@ -83,8 +83,22 @@ class Bm25Retriever {
     // Interleaved by rank rather than grouped by type: grouping would bury the
     // best answer under a section header, and a photo query should lead with
     // photos because they scored highest, not because a tab was selected.
-    final merged = [...emails, ...files]
-      ..sort((a, b) => b.score.compareTo(a.score));
+    //
+    // A query that named a kind of thing ("family photos") lifts that kind
+    // here too, not only in the fused path — otherwise the ordering the user
+    // asked for would silently disappear whenever the AI subprocess is down.
+    final merged =
+        [...emails, ...files]
+            .map(
+              (r) => r.withScore(
+                r.score *
+                    (query.prefers(r.modality) == true
+                        ? ResultRanking.modalityPreferenceBoost
+                        : 1.0),
+              ),
+            )
+            .toList()
+          ..sort((a, b) => b.score.compareTo(a.score));
     final page = merged.take(limit).toList();
 
     // Each cursor advances by however many rows of that source survived the

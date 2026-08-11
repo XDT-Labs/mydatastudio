@@ -125,11 +125,32 @@ class ParsedQuery {
   final String freeText;
   final String raw;
 
+  /// Kinds of thing the query *named* — "photos", "emails" — as `type:` values.
+  ///
+  /// Deliberately not a filter. Naming a kind expresses a preference about
+  /// order, not a constraint on membership: someone searching "family photos"
+  /// wants the photographs first but still wants the thread those photos were
+  /// sent in, and still needs the Emails facet to hold something when they
+  /// click it. A `type:` filter would zero that facet out and turn it into a
+  /// dead end.
+  ///
+  /// An *explicit* `type:image` is a different statement and stays a real
+  /// filter — that is the user being specific rather than the parser guessing.
+  final Set<String> preferredTypes;
+
   const ParsedQuery({
     required this.filters,
     required this.freeText,
     required this.raw,
+    this.preferredTypes = const {},
   });
+
+  /// Whether [type] is one the query asked to see first. Null when the query
+  /// named no kind at all — which is not the same as naming one and missing.
+  bool? prefers(String type) {
+    if (preferredTypes.isEmpty) return null;
+    return preferredTypes.contains(type);
+  }
 
   bool get hasFilters => filters.isNotEmpty;
   bool get hasFreeText => freeText.isNotEmpty;
@@ -143,6 +164,7 @@ class ParsedQuery {
       filters: filters ?? this.filters,
       freeText: freeText ?? this.freeText,
       raw: raw,
+      preferredTypes: preferredTypes,
     );
   }
 

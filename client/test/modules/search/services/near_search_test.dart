@@ -31,8 +31,10 @@ Uint8List _gazetteer(List<String> rows) {
 const _banff = '5892532\tBanff\tBanff\t51.17622\t-115.56982\tCA\t01\t8305';
 const _zurich = '2657896\tZürich\tZurich\t47.36667\t8.55\tCH\tZH\t341730';
 // Two namesakes, so tie-breaking has something to break.
-const _springfieldMo = '4409896\tSpringfield\tSpringfield\t37.21533\t-93.29824\tUS\tMO\t169176';
-const _springfieldIl = '4250542\tSpringfield\tSpringfield\t39.80172\t-89.64371\tUS\tIL\t116565';
+const _springfieldMo =
+    '4409896\tSpringfield\tSpringfield\t37.21533\t-93.29824\tUS\tMO\t169176';
+const _springfieldIl =
+    '4250542\tSpringfield\tSpringfield\t39.80172\t-89.64371\tUS\tIL\t116565';
 
 Future<void> _addPhoto(
   AppDatabase db, {
@@ -124,18 +126,21 @@ void main() {
       await db.close();
     });
 
-    test('a missing asset disables near: rather than failing the open', () async {
-      final db = await _freshDb('places_missing_asset_test.db');
-      final repo = PlaceRepository(db);
+    test(
+      'a missing asset disables near: rather than failing the open',
+      () async {
+        final db = await _freshDb('places_missing_asset_test.db');
+        final repo = PlaceRepository(db);
 
-      final written = await repo.importIfEmpty(
-        loadAsset: () async => throw Exception('asset not in bundle'),
-      );
+        final written = await repo.importIfEmpty(
+          loadAsset: () async => throw Exception('asset not in bundle'),
+        );
 
-      expect(written, 0);
-      expect(await repo.count(), 0);
-      await db.close();
-    });
+        expect(written, 0);
+        expect(await repo.count(), 0);
+        await db.close();
+      },
+    );
   });
 
   group('place resolution', () {
@@ -280,7 +285,9 @@ void main() {
       // No GPS at all — 90% of a real library.
       await _addPhoto(db, id: 'none', name: 'scan.jpg');
 
-      final query = await NearResolver(db).resolve(QueryParser.parse('near:banff'));
+      final query = await NearResolver(
+        db,
+      ).resolve(QueryParser.parse('near:banff'));
       final results = await Bm25Retriever(db).search(query);
       expect(results.results.map((r) => r.id), ['in']);
 
@@ -293,28 +300,33 @@ void main() {
       await db.close();
     });
 
-    test('a photo at the exact centre is not dropped by acos overflow', () async {
-      // The min(1.0, ...) guard. Floating point pushes the cosine sum a hair
-      // above 1.0 at zero distance, acos of which is NaN, and NaN <= 25 is
-      // false — so the best possible match is the one that disappears.
-      final db = await _freshDb('near_exact_centre_test.db');
-      await PlaceRepository(
-        db,
-      ).importIfEmpty(loadAsset: () async => _gazetteer([_banff]));
-      await _addPhoto(
-        db,
-        id: 'centre',
-        name: 'town-centre.jpg',
-        latitude: 51.17622,
-        longitude: -115.56982,
-      );
+    test(
+      'a photo at the exact centre is not dropped by acos overflow',
+      () async {
+        // The min(1.0, ...) guard. Floating point pushes the cosine sum a hair
+        // above 1.0 at zero distance, acos of which is NaN, and NaN <= 25 is
+        // false — so the best possible match is the one that disappears.
+        final db = await _freshDb('near_exact_centre_test.db');
+        await PlaceRepository(
+          db,
+        ).importIfEmpty(loadAsset: () async => _gazetteer([_banff]));
+        await _addPhoto(
+          db,
+          id: 'centre',
+          name: 'town-centre.jpg',
+          latitude: 51.17622,
+          longitude: -115.56982,
+        );
 
-      final query = await NearResolver(db).resolve(QueryParser.parse('near:banff'));
-      final results = await Bm25Retriever(db).search(query);
+        final query = await NearResolver(
+          db,
+        ).resolve(QueryParser.parse('near:banff'));
+        final results = await Bm25Retriever(db).search(query);
 
-      expect(results.results.map((r) => r.id), ['centre']);
-      await db.close();
-    });
+        expect(results.results.map((r) => r.id), ['centre']);
+        await db.close();
+      },
+    );
 
     test('unions the radius with landmarks of the same name', () async {
       // They answer different questions about one word: where the shutter
@@ -337,7 +349,9 @@ void main() {
         ['tagged', 'Banff'],
       );
 
-      final query = await NearResolver(db).resolve(QueryParser.parse('near:banff'));
+      final query = await NearResolver(
+        db,
+      ).resolve(QueryParser.parse('near:banff'));
       final results = await Bm25Retriever(db).search(query);
 
       expect(results.results.map((r) => r.id).toSet(), {'gps', 'tagged'});
@@ -395,23 +409,35 @@ void main() {
       await db.close();
     });
 
-    test('mail is excluded from a near: query rather than ranked below it', () async {
-      final db = await _freshDb('near_excludes_mail_test.db');
-      await PlaceRepository(
-        db,
-      ).importIfEmpty(loadAsset: () async => _gazetteer([_banff]));
-      await db.rawDb.execute(
-        'INSERT INTO emails (id, collection_id, date, "from", "to", subject, '
-        'plain_body, has_attachments, is_deleted) '
-        'VALUES (?, ?, 1000, ?, ?, ?, ?, 0, 0)',
-        ['e1', 'c1', 'a@x.com', 'me@x.com', 'Banff trip', 'banff banff banff'],
-      );
+    test(
+      'mail is excluded from a near: query rather than ranked below it',
+      () async {
+        final db = await _freshDb('near_excludes_mail_test.db');
+        await PlaceRepository(
+          db,
+        ).importIfEmpty(loadAsset: () async => _gazetteer([_banff]));
+        await db.rawDb.execute(
+          'INSERT INTO emails (id, collection_id, date, "from", "to", subject, '
+          'plain_body, has_attachments, is_deleted) '
+          'VALUES (?, ?, 1000, ?, ?, ?, ?, 0, 0)',
+          [
+            'e1',
+            'c1',
+            'a@x.com',
+            'me@x.com',
+            'Banff trip',
+            'banff banff banff',
+          ],
+        );
 
-      final query = await NearResolver(db).resolve(QueryParser.parse('near:banff'));
-      final results = await Bm25Retriever(db).search(query);
+        final query = await NearResolver(
+          db,
+        ).resolve(QueryParser.parse('near:banff'));
+        final results = await Bm25Retriever(db).search(query);
 
-      expect(results.emailTotal, 0);
-      await db.close();
-    });
+        expect(results.emailTotal, 0);
+        await db.close();
+      },
+    );
   });
 }

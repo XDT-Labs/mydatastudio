@@ -64,15 +64,38 @@ class ResultRanking {
     return max(decayed, 0.75);
   }
 
-  /// [fusedScore] scaled by both the tier boost and the recency decay.
+  /// How much naming a kind of thing lifts results of that kind.
+  ///
+  /// A *preference*, never a constraint. "family photos" should lead with
+  /// photographs, but the mail thread where those photos were actually sent
+  /// belongs in the results too — and has to stay reachable under the Emails
+  /// facet, which a `type:` filter would zero out entirely.
+  ///
+  /// 1.4x is chosen to be decisive without being absolute. Stacked on the tier
+  /// boost a local photo reaches 1.68x against mail's 1.0x, which reliably
+  /// leads a fused band; but an email the retrievers rank far above every photo
+  /// can still surface, which is the whole point of preferring rather than
+  /// filtering.
+  static const modalityPreferenceBoost = 1.4;
+
+  /// [fusedScore] scaled by the tier boost, the recency decay, and — when the
+  /// query named a kind of thing — the modality preference.
+  ///
+  /// [matchesPreferredType] is null when the query named no kind at all, which
+  /// is not the same as naming one and missing it: with no preference stated
+  /// nothing should be lifted or held back.
   static double adjust(
     double fusedScore, {
     required SourceTier tier,
     DateTime? date,
     DateTime? now,
+    bool? matchesPreferredType,
   }) {
+    final preference =
+        matchesPreferredType == true ? modalityPreferenceBoost : 1.0;
     return fusedScore *
         tierMultiplier(tier) *
-        recencyMultiplier(date, now: now);
+        recencyMultiplier(date, now: now) *
+        preference;
   }
 }
