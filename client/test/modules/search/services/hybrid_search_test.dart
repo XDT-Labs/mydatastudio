@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/database_manager.dart';
-import 'package:mydatastudio/modules/search/models/search_result.dart';
 import 'package:mydatastudio/modules/search/services/result_ranking.dart';
 import 'package:mydatastudio/modules/search/services/search_service.dart';
 import 'package:path/path.dart' as p;
@@ -235,7 +234,7 @@ void main() {
       await service.loadMore();
     }
 
-    final all = service.sink.value!.results;
+    final all = service.sink.value.results;
     final seen = <String>{};
     for (final r in all) {
       expect(seen.add(r.key), isTrue, reason: '${r.id} appeared twice');

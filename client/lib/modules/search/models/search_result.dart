@@ -80,10 +80,12 @@ class SearchResult {
   String get modality {
     if (isEmail) return 'email';
     final mime = contentType?.toLowerCase() ?? '';
-    if (mime.startsWith('image/') || mime == 'application/image')
+    if (mime.startsWith('image/') || mime == 'application/image') {
       return 'image';
-    if (mime.startsWith('video/') || mime == 'application/video')
+    }
+    if (mime.startsWith('video/') || mime == 'application/video') {
       return 'video';
+    }
     if (mime.contains('pdf')) return 'pdf';
     return 'file';
   }
