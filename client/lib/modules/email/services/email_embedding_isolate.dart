@@ -177,7 +177,7 @@ class EmailEmbeddingIsolate {
     // A full batch means there's likely more backlog waiting, so the
     // heartbeat sleep below stays short; a partial batch means the queue
     // just got drained, so it's fine to back off.
-    const kBatchSize = 10;
+    const kBatchSize = 100;
     var lastBatchLength = 0;
 
     while (true) {
