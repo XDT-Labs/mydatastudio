@@ -50,6 +50,16 @@ class QueryFilter {
   /// chip can say which of several namesakes was picked.
   final String? placeLabel;
 
+  /// The words in the raw query this filter was derived from, for filters that
+  /// no `field:value` token produced — today, the `from mike nimer` in
+  /// `emails from mike nimer`. Null for anything the user typed as syntax.
+  ///
+  /// Needed because removing a chip works by deleting the token it came from.
+  /// A resolved filter's value is an address that appears nowhere in the raw
+  /// text, so without this the delete silently matches nothing and the chip
+  /// looks broken — it stays on screen and the same results come back.
+  final String? sourceText;
+
   const QueryFilter({
     required this.field,
     required this.value,
@@ -59,7 +69,12 @@ class QueryFilter {
     this.latitude,
     this.longitude,
     this.placeLabel,
+    this.sourceText,
   });
+
+  /// True when a resolution pass inferred this from prose rather than the user
+  /// typing `field:value`.
+  bool get isInferred => sourceText != null;
 
   /// This filter with a gazetteer hit attached.
   QueryFilter resolvedTo({
@@ -76,6 +91,7 @@ class QueryFilter {
       latitude: latitude,
       longitude: longitude,
       placeLabel: placeLabel,
+      sourceText: sourceText,
     );
   }
 
@@ -92,7 +108,8 @@ class QueryFilter {
         other.negated == negated &&
         other.latitude == latitude &&
         other.longitude == longitude &&
-        other.placeLabel == placeLabel;
+        other.placeLabel == placeLabel &&
+        other.sourceText == sourceText;
   }
 
   @override
@@ -105,6 +122,7 @@ class QueryFilter {
     latitude,
     longitude,
     placeLabel,
+    sourceText,
   );
 
   @override

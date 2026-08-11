@@ -127,6 +127,19 @@ class SearchFilters {
     return SourceFilter(where.join(' AND '), params);
   }
 
+  /// Repeats of one field OR together; negations AND.
+  ///
+  /// `from:a from:b` means "from either", not "from both" — no message has two
+  /// senders, so AND'ing them can only ever return nothing. That was the
+  /// documented contract on [ParsedQuery.filtersFor] and on the parser's own
+  /// test from the start, but this method AND'd anyway; it went unnoticed while
+  /// nothing generated repeats. Person resolution does: one name legitimately
+  /// resolves to every address that person uses, and this archive has people
+  /// with three.
+  ///
+  /// Negations keep AND semantics, and must. `-from:a -from:b` means exclude
+  /// both, and `NOT(a) OR NOT(b)` is true for almost every row — an exclusion
+  /// that OR'd would quietly stop excluding anything.
   static void _addLike(
     ParsedQuery query,
     FilterField field,
@@ -134,9 +147,18 @@ class SearchFilters {
     List<String> where,
     List<Object?> params,
   ) {
-    for (final f in query.filtersFor(field)) {
-      final clause = '$column LIKE ? COLLATE NOCASE';
-      where.add(f.negated ? 'NOT ($clause)' : clause);
+    final all = query.filtersFor(field);
+    if (all.isEmpty) return;
+
+    final clause = '$column LIKE ? COLLATE NOCASE';
+    final positive = all.where((f) => !f.negated).toList();
+    if (positive.isNotEmpty) {
+      final ors = List.filled(positive.length, clause).join(' OR ');
+      where.add(positive.length == 1 ? ors : '($ors)');
+      params.addAll(positive.map((f) => '%${f.value}%'));
+    }
+    for (final f in all.where((f) => f.negated)) {
+      where.add('NOT ($clause)');
       params.add('%${f.value}%');
     }
   }

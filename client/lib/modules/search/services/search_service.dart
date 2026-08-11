@@ -4,6 +4,7 @@ import 'package:mydatastudio/modules/search/models/search_query.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
 import 'package:mydatastudio/modules/search/services/hybrid_ranker.dart';
 import 'package:mydatastudio/modules/search/services/near_resolver.dart';
+import 'package:mydatastudio/modules/search/services/person_resolver.dart';
 import 'package:mydatastudio/modules/search/services/query_embedder.dart';
 import 'package:mydatastudio/modules/search/services/query_parser.dart';
 import 'package:mydatastudio/modules/search/services/retrievers/bm25_retriever.dart';
@@ -84,12 +85,19 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
         return _publish(SearchResults.empty);
       }
 
-      // `near:` is the one filter parsing cannot finish on its own — a place
-      // name only becomes a constraint once the gazetteer has turned it into a
-      // point. Resolving here, before anything is retrieved, is what lets a
-      // name nothing recognises fall back to free text instead of constraining
-      // the query to zero rows.
-      final resolved = await NearResolver(command.database).resolve(parsed);
+      // Two things parsing cannot finish on its own, both database lookups and
+      // both resolved before anything is retrieved.
+      //
+      // People first: `emails from mike nimer` has to become the same hard
+      // sender filter as `from:mike@x.com` (§2b). Left as free text it would go
+      // to the vector pass, which encodes meaning rather than identity and so
+      // returns mail *about* Mike while missing mail *from* him.
+      //
+      // Then `near:`, where a place name only becomes a constraint once the
+      // gazetteer has turned it into a point, and a name nothing recognises
+      // falls back to free text instead of constraining the query to zero rows.
+      final withPeople = await PersonResolver(command.database).resolve(parsed);
+      final resolved = await NearResolver(command.database).resolve(withPeople);
       lastQuery = resolved;
 
       final retriever = Bm25Retriever(command.database);

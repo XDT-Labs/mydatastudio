@@ -196,13 +196,24 @@ class _SearchPageState extends State<SearchPage> {
 
   /// Strips the token a [QueryFilter] would have parsed from, so removing a
   /// chip edits the query text the same way deleting it by hand would.
+  ///
+  /// A filter inferred from prose has no such token — `emails from mike nimer`
+  /// yields `from:mnimer@allaire.com`, an address that appears nowhere in what
+  /// was typed. Those carry the words they came from, and removing the chip
+  /// deletes the phrase instead. Without this the delete matches nothing, the
+  /// chip stays put, and the identical results come back — a button that looks
+  /// broken rather than one that did nothing.
   String _withFilterRemoved(String raw, QueryFilter filter) {
+    final token = filter.sourceText ?? _tokenFor(filter);
+    return raw.replaceFirst(token, '').replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  String _tokenFor(QueryFilter filter) {
     final fieldName = SearchFilterChips.fieldName(filter.field);
     final needsQuotes = filter.value.contains(' ');
     final value = needsQuotes ? '"${filter.value}"' : filter.value;
     final sign = filter.negated ? '-' : '';
-    final token = '$sign$fieldName:$value';
-    return raw.replaceFirst(token, '').replaceAll(RegExp(r'\s+'), ' ').trim();
+    return '$sign$fieldName:$value';
   }
 
   // ─── Selection and detail loading ──────────────────────────────────────
