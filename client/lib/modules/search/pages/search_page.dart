@@ -1,25 +1,38 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/modules/search/models/search_query.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
 import 'package:mydatastudio/modules/search/services/retrievers/bm25_retriever.dart';
+import 'package:mydatastudio/modules/search/services/search_detail_repository.dart';
 import 'package:mydatastudio/modules/search/services/search_service.dart';
+import 'package:mydatastudio/modules/search/widgets/search_email_reader.dart';
+import 'package:mydatastudio/modules/search/widgets/search_email_sidebar.dart';
 import 'package:mydatastudio/modules/search/widgets/search_facet_bar.dart';
+import 'package:mydatastudio/modules/search/widgets/search_file_sidebar.dart';
 import 'package:mydatastudio/modules/search/widgets/search_filter_chips.dart';
+import 'package:mydatastudio/modules/search/widgets/search_lightbox.dart';
 import 'package:mydatastudio/modules/search/widgets/search_result_tile.dart';
 
-/// Top-level search screen: a query box over a ranked, faceted result list.
+/// Top-level search screen: a query box over a ranked, faceted result list,
+/// with a detail panel beside it for whichever result is selected.
 ///
 /// Renders four states that must stay visually distinct — "no query yet" is
 /// a blank slate, not a failure, while "empty results" says a real query came
 /// back with nothing. Conflating them reads as the app being broken every
 /// time a user lands here fresh.
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key, required this.initialQuery});
+  const SearchPage({super.key, required this.initialQuery, this.detailLoader});
 
   final String initialQuery;
+
+  /// Injection seam for widget tests, which have no database behind them.
+  final SearchDetailRepository? detailLoader;
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -28,12 +41,49 @@ class SearchPage extends StatefulWidget {
 class _SearchPageState extends State<SearchPage> {
   late final TextEditingController _controller;
   final ScrollController _scrollController = ScrollController();
+
+  /// Focus for the query box, and for the page body behind it.
+  ///
+  /// Selecting a row moves focus off the query box and onto [_bodyFocus], which
+  /// is what makes the spacebar mean "open this result" instead of typing a
+  /// space. Without the handoff the query box keeps focus after a click — a
+  /// `TextField` swallows the key before any ancestor shortcut sees it.
+  final FocusNode _searchFocus = FocusNode();
+  final FocusNode _bodyFocus = FocusNode(debugLabel: 'search results');
+
   StreamSubscription<SearchResults>? _resultsSub;
   StreamSubscription<bool>? _loadingSub;
 
   SearchResults _results = SearchResults.empty;
   bool _isLoading = false;
   SearchFacet _facet = SearchFacet.all;
+
+  /// Index into `_results.results` of the row whose detail panel is open, or
+  /// null when nothing is selected and the list has the width to itself.
+  int? _selectedIndex;
+
+  /// The full records behind [_selectedIndex]. A `SearchResult` is a flattened
+  /// row shared by mail and files; the panels need the real thing.
+  model.File? _selectedFile;
+  Email? _selectedEmail;
+  Collection? _selectedCollection;
+  bool _detailLoading = false;
+
+  /// Bumped on every selection change so a slow load that lands after the user
+  /// has moved on is discarded instead of overwriting the newer selection.
+  int _detailToken = 0;
+
+  /// The in-flight load for the current selection, so a double-click can wait
+  /// on the same fetch the sidebar is already making instead of issuing another.
+  Future<void>? _detailFuture;
+
+  bool _isFullscreen = false;
+  bool _panelWide = false;
+
+  late final SearchDetailRepository _detailLoader;
+
+  static const _panelWidth = 320.0;
+  static const _panelWideWidth = 640.0;
 
   /// Distance from the bottom at which the next page is requested. Far enough
   /// ahead that the fetch usually lands before the user reaches the end.
@@ -48,12 +98,16 @@ class _SearchPageState extends State<SearchPage> {
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialQuery);
+    _detailLoader = widget.detailLoader ?? const SearchDetailRepository();
 
     _scrollController.addListener(_onScroll);
 
     _resultsSub = SearchService.instance.sink.listen((results) {
       if (!mounted) return;
-      setState(() => _results = results);
+      setState(() {
+        _results = results;
+        _dropSelectionIfGone();
+      });
     });
     _loadingSub = SearchService.instance.isLoading.listen((loading) {
       if (mounted) setState(() => _isLoading = loading);
@@ -73,6 +127,8 @@ class _SearchPageState extends State<SearchPage> {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _controller.dispose();
+    _searchFocus.dispose();
+    _bodyFocus.dispose();
     super.dispose();
   }
 
@@ -90,7 +146,10 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _onFacetSelected(SearchFacet facet) {
-    setState(() => _facet = facet);
+    setState(() {
+      _facet = facet;
+      _clearSelectionState();
+    });
     // Re-query rather than slice: the counts are archive totals, so choosing
     // a facet has to be able to reach every one of them.
     SearchService.instance.setSourceFilter(sourceTypeForFacet(facet));
@@ -117,7 +176,10 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _onSubmitted(String value) {
-    setState(() => _lastRunQuery = value.trim());
+    setState(() {
+      _lastRunQuery = value.trim();
+      _clearSelectionState();
+    });
     _runSearch(value);
   }
 
@@ -125,7 +187,10 @@ class _SearchPageState extends State<SearchPage> {
     final updated = _withFilterRemoved(_controller.text, filter);
     _controller.text = updated;
     _controller.selection = TextSelection.collapsed(offset: updated.length);
-    setState(() => _lastRunQuery = updated.trim());
+    setState(() {
+      _lastRunQuery = updated.trim();
+      _clearSelectionState();
+    });
     _runSearch(updated);
   }
 
@@ -140,29 +205,236 @@ class _SearchPageState extends State<SearchPage> {
     return raw.replaceFirst(token, '').replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
+  // ─── Selection and detail loading ──────────────────────────────────────
+
+  SearchResult? get _selectedResult {
+    final index = _selectedIndex;
+    if (index == null || index >= _results.results.length) return null;
+    return _results.results[index];
+  }
+
+  /// Clears selection without touching the widget tree. Callers are already
+  /// inside a `setState`.
+  void _clearSelectionState() {
+    _selectedIndex = null;
+    _selectedFile = null;
+    _selectedEmail = null;
+    _selectedCollection = null;
+    _detailLoading = false;
+    _isFullscreen = false;
+    _detailToken++;
+  }
+
+  /// Drops a selection whose row is no longer in the result list.
+  ///
+  /// Paging only appends, so an index normally stays pointed at the same row.
+  /// A re-query replaces the list wholesale, though, and an index that survives
+  /// that would leave the panel describing whatever now happens to sit at that
+  /// position.
+  void _dropSelectionIfGone() {
+    final index = _selectedIndex;
+    if (index == null) return;
+    final selectedKey = _selectedFile?.id ?? _selectedEmail?.id;
+    if (index >= _results.results.length) {
+      _clearSelectionState();
+      return;
+    }
+    if (selectedKey != null && _results.results[index].id != selectedKey) {
+      _clearSelectionState();
+    }
+  }
+
+  void _selectIndex(int index) {
+    if (index < 0 || index >= _results.results.length) return;
+    final token = ++_detailToken;
+    setState(() {
+      _selectedIndex = index;
+      _selectedFile = null;
+      _selectedEmail = null;
+      _selectedCollection = null;
+      _detailLoading = true;
+    });
+    // Hand focus to the body so the spacebar reaches the shortcut instead of
+    // typing into the query box.
+    _searchFocus.unfocus();
+    _bodyFocus.requestFocus();
+    _detailFuture = _loadDetail(_results.results[index], token);
+  }
+
+  Future<void> _loadDetail(SearchResult result, int token) async {
+    Collection? collection;
+    model.File? file;
+    Email? email;
+    try {
+      if (result.isFile) {
+        file = await _detailLoader.fileById(result.id);
+      } else {
+        email = await _detailLoader.emailById(result.id);
+      }
+      final collectionId = result.collectionId ?? file?.collectionId;
+      if (collectionId != null) {
+        collection = await _detailLoader.collectionById(collectionId);
+      }
+    } catch (_) {
+      // A record deleted between indexing and now, or a database that closed
+      // under us. The panel shows its "couldn't load" state rather than
+      // taking the page down.
+    }
+    if (!mounted || token != _detailToken) return;
+    setState(() {
+      _selectedFile = file;
+      _selectedEmail = email;
+      _selectedCollection = collection;
+      _detailLoading = false;
+    });
+  }
+
+  /// Indices of every loaded result of the same kind as the current selection —
+  /// what the lightbox and reader step through with the arrow keys.
+  List<int> get _siblingIndices {
+    final selected = _selectedResult;
+    if (selected == null) return const [];
+    final indices = <int>[];
+    for (var i = 0; i < _results.results.length; i++) {
+      if (_results.results[i].type == selected.type) indices.add(i);
+    }
+    return indices;
+  }
+
+  String? get _positionLabel {
+    final index = _selectedIndex;
+    if (index == null) return null;
+    final siblings = _siblingIndices;
+    final at = siblings.indexOf(index);
+    if (at < 0 || siblings.length < 2) return null;
+    return '${at + 1} of ${siblings.length}';
+  }
+
+  void _step(int delta) {
+    final index = _selectedIndex;
+    if (index == null) return;
+    final siblings = _siblingIndices;
+    final at = siblings.indexOf(index);
+    if (at < 0) return;
+    final next = at + delta;
+    // Deliberately no wrap-around: the loaded list is a window onto a longer
+    // ranked set, so wrapping from the last loaded row back to the first would
+    // claim an end that isn't there.
+    if (next < 0 || next >= siblings.length) return;
+    _selectIndex(siblings[next]);
+  }
+
+  /// Opens the lightbox or the reader for the current selection.
+  ///
+  /// Does nothing while the record is still loading — a viewer with nothing in
+  /// it is worse than a keypress that appears not to have registered.
+  void _openFullscreen() {
+    if (_selectedFile == null && _selectedEmail == null) return;
+    setState(() => _isFullscreen = true);
+  }
+
+  void _closeFullscreen() => setState(() => _isFullscreen = false);
+
+  void _onEscape() {
+    if (_isFullscreen) {
+      _closeFullscreen();
+      return;
+    }
+    if (_selectedIndex != null) setState(_clearSelectionState);
+  }
+
+  // ─── Build ─────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
-              child: _SearchBar(
-                controller: _controller,
-                onSubmitted: _onSubmitted,
-                colorScheme: colorScheme,
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.space): _OpenSelectedIntent(),
+        SingleActivator(LogicalKeyboardKey.escape): _DismissIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _OpenSelectedIntent: CallbackAction<_OpenSelectedIntent>(
+            onInvoke: (_) {
+              // Belt and braces: a TextField normally consumes the key before
+              // this ever runs, but a stray focus state must not turn a typed
+              // space into a fullscreen viewer.
+              if (_searchFocus.hasFocus) return null;
+              _openFullscreen();
+              return null;
+            },
+          ),
+          _DismissIntent: CallbackAction<_DismissIntent>(
+            onInvoke: (_) {
+              _onEscape();
+              return null;
+            },
+          ),
+        },
+        child: Focus(
+          focusNode: _bodyFocus,
+          child: Stack(
+            children: [
+              Scaffold(
+                body: SafeArea(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+                        child: _SearchBar(
+                          controller: _controller,
+                          focusNode: _searchFocus,
+                          onSubmitted: _onSubmitted,
+                          colorScheme: colorScheme,
+                        ),
+                      ),
+                      if (_isLoading)
+                        const LinearProgressIndicator(minHeight: 2),
+                      Expanded(child: _buildBody(context)),
+                    ],
+                  ),
+                ),
               ),
-            ),
-            if (_isLoading) const LinearProgressIndicator(minHeight: 2),
-            Expanded(child: _buildBody(context)),
-          ],
+              if (_isFullscreen) Positioned.fill(child: _buildFullscreen()),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _buildFullscreen() {
+    final siblings = _siblingIndices;
+    final at = siblings.indexOf(_selectedIndex ?? -1);
+    final onPrevious = at > 0 ? () => _step(-1) : null;
+    final onNext = at >= 0 && at < siblings.length - 1 ? () => _step(1) : null;
+
+    final email = _selectedEmail;
+    if (email != null) {
+      return SearchEmailReader(
+        email: email,
+        onClose: _closeFullscreen,
+        onNext: onNext,
+        onPrevious: onPrevious,
+        position: _positionLabel,
+      );
+    }
+
+    final file = _selectedFile;
+    final collection = _selectedCollection;
+    if (file == null || collection == null) return const SizedBox.shrink();
+
+    return SearchLightbox(
+      file: file,
+      collection: collection,
+      onClose: _closeFullscreen,
+      onNext: onNext,
+      onPrevious: onPrevious,
+      position: _positionLabel,
     );
   }
 
@@ -183,7 +455,6 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildResults(BuildContext context) {
-    final theme = Theme.of(context);
     final lastQuery = SearchService.instance.lastQuery;
     // The service already restricted retrieval to the selected facet, so what
     // arrived is what belongs on screen.
@@ -213,40 +484,205 @@ class _SearchPageState extends State<SearchPage> {
         // No "showing the first N of M" line: the facet counts already state
         // the real totals, and the list reaches all of them as it scrolls.
         Expanded(
-          child:
-              filtered.isEmpty
-                  ? _EmptyResultsView(
-                    query: _lastRunQuery,
-                    hasFilters: lastQuery?.hasFilters ?? false,
-                    // A facet with nothing in it, while other facets do have
-                    // matches, is a different situation from a query that
-                    // found nothing anywhere — and the way out differs too.
-                    otherFacetsHaveResults:
-                        _facet != SearchFacet.all && _results.total > 0,
-                  )
-                  : ListView.separated(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.only(bottom: 16),
-                    // One extra row for the paging footer.
-                    itemCount: filtered.length + 1,
-                    separatorBuilder:
-                        (_, _) => Divider(
-                          height: 1,
-                          color: theme.colorScheme.outlineVariant.withValues(
-                            alpha: 0.3,
-                          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child:
+                    filtered.isEmpty
+                        ? _EmptyResultsView(
+                          query: _lastRunQuery,
+                          hasFilters: lastQuery?.hasFilters ?? false,
+                          // A facet with nothing in it, while other facets do
+                          // have matches, is a different situation from a query
+                          // that found nothing anywhere — and the way out
+                          // differs too.
+                          otherFacetsHaveResults:
+                              _facet != SearchFacet.all && _results.total > 0,
+                        )
+                        : _buildList(filtered),
+              ),
+              _buildDetailsPanel(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildList(List<SearchResult> filtered) {
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.only(bottom: 16),
+      // One extra row for the paging footer.
+      itemCount: filtered.length + 1,
+      itemBuilder: (context, index) {
+        if (index == filtered.length) {
+          return _PagingFooter(
+            hasMore: SearchService.instance.hasMore,
+            loadedCount: filtered.length,
+            total: _results.total,
+          );
+        }
+        return SearchResultTile(
+          result: filtered[index],
+          isSelected: _selectedIndex == index,
+          onTap: () => _selectIndex(index),
+          onDoubleTap: () => _openAt(index),
+          onExpand: () => _openAt(index),
+        );
+      },
+    );
+  }
+
+  /// Selects [index] and opens its viewer once the record has loaded.
+  ///
+  /// Double-clicking an unselected row has to wait for the same load the
+  /// sidebar is already making — opening a viewer against a half-loaded
+  /// selection would show the previous result's contents. The token re-check
+  /// after the await is what makes a third click during the wait win.
+  Future<void> _openAt(int index) async {
+    if (_selectedIndex != index) {
+      _selectIndex(index);
+      final token = _detailToken;
+      await _detailFuture;
+      if (!mounted || token != _detailToken) return;
+    }
+    _openFullscreen();
+  }
+
+  /// The detail panel beside the list.
+  ///
+  /// Inline rather than an overlay, matching the Files module: it takes width
+  /// from the list instead of covering it, so the ranked order behind it stays
+  /// readable while a result is being inspected — which is the whole point when
+  /// what is being judged is the ranking itself.
+  Widget _buildDetailsPanel() {
+    final theme = Theme.of(context);
+    final isVisible = _selectedIndex != null;
+    final width = _panelWide ? _panelWideWidth : _panelWidth;
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      alignment: Alignment.topRight,
+      child:
+          !isVisible
+              ? const SizedBox.shrink()
+              : Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: SizedBox(
+                  width: width,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainer,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.2,
                         ),
-                    itemBuilder: (context, index) {
-                      if (index == filtered.length) {
-                        return _PagingFooter(
-                          hasMore: SearchService.instance.hasMore,
-                          loadedCount: filtered.length,
-                          total: _results.total,
-                        );
-                      }
-                      return SearchResultTile(result: filtered[index]);
-                    },
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.18),
+                          blurRadius: 16,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: _buildPanelContents(width),
                   ),
+                ),
+              ),
+    );
+  }
+
+  Widget _buildPanelContents(double width) {
+    if (_detailLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final email = _selectedEmail;
+    if (email != null) {
+      return SearchEmailSidebar(
+        email: email,
+        collection: _selectedCollection,
+        width: width,
+        isWide: _panelWide,
+        onToggleWidth: () => setState(() => _panelWide = !_panelWide),
+        onClose: () => setState(_clearSelectionState),
+        onOpenReader: _openFullscreen,
+      );
+    }
+
+    final file = _selectedFile;
+    final collection = _selectedCollection;
+    if (file != null && collection != null) {
+      return SearchFileSidebar(
+        file: file,
+        collection: collection,
+        width: width,
+        isWide: _panelWide,
+        onToggleWidth: () => setState(() => _panelWide = !_panelWide),
+        onClose: () => setState(_clearSelectionState),
+        onOpenLightbox: _openFullscreen,
+      );
+    }
+
+    return _PanelUnavailable(
+      // A file with no collection is the case worth naming: the row is in the
+      // index but the account it came from is gone, so nothing can resolve its
+      // path. Saying "not found" would send someone looking for a bug in the
+      // panel instead of at the collection.
+      message:
+          file != null
+              ? 'This file\'s collection is no longer available.'
+              : 'This result could not be loaded.',
+      onClose: () => setState(_clearSelectionState),
+    );
+  }
+}
+
+class _OpenSelectedIntent extends Intent {
+  const _OpenSelectedIntent();
+}
+
+class _DismissIntent extends Intent {
+  const _DismissIntent();
+}
+
+class _PanelUnavailable extends StatelessWidget {
+  const _PanelUnavailable({required this.message, required this.onClose});
+
+  final String message;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        Align(
+          alignment: Alignment.centerRight,
+          child: IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            tooltip: 'Close',
+            onPressed: onClose,
+          ),
+        ),
+        Expanded(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                message,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
@@ -256,11 +692,13 @@ class _SearchPageState extends State<SearchPage> {
 class _SearchBar extends StatelessWidget {
   const _SearchBar({
     required this.controller,
+    required this.focusNode,
     required this.onSubmitted,
     required this.colorScheme,
   });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final ValueChanged<String> onSubmitted;
   final ColorScheme colorScheme;
 
@@ -268,6 +706,7 @@ class _SearchBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      focusNode: focusNode,
       autofocus: true,
       onSubmitted: onSubmitted,
       textInputAction: TextInputAction.search,

@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/modules/search/models/search_query.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
 import 'package:mydatastudio/modules/search/pages/search_page.dart';
+import 'package:mydatastudio/modules/search/services/search_detail_repository.dart';
 import 'package:mydatastudio/modules/search/services/search_service.dart';
 import 'package:mydatastudio/modules/search/widgets/search_facet_bar.dart';
 import 'package:mydatastudio/modules/search/widgets/search_filter_chips.dart';
@@ -54,6 +59,86 @@ SearchResult _file({
     contentType: contentType,
     thumbnail: thumbnail,
   );
+}
+
+/// Stands in for the database behind the detail sidebars.
+///
+/// Widget tests have no `AppDatabase`, so the real repository would return null
+/// for everything and the panel would only ever render its "couldn't load"
+/// state — which is exactly the state these tests need to distinguish from a
+/// successful open.
+///
+/// [emailById] always returns null, and the tests below only ever select files.
+/// The email panel is not reachable from a widget test at all: `EmailDetails`
+/// builds a `WebViewController` in `initState`, and `webview_flutter` has no
+/// platform implementation under `flutter test`, so constructing it throws.
+/// Covering the mail path needs an integration test on a real device.
+class _FakeDetailLoader implements SearchDetailRepository {
+  _FakeDetailLoader({this.file, this.collection});
+
+  final model.File? file;
+  final Collection? collection;
+
+  @override
+  Future<model.File?> fileById(String id) async => file;
+
+  @override
+  Future<Email?> emailById(String id) async => null;
+
+  @override
+  Future<Collection?> collectionById(String id) async => collection;
+}
+
+model.File _fileRecord({String id = 'f1', String name = 'vacation.jpg'}) {
+  return model.File(
+    id: id,
+    name: name,
+    path: 'Photos/2026/$name',
+    parent: 'Photos/2026',
+    dateCreated: DateTime(2026, 3, 2),
+    dateLastModified: DateTime(2026, 3, 2),
+    collectionId: 'c1',
+    contentType: 'image/jpeg',
+    size: 1024,
+    isDeleted: false,
+  );
+}
+
+Collection _collectionRecord() {
+  return Collection(
+    id: 'c1',
+    name: 'Local Files',
+    path: '/tmp/does-not-exist',
+    type: 'files',
+    scanner: 'local',
+    scanStatus: 'idle',
+    needsReAuth: false,
+  );
+}
+
+/// Taps the single result row and waits for the detail panel to load.
+///
+/// The extra wait is not padding: the row carries both a tap and a double-tap
+/// handler, so the gesture arena holds the single tap until the double-tap
+/// window closes. Pumping zero-duration frames never gets there.
+Future<void> _tapRowAndSettle(WidgetTester tester) async {
+  await tester.tap(find.byType(SearchResultTile));
+  await tester.pump(const Duration(milliseconds: 400));
+  await tester.pump();
+}
+
+/// The row's own background/border container — the first [Container] under the
+/// tile, ahead of the one the icon fallback builds.
+BoxDecoration _rowDecoration(WidgetTester tester) {
+  final container = tester.widget<Container>(
+    find
+        .descendant(
+          of: find.byType(SearchResultTile),
+          matching: find.byType(Container),
+        )
+        .first,
+  );
+  return container.decoration! as BoxDecoration;
 }
 
 void main() {
@@ -114,6 +199,47 @@ void main() {
 
       await tester.tap(find.byType(SearchResultTile));
       expect(tapped, isTrue);
+    });
+
+    testWidgets('renders the thumbnail big enough to judge an image by eye', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestableWidget(SearchResultTile(result: _file())),
+      );
+
+      // This list is how the relevance of a semantic image search gets
+      // judged. At the 40px the other modules' list views use, a white swan
+      // and a white dog are the same smudge and every hit has to be opened to
+      // tell them apart — so the size is a requirement, not a style choice.
+      final leading =
+          find
+              .descendant(
+                of: find.byType(SearchResultTile),
+                matching: find.byType(SizedBox),
+              )
+              .first;
+      expect(tester.getSize(leading), const Size(100, 100));
+    });
+
+    testWidgets('the selected row is marked so the list and panel agree', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestableWidget(SearchResultTile(result: _file())),
+      );
+      final unselected = _rowDecoration(tester).border! as Border;
+      expect(unselected.left.color, Colors.transparent);
+
+      await tester.pumpWidget(
+        _buildTestableWidget(
+          SearchResultTile(result: _file(), isSelected: true),
+        ),
+      );
+      // Without the accent bar, an open detail panel names a row the user has
+      // no way to locate again in a long scrolled list.
+      final selected = _rowDecoration(tester).border! as Border;
+      expect(selected.left.color, darkColorScheme.primary);
     });
   });
 
@@ -319,6 +445,92 @@ void main() {
 
       final textField = tester.widget<TextField>(find.byType(TextField));
       expect(textField.controller?.text, 'invoices');
+    });
+
+    testWidgets('selecting a result opens a detail panel for that result', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestableWidget(
+          SearchPage(
+            initialQuery: 'vacation',
+            detailLoader: _FakeDetailLoader(
+              file: _fileRecord(),
+              collection: _collectionRecord(),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      SearchService.instance.sink.add(
+        SearchResults(results: [_file()], fileTotal: 1),
+      );
+      await tester.pump();
+      expect(find.text('File Details'), findsNothing);
+
+      await _tapRowAndSettle(tester);
+
+      expect(find.text('File Details'), findsOneWidget);
+    });
+
+    testWidgets('running a new query closes the panel from the old results', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestableWidget(
+          SearchPage(
+            initialQuery: 'vacation',
+            detailLoader: _FakeDetailLoader(
+              file: _fileRecord(),
+              collection: _collectionRecord(),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      SearchService.instance.sink.add(
+        SearchResults(results: [_file()], fileTotal: 1),
+      );
+      await tester.pump();
+      await _tapRowAndSettle(tester);
+      expect(find.text('File Details'), findsOneWidget);
+
+      // The panel is keyed to a position in the result list. A new query
+      // replaces that list wholesale, so a panel that survived would keep
+      // describing a file the new results never contained.
+      await tester.enterText(find.byType(TextField), 'something else');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+
+      expect(find.text('File Details'), findsNothing);
+    });
+
+    testWidgets('space with nothing selected does not open a viewer', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestableWidget(
+          SearchPage(
+            initialQuery: 'vacation',
+            detailLoader: _FakeDetailLoader(
+              file: _fileRecord(),
+              collection: _collectionRecord(),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      SearchService.instance.sink.add(
+        SearchResults(results: [_file()], fileTotal: 1),
+      );
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+
+      // A full-window viewer over an empty selection has nothing to show and
+      // no obvious way back — the key has to be inert until a row is picked.
+      expect(find.byTooltip('Close'), findsNothing);
     });
   });
 }
