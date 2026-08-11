@@ -2,7 +2,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/modules/email/services/email_repository.dart';
-import 'package:mydatastudio/modules/search/services/contact_repository.dart';
+import 'package:mydatastudio/modules/search/services/email_contact_repository.dart';
 import 'package:mydatastudio/services/rx_service.dart';
 import 'package:mydatastudio/services/sqlite_retry.dart';
 
@@ -38,7 +38,9 @@ class EmailUpsertService
   /// re-synced, those messages would be lost for good.
   Future<void> _indexContacts(EmailUpsertServiceCommand command) async {
     try {
-      await ContactRepository(command.database).indexEmails(command.emails);
+      await EmailContactRepository(
+        command.database,
+      ).indexEmails(command.emails);
     } catch (e, stackTrace) {
       AppLogger(null).w(
         'EmailUpsertService: contact indexing failed for '

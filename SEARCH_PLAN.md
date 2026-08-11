@@ -108,7 +108,7 @@ Grammar: `<field>:<value>`, value optionally quoted, `-` prefix negates, unmatch
 >
 > This matters because the obvious alternative — letting un-prefixed prose fall through to vector search — is wrong on the merits. **Embeddings encode meaning, not identity.** Embedding `"from mike nimer"` and comparing it against email vectors retrieves messages *about* Mike, or that mention his name in the body, while systematically **missing** messages *from* Mike on unrelated topics. That missed set is precisely what was asked for. Proper nouns are the weakest thing a semantic vector carries.
 >
-> Detection is n-gram matching over `contacts.display_name`, plus the prepositional patterns `from|to|with|between <person>` — deterministic, no inference. Resolves cleanly → hard filter + editable chip. Ambiguous → disambiguation chip. Resolves to nothing → §2d fallback.
+> Detection is n-gram matching over `emails_contacts.display_name`, plus the prepositional patterns `from|to|with|between <person>` — deterministic, no inference. Resolves cleanly → hard filter + editable chip. Ambiguous → disambiguation chip. Resolves to nothing → §2d fallback.
 
 ```sql
 SELECT DISTINCT "from" FROM emails WHERE "from" LIKE '%russel%jong%'
@@ -271,11 +271,22 @@ All hand-written DDL in `database_manager.dart` per this project's conventions (
 CREATE VIRTUAL TABLE emails_fts USING fts5(... content='emails' ...);
 CREATE VIRTUAL TABLE files_fts  USING fts5(... content='files'  ...);
 
--- 2. Contacts index — powers name→address resolution (§2b) and the
+-- 2. Email address index — powers name→address resolution (§2b) and the
 --    field autocomplete (§13). `address` is stored ALREADY LOWERCASED and
 --    is the identity key; `display_name` keeps human casing for display.
 --    See §13a for why this cannot be a view over `emails`.
-CREATE TABLE IF NOT EXISTS contacts (
+--
+--    Named `emails_contacts`, not `contacts`, and keyed by ADDRESS, not by
+--    person. It is a derived index over `emails` in the same family as
+--    `emails_fts` and `emails_embeddings` — nothing in it is user-authored,
+--    and it is fully rebuildable by re-parsing from/to/cc. One human with
+--    three addresses is three rows here; this archive already holds
+--    mnimer@allaire.com and mike@digitalchef.com both named "Mike Nimer".
+--    A root-level contacts module would be person-level and consume this
+--    table as one source, so the bare name `contacts` is reserved for it.
+--    That is also why §2b resolves to a *set* of addresses and surfaces a
+--    disambiguation chip rather than picking one.
+CREATE TABLE IF NOT EXISTS emails_contacts (
   address        TEXT PRIMARY KEY,     -- normalized: lowercased, angle brackets stripped
   display_name   TEXT,                 -- most frequent variant seen, original casing
   local_part     TEXT NOT NULL,        -- substring before '@', for prefix ranking
@@ -284,9 +295,9 @@ CREATE TABLE IF NOT EXISTS contacts (
   first_seen     INTEGER,
   last_seen      INTEGER
 );
-CREATE INDEX IF NOT EXISTS contacts_name_idx  ON contacts (display_name COLLATE NOCASE);
-CREATE INDEX IF NOT EXISTS contacts_local_idx ON contacts (local_part  COLLATE NOCASE);
-CREATE INDEX IF NOT EXISTS contacts_rank_idx  ON contacts (message_count DESC);
+CREATE INDEX IF NOT EXISTS emails_contacts_name_idx  ON emails_contacts (display_name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS emails_contacts_local_idx ON emails_contacts (local_part  COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS emails_contacts_rank_idx  ON emails_contacts (message_count DESC);
 
 -- 3. Document chunks — Section 8. Deliberately deferred; listed here so the
 --    shape is agreed before anything is written against it.
@@ -499,7 +510,7 @@ Three concrete problems:
 
 Also: a `DISTINCT` + dedup over `emails` is a full table scan **per keystroke**. Fine at 1,367 rows, unusable at 200,000.
 
-So the dropdown must read the **materialized `contacts` table** (§6), never `emails` directly. Populating it requires an address parser — split `to`/`cc` on commas, then parse each part as either `Display Name <addr@domain>` or a bare `addr@domain`, lowercase the address, keep the display name for presentation.
+So the dropdown must read the **materialized `emails_contacts` table** (§6), never `emails` directly. Populating it requires an address parser — split `to`/`cc` on commas, then parse each part as either `Display Name <addr@domain>` or a bare `addr@domain`, lowercase the address, keep the display name for presentation.
 
 Note the formats are inconsistent by source: `from` carries display names, `to` in this data does not. The parser must handle both, and `display_name` is therefore nullable.
 
@@ -517,7 +528,7 @@ The same mechanism serves every enumerable field, and building it generically co
 
 | Field | Source | Rows today |
 |---|---|---|
-| `from:` `to:` `cc:` | `contacts` | ~400 |
+| `from:` `to:` `cc:` | `emails_contacts` | ~400 |
 | **`tag:`** | `file_tags` | **16,725** |
 | `near:` | `file_landmarks` | 316 |
 | `in:` | `collections` | 8 |
@@ -539,7 +550,7 @@ Desktop keyboard behavior, all of it required:
 - `↑`/`↓` navigate, `Tab` completes the highlighted entry, `Esc` dismisses.
 - **`Enter` accepts the highlighted suggestion when the dropdown is open, and submits the search only when it is closed.** This is the classic autocomplete bug and it is worth calling out explicitly — getting it backwards means every completed selection also fires a premature search.
 - Typing `from:` with an empty value opens the list immediately, showing top correspondents by volume. Useful before the user types anything.
-- **Never force a selection.** Free text must stay valid — an address may be absent from `contacts` because that mail was deleted, or the user is searching for something not yet synced. The dropdown suggests; it does not gate.
+- **Never force a selection.** Free text must stay valid — an address may be absent from `emails_contacts` because that mail was deleted, or the user is searching for something not yet synced. The dropdown suggests; it does not gate.
 
 ### 13e. Cache the lists; don't query per keystroke
 
@@ -572,12 +583,12 @@ Measured detail that reinforces this: `DISTINCT` defeats the prefix-range optimi
 
 ### 13f. Build order impact
 
-`contacts` (table, parser, backfill) moves to **Phase 1** — §2b already depends on it, so autocomplete adds the UI and the suggestion providers, not the data layer. The dropdown itself lands in **Phase 2** with the search page.
+`emails_contacts` (table, parser, backfill) moves to **Phase 1** — §2b already depends on it, so autocomplete adds the UI and the suggestion providers, not the data layer. The dropdown itself lands in **Phase 2** with the search page.
 
 Tests:
 
 - **`address_parser_test.dart`** — `Display Name <a@b.com>`, `"quoted[bot]" <a@b.com>`, bare `a@b.com`, and a comma-joined multi-recipient string each parse to the right address set; casing normalizes; a malformed header yields no contact rather than throwing.
-- **`contact_suggestion_test.dart`** — ranking puts high-`message_count` first; prefix beats substring; matching is case-insensitive; an address absent from `contacts` still produces a usable free-text filter.
+- **`contact_suggestion_test.dart`** — ranking puts high-`message_count` first; prefix beats substring; matching is case-insensitive; an address absent from `emails_contacts` still produces a usable free-text filter.
 
 ---
 

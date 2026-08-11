@@ -556,6 +556,72 @@ void main() {
       if (dbFile.existsSync()) dbFile.deleteSync();
     });
 
+    test('renaming contacts to emails_contacts keeps the indexed rows', () async {
+      // The rename runs before _createSearchIndexes for a reason: that method
+      // creates emails_contacts with IF NOT EXISTS, so an install still holding
+      // the old table would otherwise end up with both — a populated one nothing
+      // reads and an empty one everything reads. The visible symptom would be
+      // `from:` autocomplete and prose person-resolution silently returning
+      // nothing on exactly the archives that have the most mail in them.
+      final supportDir = await getApplicationSupportDirectory();
+      const dbName = 'contacts_rename_test.db';
+      final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+      if (dbFile.existsSync()) dbFile.deleteSync();
+
+      var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+
+      // Reproduce an install carrying the pre-rename shape.
+      await appDb.rawDb.execute('DROP TABLE IF EXISTS emails_contacts');
+      await appDb.rawDb.execute('''
+        CREATE TABLE contacts (
+          address        TEXT PRIMARY KEY,
+          display_name   TEXT,
+          local_part     TEXT NOT NULL,
+          message_count  INTEGER NOT NULL DEFAULT 0,
+          sent_count     INTEGER NOT NULL DEFAULT 0,
+          first_seen     INTEGER,
+          last_seen      INTEGER
+        );
+      ''');
+      await appDb.rawDb.execute(
+        'CREATE INDEX contacts_name_idx ON contacts (display_name)',
+      );
+      await appDb.rawDb.execute(
+        'INSERT INTO contacts (address, display_name, local_part, '
+        'message_count) VALUES (?, ?, ?, ?)',
+        ['mnimer@allaire.com', 'Mike Nimer', 'mnimer', 6889],
+      );
+      await appDb.close();
+
+      // Reopening is what an upgraded install does.
+      appDb = await AppDatabase.create(null, supportDir.path, dbName);
+
+      final rows = await appDb.rawDb.select(
+        'SELECT address, message_count FROM emails_contacts',
+      );
+      expect(rows.length, 1);
+      expect(rows.first['address'], 'mnimer@allaire.com');
+      // Carried across, not rebuilt: a rebuild would re-derive this from an
+      // emails table that is empty here, and 6889 would come back as nothing.
+      expect(rows.first['message_count'], 6889);
+
+      final old = await appDb.rawDb.select(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='contacts'",
+      );
+      expect(old, isEmpty, reason: 'the old table must not survive the rename');
+
+      // The old index names must go with it, or a future contacts module
+      // creating its own contacts_name_idx collides with a leftover.
+      final staleIndex = await appDb.rawDb.select(
+        "SELECT name FROM sqlite_master WHERE type='index' "
+        "AND name='contacts_name_idx'",
+      );
+      expect(staleIndex, isEmpty);
+
+      await appDb.close();
+      if (dbFile.existsSync()) dbFile.deleteSync();
+    });
+
     test('HTML-only mail becomes searchable on upgrade', () async {
       // A third of a real archive (425 of 1,279 measured here) arrives with
       // an html_body and no plain_body. The first version of the index read
@@ -665,9 +731,16 @@ void main() {
       final tables =
           (await appDb.rawDb.select(
             "SELECT name FROM sqlite_master WHERE name IN "
-            "('emails_fts', 'files_fts', 'contacts')",
+            "('emails_fts', 'files_fts', 'emails_contacts', 'contacts')",
           )).map((r) => r['name'] as String).toSet();
-      expect(tables, containsAll(['emails_fts', 'files_fts', 'contacts']));
+      expect(
+        tables,
+        containsAll(['emails_fts', 'files_fts', 'emails_contacts']),
+      );
+      // A fresh database must never carry the pre-rename table. The rename
+      // migration is a no-op here, so its presence would mean the old DDL had
+      // been left behind somewhere alongside the new.
+      expect(tables, isNot(contains('contacts')));
 
       await appDb.close();
       if (dbFile.existsSync()) dbFile.deleteSync();

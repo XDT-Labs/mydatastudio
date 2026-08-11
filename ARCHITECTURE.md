@@ -713,7 +713,7 @@ These are the ones that break things quietly when violated:
 | `services/rank_fusion.dart` | RRF, `k = 60`, 1-based ranks. |
 | `services/result_ranking.dart` | Tier, recency, modality multipliers. |
 | `services/query_embedder.dart` | Query → vector via the Python service; fails soft to lexical-only. |
-| `services/contact_repository.dart` | `from:` name → address, a DB lookup rather than a model call. |
+| `services/email_contact_repository.dart` | `from:` name → address, a DB lookup rather than a model call. |
 | `services/near_resolver.dart`, `place_repository.dart`, `geo.dart` | `near:` — bundled GeoNames gazetteer, bounding box then haversine. No R-Tree in this build. |
 
 Search degrades rather than fails: if the AI subprocess is down the vector pass

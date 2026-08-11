@@ -18,7 +18,7 @@ import 'package:mydatastudio/modules/files/services/embedding_isolate.dart';
 import 'package:mydatastudio/modules/files/services/file_description_isolate.dart';
 import 'package:mydatastudio/modules/email/services/email_embedding_isolate.dart';
 import 'package:mydatastudio/modules/email/services/searchable_body.dart';
-import 'package:mydatastudio/modules/search/services/contact_repository.dart';
+import 'package:mydatastudio/modules/search/services/email_contact_repository.dart';
 import 'package:mydatastudio/modules/search/services/place_repository.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:uuid/uuid.dart';
@@ -594,6 +594,13 @@ class AppDatabase {
 
     await _reapOrphanedArtifacts();
 
+    // Strictly before _createSearchIndexes: that method creates
+    // `emails_contacts` with IF NOT EXISTS, which on an install still holding
+    // the old `contacts` table would happily make a second, empty one beside
+    // it — leaving the archive with a populated table nothing reads and an
+    // empty table everything reads.
+    await _renameContactsTable();
+
     // Strictly after _addMissingColumns: files_fts indexes `description`, a
     // column added long after the initial schema. Creating the trigger that
     // reads `new.description` before that ALTER lands would build it against
@@ -722,8 +729,48 @@ class AppDatabase {
     }
   }
 
+  /// Renames the derived address index `contacts` → `emails_contacts`.
+  ///
+  /// The table only ever held addresses parsed out of `emails.from`/`to`/`cc`,
+  /// so `contacts` overstated it: it is an email-derived search index, not a
+  /// contact book. The plain name is reserved for a future root-level contacts
+  /// module, which will be *person*-level — this table is keyed by address, and
+  /// one person routinely owns several rows here.
+  ///
+  /// Renamed rather than dropped and rebuilt, even though the contents are
+  /// fully derivable. `backfillFromEmails` re-parses every message in the
+  /// archive, and on an archive this size that is real work to repeat for a
+  /// change that moves no data. SQLite carries the existing indexes across a
+  /// RENAME under their old names, so they are dropped here and recreated by
+  /// [_createSearchIndexes] — otherwise an install would keep `contacts_*`
+  /// index names against a table that no longer answers to `contacts`.
+  ///
+  /// Not gated on `user_version`: the guard is the rename itself, which is a
+  /// no-op once `emails_contacts` exists. That is cheaper than a version bump
+  /// and cannot be skipped by an install that jumped several versions.
+  Future<void> _renameContactsTable() async {
+    final existing = await _db.select(
+      "SELECT name FROM sqlite_master WHERE type = 'table' "
+      "AND name IN ('contacts', 'emails_contacts')",
+    );
+    final names = existing.map((r) => r['name'] as String).toSet();
+    if (!names.contains('contacts') || names.contains('emails_contacts')) {
+      return;
+    }
+
+    await _db.execute('ALTER TABLE contacts RENAME TO emails_contacts');
+    for (final index in const [
+      'contacts_name_idx',
+      'contacts_local_idx',
+      'contacts_rank_idx',
+    ]) {
+      await _db.execute('DROP INDEX IF EXISTS $index');
+    }
+    logger.i('AppDatabase: renamed contacts -> emails_contacts');
+  }
+
   /// Creates the keyword-search indexes: two FTS5 virtual tables and the
-  /// derived `contacts` index.
+  /// derived `emails_contacts` index.
   ///
   /// Deliberately not part of [schemaDDL]. That list only runs for a brand-new
   /// database, so an existing install would never see these; running them here
@@ -832,7 +879,7 @@ class AppDatabase {
     // the comma-joined `to`/`cc` lists, neither of which is expressible in SQL.
     // See ContactIndexer.
     await _db.execute('''
-      CREATE TABLE IF NOT EXISTS contacts (
+      CREATE TABLE IF NOT EXISTS emails_contacts (
         address        TEXT PRIMARY KEY,
         display_name   TEXT,
         local_part     TEXT NOT NULL,
@@ -843,16 +890,16 @@ class AppDatabase {
       );
     ''');
     await _db.execute(
-      'CREATE INDEX IF NOT EXISTS contacts_name_idx '
-      'ON contacts (display_name COLLATE NOCASE);',
+      'CREATE INDEX IF NOT EXISTS emails_contacts_name_idx '
+      'ON emails_contacts (display_name COLLATE NOCASE);',
     );
     await _db.execute(
-      'CREATE INDEX IF NOT EXISTS contacts_local_idx '
-      'ON contacts (local_part COLLATE NOCASE);',
+      'CREATE INDEX IF NOT EXISTS emails_contacts_local_idx '
+      'ON emails_contacts (local_part COLLATE NOCASE);',
     );
     await _db.execute(
-      'CREATE INDEX IF NOT EXISTS contacts_rank_idx '
-      'ON contacts (message_count DESC);',
+      'CREATE INDEX IF NOT EXISTS emails_contacts_rank_idx '
+      'ON emails_contacts (message_count DESC);',
     );
   }
 
@@ -899,7 +946,7 @@ class AppDatabase {
 
       await _db.execute("INSERT INTO emails_fts(emails_fts) VALUES('rebuild')");
       await _db.execute("INSERT INTO files_fts(files_fts) VALUES('rebuild')");
-      await ContactRepository(this).backfillFromEmails();
+      await EmailContactRepository(this).backfillFromEmails();
       await _db.execute('PRAGMA user_version = $searchIndexVersion');
       logger.i('AppDatabase: full-text search indexes built');
     } catch (e, stackTrace) {

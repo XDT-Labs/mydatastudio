@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/email.dart';
-import 'package:mydatastudio/modules/search/services/contact_repository.dart';
+import 'package:mydatastudio/modules/search/services/email_contact_repository.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -40,7 +40,7 @@ Future<AppDatabase> _freshDb(String dbName) async {
 
 Future<Map<String, Object?>?> _contact(AppDatabase db, String address) async {
   final rows = await db.rawDb.select(
-    'SELECT * FROM contacts WHERE address = ?',
+    'SELECT * FROM emails_contacts WHERE address = ?',
     [address],
   );
   return rows.isEmpty ? null : rows.first;
@@ -67,14 +67,14 @@ void main() {
     _createdDbs.clear();
   });
 
-  group('ContactRepository.indexEmails', () {
+  group('EmailContactRepository.indexEmails', () {
     test('extracts the address out of an RFC 5322 from header', () async {
       // The whole reason this index exists: `emails."from"` stores
       // `Name <addr@host>`, so a `from:` filter comparing against the raw
       // column can never equality-match. If this regresses, every
       // sender-filtered search silently returns nothing.
       final db = await _freshDb('contacts_rfc5322_test.db');
-      final repo = ContactRepository(db);
+      final repo = EmailContactRepository(db);
 
       await repo.indexEmails([
         _email(
@@ -96,7 +96,7 @@ void main() {
       // value would put a whole recipient list into the autocomplete as a
       // single unselectable row.
       final db = await _freshDb('contacts_list_test.db');
-      final repo = ContactRepository(db);
+      final repo = EmailContactRepository(db);
 
       await repo.indexEmails([
         _email(
@@ -107,7 +107,7 @@ void main() {
         ),
       ]);
 
-      final rows = await db.rawDb.select('SELECT address FROM contacts');
+      final rows = await db.rawDb.select('SELECT address FROM emails_contacts');
       expect(rows.map((r) => r['address'] as String).toSet(), {
         'sender@x.com',
         'bmageau@hotmail.com',
@@ -124,7 +124,7 @@ void main() {
       // autocomplete rows with split message counts, so neither ranks
       // correctly.
       final db = await _freshDb('contacts_case_test.db');
-      final repo = ContactRepository(db);
+      final repo = EmailContactRepository(db);
 
       // No recipients, so the only contacts that can exist are the two
       // spellings of the sender — which is exactly what must collapse to one.
@@ -133,7 +133,7 @@ void main() {
         _email(id: 'e2', from: 'bob@x.com', to: const []),
       ]);
 
-      final rows = await db.rawDb.select('SELECT * FROM contacts');
+      final rows = await db.rawDb.select('SELECT * FROM emails_contacts');
       expect(rows.length, 1);
       expect(rows.first['address'], 'bob@x.com');
       expect(rows.first['message_count'], 2);
@@ -149,7 +149,7 @@ void main() {
       // exchanged 400 messages with must outrank one you have exchanged two
       // with, or a short prefix lands on an alphabetical accident.
       final db = await _freshDb('contacts_counts_test.db');
-      final repo = ContactRepository(db);
+      final repo = EmailContactRepository(db);
 
       await repo.indexEmails([
         _email(id: 'e1', from: 'busy@x.com', to: ['me@example.com']),
@@ -167,7 +167,7 @@ void main() {
 
     test('tracks first and last seen across a batch', () async {
       final db = await _freshDb('contacts_seen_test.db');
-      final repo = ContactRepository(db);
+      final repo = EmailContactRepository(db);
 
       await repo.indexEmails([
         _email(id: 'e1', from: 'a@x.com', dateMs: 5000),
@@ -186,7 +186,7 @@ void main() {
       // Scanners hand over whatever the server sent. One malformed header must
       // not cost the contacts of every other message in the batch.
       final db = await _freshDb('contacts_malformed_test.db');
-      final repo = ContactRepository(db);
+      final repo = EmailContactRepository(db);
 
       await repo.indexEmails([
         _email(id: 'e1', from: 'not-an-address', to: const []),
@@ -194,20 +194,22 @@ void main() {
       ]);
 
       expect(await _contact(db, 'good@x.com'), isNotNull);
-      final all = await db.rawDb.select('SELECT COUNT(*) c FROM contacts');
+      final all = await db.rawDb.select(
+        'SELECT COUNT(*) c FROM emails_contacts',
+      );
       expect(all.first['c'], 1);
 
       await db.close();
     });
   });
 
-  group('ContactRepository.resolveName', () {
+  group('EmailContactRepository.resolveName', () {
     test('resolves a prose name to the addresses behind it', () async {
       // This is what makes `emails from mike nimer` produce the same hard
       // sender filter as `from:mike@x.com`. A language model does not know
       // Mike's address; the archive does.
       final db = await _freshDb('contacts_resolve_test.db');
-      final repo = ContactRepository(db);
+      final repo = EmailContactRepository(db);
 
       await repo.indexEmails([
         _email(id: 'e1', from: 'Mike Nimer <mike@xdtlabs.com>'),
@@ -227,7 +229,7 @@ void main() {
         // wrong result set, so all candidates come back for the caller to
         // disambiguate — ordered so the likeliest is first.
         final db = await _freshDb('contacts_ambiguous_test.db');
-        final repo = ContactRepository(db);
+        final repo = EmailContactRepository(db);
 
         await repo.indexEmails([
           _email(id: 'e1', from: 'Mike Nimer <mike@work.com>'),
@@ -246,7 +248,7 @@ void main() {
 
     test('matches a bare address with no display name', () async {
       final db = await _freshDb('contacts_bare_test.db');
-      final repo = ContactRepository(db);
+      final repo = EmailContactRepository(db);
 
       await repo.indexEmails([_email(id: 'e1', from: 'mnimer@gmail.com')]);
 
@@ -261,7 +263,7 @@ void main() {
       // result. Returning a loose match instead would silently apply a hard
       // filter the user never asked for.
       final db = await _freshDb('contacts_unknown_test.db');
-      final repo = ContactRepository(db);
+      final repo = EmailContactRepository(db);
 
       await repo.indexEmails([_email(id: 'e1', from: 'someone@x.com')]);
 
@@ -272,7 +274,7 @@ void main() {
     });
   });
 
-  group('ContactRepository.backfillFromEmails', () {
+  group('EmailContactRepository.backfillFromEmails', () {
     test('indexes mail that predates the write-path hook', () async {
       // The hook in EmailUpsertService only sees mail arriving after it
       // exists. Without the backfill an upgraded install has no contacts at
@@ -292,9 +294,9 @@ void main() {
           'legacy',
         ],
       );
-      await db.rawDb.execute('DELETE FROM contacts');
+      await db.rawDb.execute('DELETE FROM emails_contacts');
 
-      final count = await ContactRepository(db).backfillFromEmails();
+      final count = await EmailContactRepository(db).backfillFromEmails();
       expect(count, 1);
 
       final row = await _contact(db, 'old@x.com');
@@ -316,7 +318,7 @@ void main() {
         ['e1', 'c1', 1, 'a@x.com', 'me@example.com', 's'],
       );
 
-      final repo = ContactRepository(db);
+      final repo = EmailContactRepository(db);
       await repo.backfillFromEmails();
       await repo.backfillFromEmails();
 
@@ -340,10 +342,14 @@ void main() {
         );
       }
 
-      final count = await ContactRepository(db).backfillFromEmails(pageSize: 2);
+      final count = await EmailContactRepository(
+        db,
+      ).backfillFromEmails(pageSize: 2);
       expect(count, 7);
 
-      final rows = await db.rawDb.select('SELECT COUNT(*) c FROM contacts');
+      final rows = await db.rawDb.select(
+        'SELECT COUNT(*) c FROM emails_contacts',
+      );
       // 7 distinct senders + the shared recipient.
       expect(rows.first['c'], 8);
 

@@ -4,8 +4,21 @@ import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/modules/search/services/address_parser.dart';
 import 'package:resqlite/resqlite.dart';
 
-/// Maintains the `contacts` index — every email address seen in the archive,
-/// with the display name and correspondence volume needed to rank it.
+/// Maintains the `emails_contacts` index — every email address seen in the
+/// archive, with the display name and correspondence volume needed to rank it.
+///
+/// Named for what it is: a derived index over `emails`, in the same family as
+/// `emails_fts` and `emails_embeddings`, holding nothing that is not recoverable
+/// by re-parsing `from`/`to`/`cc`. It is **not** a contact book, and the bare
+/// name `contacts` is left free for a root-level contacts module.
+///
+/// The distinction that matters if such a module arrives: rows here are keyed by
+/// **address**, not by person. One human with three addresses is three rows, and
+/// this archive already contains exactly that — `mnimer@allaire.com` and
+/// `mike@digitalchef.com` both carry the display name "Mike Nimer". A
+/// person-level module would consume this table as a source and map many
+/// addresses onto one identity; it would not be this table renamed. That is also
+/// why [resolveName] returns every candidate instead of picking one.
 ///
 /// This exists because neither of the obvious alternatives works against the
 /// data as it is actually stored. `emails."from"` holds RFC 5322 text
@@ -20,11 +33,11 @@ import 'package:resqlite/resqlite.dart';
 /// It is also what keeps a per-keystroke autocomplete query off the `emails`
 /// table: a `DISTINCT` scan there is fine at a thousand rows and unusable at
 /// two hundred thousand.
-class ContactRepository {
+class EmailContactRepository {
   final AppDatabase db;
   final AppLogger logger = AppLogger(null);
 
-  ContactRepository(this.db);
+  EmailContactRepository(this.db);
 
   /// Folds [emails] into the index, one increment per appearance.
   ///
@@ -70,17 +83,21 @@ class ContactRepository {
     // names that only ever arrive on the `from` side.
     return tx.execute(
       '''
-      INSERT INTO contacts (address, display_name, local_part, message_count,
-                            sent_count, first_seen, last_seen)
+      INSERT INTO emails_contacts (address, display_name, local_part,
+                                   message_count, sent_count,
+                                   first_seen, last_seen)
       VALUES (?, ?, ?, 1, ?, ?, ?)
       ON CONFLICT(address) DO UPDATE SET
-        display_name  = COALESCE(contacts.display_name, excluded.display_name),
+        display_name  = COALESCE(emails_contacts.display_name,
+                                 excluded.display_name),
         local_part    = excluded.local_part,
-        message_count = contacts.message_count + 1,
-        sent_count    = contacts.sent_count + excluded.sent_count,
-        first_seen    = MIN(COALESCE(contacts.first_seen, excluded.first_seen),
+        message_count = emails_contacts.message_count + 1,
+        sent_count    = emails_contacts.sent_count + excluded.sent_count,
+        first_seen    = MIN(COALESCE(emails_contacts.first_seen,
+                                     excluded.first_seen),
                             excluded.first_seen),
-        last_seen     = MAX(COALESCE(contacts.last_seen, excluded.last_seen),
+        last_seen     = MAX(COALESCE(emails_contacts.last_seen,
+                                     excluded.last_seen),
                             excluded.last_seen)
       ''',
       [
@@ -97,15 +114,15 @@ class ContactRepository {
   /// Rebuilds the index from every message already in the archive.
   ///
   /// Needed because the write-path hook only sees mail that arrives after it
-  /// exists; without this an upgraded install has an empty `contacts` table and
-  /// no `from:` autocomplete at all until the next sync.
+  /// exists; without this an upgraded install has an empty `emails_contacts`
+  /// table and no `from:` autocomplete at all until the next sync.
   ///
   /// Reads in pages and selects only the four address-bearing columns — a
   /// large archive is mostly `html_body`/`plain_body`/`headers`, and pulling
   /// those to count addresses would materialize hundreds of megabytes for
   /// nothing.
   Future<int> backfillFromEmails({int pageSize = 500}) async {
-    await db.execute('DELETE FROM contacts');
+    await db.execute('DELETE FROM emails_contacts');
 
     var offset = 0;
     var indexed = 0;
@@ -138,7 +155,7 @@ class ContactRepository {
       offset += pageSize;
     }
 
-    logger.i('ContactRepository: indexed contacts from $indexed emails');
+    logger.i('EmailContactRepository: indexed contacts from $indexed emails');
     return indexed;
   }
 
@@ -148,15 +165,15 @@ class ContactRepository {
   /// in memory and filters per keystroke — see the suggestion cache. Ordering
   /// by volume here is what makes a one- or two-character prefix land on the
   /// right person instead of an alphabetical accident.
-  Future<List<Contact>> all({int? limit}) async {
+  Future<List<EmailContact>> all({int? limit}) async {
     final rows = await db.select(
       'SELECT address, display_name, local_part, message_count, sent_count, '
-      'first_seen, last_seen FROM contacts '
+      'first_seen, last_seen FROM emails_contacts '
       'ORDER BY message_count DESC, address ASC'
       '${limit != null ? ' LIMIT ?' : ''}',
       [if (limit != null) limit],
     );
-    return rows.map(Contact.fromDbMap).toList();
+    return rows.map(EmailContact.fromDbMap).toList();
   }
 
   /// Addresses plausibly belonging to a person named [name].
@@ -169,7 +186,7 @@ class ContactRepository {
   /// Returns every candidate rather than guessing between them — an ambiguous
   /// name is for the caller to disambiguate visibly, since silently picking
   /// the wrong Mike returns a confidently empty result set.
-  Future<List<Contact>> resolveName(String name, {int limit = 10}) async {
+  Future<List<EmailContact>> resolveName(String name, {int limit = 10}) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return const [];
 
@@ -180,7 +197,7 @@ class ContactRepository {
       '''
       SELECT address, display_name, local_part, message_count, sent_count,
              first_seen, last_seen
-      FROM contacts
+      FROM emails_contacts
       WHERE display_name LIKE ? COLLATE NOCASE
          OR address      LIKE ? COLLATE NOCASE
       ORDER BY message_count DESC, address ASC
@@ -188,12 +205,12 @@ class ContactRepository {
       ''',
       [pattern, pattern, limit],
     );
-    return rows.map(Contact.fromDbMap).toList();
+    return rows.map(EmailContact.fromDbMap).toList();
   }
 }
 
-/// One row of the `contacts` index.
-class Contact {
+/// One row of the `emails_contacts` index — one **address**, not one person.
+class EmailContact {
   /// Lowercased — the identity key. See [AddressParser].
   final String address;
   final String? displayName;
@@ -208,7 +225,7 @@ class Contact {
   final DateTime? firstSeen;
   final DateTime? lastSeen;
 
-  const Contact({
+  const EmailContact({
     required this.address,
     required this.displayName,
     required this.localPart,
@@ -218,10 +235,10 @@ class Contact {
     this.lastSeen,
   });
 
-  factory Contact.fromDbMap(Map<String, Object?> map) {
+  factory EmailContact.fromDbMap(Map<String, Object?> map) {
     DateTime? at(Object? v) =>
         v == null ? null : DateTime.fromMillisecondsSinceEpoch(v as int);
-    return Contact(
+    return EmailContact(
       address: map['address'] as String,
       displayName: map['display_name'] as String?,
       localPart: map['local_part'] as String? ?? '',
@@ -238,5 +255,5 @@ class Contact {
       (displayName?.isNotEmpty ?? false) ? displayName! : address;
 
   @override
-  String toString() => 'Contact($address, $displayName, n=$messageCount)';
+  String toString() => 'EmailContact($address, $displayName, n=$messageCount)';
 }
