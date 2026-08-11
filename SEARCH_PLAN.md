@@ -369,17 +369,15 @@ A "Summarize these results" button on the result set — not automatic. It takes
 
 Nothing here exists today. Ordered by value-per-unit-effort:
 
-1. **Email chunking — deferred pending measured quality. Ship single-vector first.**
+1. **Email chunking — evaluated and adopted. See §16 for the measurement.**
 
-   One vector currently represents an entire message, including a 40-message quoted thread ([email_embedding_isolate.dart:123](client/lib/modules/email/services/email_embedding_isolate.dart:123)). That is a real dilution risk on long threads — but it is a *predicted* problem, and the embeddings already exist. **Decision: run Phases 1–5 on the existing single-vector embeddings and evaluate.** Chunking only happens if retrieval quality actually disappoints.
+   One vector currently represents an entire message, including a 40-message quoted thread ([email_embedding_isolate.dart:123](client/lib/modules/email/services/email_embedding_isolate.dart:123)). This was flagged as a *predicted* dilution risk, deliberately not acted on until measured: chunking means re-embedding every message, and that cost should be paid against evidence.
 
-   This is the right order. Chunking means re-embedding every message — negligible at today's 1,279, but hours of local inference at a fully-synced 200k — and that cost should be paid against evidence, not a hypothesis. BM25 also covers much of the same ground: a long thread's distinctive terms are all indexed regardless of how the vector dilutes.
+   **The evaluation ran on 2026-08-11 (§16). Chunking wins, and Phase 6 is no longer conditional.** Against the shipping single-vector approach, chunking improves overall MRR by +0.081 (95% CI [+0.047, +0.117]) on a 235-probe known-item benchmark, with the gain concentrated exactly where it was predicted — +0.119 on text buried late in a quoted chain. It is also the only variant tested that improves on the status quo at all; both truncation strategies score *worse* overall.
 
-   **Make the evaluation concrete, or it never happens.** After Phase 3, check the failure mode directly: pick a handful of known long threads, query for content buried deep inside them, and see whether they surface. Two specific signals that would justify chunking:
-   - A query matching text late in a long thread returns the thread below shorter, less relevant messages.
-   - Results skew toward short emails generally — the signature of long-message vectors being averaged into mush.
+   The original stopping rule was "if neither signal shows up, single-vector is fine and Phase 6 drops entirely." Signal 1 showed up and is the whole result. Signal 2 (a general skew toward short emails) was not tested directly and did not need to be.
 
-   If neither shows up, single-vector is fine and Phase 6 drops entirely.
+   One correction to the reasoning above, worth keeping because it inverted the cost argument: chunking was assumed to be *more* expensive. It is cheaper on this corpus. Nothing truncates before the model ([model_manager.py:305](aiserver/src/aichat/model_manager.py:305) passes no `max_length`), so attention runs quadratic over the full body — a 60k-character email costs 145s whole and 75s chunked. Projected across the corpus: **~22h single-vector vs ~13h chunked.**
 2. **Text extraction** for PDF/DOCX/TXT. Belongs in `aiserver` (Python has real libraries; `pdfx` on the Flutter side renders pages, it doesn't extract text reliably). New endpoint `POST /util/extract-text` returning per-page text, mirroring the existing `/util/thumbnail` shape.
 3. **A `DocumentChunkIsolate`** following the exact `EmbeddingIsolate` pattern — control port, write relay, pause-during-scan, `SequentialWriteQueue`. That shape is well-established here; don't invent a new one.
 4. Chunking: ~512 tokens, ~64 overlap, prefer paragraph boundaries. Persist `page` so a result can deep-link into the PDF viewer.
@@ -397,7 +395,7 @@ Each phase ships something usable on its own.
 | **3** | Vector retriever (Mode A candidate rerank) + RRF + tier boost | "landscape photos near Banff", "party pictures from 2026" |
 | **4** | Query planner (LLM intent, off critical path, fails open) | Ambiguous queries route to the right modality |
 | **5** | Summarize handoff to `aichat`, **map-reduce over filtered sets (§2e)** | "Summarize my interactions with Russel Jong" — genuinely over all 412, not a top-50 sample |
-| **6** | Email chunking — **conditional, see §8** | Only if single-vector quality proves insufficient |
+| **6** | Email chunking — **no longer conditional; measured and adopted, see §16** | Retrieval of text inside quoted threads; also cuts backfill time from ~22h to ~13h |
 | **7** | Document extraction + chunk embeddings | "Find my graduation speech" over PDFs |
 
 Phases 1–3 cover three of the four example queries. Phase 7 is the only one gated on new infrastructure.
@@ -428,9 +426,10 @@ All open questions are resolved. No decision below blocks Phase 1.
 | 3 | `near:` semantics | **Both sources**, gazetteer primary. Forward-geocode via a bundled GeoNames table + haversine in SQL; `file_landmarks` secondary. See §14. |
 | 4 | Social posts | **Nothing now.** No scanner exists. Integrated into search when one is built; the retriever interface just needs to accept a fifth source type. |
 | 5 | Gazetteer size | **`cities5000`** (~4 MB) over `cities1000` (~11 MB), to keep the bundle small. Contains Banff. Swappable later without a schema change. See §14d. |
-| 6 | Chunk embedding schema | **Deferred to Phase 7.** No chunk embeddings exist yet. Current preference: a chunk-sequence column widening the PK. See §6. |
+| 6 | Chunk embedding schema | **Now due at Phase 6, not Phase 7.** The preferred shape was right: widen the PK with a chunk-sequence column. Email chunking needs it first. See §16d. |
 | 7 | Tier-boost multipliers | **Accepted as starting values** (1.5 favorited / 1.2 local / 1.0 baseline / 0.8 attachment / excluded inline). Tune against real usage. See §5b. |
-| 8 | Email chunking | **Start single-vector.** Ship Phases 1–5 on existing embeddings, evaluate quality, chunk only if it disappoints. Phase 6 is now conditional. See §8. |
+| 8 | Email chunking | **Resolved 2026-08-11: chunk.** Measured against three alternatives on a 235-probe benchmark; chunking is the only one that beats single-vector, and it is *cheaper* to build than the status quo. See §16. |
+| 9 | Truncating the body before embedding | **Rejected, twice over.** First-N-characters and cut-at-the-quote-marker both improve retrieval of top-of-message text and both lose badly overall, because the deleted text becomes unfindable. Cutting at the *second* quote marker to keep the antecedent is statistically indistinguishable from a blind character cut at double the cost. See §16b. |
 
 ---
 
@@ -956,3 +955,164 @@ Tests: `client/test/modules/search/` — `similarity_floor_test.dart` (the floor
 including the per-modality trap), `vector_retriever_test.dart` (both modes),
 `hybrid_search_test.dart` (fusion, tiers, pagination totals),
 `rank_fusion_test.dart`, `result_ranking_test.dart`, `query_parser_test.dart`.
+
+---
+
+## 16. Email chunking — the Phase 6 decision, measured
+
+Run 2026-08-11 against the dev database (20,431 emails, 1,556 embedded at the
+time — the backfill from two fresh PST imports was still in flight). §8 required
+this evaluation before Phase 6 could proceed; this section is that evaluation and
+the decision it produced.
+
+**Decision: chunk. ~2,000 characters, ~400 overlap, score an email by its best
+chunk.** It is the only approach tested that beats what ships today, and it is
+cheaper to build than what ships today.
+
+### 16a. What the corpus actually looks like
+
+Everything below follows from these numbers, so they come first.
+
+| Embedded body length | chars | | Bodies over | count | share |
+|---|---|---|---|---|---|
+| p50 | 566 | | 2,000 | 3,175 | 15.6% |
+| p75 | 1,225 | | 5,000 | 1,102 | 5.4% |
+| p90 | 3,029 | | 10,000 | 624 | 3.1% |
+| p95 | 5,416 | | 20,000 | 383 | 1.9% |
+| p99 | 45,387 | | 40,000 | 286 | 1.4% |
+| max | 243,841 | | 150,000 | 2 | — |
+
+Two facts that decide most of the argument:
+
+- **Half the corpus is under 566 characters.** For those, every strategy in this
+  section produces a byte-identical vector. Whatever is chosen only touches the
+  15.6% over 2,000 characters.
+- **p95 → p99 jumps from 5,416 to 45,387.** That is not a tail, it is a second
+  population of a few hundred enormous messages, and it dominates cost.
+
+**The premise held.** Of long emails carrying a quoted chain (1,987 of them),
+the median message is only **6.7% original text** — p50 of 220 characters of new
+content. p75 is 15.9%. A long email really is mostly somebody else's older
+message.
+
+**A mechanism makes this worse than it looks.** The checkpoint pools with
+`lasttoken` (`1_Pooling/config.json`, and [model_manager.py](aiserver/src/aichat/model_manager.py) matches it).
+Under causal attention the final hidden state is most influenced by what sits
+nearest the end — and for a reply chain the end is the *oldest* quoted message.
+The single vector is not merely diluted by quoted text, it is weighted toward it.
+
+### 16b. The four variants, and the result
+
+Known-item retrieval over a 250-email pool (100 long, 150 short distractors;
+bodies capped at 40,000 chars so the run would terminate — which flatters the
+full-body variant). Ground truth is generated from the corpus: lift a verbatim
+15-word span from a known email, query with it, record the rank of the source.
+Spans come from two regions — **early** (original text, above the quote marker)
+and **late** (past the halfway point, i.e. deep in the quoted chain). 235 probes,
+paired bootstrap CIs.
+
+| | early MRR | late MRR | **overall** | vs A (overall, 95% CI) | chars |
+|---|---|---|---|---|---|
+| **A** full body *(ships today)* | 0.593 | 0.537 | 0.561 | — | 1.00× |
+| **B** chunked | 0.625 | **0.655** | **0.642** | **+0.081 [+0.047, +0.117]** | 1.22× |
+| **C** first 1,000 chars | 0.654 | 0.375 | 0.496 | −0.065 [−0.105, −0.023] | 0.32× |
+| **D** cut at quote marker | **0.671** | 0.316 | 0.470 | −0.091 [−0.135, −0.044] | 0.54× |
+| **E** cut at *second* marker | 0.643 | 0.382 | 0.495 | −0.066 [−0.107, −0.026] | 0.69× |
+
+Read in order:
+
+1. **Truncation genuinely helps the text at the top.** D is the best variant on
+   early probes, +0.078 over the status quo and significant. Removing the quoted
+   tail measurably sharpens the vector for the new content — the `lasttoken`
+   mechanism above, confirmed.
+2. **And it loses anyway.** Deleting the quoted text makes it unfindable: D's
+   late MRR falls to 0.316, median rank 11 against today's 2. Roughly 29% of the
+   corpus carries a quoted chain, and for many threads the only copy of an
+   earlier message is the quote inside a later reply. Both truncation strategies
+   are net *worse* than doing nothing.
+3. **E does not rescue the idea.** Keeping the message being replied to — so the
+   reply sits next to its antecedent — is statistically indistinguishable from a
+   blind character cut (0.495 vs 0.496 overall) at more than double the cost.
+   The antecedent is a *different message about a different point*; adding it
+   moves the vector toward that topic rather than sharpening this one. Being
+   meaningful to a human reader and being matchable are different axes.
+4. **Chunking is the only way to get (1) without (2).** The top of the message
+   becomes its own undiluted chunk — the truncation benefit — while the quoted
+   text stays indexed in chunks of its own. It is the only variant with a
+   significant positive CI.
+
+**Caveat, stated plainly:** verbatim-span probes are a best case for chunking on
+the late axis, so +0.119 there likely overstates the gain for real paraphrase-style
+queries. The deficit of C/D/E is *structural* — the text is not in the index at
+all — and no query style changes that.
+
+### 16c. Cost — the argument that inverted
+
+§8 assumed chunking would be more expensive. On this corpus it is cheaper,
+because nothing truncates before the model: [model_manager.py](aiserver/src/aichat/model_manager.py)
+calls the processor with no `truncation` or `max_length`, and the model's window
+is 262k tokens, so a 243k-character body goes through whole with quadratic
+attention. Measured end-to-end against the running server:
+
+| body | full body | chunked | |
+|---|---|---|---|
+| 5,003 chars | 1.9s | 3.7s (4 calls) | chunking 2× slower |
+| 19,993 chars | 8.3s | 13.5s (13 calls) | chunking 1.6× slower |
+| 59,814 chars | **145.0s** | **74.9s** (38 calls) | chunking 1.9× *faster* |
+
+Below ~20k characters, per-call overhead dominates and chunking costs more.
+Above it, quadratic attention dominates and chunking wins — decisively, and the
+curve keeps steepening. Projected over all 20,277 bodies: **~22h single-vector
+vs ~13h chunked.**
+
+The real point is not the average, it is the shape: the current design has an
+**unbounded worst case**, and 286 emails over 40k characters are paying it.
+Chunking caps per-call cost by construction.
+
+Storage: 38,815 vectors instead of 20,180 (1.92× rows, 318 MB vs 165 MB at
+2048 f32). Only **3,175 emails (15.7%) produce more than one chunk** — the other
+84% keep a single vector identical to today's. The migration is much smaller than
+"chunk every email" implies.
+
+### 16d. What implementing this requires
+
+Not a config flip. In order:
+
+1. **Schema.** `emails_embeddings` has `email_id` as PRIMARY KEY
+   ([database_manager.dart](client/lib/database_manager.dart)). Widen it to
+   `(email_id, chunk_index)`, matching decision #6's long-standing preference.
+   Keep `model_version` per row — a partially re-chunked archive must be
+   detectable (§15g).
+2. **Producer.** `EmailEmbeddingIsolate.formatEmailForEmbedding` returns one
+   string; it becomes a list. Headers (`from`/`to`/`cc`/`subject`) prefix
+   **every** chunk — that is what the benchmark measured, and it is what keeps a
+   chunk from the middle of a thread attributable to its message.
+3. **Retriever.** `VectorRetriever` must score an email by its **best** chunk and
+   emit it once. Without dedup a long thread occupies several result rows, and
+   worse, RRF sees it as several documents — the double-listing trap in §15f,
+   which is already known to distort ranking by 2×.
+4. **The floor.** §15e measures the similarity floor from the per-modality
+   *median*. Chunking changes that distribution: many more mail vectors, skewed
+   toward fragments. Re-measure `similarityFloorRatio` for mail after the
+   backfill; do not assume 0.75 still holds.
+5. **Backfill.** Re-embedding is unavoidable. Do it before the current backfill
+   finishes rather than after — at 7.6% complete when this was written, most of
+   the work has not been spent yet, and chunked is the faster path to 100%.
+
+### 16e. Reproducing this
+
+Scripts are not checked in; they are throwaway harnesses against a live database
+and a running aiserver. The method is what matters and is described fully above.
+To re-run after a corpus change: build a stratified pool, generate probes by
+lifting verbatim spans from known emails (ground truth for free), split them
+early/late around the quote marker, embed each variant via `POST /util/embedding`,
+and rank by cosine with a paired bootstrap over probes.
+
+Two traps worth repeating:
+
+- **Use enough probes.** A first pass at n=30 per cell put C ahead of B on early
+  probes and could not separate anything else from noise. At n=235 the ordering
+  held but every CI moved. Thirty probes cannot resolve a 0.06 MRR gap.
+- **Pair the bootstrap.** All variants answer the same probes, so probe difficulty
+  cancels only if the resampling is paired. Unpaired CIs here are roughly twice
+  as wide and would have called the chunking result insignificant.
