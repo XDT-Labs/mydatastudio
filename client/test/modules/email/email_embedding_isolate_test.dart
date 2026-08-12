@@ -171,4 +171,64 @@ void main() {
       }
     });
   });
+
+  group('groupByChunkBudget', () {
+    // The batch spans emails, so this arithmetic decides which vectors come
+    // back attached to which message. An off-by-one here does not throw — it
+    // shifts every later email's vectors onto the wrong mail, silently.
+    test('packs several single-chunk emails into one request', () {
+      // 84% of a real archive is one chunk, so this is the common case and the
+      // one the batch exists for: sixteen emails, one request.
+      final groups = EmailEmbeddingIsolate.groupByChunkBudget(
+        List.filled(16, 1),
+        16,
+      );
+
+      expect(groups.length, 1);
+      expect(groups.first.length, 16);
+    });
+
+    test('every email lands in exactly one request', () {
+      final counts = [1, 3, 1, 9, 2, 1, 1, 14, 1];
+      final groups = EmailEmbeddingIsolate.groupByChunkBudget(counts, 16);
+
+      final seen = [for (final g in groups) ...g]..sort();
+      expect(seen, List.generate(counts.length, (i) => i));
+    });
+
+    test('no request exceeds the budget unless one email does', () {
+      final counts = [5, 5, 5, 5, 5];
+      final groups = EmailEmbeddingIsolate.groupByChunkBudget(counts, 16);
+
+      for (final g in groups) {
+        final size = g.fold<int>(0, (sum, i) => sum + counts[i]);
+        expect(size, lessThanOrEqualTo(16));
+      }
+    });
+
+    test('an email larger than the budget travels alone', () {
+      // Splitting it would mean a half-written message if the second request
+      // failed — and a half-written message reads as finished to the backfill
+      // queue, so those chunks would never be retried.
+      final groups = EmailEmbeddingIsolate.groupByChunkBudget([1, 40, 1], 16);
+
+      expect(groups.length, 3);
+      expect(groups[1], [1]);
+    });
+
+    test('an email is never split across two requests', () {
+      // The property the whole design rests on: membership is by email, so a
+      // request always covers a whole number of messages.
+      final counts = [7, 7, 7, 7];
+      final groups = EmailEmbeddingIsolate.groupByChunkBudget(counts, 16);
+
+      final seen = [for (final g in groups) ...g];
+      expect(seen.toSet().length, seen.length);
+    });
+
+    test('an empty batch produces no requests', () {
+      expect(EmailEmbeddingIsolate.groupByChunkBudget([], 16), isEmpty);
+    });
+  });
+
 }

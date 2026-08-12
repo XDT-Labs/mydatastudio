@@ -10,6 +10,7 @@ import uuid
 from typing import Dict, Any, Generator, Optional
 
 from fastapi import HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from PIL import Image
 try:
@@ -33,7 +34,7 @@ from .pst_parser import PstParser
 from .model_manager import (
     load_local_model,
     load_embedding_model,
-    generate_embedding as gen_emb_fn,
+    generate_embeddings as gen_emb_fn,
     load_gemini_model,
     load_claude_model,
     load_openai_model,
@@ -606,14 +607,15 @@ async def generate_embedding_v1(request: EmbeddingV1Request) -> Dict[str, Any]:
 
     try:
         embedding_model, embedding_processor = get_embedding_model()
-        embedding = gen_emb_fn(
+        embeddings = await run_in_threadpool(
+            gen_emb_fn,
             model=embedding_model,
             processor=embedding_processor,
-            text=request.input,
+            texts=[request.input],
         )
         return {
             "object": "list",
-            "data": [{"object": "embedding", "embedding": embedding, "index": 0}],
+            "data": [{"object": "embedding", "embedding": embeddings[0], "index": 0}],
             "model": get_embedding_model_id(),
             "usage": {"prompt_tokens": -1, "total_tokens": -1},
         }
@@ -628,10 +630,10 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
     """
     _, embedding_lock = get_locks()
 
-    if not request.text and not request.image_base64:
-        raise HTTPException(status_code=400, detail="Either 'text' or 'image_base64' must be provided.")
-    if request.text and request.image_base64:
-        raise HTTPException(status_code=400, detail="Only one of 'text' or 'image_base64' can be provided.")
+    if not request.texts and not request.images_base64:
+        raise HTTPException(status_code=400, detail="Either 'texts' or 'images_base64' must be provided.")
+    if request.texts and request.images_base64:
+        raise HTTPException(status_code=400, detail="Only one of 'texts' or 'images_base64' can be provided.")
 
     async with embedding_lock:
         embedding_model, embedding_processor = get_embedding_model()
@@ -654,21 +656,27 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
 
     try:
         embedding_model, embedding_processor = get_embedding_model()
-        input_type = "text" if request.text else "image"
-        input_content = request.text if request.text else f"base64_image({len(request.image_base64)})"
-        embedding = gen_emb_fn(
+        input_type = "text" if request.texts else "image"
+        count = len(request.texts or request.images_base64)
+        # The forward pass is synchronous and holds the GIL through Python-level
+        # work, so running it inline would block uvicorn's event loop for its
+        # whole duration — the next request would not even be read off the
+        # socket until this one finished. Off-loop it stays cancellable and the
+        # server keeps answering /util/model-status while a batch is running.
+        embeddings = await run_in_threadpool(
+            gen_emb_fn,
             model=embedding_model,
             processor=embedding_processor,
-            text=request.text,
-            image_base64=request.image_base64,
+            texts=request.texts,
+            images_base64=request.images_base64,
             filename=request.filename,
         )
         return {
-            "embedding": embedding,
+            "embeddings": embeddings,
             "input_type": input_type,
-            "input_content": input_content,
+            "input_count": count,
             "model_used": get_embedding_model_id(),
-            "embedding_dimension": len(embedding),
+            "embedding_dimension": len(embeddings[0]) if embeddings else 0,
         }
     except HTTPException:
         raise

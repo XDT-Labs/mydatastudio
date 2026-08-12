@@ -443,7 +443,7 @@ class EmbeddingIsolate {
         },
         body: jsonEncode({
           'model_name': EmbeddingModel.modelName,
-          'text': text,
+          'texts': [text],
         }),
       );
       if (response.statusCode != 200) {
@@ -453,11 +453,24 @@ class EmbeddingIsolate {
         return null;
       }
       final data = jsonDecode(response.body);
-      return (data['embedding'] as List<dynamic>).cast<double>();
+      return _firstVector(data);
     } catch (e) {
       logger.e("Error calling Python embedding service: $e");
       return null;
     }
+  }
+
+  /// The one vector out of a list-shaped response.
+  ///
+  /// Not `.cast<double>()`: JSON-decoded whole-number components (0, 1, ...)
+  /// arrive as int, and cast's runtime check throws on those rather than
+  /// converting them — lazily, at the first access, far from here.
+  static List<double>? _firstVector(dynamic data) {
+    final rows = data['embeddings'];
+    if (rows is! List || rows.isEmpty) return null;
+    final row = rows.first;
+    if (row is! List) return null;
+    return row.map((e) => (e as num).toDouble()).toList();
   }
 
   static Future<List<double>?> _generateEmbedding(
@@ -479,14 +492,17 @@ class EmbeddingIsolate {
         body: jsonEncode({
           'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
           'filename': filename,
-          'image_base64': base64Image,
+          // A list of one: images are not batched — two photos of different
+          // dimensions expand to different numbers of vision tokens — but the
+          // request shape is the same one text uses, so there is a single
+          // contract to keep in step.
+          'images_base64': [base64Image],
         }),
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final List<dynamic> embData = data['embedding'];
-        return embData.cast<double>();
+        return _firstVector(data);
       } else {
         logger.e(
           "Python service error: ${response.statusCode} ${response.body}",

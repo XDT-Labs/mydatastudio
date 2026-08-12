@@ -134,6 +134,16 @@ class EmailEmbeddingIsolate {
   static const chunkSize = 2000;
   static const chunkOverlap = 400;
 
+  /// Chunks per embedding request, batched across as many emails as fit.
+  ///
+  /// Measured against the running server on ~2,000-character chunks: one chunk
+  /// per request costs roughly ten times as much per chunk as sixteen do, since
+  /// at ~500 tokens the round trip, the processor's Python work and the kernel
+  /// launches all outweigh the arithmetic. Gains continue past 16 but flatten,
+  /// and every extra row is live memory on the GPU during the forward pass —
+  /// 16 takes most of the win at a modest footprint.
+  static const maxChunksPerRequest = 16;
+
   /// The strings to embed for [email] — one per chunk of its body, each
   /// carrying the full headers.
   ///
@@ -158,7 +168,9 @@ class EmailEmbeddingIsolate {
     // extra ~8,200 are `<td style=...>`, CSS and the occasional base64 data
     // URI — each one a separately retrievable unit competing with real text,
     // and each one an embedding call. The single largest body in the corpus
-    // (243,841 chars, §16a) is one of these; stripped, the largest is 21,387.
+    // (243,841 chars, §16a) is one of these. Stripping shrinks that tail but
+    // does not remove it — the largest stripped body here is still 130,617
+    // characters, or 82 chunks.
     //
     // Sharing `searchableBodyText` with the FTS index is the point rather than
     // a convenience: two indexes that disagree about what a message *says*
@@ -286,51 +298,36 @@ class EmailEmbeddingIsolate {
 
         logger.i("Processing ${emails.length} emails for embeddings");
 
-        for (final email in emails) {
+        // Chunks are batched *across* emails, not just within one. Batching
+        // per email would have been nearly pointless: 84% of a real archive
+        // is a single chunk (§16a), so those emails would still be one
+        // request each — exactly the per-call overhead the batch exists to
+        // amortize. Measured on this corpus, 16 chunks per request costs
+        // about a tenth as much per chunk as one.
+        final chunksPerEmail = [
+          for (final email in emails) formatEmailForEmbedding(email),
+        ];
+        final groups = groupByChunkBudget(
+          [for (final chunks in chunksPerEmail) chunks.length],
+          maxChunksPerRequest,
+        );
+
+        for (final group in groups) {
           if (isPaused) {
             logger.d("Pause requested; abandoning remaining batch");
             break;
           }
           try {
-            final chunks = formatEmailForEmbedding(email);
-            final embeddings = <List<double>>[];
-            for (final chunk in chunks) {
-              final embedding = await _generateEmbedding(
-                chunk,
-                serviceUrl!,
-                serviceToken,
-                logger,
-              );
-              // All or nothing. A half-embedded email written now would carry
-              // a model_version matching the current pipeline, which is
-              // exactly what getEmailsWithMissingEmbeddings reads as "done" —
-              // so the missing chunks would never be retried and that part of
-              // the message would be permanently unsearchable.
-              if (embedding == null) break;
-              embeddings.add(embedding);
-            }
-
-            // Hand the result back to the main isolate to write — resqlite
-            // serializes writes through a single connection internally, so
-            // writing here (a second, independent connection to the same
-            // file) only added SQLITE_BUSY contention.
-            //
-            // Sent as one message per email rather than one per chunk so the
-            // write can replace the email's chunks atomically. Re-embedding a
-            // shortened email otherwise leaves its surplus high-index chunks
-            // behind, still holding the old text.
-            if (embeddings.length == chunks.length) {
-              replyTo.send({
-                'type': 'embedding',
-                'table': 'emails_embeddings',
-                'id': email.id,
-                'embeddings': embeddings,
-              });
-            } else {
-              logger.w("Skipped unprocessable email: ${email.id}");
-            }
+            await _embedAndSend(
+              [for (final i in group) emails[i]],
+              [for (final i in group) chunksPerEmail[i]],
+              serviceUrl!,
+              serviceToken,
+              replyTo,
+              logger,
+            );
           } catch (e) {
-            logger.e("Error processing email ${email.id}: $e");
+            logger.e("Error embedding batch of ${group.length} emails: $e");
           }
         }
       } catch (e, stack) {
@@ -380,8 +377,123 @@ class EmailEmbeddingIsolate {
     }
   }
 
-  static Future<List<double>?> _generateEmbedding(
-    String text,
+  /// Packs emails into requests of at most [budget] chunks, returning the
+  /// indices belonging to each request.
+  ///
+  /// Emails are never *interleaved*: a group holds whole messages, so the
+  /// vectors coming back always split cleanly along email boundaries. An email
+  /// whose own chunk count exceeds the budget gets a group to itself, and its
+  /// chunks are then sliced into budget-sized requests inside [_embedAndSend]
+  /// — the write stays atomic because nothing is emitted until every slice has
+  /// returned.
+  @visibleForTesting
+  static List<List<int>> groupByChunkBudget(List<int> chunkCounts, int budget) {
+    final groups = <List<int>>[];
+    var current = <int>[];
+    var size = 0;
+
+    for (var i = 0; i < chunkCounts.length; i++) {
+      if (current.isNotEmpty && size + chunkCounts[i] > budget) {
+        groups.add(current);
+        current = <int>[];
+        size = 0;
+      }
+      current.add(i);
+      size += chunkCounts[i];
+      if (size >= budget) {
+        groups.add(current);
+        current = <int>[];
+        size = 0;
+      }
+    }
+    if (current.isNotEmpty) groups.add(current);
+    return groups;
+  }
+
+  /// Embeds one request's worth of emails and relays a message per email.
+  ///
+  /// The split back out is by chunk count, in order, which is the contract the
+  /// server side holds up: one vector per input, same order. [_generateEmbeddings]
+  /// refuses a response of the wrong length precisely so this arithmetic can be
+  /// trusted — a short reply here would silently shift every subsequent email's
+  /// vectors onto the wrong message.
+  static Future<void> _embedAndSend(
+    List<Email> emails,
+    List<List<String>> chunksPerEmail,
+    String serviceUrl,
+    String? serviceToken,
+    SendPort replyTo,
+    AppLogger logger,
+  ) async {
+    final flat = [for (final chunks in chunksPerEmail) ...chunks];
+
+    // Sliced so no single request exceeds the budget, even when one email
+    // carries more chunks than that on its own — the largest body in this
+    // archive is 130,617 characters, or 82 chunks, and asking for 82 rows in
+    // one forward pass is ~41,000 token positions live on the GPU at once.
+    //
+    // Splitting the *request* does not weaken all-or-nothing, because that
+    // property is about not writing a partial email, not about how many round
+    // trips the vectors arrived in: nothing is sent to the writer until every
+    // slice has come back.
+    final vectors = <List<double>>[];
+    for (var start = 0; start < flat.length; start += maxChunksPerRequest) {
+      final end = math.min(start + maxChunksPerRequest, flat.length);
+      final slice = await _generateEmbeddings(
+        flat.sublist(start, end),
+        serviceUrl,
+        serviceToken,
+        logger,
+      );
+      if (slice == null) {
+        for (final email in emails) {
+          logger.w("Skipped unprocessable email: ${email.id}");
+        }
+        return;
+      }
+      vectors.addAll(slice);
+    }
+
+    // All or nothing. A half-embedded email written now would carry a
+    // model_version matching the current pipeline, which is exactly what
+    // getEmailsWithMissingEmbeddings reads as "done" — so the missing chunks
+    // would never be retried and that part of the message would be
+    // permanently unsearchable.
+    var offset = 0;
+    for (var i = 0; i < emails.length; i++) {
+      final count = chunksPerEmail[i].length;
+      // Hand the result back to the main isolate to write — resqlite
+      // serializes writes through a single connection internally, so writing
+      // here (a second, independent connection to the same file) only added
+      // SQLITE_BUSY contention.
+      //
+      // One message per email rather than per chunk so the write can replace
+      // the email's chunks atomically. Re-embedding a shortened email
+      // otherwise leaves its surplus high-index chunks behind, still holding
+      // the old text.
+      replyTo.send({
+        'type': 'embedding',
+        'table': 'emails_embeddings',
+        'id': emails[i].id,
+        'embeddings': vectors.sublist(offset, offset + count),
+      });
+      offset += count;
+    }
+  }
+
+  /// Embeds a list of chunks in a single request.
+  ///
+  /// One call rather than one per chunk because the server embeds a list in a
+  /// single forward pass, and at ~500 tokens per chunk the per-call overhead —
+  /// the HTTP round trip, the processor's Python work, kernel launches — costs
+  /// more than the arithmetic. A long thread's twenty chunks were twenty of
+  /// those; now they are one.
+  ///
+  /// Returns null if anything goes wrong, which the caller treats as
+  /// all-or-nothing: an email is stored with a complete chunk set or not at
+  /// all, so a partial thread never looks finished to the backfill queue.
+  static Future<List<List<double>>?> _generateEmbeddings(
+    List<String> texts,
     String serviceUrl,
     String? serviceToken,
     AppLogger logger,
@@ -395,14 +507,30 @@ class EmailEmbeddingIsolate {
         },
         body: jsonEncode({
           'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
-          'text': text,
+          'texts': texts,
         }),
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final List<dynamic> embData = data['embedding'];
-        return embData.cast<double>();
+        final List<dynamic> rows = data['embeddings'];
+        // A short reply is silently dropped rather than trusted: the chunk
+        // count is what the caller checks to decide the email is complete, so
+        // a truncated response must not be able to masquerade as one.
+        if (rows.length != texts.length) {
+          logger.e(
+            "Embedding service returned ${rows.length} vectors for "
+            "${texts.length} chunks",
+          );
+          return null;
+        }
+        // Not .cast<double>(): JSON-decoded whole-number components (0, 1,
+        // ...) arrive as int, and cast's runtime check throws on those rather
+        // than converting them.
+        return [
+          for (final row in rows)
+            (row as List<dynamic>).map((e) => (e as num).toDouble()).toList(),
+        ];
       } else {
         logger.e(
           "Python service error: ${response.statusCode} ${response.body}",

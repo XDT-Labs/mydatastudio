@@ -41,7 +41,10 @@ class AiServerQueryEmbedder {
               'Content-Type': 'application/json',
               ...aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
             },
-            body: jsonEncode({'model_name': modelName, 'text': text}),
+            body: jsonEncode({
+              'model_name': modelName,
+              'texts': [text],
+            }),
           )
           .timeout(timeout);
 
@@ -52,7 +55,9 @@ class AiServerQueryEmbedder {
         return null;
       }
       final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final embedding = data['embedding'];
+      final rows = data['embeddings'];
+      if (rows is! List || rows.isEmpty) return null;
+      final embedding = rows.first;
       if (embedding is! List) return null;
       return embedding.cast<num>().map((n) => n.toDouble()).toList();
     } catch (e) {

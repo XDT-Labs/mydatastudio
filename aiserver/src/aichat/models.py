@@ -64,9 +64,15 @@ class EmbeddingV1Request(BaseModel):
 # ── Util endpoint models (/util/*) ───────────────────────────────────────────
 
 class EmbeddingRequest(BaseModel):
-    """Multimodal embedding (text or image). Used by /util/embedding."""
-    text: Optional[str] = Field(None, description="Text content to embed")
-    image_base64: Optional[str] = Field(None, description="Base64-encoded image data")
+    """Multimodal embedding (text or images). Used by /util/embedding.
+
+    Both inputs are lists so there is exactly one request shape and one
+    response shape; a caller with a single item sends a list of one. Text is
+    embedded as a true batch in one forward pass, which is what makes bulk
+    work (an email's body chunks) affordable.
+    """
+    texts: Optional[List[str]] = Field(None, description="Text content to embed, one vector returned per entry")
+    images_base64: Optional[List[str]] = Field(None, description="Base64-encoded images, one vector returned per entry")
     model_name: str = Field(
         default=DEFAULT_LOCAL_MODEL,
         description="Hugging Face model identifier"

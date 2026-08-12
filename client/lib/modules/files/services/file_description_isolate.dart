@@ -523,18 +523,21 @@ class FileDescriptionIsolate {
             },
             body: jsonEncode({
               'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
-              'text': text,
+              'texts': [text],
             }),
           )
           .timeout(const Duration(seconds: 60));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final List<dynamic> embData = data['embedding'];
+        final List<dynamic> rows = data['embeddings'];
+        if (rows.isEmpty) return null;
         // Not .cast<double>(): JSON-decoded whole-number components (0, 1,
         // ...) come through as int, and cast's runtime type check throws on
         // those instead of converting them.
-        return embData.map((e) => (e as num).toDouble()).toList();
+        return (rows.first as List<dynamic>)
+            .map((e) => (e as num).toDouble())
+            .toList();
       } else {
         logger.e(
           "Python service error: ${response.statusCode} ${response.body}",

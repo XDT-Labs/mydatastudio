@@ -251,57 +251,135 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
     return model, processor
 
 
-def generate_embedding(
-    model: Any, 
-    processor: Any, 
-    text: Optional[str] = None, 
-    image_base64: Optional[str] = None,
+def generate_embeddings(
+    model: Any,
+    processor: Any,
+    texts: Optional[List[str]] = None,
+    images_base64: Optional[List[str]] = None,
     filename: Optional[str] = None
-) -> List[float]:
+) -> List[List[float]]:
     """
     Universal embedding generator that handles both LlamaCpp and Transformers.
+
+    Takes and returns lists, one vector per input, in order. Callers with a
+    single item send a list of one — a uniform shape beats a singular and a
+    plural path that can drift apart.
     """
     # Which route is taken is a property of the loaded model, not of the call,
     # so it was logging the same line thousands of times per import.
     if hasattr(model, 'client') and hasattr(model.client, 'embed'):
-        # LlamaCpp path (Text only)
-        if image_base64:
+        # LlamaCpp path (Text only). No batching available here — llama.cpp's
+        # embed is one string at a time — so the list is honoured by looping.
+        if images_base64:
             raise ValueError("LlamaCpp does not support image embeddings in this implementation.")
-        return generate_text_embedding(text, model, processor)
+        return [generate_text_embedding(text, model, processor) for text in (texts or [])]
 
     # Transformers path
-    return generate_transformers_multimodal_embedding(model, processor, text, image_base64, filename)
+    return generate_transformers_multimodal_embedding(model, processor, texts, images_base64, filename)
+
+
+def last_token_indices(attention_mask: "torch.Tensor") -> "torch.Tensor":
+    """Index of each row's final real (non-padding) token.
+
+    This exists because the checkpoint pools with `lasttoken` — it reads one
+    position out of the sequence and calls that the embedding. Taking position
+    `-1` is only that token when nothing is padded, which was true while every
+    call embedded exactly one item and stops being true the moment a batch
+    holds two different lengths.
+
+    Getting it wrong does not raise: a row would be handed the hidden state of
+    a PAD token, producing a confident, normalized, meaningless vector for
+    every item in the batch except the longest. Search results would just
+    quietly get worse.
+
+    Derived from the mask rather than from a padding-side setting, because
+    nothing in this codebase sets `padding_side` — it inherits whatever the
+    processor's tokenizer config happens to carry, so depending on it would be
+    depending on a default we do not control. Counting from the right works
+    under either convention.
+    """
+    # Number of trailing zeros per row: argmax on the reversed mask finds the
+    # first 1 from the end. `flip` costs nothing at these sizes.
+    trailing_pad = attention_mask.flip(dims=[1]).argmax(dim=1)
+    return attention_mask.shape[1] - 1 - trailing_pad
+
+
+def _pool_last_token(last_hidden_state: "torch.Tensor", attention_mask: "torch.Tensor") -> "torch.Tensor":
+    """Last-token pooling, then L2 normalization — per the checkpoint's own
+    1_Pooling/config.json ("pooling_mode": "lasttoken")."""
+    indices = last_token_indices(attention_mask)
+    pooled = last_hidden_state[torch.arange(last_hidden_state.shape[0]), indices]
+    return torch.nn.functional.normalize(pooled, p=2, dim=1)
 
 
 def generate_transformers_multimodal_embedding(
-    model: Any, 
-    processor: Any, 
-    text: Optional[str] = None, 
-    image_base64: Optional[str] = None,
+    model: Any,
+    processor: Any,
+    texts: Optional[List[str]] = None,
+    images_base64: Optional[List[str]] = None,
     filename: Optional[str] = None
-) -> List[float]:
+) -> List[List[float]]:
     """
     Generate embeddings using Qwen3-VL Transformers model.
+
+    Text is embedded as a true batch — one forward pass over all of it. That is
+    the whole point of the list: at ~500 tokens per chunk, per-call overhead
+    (kernel launches, the processor's Python work, the HTTP round trip) costs
+    more than the matmuls, so N separate calls cost far more than one call with
+    N rows. Email body chunks are a uniform 2,000 characters, so they pad
+    against each other with little waste.
+
+    Images are looped rather than batched, and callers send a list of one. Two
+    photos of different dimensions expand to different numbers of vision
+    tokens, so batching them is a real piece of work with no demand behind it
+    — one image per file, and the file corpus is not the slow part.
     """
     device = next(model.parameters()).device
-    
-    content = []
-    if image_base64:
-        # Decode and validate base64 image into a loaded PIL Image
-        pil_image = decode_base64_image(image_base64, filename)
-        content.append({"type": "image", "image": pil_image})
-    
-    if text:
-        content.append({"type": "text", "text": text})
-    
-    messages = [{"role": "user", "content": content}]
-    
+
+    if images_base64:
+        return [
+            _embed_one_multimodal(model, processor, device, image_base64=image, filename=filename)
+            for image in images_base64
+        ]
+
+    messages_batch = [
+        [{"role": "user", "content": [{"type": "text", "text": text}]}]
+        for text in (texts or [])
+    ]
+    prompts = [
+        processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+        for messages in messages_batch
+    ]
+
+    inputs = processor(
+        text=prompts,
+        images=None,
+        videos=None,
+        padding=True,
+        return_tensors="pt"
+    ).to(device)
+
+    return _encode(model, inputs, device)
+
+
+def _embed_one_multimodal(
+    model: Any,
+    processor: Any,
+    device: Any,
+    image_base64: str,
+    filename: Optional[str] = None
+) -> List[float]:
+    """One image through the vision path, returning a single vector."""
+    # Decode and validate base64 image into a loaded PIL Image
+    pil_image = decode_base64_image(image_base64, filename)
+    messages = [{"role": "user", "content": [{"type": "image", "image": pil_image}]}]
+
     # Prepare inputs using Qwen-VL utilities and processor
     image_inputs, video_inputs = process_vision_info(messages)
-    
+
     # Use chat template to ensure multimodal tokens (<|image_pad|>, etc.) are correctly inserted
     prompt = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
-    
+
     inputs = processor(
         text=[prompt],
         images=image_inputs,
@@ -309,7 +387,12 @@ def generate_transformers_multimodal_embedding(
         padding=True,
         return_tensors="pt"
     ).to(device)
-    
+
+    return _encode(model, inputs, device)[0]
+
+
+def _encode(model: Any, inputs: Any, device: Any) -> List[List[float]]:
+    """Run the encoder and pool, with the existing CPU fallback for device errors."""
     # `.model` rather than the model itself: the checkpoint's class is a
     # generation head, whose forward returns vocabulary logits. The embedding
     # lives one level down, in the base model's hidden states.
@@ -318,14 +401,9 @@ def generate_transformers_multimodal_embedding(
     try:
         with torch.no_grad():
             outputs = encoder(**inputs)
-            # Last Token Pooling ([EOS]), which is what the checkpoint's own
-            # 1_Pooling/config.json specifies ("pooling_mode": "lasttoken").
-            embeddings = outputs.last_hidden_state[:, -1, :]
+            embeddings = _pool_last_token(outputs.last_hidden_state, inputs["attention_mask"])
 
-            # Normalize the embedding
-            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-
-        return embeddings[0].tolist()
+        return embeddings.tolist()
     except Exception as e:
         if "buffer size" in str(e).lower() or "out of memory" in str(e).lower() or "mps" in str(e).lower():
             print(f"[EMBEDDING] Device error on {device} ({e}). Falling back to CPU...")
@@ -334,9 +412,8 @@ def generate_transformers_multimodal_embedding(
             inputs_cpu = {k: (v.to(cpu_device) if isinstance(v, torch.Tensor) else v) for k, v in inputs.items()}
             with torch.no_grad():
                 outputs = model.model(**inputs_cpu)
-                embeddings = outputs.last_hidden_state[:, -1, :]
-                embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-            return embeddings[0].tolist()
+                embeddings = _pool_last_token(outputs.last_hidden_state, inputs_cpu["attention_mask"])
+            return embeddings.tolist()
         raise
 
 
