@@ -1,6 +1,8 @@
 # Unified Search — Implementation Plan
 
-Status: **Phases 1–3 implemented.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 6 — decided but not built (§16). Phases 4, 5, 7 still proposal.
+Status: **Phases 1–3 and 6 implemented.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 6 — email chunking, per §16. Phases 4, 5, 7 still proposal.
+
+**One measurement is outstanding and is not optional: `similarityFloorRatio` for mail (§16d item 4).** 0.75 was fitted to whole-body vectors on a corpus where the Mode B fetch covered every row. Chunking breaks both premises — the mail corpus grows to ~39,000 vectors against a 10,000-row fetch, so the median is drawn from the top quarter, and short fragments score differently from whole bodies. Both biases push the floor up, i.e. toward pruning mail that should have survived. Re-derive it from the chunked archive once the backfill completes.
 
 Person resolution deliberately requires a preposition: a bare name in free text is *not* treated as a person. §2b's "n-gram matching plus the prepositional patterns" reads either way, and this is the reading whose failure mode is visible — a hard filter removes results silently, so searching for the word "mike" must not narrow the archive to one person's mail without saying so.
 
@@ -301,7 +303,21 @@ CREATE INDEX IF NOT EXISTS emails_contacts_name_idx  ON emails_contacts (display
 CREATE INDEX IF NOT EXISTS emails_contacts_local_idx ON emails_contacts (local_part  COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS emails_contacts_rank_idx  ON emails_contacts (message_count DESC);
 
--- 3. Document chunks — Section 8. Deliberately deferred; listed here so the
+-- 3. Email chunk vectors — Section 16. One row per body chunk, not per email.
+--    `chunk_index` is the position in the chunk list, so chunk 0 is the top of
+--    the message. Retrieval scores an email by its BEST chunk and emits it
+--    once; nothing downstream reads chunk_index, it exists to make the rows
+--    distinct and the order reproducible.
+CREATE TABLE IF NOT EXISTS emails_embeddings (
+  email_id           TEXT NOT NULL,
+  chunk_index        INTEGER NOT NULL DEFAULT 0,
+  qwen3_vl_embedding BLOB,
+  model_version      TEXT,
+  PRIMARY KEY (email_id, chunk_index),
+  FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
+);
+
+-- 4. Document chunks — Section 8. Deliberately deferred; listed here so the
 --    shape is agreed before anything is written against it.
 CREATE TABLE IF NOT EXISTS file_chunks (
   id           TEXT PRIMARY KEY,
@@ -313,7 +329,7 @@ CREATE TABLE IF NOT EXISTS file_chunks (
 );
 CREATE INDEX IF NOT EXISTS file_chunks_file_idx ON file_chunks (file_id);
 
--- 4. Saved searches (Section 9, optional)
+-- 5. Saved searches (Section 9, optional)
 ```
 
 Chunk *vectors* need no new table: `files_embeddings` is already keyed `(file_id, type)` and its own comment anticipates `type='chunk'`.
@@ -323,7 +339,7 @@ Chunk *vectors* need no new table: `files_embeddings` is already keyed `(file_id
 - **(a)** Key chunk vectors by `chunk_id` in a separate `file_chunks_embeddings` table.
 - **(b)** Add a chunk-sequence column and widen the PK to `(file_id, type, sequence)`.
 
-**Deferred to Phase 7; current preference is (b).** No chunk embeddings exist yet, so nothing is blocked either way.
+**Deferred to Phase 7; current preference is (b), now with a precedent.** Phase 6 took (b) for `emails_embeddings` and it was uneventful — the retriever needed no dedup work at all, because scoring by best-vector-per-id was already there for files carrying both an image and a description vector. The two things that did bite are both in §16d and both apply verbatim to `file_chunks`: the backfill queue must not be an outer join over the embedding table, and the write must *replace* an item's chunk set rather than upsert into it.
 
 One factual note for whenever it's picked up: (b) alters a table holding live rows — 4,711 today — so it needs a migration and touches the existing insert paths in `upsertFileEmbedding` and `saveFileDescription`; (a) leaves those untouched and lets chunk vectors be scanned independently of image vectors, which matters because scanning chunks during a photo query is wasted work. Not an argument to settle now, just the cost to weigh then.
 
@@ -380,9 +396,9 @@ A "Summarize these results" button on the result set — not automatic. It takes
 
 ## 8. Document chunking (separate track, do not block search on it)
 
-Nothing here exists today. Ordered by value-per-unit-effort:
+Item 1 is built; items 2–4 do not exist yet. Ordered by value-per-unit-effort:
 
-1. **Email chunking — evaluated and adopted. See §16 for the measurement.**
+1. **Email chunking — evaluated, adopted and shipped. See §16 for the measurement and §16d for what it took.**
 
    One vector currently represents an entire message, including a 40-message quoted thread ([email_embedding_isolate.dart:123](client/lib/modules/email/services/email_embedding_isolate.dart:123)). This was flagged as a *predicted* dilution risk, deliberately not acted on until measured: chunking means re-embedding every message, and that cost should be paid against evidence.
 
@@ -394,6 +410,8 @@ Nothing here exists today. Ordered by value-per-unit-effort:
 2. **Text extraction** for PDF/DOCX/TXT. Belongs in `aiserver` (Python has real libraries; `pdfx` on the Flutter side renders pages, it doesn't extract text reliably). New endpoint `POST /util/extract-text` returning per-page text, mirroring the existing `/util/thumbnail` shape.
 3. **A `DocumentChunkIsolate`** following the exact `EmbeddingIsolate` pattern — control port, write relay, pause-during-scan, `SequentialWriteQueue`. That shape is well-established here; don't invent a new one.
 4. Chunking: ~512 tokens, ~64 overlap, prefer paragraph boundaries. Persist `page` so a result can deep-link into the PDF viewer.
+
+   Note the deliberate divergence from what mail ended up with (2,000 characters, 400 overlap, no boundary detection). Documents genuinely have structure to cut on and it survives extraction; quoted mail does not — the same thread arrives with `>` markers, with `On ... wrote:` preambles, with neither, and HTML-derived text often has no paragraph breaks left at all, so boundary detection would work best on the mail that needed it least. Keep paragraph-awareness for documents; do not backport it to email without a measurement.
 
 ---
 
@@ -408,7 +426,7 @@ Each phase ships something usable on its own.
 | **3** | Vector retriever (Mode A candidate rerank) + RRF + tier boost | "landscape photos near Banff", "party pictures from 2026" |
 | **4** | Query planner (LLM intent, off critical path, fails open) | Ambiguous queries route to the right modality |
 | **5** | Summarize handoff to `aichat`, **map-reduce over filtered sets (§2e)** | "Summarize my interactions with Russel Jong" — genuinely over all 412, not a top-50 sample |
-| **6** | Email chunking — **no longer conditional; measured and adopted, see §16** | Retrieval of text inside quoted threads; also cuts backfill time from ~22h to ~13h |
+| **6** | Email chunking — **measured, adopted and built, see §16** | Retrieval of text inside quoted threads; also cuts backfill time from ~22h to ~13h |
 | **7** | Document extraction + chunk embeddings | "Find my graduation speech" over PDFs |
 
 Phases 1–3 cover three of the four example queries. Phase 7 is the only one gated on new infrastructure.
@@ -439,7 +457,7 @@ All open questions are resolved. No decision below blocks Phase 1.
 | 3 | `near:` semantics | **Both sources**, gazetteer primary. Forward-geocode via a bundled GeoNames table + haversine in SQL; `file_landmarks` secondary. See §14. |
 | 4 | Social posts | **Nothing now.** No scanner exists. Integrated into search when one is built; the retriever interface just needs to accept a fifth source type. |
 | 5 | Gazetteer size | **`cities5000`** (~4 MB) over `cities1000` (~11 MB), to keep the bundle small. Contains Banff. Swappable later without a schema change. See §14d. |
-| 6 | Chunk embedding schema | **Now due at Phase 6, not Phase 7.** The preferred shape was right: widen the PK with a chunk-sequence column. Email chunking needs it first. See §16d. |
+| 6 | Chunk embedding schema | **Shipped at Phase 6, not Phase 7.** The preferred shape was right: widen the PK with a chunk-sequence column. `emails_embeddings` is now `(email_id, chunk_index)`; Phase 7 does the same to `files_embeddings`. See §16d. |
 | 7 | Tier-boost multipliers | **Accepted as starting values** (1.5 favorited / 1.2 local / 1.0 baseline / 0.8 attachment / excluded inline). Tune against real usage. See §5b. |
 | 8 | Email chunking | **Resolved 2026-08-11: chunk.** Measured against three alternatives on a 235-probe benchmark; chunking is the only one that beats single-vector, and it is *cheaper* to build than the status quo. See §16. |
 | 9 | Truncating the body before embedding | **Rejected, twice over.** First-N-characters and cut-at-the-quote-marker both improve retrieval of top-of-message text and both lose badly overall, because the deleted text becomes unfindable. Cutting at the *second* quote marker to keep the antecedent is statistically indistinguishable from a blind character cut at double the cost. See §16b. |
@@ -469,6 +487,8 @@ That last row of context matters for a different reason: **16,725 tags and 2,338
 This archive is partially synced (Gmail 309 messages, Yahoo 1,058, spanning 2019–2026). A fully-synced account is typically 50k–250k messages; a real photo library 20k–100k images. That is 10–50× the current vector count.
 
 **Threshold: ~50,000 vectors in a single modality.** Per-modality, not total — a photo query scans only photo vectors, so the ceiling applies to the largest single corpus, not their sum.
+
+**Chunking moved mail most of the way to this line in one step.** The table above was taken when the archive held 1,279 mail vectors. Two PST imports took the corpus to 20,431 emails, and chunking multiplies that to a projected ~39,000 vectors (§16c) — roughly 78% of the tripwire, from a partially-synced archive. Mail, not photos, is now the modality to instrument first, and the next import is likely to cross it. Nothing here is a reason to pre-optimize: the point of a tripwire is that it is checked, and this one is close enough to check rather than assume.
 
 | Vectors (one modality) | Scan reads | Verdict |
 |---|---|---|
@@ -767,13 +787,16 @@ path is therefore a ceiling on total recall, not a page size.
 | `HybridRanker.retrieverWeights` | all 1.0 | `hybrid_ranker.dart:23` | Flat on purpose — weighting before real usage data just encodes a guess. |
 | `SearchService.fusionWindow` | 500 | `search_service.dart:39` | Lexical rows entering fusion. |
 | `VectorRetriever.candidateLimit` | 2000 | `vector_retriever.dart:82` | Memory **ceiling**, not the relevance gate. Was 300; see 15d. |
-| `VectorRetriever.similarityFloorRatio` | 0.75 | `vector_retriever.dart:116` | Fraction of the *background-to-best* span a hit must clear. See 15e. |
-| `VectorRetriever.minimumCandidatesForFloor` | 50 | `vector_retriever.dart:130` | Below this the median *is* one of the answers. See 15e. |
-| `VectorRetriever.modeACandidateCap` | 4000 | `vector_retriever.dart:140` | ~32 MB of blobs — where reading them stops being free. |
+| `VectorRetriever.similarityFloorRatio` | 0.75 | `vector_retriever.dart` | Fraction of the *background-to-best* span a hit must clear. See 15e. **Owed a re-measurement for mail since chunking — §16d item 4.** |
+| `VectorRetriever.minimumCandidatesForFloor` | 50 | `vector_retriever.dart` | Below this the median *is* one of the answers. See 15e. |
+| `VectorRetriever.modeACandidateCap` | 4000 | `vector_retriever.dart` | ~32 MB of blobs — where reading them stops being free. |
+| `VectorRetriever.modeAEmailChunkCap` | 8000 | `vector_retriever.dart` | The cap counts rows, and a mail row is now a body chunk. At 1.92 chunks per email the plain cap would reach half as many emails as before chunking — a recall loss caused purely by storage layout, worst on the long threads chunking was adopted to reach. |
+| `EmailEmbeddingIsolate.chunkSize` / `chunkOverlap` | 2000 / 400 | `email_embedding_isolate.dart` | Measured in §16b. The overlap guarantees any span shorter than it survives intact in some chunk. |
 | `ResultRanking.tierMultiplier` | 1.5 / 1.2 / 1.0 / 0.8 | `result_ranking.dart:30` | Unchanged from §5b. |
 | recency decay | `1/(1+ln(1+age/365))`, floored **0.75** | `result_ranking.dart` | The floor is load-bearing: without it a 2009 photo cannot outrank recent marketing mail. |
 | `ResultRanking.modalityPreferenceBoost` | **3.0** | `result_ranking.dart:93` | Was 1.4, which could not overcome double-listing. See 15f. |
 | `EmbeddingModel.revision` | 2 | `services/embedding_model.dart:33` | Bump on anything that changes what a vector *means*. See 15g. |
+| `DatabaseRepository.maxEmbeddingAttempts` | 5 | `repositories/database_repository.dart` | Retires an image whose **bytes** the model keeps rejecting. Counted only when the file was readable — an unreachable file (unmounted NAS, stale cloud token, laptop off its home network) is retried without cost, or an outage would permanently retire photos and never say so. Cleared on success, because the eligibility query re-selects on a `model_version` change. |
 
 ### 15c. Filters constrain, never rank
 
@@ -995,6 +1018,10 @@ Everything below follows from these numbers, so they come first.
 | p99 | 45,387 | | 40,000 | 286 | 1.4% |
 | max | 243,841 | | 150,000 | 2 | — |
 
+**Correction found during implementation: these lengths include HTML markup.** The producer fell back to the raw `html_body` when a message had no plain text, so the profile above measures markup as if it were prose. On the 380 HTML-only messages in this archive that is a 15× overstatement — 8,825 chunks raw against 587 with markup stripped — and the 243,841-character maximum is one of them (stripped, the largest is 21,387). The producer now uses `searchableBodyText`, the same stripped text the FTS index reads.
+
+This does not disturb the decision in 16b: every variant was measured against the same bodies, so the comparison holds. It does mean the **cost projections in 16c are upper bounds** — the real chunked backfill is smaller and faster than ~13h, because the messages that dominated the tail were mostly markup. Re-profile before quoting these percentiles again.
+
 Two facts that decide most of the argument:
 
 - **Half the corpus is under 566 characters.** For those, every strategy in this
@@ -1089,28 +1116,54 @@ Storage: 38,815 vectors instead of 20,180 (1.92× rows, 318 MB vs 165 MB at
 
 ### 16d. What implementing this requires
 
-Not a config flip. In order:
+Not a config flip. In order — items 1–3 and 5 are **built**; item 4 is not, and
+cannot be until the backfill finishes:
 
-1. **Schema.** `emails_embeddings` has `email_id` as PRIMARY KEY
-   ([database_manager.dart](client/lib/database_manager.dart)). Widen it to
-   `(email_id, chunk_index)`, matching decision #6's long-standing preference.
-   Keep `model_version` per row — a partially re-chunked archive must be
+1. **Schema. Done.** `emails_embeddings` is keyed by `(email_id, chunk_index)`.
+   `model_version` stays per row so a partially re-chunked archive is
    detectable (§15g).
-2. **Producer.** `EmailEmbeddingIsolate.formatEmailForEmbedding` returns one
-   string; it becomes a list. Headers (`from`/`to`/`cc`/`subject`) prefix
-   **every** chunk — that is what the benchmark measured, and it is what keeps a
-   chunk from the middle of a thread attributable to its message.
-3. **Retriever.** `VectorRetriever` must score an email by its **best** chunk and
-   emit it once. Without dedup a long thread occupies several result rows, and
-   worse, RRF sees it as several documents — the double-listing trap in §15f,
-   which is already known to distort ranking by 2×.
-4. **The floor.** §15e measures the similarity floor from the per-modality
-   *median*. Chunking changes that distribution: many more mail vectors, skewed
-   toward fragments. Re-measure `similarityFloorRatio` for mail after the
-   backfill; do not assume 0.75 still holds.
-5. **Backfill.** Re-embedding is unavoidable. Do it before the current backfill
-   finishes rather than after — at 7.6% complete when this was written, most of
-   the work has not been spent yet, and chunked is the faster path to 100%.
+2. **Producer. Done.** `EmailEmbeddingIsolate.formatEmailForEmbedding` returns a
+   list. Headers (`from`/`to`/`cc`/`subject`) prefix **every** chunk — that is
+   what the benchmark measured, and it is what keeps a chunk from the middle of
+   a thread attributable to its message. Chunks are 2,000 body characters with
+   400 of overlap, and the overlap is load-bearing rather than slack: it is what
+   guarantees a phrase shorter than 400 characters is never split across two
+   chunks and matchable by neither.
+3. **Retriever. Done** — and it needed less than expected, because
+   `VectorRetriever` already scored by best-vector-per-id and deduplicated
+   before applying its limit, for files carrying both an image and a description
+   vector. Emails inherit that. What did change is the Mode B over-fetch (2× →
+   5×, since the chunks of one thread are near neighbours and tend to match
+   together) and the Mode A row cap for mail, which counts rows: left at 4,000 it
+   would have scored barely half as many *emails* as before chunking.
+4. **The floor. Not done, and the one real debt this leaves.** §15e measures the
+   similarity floor from the per-modality *median*. Chunking changes both the
+   distribution (fragments, not whole bodies) and the sample (Mode B now fetches
+   10,000 of ~39,000 mail vectors, so the median is drawn from the top quarter).
+   Both bias the floor upward. Re-measure `similarityFloorRatio` for mail after
+   the backfill; do not assume 0.75 still holds.
+5. **Backfill. Done, by discarding.** The migration drops the stored vectors
+   rather than carrying them forward as chunk 0. That is not a shortcut around
+   the migration, it *is* the migration: a copied row keeps the current
+   `model_version`, which is the only signal `getEmailsWithMissingEmbeddings`
+   reads, so every long email would look finished and keep its diluted single
+   vector permanently. Bumping `EmbeddingModel.revision` instead would have aged
+   the rows out on their own, but that constant is shared with
+   `files_embeddings` and would have thrown away several thousand image vectors
+   this change does not touch.
+
+Three things the build surfaced that the plan above did not anticipate:
+
+- **The producer was embedding raw HTML.** Pre-existing — one mediocre vector per HTML-only message — but chunking turns it into a bad *corpus*, since markup is most of the bytes and each markup chunk is a separately retrievable unit competing with real text. Fixed by sharing `searchableBodyText` with the FTS index, which also removes the older and quieter problem of two indexes disagreeing about what a message says. See the correction in §16a.
+
+- **The backfill queue query was an outer join**, so it emitted one copy of an
+  email per embedding row it owned. Under chunking a batch of 100 becomes a
+  handful of distinct emails re-embedded dozens of times each, and the queue
+  stops draining. It is now `NOT EXISTS`.
+- **Writes must replace an email's chunk set, not upsert into it.** A body can
+  shrink, and chunks past the new end are not orphans — their `emails` row is
+  alive, so no cascade and no reaper removes them. They would sit in the index
+  holding superseded text and be scored by every search.
 
 ### 16e. Reproducing this
 

@@ -20,8 +20,22 @@ AISERVER_DIR="$REPO_ROOT/aiserver"
 CLIENT_DIR="$REPO_ROOT/client"
 LOG="/tmp/mds_client_run.log"
 
+# The realm's Application Support directory — where the client keeps its
+# database and, crucially, its downloaded models.
+#
+# Without these two the server starts fine and answers /, /skills and
+# /util/model-status, so the app looks healthy — but model-status answers
+# `{"exists": false}` for models that are sitting on disk, and both embedding
+# isolates park on "Embedding model not downloaded yet. Sleeping..." forever.
+# Nothing reports an error; the backfill simply never starts. Matches the env
+# block in the "aichat server (python)" debug configuration in .vscode.
+REALM_SUPPORT_DIR="${APP_SUPPORT_DIR:-$HOME/Library/Application Support/com.xdtlabs.mydatastudio.dev}"
+
 echo "== starting aiserver on port $PORT =="
-( cd "$AISERVER_DIR" && AICHAT_PORT="$PORT" AISERVER_LOG_LEVEL=info pdm run python main.py \
+( cd "$AISERVER_DIR" && AICHAT_PORT="$PORT" AISERVER_LOG_LEVEL=info \
+    APP_SUPPORT_DIR="$REALM_SUPPORT_DIR" \
+    AICHAT_MODELS_DIR="${AICHAT_MODELS_DIR:-$REALM_SUPPORT_DIR/models}" \
+    pdm run python main.py \
     >/tmp/mds_aiserver.log 2>&1 ) &
 AISERVER_PID=$!
 AISERVER_UP=0

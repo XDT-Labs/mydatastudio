@@ -139,6 +139,21 @@ class VectorRetriever {
   /// starts to, and where quantised scanning earns its place.
   static const modeACandidateCap = 4000;
 
+  /// Ceiling on rows read in Mode A **for mail**.
+  ///
+  /// Higher than [modeACandidateCap] because the cap counts rows and a row is
+  /// now a body chunk, not an email. At the measured 1.92 chunks per email
+  /// (§16c) the plain cap would score barely half as many emails as it did
+  /// before chunking — a recall loss caused entirely by how the work is
+  /// stored, invisible in the results, and worst on exactly the long threads
+  /// chunking was adopted to reach. Doubling it holds email coverage where it
+  /// was.
+  ///
+  /// The cost is transient memory during the mail pass: ~65 MB of blobs read
+  /// and scored, against ~32 MB before. Both are bounded by construction,
+  /// which is what this constant is for.
+  static const modeAEmailChunkCap = modeACandidateCap * 2;
+
   /// Ranked candidates for [query], best first.
   Future<List<VectorHit>> search(
     ParsedQuery query, {
@@ -251,11 +266,17 @@ class VectorRetriever {
         ORDER BY e.date DESC
         LIMIT ?
         ''',
-        [...filter.params, modeACandidateCap],
+        [...filter.params, modeAEmailChunkCap],
       );
       return _rankInDart(rows, queryVector, SearchResultType.email, limit);
     }
 
+    // Over-fetched for the same reason as files, but harder: a long email holds
+    // one vector per body chunk, and the chunks of a single thread are near
+    // neighbours of each other — so when one of them matches, several tend to,
+    // and they crowd the scan's raw top-N before dedup collapses them to one
+    // email. 5x mirrors the files multiplier and comfortably covers the
+    // measured 1.92 vectors per email (§16c).
     final rows = await db.select(
       '''
       SELECT emb.email_id AS id, v.distance AS distance
@@ -267,7 +288,7 @@ class VectorRetriever {
       WHERE ${filter.sql}
       ORDER BY v.distance ASC
       ''',
-      [_toJsonArray(queryVector), limit * 2, ...filter.params],
+      [_toJsonArray(queryVector), limit * 5, ...filter.params],
     );
     return _rankFromDistance(rows, SearchResultType.email, limit);
   }
@@ -275,9 +296,18 @@ class VectorRetriever {
   /// Mode A: cosine against every candidate blob, deduplicated to the best hit
   /// per id.
   ///
-  /// Deduplication happens before the limit is applied, not after. A file with
-  /// both an image vector and a description vector would otherwise take two of
-  /// the returned slots and crowd out a genuinely different result.
+  /// Scoring an item by its **best** vector is what makes multi-vector items
+  /// work at all: a file carries up to two (the image and its AI description)
+  /// and an email one per body chunk. Taking the maximum is the point of
+  /// chunking — a thread matches on whichever of its messages the query is
+  /// actually about, undiluted by the rest.
+  ///
+  /// Deduplication happens before the limit is applied, not after, and that
+  /// ordering carries more weight than it looks. A long email would otherwise
+  /// take dozens of the returned slots and crowd out genuinely different
+  /// results — and worse, reach `HybridRanker` as dozens of separate documents,
+  /// each collecting its own reciprocal-rank contribution. That is the
+  /// double-listing trap, already measured at a 2x distortion.
   List<VectorHit> _rankInDart(
     List<Map<String, Object?>> rows,
     List<double> queryVector,
@@ -344,10 +374,18 @@ class VectorRetriever {
   /// The median is taken over what was retrieved rather than over the table.
   /// In Mode A that is the whole filtered candidate set, so it is the real
   /// median. In Mode B it is the top N the extension returned; while N covers
-  /// the corpus — it does today, at 2,000 against ~4,700 file and ~1,300 email
-  /// vectors, because the ceiling exceeds both — that is also the real median.
-  /// Past that point the sample skews high, which biases the floor *upward*
-  /// and prunes harder. §12's 50k tripwire is where that starts to matter.
+  /// the corpus that is also the real median, and past that point the sample
+  /// skews high, which biases the floor *upward* and prunes harder.
+  ///
+  /// **Mail has now crossed that line and this ratio is owed a re-measurement.**
+  /// Chunking multiplies the mail corpus to ~39,000 vectors (§16c) against a
+  /// 10,000-row fetch, so the mail median is drawn from the top quarter rather
+  /// than the whole. The distribution moved as well as the sample: chunks are
+  /// short fragments and score differently from whole bodies, and 0.75 was
+  /// fitted to whole bodies. Both push the same way — a floor that prunes more
+  /// than intended — and the honest correction is to re-derive it from the
+  /// chunked archive once the backfill completes, per §16d item 4, not to
+  /// guess a new constant here.
   ///
   /// A spread of zero or less means every candidate scored alike and there is
   /// no signal to separate: scaling would then invert the comparison, since

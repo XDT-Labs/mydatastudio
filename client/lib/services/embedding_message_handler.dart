@@ -1,8 +1,12 @@
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 
-/// Handles `{'type': 'embedding', 'table': ..., 'id': ..., 'embedding': ...}`
-/// messages sent by the embedding isolates over their control port.
+/// Handles `{'type': 'embedding', 'table': ..., 'id': ..., ...}` messages sent
+/// by the embedding isolates over their control port.
+///
+/// Files carry a single `embedding`; emails carry `embeddings`, one per chunk
+/// of the body, replacing whatever the email had before (see
+/// [DatabaseRepository.replaceEmailEmbeddings]).
 ///
 /// The embedding isolates open their own read-only-in-practice `AppDatabase`
 /// connection to poll for pending work, but no longer write results directly.
@@ -18,7 +22,6 @@ Future<void> handleEmbeddingMessage(
 ) async {
   final table = message['table'] as String;
   final id = message['id'] as String;
-  final embedding = (message['embedding'] as List).cast<double>();
   // Which kind of vector this is — the image itself ('file', the default) or
   // its description's text. Both live in files_embeddings keyed by
   // (file_id, type), so losing this would have one overwrite the other.
@@ -27,10 +30,15 @@ Future<void> handleEmbeddingMessage(
   try {
     switch (table) {
       case 'files_embeddings':
+        final embedding = (message['embedding'] as List).cast<double>();
         await repo.upsertFileEmbedding(id, embedding, type: embeddingType);
         break;
       case 'emails_embeddings':
-        await repo.upsertEmailEmbedding(id, embedding);
+        final embeddings = [
+          for (final chunk in message['embeddings'] as List)
+            (chunk as List).cast<double>(),
+        ];
+        await repo.replaceEmailEmbeddings(id, embeddings);
         break;
       default:
         logger.w('handleEmbeddingMessage: unknown table "$table"');

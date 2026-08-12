@@ -107,6 +107,17 @@ class EmbeddingIsolate {
             }
             await handleEmbeddingMessage(repo, data, logger);
           });
+        } else if (type == 'embeddingFailed') {
+          // Records a rejected-bytes failure so an image that can never
+          // succeed eventually drops out of getFilesWithMissingEmbeddings
+          // instead of being retried forever — see maxEmbeddingAttempts. Only
+          // sent when the file was readable; an unreachable file is retried
+          // without cost.
+          _writeQueue.add(() async {
+            final repo = DatabaseManager.instance.repository;
+            if (repo == null) return;
+            await repo.incrementEmbeddingAttempts(data['id'] as String);
+          });
         }
       }
     });
@@ -346,8 +357,20 @@ class EmbeddingIsolate {
                 'embedding': embedding,
               });
               logger.d("Sent embedding for file: ${file.path}");
+            } else if (rawBytes == null) {
+              // Could not read the file at all — an unmounted volume, a cloud
+              // token needing refresh, a network that isn't there. This says
+              // nothing about whether the image can be embedded, so it must
+              // not spend an attempt: five passes during an outage would
+              // retire the photo permanently, and it would stay retired once
+              // the outage ended. Retried, unbudgeted, forever.
+              logger.w("Could not read file, will retry: ${file.path}");
             } else {
+              // Read fine and still produced nothing: the bytes themselves are
+              // the problem (truncated JPEG, unsupported encoding). That is
+              // what the attempt budget is for — see maxEmbeddingAttempts.
               logger.w("Skipped unprocessable file: ${file.path}");
+              replyTo.send({'type': 'embeddingFailed', 'id': file.id});
             }
             // Batch complete
           } catch (e) {

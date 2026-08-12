@@ -545,9 +545,11 @@ class AppDatabase {
     }
     await _db.execute('''
       CREATE TABLE IF NOT EXISTS emails_embeddings (
-        email_id TEXT PRIMARY KEY,
+        email_id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL DEFAULT 0,
         qwen3_vl_embedding BLOB,
         model_version TEXT,
+        PRIMARY KEY (email_id, chunk_index),
         FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
       );
     ''');
@@ -584,6 +586,7 @@ class AppDatabase {
       'ON file_landmarks (landmark);',
     );
     await _migrateFilesEmbeddingsKey();
+    await _migrateEmailEmbeddingsToChunks();
     final added = await _addMissingColumns();
 
     // Only on the open that introduces the column, so a large archive pays for
@@ -1058,6 +1061,59 @@ class AppDatabase {
     });
   }
 
+  /// Rebuilds `emails_embeddings` onto an `(email_id, chunk_index)` primary
+  /// key, **discarding every row it held**.
+  ///
+  /// Discarding is the migration, not a shortcut around one. The stored
+  /// vectors are whole-body embeddings, which is precisely what chunking
+  /// replaces (§16 of the search plan); but they carry the current
+  /// `model_version`, and `model_version` is the only signal
+  /// `getEmailsWithMissingEmbeddings` has. Copied forward as chunk 0 they
+  /// would read as finished work, and every long email in the archive would
+  /// keep its diluted single vector forever — the exact failure the chunking
+  /// change exists to fix, made invisible.
+  ///
+  /// The alternative — bumping [EmbeddingModel.revision] so the rows age out
+  /// on their own — is worse here, because that constant is shared with
+  /// `files_embeddings`: it would invalidate several thousand image vectors
+  /// that nothing about this change touches. The revision stays put and the
+  /// mail vectors go.
+  ///
+  /// SQLite can't alter a primary key with `ALTER TABLE`, so this is a
+  /// drop-recreate inside a transaction. Safe to run on every open: once the
+  /// key covers `chunk_index` it is a single `PRAGMA table_info` read.
+  Future<void> _migrateEmailEmbeddingsToChunks() async {
+    final info = await _db.select('PRAGMA table_info(emails_embeddings)');
+    if (info.isEmpty) return;
+    final chunked = info.any(
+      (row) => row['name'] == 'chunk_index' && (row['pk'] as int) > 0,
+    );
+    if (chunked) return;
+
+    final existing = await _db.select(
+      'SELECT COUNT(*) AS n FROM emails_embeddings',
+    );
+    final discarded = existing.first['n'] as int? ?? 0;
+    logger.i(
+      'AppDatabase: rebuilding emails_embeddings on (email_id, chunk_index); '
+      'discarding $discarded whole-body vectors to be re-embedded as chunks',
+    );
+
+    await _db.transaction((tx) async {
+      await tx.execute('DROP TABLE emails_embeddings');
+      await tx.execute('''
+        CREATE TABLE emails_embeddings (
+          email_id TEXT NOT NULL,
+          chunk_index INTEGER NOT NULL DEFAULT 0,
+          qwen3_vl_embedding BLOB,
+          model_version TEXT,
+          PRIMARY KEY (email_id, chunk_index),
+          FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
+        )
+      ''');
+    });
+  }
+
   /// Columns added to [schemaDDL] after the initial schema shipped.
   ///
   /// The DDL above only runs for a brand-new database, so an existing install
@@ -1085,6 +1141,11 @@ class AppDatabase {
         // a file that can never succeed gets re-selected and retried by
         // getFilesWithMissingDescriptions forever.
         'description_attempts': 'INTEGER NOT NULL DEFAULT 0',
+        // The same guard for embeddings. Counts only attempts where the bytes
+        // were read and the model rejected them — see
+        // DatabaseRepository.maxEmbeddingAttempts, and note that an unreadable
+        // file must never land here.
+        'embedding_attempts': 'INTEGER NOT NULL DEFAULT 0',
       },
       'albums': {'description': 'TEXT', 'cover_file_id': 'TEXT'},
       // Which embedding pipeline produced the vector in this row. See
@@ -1774,9 +1835,11 @@ class AppDatabase {
     // emails_embeddings
     '''
     CREATE TABLE IF NOT EXISTS emails_embeddings (
-      email_id TEXT PRIMARY KEY,
+      email_id TEXT NOT NULL,
+      chunk_index INTEGER NOT NULL DEFAULT 0,
       qwen3_vl_embedding BLOB,
       model_version TEXT,
+      PRIMARY KEY (email_id, chunk_index),
       FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
     );
     ''',

@@ -98,6 +98,17 @@ class DatabaseRepository {
         '— files row missing or not yet visible to this connection',
       );
     } else {
+      // Success clears the failure budget, and this is not tidiness. The
+      // eligibility query re-selects a file when `model_version` moves on, so
+      // a file that once exhausted [maxEmbeddingAttempts] and later succeeded
+      // would be held back at the *next* revision bump by a count describing a
+      // problem that no longer exists — and held back silently, since a stale
+      // vector is a present vector. [maxDescriptionAttempts] needs no
+      // equivalent: a written description is never re-derived.
+      await db.execute(
+        'UPDATE files SET embedding_attempts = 0 WHERE id = ?',
+        [fileId],
+      );
       logger.d(
         'upsertFileEmbedding: fileId=$fileId type=$type dim=${embedding.length}',
       );
@@ -287,11 +298,45 @@ class DatabaseRepository {
         AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
         AND f.is_deleted = 0
         AND f.is_inline = 0
+        AND f.embedding_attempts < ?
       LIMIT ?
       ''',
-      [EmbeddingModel.current, limit],
+      [EmbeddingModel.current, maxEmbeddingAttempts, limit],
     );
     return _filesWithResolvedPaths(rows);
+  }
+
+  /// Images that have failed embedding this many times are dropped from
+  /// [getFilesWithMissingEmbeddings].
+  ///
+  /// Without a cap a file that can *never* succeed is re-selected every batch,
+  /// forever: the queue never drains, the aiserver is asked to decode the same
+  /// broken bytes on a loop, and the log fills with identical errors. Measured
+  /// on the dev archive this was 7 files — a truncated JPEG attached to a 1997
+  /// email among them — cycling indefinitely.
+  ///
+  /// Mirrors [maxDescriptionAttempts], but what counts as an attempt is
+  /// narrower and that difference is the whole design. See
+  /// [incrementEmbeddingAttempts].
+  static const maxEmbeddingAttempts = 5;
+
+  /// Records that [fileId]'s bytes were read and the model rejected them.
+  ///
+  /// **Only for that case.** A file that could not be read at all — a photo on
+  /// an unmounted NAS, a cloud file whose token needs refreshing, a laptop on
+  /// a plane away from its home network — has demonstrated nothing about
+  /// whether it can be embedded, and counting it would spend the budget on an
+  /// outage. Five passes while a volume happens to be offline would retire the
+  /// file permanently, and it would stay retired after the volume came back,
+  /// with nothing in the UI to say a photo had been quietly dropped from
+  /// semantic search. The caller distinguishes the two by whether the byte
+  /// load returned null.
+  Future<void> incrementEmbeddingAttempts(String fileId) async {
+    await db.execute(
+      'UPDATE files SET embedding_attempts = embedding_attempts + 1 '
+      'WHERE id = ?',
+      [fileId],
+    );
   }
 
   /// Files that have failed description generation this many times are
@@ -487,62 +532,84 @@ class DatabaseRepository {
   // Email Embedding Methods (sqlite_vector API)
   // ---------------------------------------------------------------------------
 
-  /// Upserts the Qwen3-VL embedding for [emailId] into the `emails_embeddings`
-  /// table, storing values as a packed Float32 BLOB via `vector_as_f32()`.
+  /// Replaces every stored chunk vector for [emailId] with [embeddings],
+  /// storing values as packed Float32 BLOBs via `vector_as_f32()`.
+  ///
+  /// Chunk index is the position in [embeddings], so the caller's chunk order
+  /// is the stored order.
+  ///
+  /// Replace rather than upsert, and in one transaction, because the number of
+  /// chunks is a function of the body and the body can shrink — an email
+  /// re-embedded after an edit, or after a scanner replaces a truncated
+  /// snippet with the full text, can go from ten chunks to three. Upserting
+  /// would update the first three and leave chunks 3–9 in place holding
+  /// superseded text, still scored by every search, and never cleaned up by
+  /// anything: they are not orphans, their `emails` row exists.
   ///
   /// Guarded on the `emails` row still existing, for the same reason as
   /// [upsertFileEmbedding].
-  Future<void> upsertEmailEmbedding(
+  Future<void> replaceEmailEmbeddings(
     String emailId,
-    List<double> embedding,
+    List<List<double>> embeddings,
   ) async {
-    final jsonArray = '[${embedding.join(',')}]';
+    if (embeddings.isEmpty) return;
 
     int affectedRows = 0;
     await db.transaction((tx) async {
-      try {
-        final result = await tx.execute(
-          '''
-          INSERT INTO emails_embeddings
-            (email_id, qwen3_vl_embedding, model_version)
-          SELECT ?, vector_as_f32(?), ?
-          WHERE EXISTS (SELECT 1 FROM emails WHERE id = ?)
-          ON CONFLICT(email_id) DO UPDATE SET
-            qwen3_vl_embedding = excluded.qwen3_vl_embedding,
-            model_version = excluded.model_version
-          ''',
-          [emailId, jsonArray, EmbeddingModel.current, emailId],
-        );
-        affectedRows = result.affectedRows;
-      } catch (e) {
-        logger.w('vector_as_f32 unavailable, storing raw BLOB: $e');
-        final blob = Float32List.fromList(embedding).buffer.asUint8List();
-        final result = await tx.execute(
-          '''
-          INSERT INTO emails_embeddings
-            (email_id, qwen3_vl_embedding, model_version)
-          SELECT ?, ?, ?
-          WHERE EXISTS (SELECT 1 FROM emails WHERE id = ?)
-          ON CONFLICT(email_id) DO UPDATE SET
-            qwen3_vl_embedding = excluded.qwen3_vl_embedding,
-            model_version = excluded.model_version
-          ''',
-          [emailId, blob, EmbeddingModel.current, emailId],
-        );
-        affectedRows = result.affectedRows;
+      final exists = await tx.select(
+        'SELECT 1 FROM emails WHERE id = ? LIMIT 1',
+        [emailId],
+      );
+      if (exists.isEmpty) return;
+
+      await tx.execute('DELETE FROM emails_embeddings WHERE email_id = ?', [
+        emailId,
+      ]);
+
+      for (var index = 0; index < embeddings.length; index++) {
+        final embedding = embeddings[index];
+        try {
+          final result = await tx.execute(
+            '''
+            INSERT INTO emails_embeddings
+              (email_id, chunk_index, qwen3_vl_embedding, model_version)
+            VALUES (?, ?, vector_as_f32(?), ?)
+            ''',
+            [
+              emailId,
+              index,
+              '[${embedding.join(',')}]',
+              EmbeddingModel.current,
+            ],
+          );
+          affectedRows += result.affectedRows;
+        } catch (e) {
+          logger.w('vector_as_f32 unavailable, storing raw BLOB: $e');
+          final blob = Float32List.fromList(embedding).buffer.asUint8List();
+          final result = await tx.execute(
+            '''
+            INSERT INTO emails_embeddings
+              (email_id, chunk_index, qwen3_vl_embedding, model_version)
+            VALUES (?, ?, ?, ?)
+            ''',
+            [emailId, index, blob, EmbeddingModel.current],
+          );
+          affectedRows += result.affectedRows;
+        }
       }
     });
 
-    // See upsertFileEmbedding: WHERE EXISTS makes a missing `emails` row a
-    // silent no-op rather than a failure — surface it loudly.
+    // See upsertFileEmbedding: a missing `emails` row is a silent no-op rather
+    // than a failure — surface it loudly.
     if (affectedRows == 0) {
       logger.w(
-        'upsertEmailEmbedding: no row written for emailId=$emailId — '
+        'replaceEmailEmbeddings: no rows written for emailId=$emailId — '
         'emails row missing or not yet visible to this connection',
       );
     } else {
       logger.d(
-        'upsertEmailEmbedding: emailId=$emailId dim=${embedding.length}',
+        'replaceEmailEmbeddings: emailId=$emailId chunks=$affectedRows '
+        'dim=${embeddings.first.length}',
       );
     }
   }
@@ -557,20 +624,37 @@ class DatabaseRepository {
     logger.d('deleteEmailEmbedding: emailId=$emailId');
   }
 
-  /// Fetches the Qwen3-VL embedding for [emailId].
-  /// Returns null if no embedding exists for this email.
-  Future<List<double>?> getEmailEmbedding(String emailId) async {
+  /// Fetches the Qwen3-VL chunk embeddings for [emailId], in chunk order.
+  /// Returns an empty list if the email has no embedding.
+  Future<List<List<double>>> getEmailEmbeddings(String emailId) async {
     final rows = await db.select(
-      'SELECT qwen3_vl_embedding FROM emails_embeddings WHERE email_id = ? LIMIT 1',
+      'SELECT qwen3_vl_embedding FROM emails_embeddings '
+      'WHERE email_id = ? ORDER BY chunk_index',
       [emailId],
     );
-    if (rows.isEmpty || rows.first['qwen3_vl_embedding'] == null) return null;
-    final blob = rows.first['qwen3_vl_embedding'] as Uint8List;
-    return Float32List.view(blob.buffer).toList();
+    return [
+      for (final row in rows)
+        if (row['qwen3_vl_embedding'] case final Uint8List blob)
+          Float32List.view(
+            blob.buffer,
+            blob.offsetInBytes,
+            blob.lengthInBytes ~/ Float32List.bytesPerElement,
+          ).toList(),
+    ];
   }
 
-  /// Returns a list of emails that do not have a corresponding entry in the
-  /// `emails_embeddings` table, limited to [limit] results.
+  /// Returns a list of emails carrying no current-pipeline embedding, limited
+  /// to [limit] results.
+  ///
+  /// Phrased as `NOT EXISTS` rather than the outer join it replaced, because
+  /// an email now owns one row per chunk: the join emitted a copy of a long
+  /// email for every chunk it had, so a batch of 100 could hold four distinct
+  /// emails and re-embed each of them dozens of times.
+  ///
+  /// "Has one valid row" is read as "is fully embedded", which holds because
+  /// [replaceEmailEmbeddings] writes an email's chunks in a single transaction
+  /// and the isolate declines to send a partial set. A half-written email
+  /// would otherwise look finished here and never be completed.
   ///
   /// Excludes `headers` — the raw MIME header dump, unused by
   /// `formatEmailForEmbedding` and easily the largest column on a row. The
@@ -586,10 +670,12 @@ class DatabaseRepository {
              e.folder_id, e.message_id, e.thread_id, e.is_read,
              e.has_attachments, e.is_deleted, e.uid
       FROM emails e
-      LEFT OUTER JOIN emails_embeddings ee ON ee.email_id = e.id
-      WHERE (ee.email_id IS NULL
-             OR ee.qwen3_vl_embedding IS NULL
-             OR IFNULL(ee.model_version, '') <> ?)
+      WHERE NOT EXISTS (
+              SELECT 1 FROM emails_embeddings ee
+              WHERE ee.email_id = e.id
+                AND ee.qwen3_vl_embedding IS NOT NULL
+                AND IFNULL(ee.model_version, '') = ?
+            )
         AND e.is_deleted = 0
       LIMIT ?
       ''',

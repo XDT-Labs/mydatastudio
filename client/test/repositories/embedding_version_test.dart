@@ -116,7 +116,7 @@ void main() {
       "plain_body, has_attachments, is_deleted) VALUES ('e1', 'c1', 1000, "
       "'a@x.com', 'me@x.com', 's', 'b', 0, 0)",
     );
-    await repo.upsertEmailEmbedding('e1', _vector());
+    await repo.replaceEmailEmbeddings('e1', [_vector()]);
     expect(await repo.getEmailsWithMissingEmbeddings(), isEmpty);
 
     await db.rawDb.execute('UPDATE emails_embeddings SET model_version = NULL');

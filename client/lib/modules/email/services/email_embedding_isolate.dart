@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
+import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/modules/email/services/searchable_body.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/embedding_message_handler.dart';
 import 'package:mydatastudio/services/sequential_write_queue.dart';
@@ -120,16 +123,84 @@ class EmailEmbeddingIsolate {
     _controlPort?.send({'type': 'resume'});
   }
 
-  static String formatEmailForEmbedding(Email email) {
+  /// Body characters per chunk, and how much of the previous chunk each one
+  /// repeats.
+  ///
+  /// Both measured — see §16 of the search plan. The overlap is not padding:
+  /// it is what guarantees a query-length phrase is never split across two
+  /// chunks and so matchable by neither. Any span shorter than [chunkOverlap]
+  /// sits intact inside at least one chunk, because consecutive chunks advance
+  /// by `chunkSize - chunkOverlap` and cover `chunkSize`.
+  static const chunkSize = 2000;
+  static const chunkOverlap = 400;
+
+  /// The strings to embed for [email] — one per chunk of its body, each
+  /// carrying the full headers.
+  ///
+  /// Returns a single element for 84% of a real archive (§16a: half of all
+  /// bodies are under 566 characters), and that element is byte-identical to
+  /// what the single-vector pipeline produced. Only long mail changes shape.
+  ///
+  /// Headers repeat on **every** chunk rather than only the first. That is what
+  /// the benchmark measured, and it is what keeps a chunk lifted from the
+  /// middle of a quoted thread attributable to the message it belongs to —
+  /// without them, chunk 7 of a reply chain is anonymous text that matches
+  /// `from:`-flavoured intent no better than a stranger's mail.
+  static List<String> formatEmailForEmbedding(Email email) {
     final toList = email.to.join(', ');
     final ccList = (email.cc ?? []).join(', ');
-    final body = email.plainBody ?? email.snippet ?? email.htmlBody ?? '';
 
-    return 'from: ${email.from}\n'
+    // The same text keyword search indexes — markup stripped, not raw HTML.
+    //
+    // This path used to fall straight back to `htmlBody`, which chunking turns
+    // from a bad vector into a bad *corpus*: measured on this archive, the 380
+    // HTML-only messages chunk to 8,825 pieces raw against 587 stripped. The
+    // extra ~8,200 are `<td style=...>`, CSS and the occasional base64 data
+    // URI — each one a separately retrievable unit competing with real text,
+    // and each one an embedding call. The single largest body in the corpus
+    // (243,841 chars, §16a) is one of these; stripped, the largest is 21,387.
+    //
+    // Sharing `searchableBodyText` with the FTS index is the point rather than
+    // a convenience: two indexes that disagree about what a message *says*
+    // produce results that cannot be reconciled by anything downstream.
+    final stripped = searchableBodyText(email);
+    // Snippet stays as a last resort — 45 messages here carry one and no body
+    // of either kind, and they would otherwise embed headers alone.
+    final body = stripped.isNotEmpty ? stripped : (email.snippet ?? '');
+
+    final headers =
+        'from: ${email.from}\n'
         'to: [$toList]\n'
         'cc: [$ccList]\n'
-        'subject: ${email.subject ?? ""}\n\n'
-        '$body';
+        'subject: ${email.subject ?? ""}\n\n';
+
+    return [for (final chunk in chunkBody(body)) '$headers$chunk'];
+  }
+
+  /// Splits [body] into overlapping windows, or returns it whole when it fits.
+  ///
+  /// Deliberately cuts on character count rather than on sentence or paragraph
+  /// boundaries. Quoted mail has no reliable structure to cut on — the same
+  /// thread arrives with `>` markers, with `On ... wrote:` preambles, with
+  /// neither, and HTML-derived text often has no paragraph breaks left at all —
+  /// so boundary detection would work on the mail that needed it least. The
+  /// overlap makes the arbitrary cut harmless, which is cheaper than being
+  /// clever about where to place it.
+  ///
+  /// An empty body still yields one (empty) chunk, so every email gets a
+  /// vector built from its headers alone rather than no vector at all.
+  @visibleForTesting
+  static List<String> chunkBody(String body) {
+    if (body.length <= chunkSize) return [body];
+
+    final step = chunkSize - chunkOverlap;
+    final chunks = <String>[];
+    for (var start = 0; start < body.length; start += step) {
+      final end = math.min(start + chunkSize, body.length);
+      chunks.add(body.substring(start, end));
+      if (end == body.length) break;
+    }
+    return chunks;
   }
 
   static Future<void> _isolateEntry(Map<String, dynamic> cfg) async {
@@ -221,29 +292,39 @@ class EmailEmbeddingIsolate {
             break;
           }
           try {
-            final formattedText = formatEmailForEmbedding(email);
-            final embedding = await _generateEmbedding(
-              formattedText,
-              serviceUrl!,
-              serviceToken,
-              logger,
-            );
-            // logger.d("Processed email ${email.id} in $duration");
+            final chunks = formatEmailForEmbedding(email);
+            final embeddings = <List<double>>[];
+            for (final chunk in chunks) {
+              final embedding = await _generateEmbedding(
+                chunk,
+                serviceUrl!,
+                serviceToken,
+                logger,
+              );
+              // All or nothing. A half-embedded email written now would carry
+              // a model_version matching the current pipeline, which is
+              // exactly what getEmailsWithMissingEmbeddings reads as "done" —
+              // so the missing chunks would never be retried and that part of
+              // the message would be permanently unsearchable.
+              if (embedding == null) break;
+              embeddings.add(embedding);
+            }
 
             // Hand the result back to the main isolate to write — resqlite
             // serializes writes through a single connection internally, so
             // writing here (a second, independent connection to the same
             // file) only added SQLITE_BUSY contention.
             //
-            // Only relayed when generation actually succeeded — see
-            // embedding_isolate.dart for why a placeholder empty embedding
-            // on failure would permanently exclude the email from retry.
-            if (embedding != null) {
+            // Sent as one message per email rather than one per chunk so the
+            // write can replace the email's chunks atomically. Re-embedding a
+            // shortened email otherwise leaves its surplus high-index chunks
+            // behind, still holding the old text.
+            if (embeddings.length == chunks.length) {
               replyTo.send({
                 'type': 'embedding',
                 'table': 'emails_embeddings',
                 'id': email.id,
-                'embedding': embedding,
+                'embeddings': embeddings,
               });
             } else {
               logger.w("Skipped unprocessable email: ${email.id}");

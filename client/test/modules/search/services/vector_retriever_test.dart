@@ -94,6 +94,20 @@ Future<void> _addEmail(
   }
 }
 
+/// Adds one body-chunk vector to an existing email.
+Future<void> _addEmailChunk(
+  AppDatabase db,
+  String emailId,
+  int chunkIndex,
+  List<double> vector,
+) {
+  return db.rawDb.execute(
+    'INSERT INTO emails_embeddings (email_id, chunk_index, qwen3_vl_embedding) '
+    'VALUES (?, ?, vector_as_f32(?))',
+    [emailId, chunkIndex, '[${vector.join(',')}]'],
+  );
+}
+
 /// An embedder that always returns [vector], standing in for the AI subprocess.
 QueryEmbedder _embedder(List<double>? vector) => (_) async => vector;
 
@@ -265,6 +279,34 @@ void main() {
       await db.close();
     });
 
+    test('a chunked email is scored by its best chunk, and listed once', () async {
+      // The whole point of chunking: a long thread matches on whichever of its
+      // messages the query is about, undiluted by the rest. Scoring it by an
+      // average — or by chunk 0 — would give back exactly the diluted vector
+      // chunking replaced.
+      //
+      // Listing it once is the other half, and the more dangerous one. A
+      // 20-chunk thread emitted 20 times does not merely fill the page: it
+      // reaches HybridRanker as 20 separate documents, each collecting its own
+      // reciprocal-rank contribution. That is the double-listing trap, already
+      // measured at a 2x ranking distortion.
+      final db = await _freshDb('vec_mode_a_chunk_dedup_test.db');
+      await _addEmail(db, id: 'thread', date: _y2024);
+      await _addEmailChunk(db, 'thread', 0, _vector(0, lean: 0.3));
+      await _addEmailChunk(db, 'thread', 1, _vector(0));
+      await _addEmailChunk(db, 'thread', 2, _vector(0, lean: 0.4));
+      await _addEmail(db, id: 'short', date: _y2024, vector: _vector(0, lean: 0.8));
+
+      final hits = await VectorRetriever(
+        db,
+        _embedder(_vector(0)),
+      ).search(QueryParser.parse('after:2020 sunset'));
+
+      expect(hits.map((h) => h.id), ['thread', 'short']);
+      expect(hits.first.similarity, closeTo(1.0, 1e-5));
+      await db.close();
+    });
+
     test('onlySource restricts which archive is scanned', () async {
       final db = await _freshDb('vec_mode_a_only_test.db');
       await _addFile(db, id: 'f1', dateCreated: _y2024);
@@ -337,6 +379,26 @@ void main() {
       ).search(QueryParser.parse('sunset'));
 
       expect(hits.length, 1);
+      await db.close();
+    });
+
+    test('collapses an email that owns many chunks', () async {
+      // Mode B ranks inside SQLite, so the chunks of one thread arrive as
+      // separate scan rows and have to be collapsed on the way out. The
+      // over-fetch that feeds this is sized for it: the chunks of a thread are
+      // near neighbours of each other, so when one matches several tend to.
+      final db = await _freshDb('vec_mode_b_chunk_dedup_test.db');
+      await _addEmail(db, id: 'thread');
+      for (var i = 0; i < 8; i++) {
+        await _addEmailChunk(db, 'thread', i, _vector(0, lean: 0.5 + i * 0.05));
+      }
+
+      final hits = await VectorRetriever(
+        db,
+        _embedder(_vector(0)),
+      ).search(QueryParser.parse('sunset'));
+
+      expect(hits.map((h) => h.id), ['thread']);
       await db.close();
     });
   });

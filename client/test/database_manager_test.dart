@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:mydatastudio/custom_path_provider.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
@@ -617,6 +619,70 @@ void main() {
         "AND name='contacts_name_idx'",
       );
       expect(staleIndex, isEmpty);
+
+      await appDb.close();
+      if (dbFile.existsSync()) dbFile.deleteSync();
+    });
+
+    test('email embeddings rekey to chunks, discarding whole-body vectors', () async {
+      // Chunking supersedes the stored vectors, and they cannot simply be
+      // carried across as chunk 0: they would keep the current model_version,
+      // which is the only signal getEmailsWithMissingEmbeddings has. Every
+      // long email in the archive would look finished and keep its diluted
+      // single vector forever — the failure chunking exists to fix, made
+      // invisible. Dropping them is what re-enqueues the archive.
+      final supportDir = await getApplicationSupportDirectory();
+      const dbName = 'email_chunk_rekey_test.db';
+      final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+      if (dbFile.existsSync()) dbFile.deleteSync();
+
+      var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+
+      // Reproduce a pre-chunking install: one row per email, keyed by email_id
+      // alone, stamped with the pipeline that is still current.
+      await appDb.rawDb.execute('DROP TABLE emails_embeddings');
+      await appDb.rawDb.execute('''
+        CREATE TABLE emails_embeddings (
+          email_id TEXT PRIMARY KEY,
+          qwen3_vl_embedding BLOB,
+          model_version TEXT,
+          FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
+        );
+      ''');
+      await appDb.rawDb.execute(
+        'INSERT INTO emails (id, collection_id, date, "from", "to", subject, '
+        'plain_body, is_deleted) VALUES (?, ?, ?, ?, ?, ?, ?, 0)',
+        ['e1', 'c1', 1000, 'a@x.com', 'me@x.com', 'Subject', 'body'],
+      );
+      await appDb.rawDb.execute(
+        'INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding, '
+        'model_version) VALUES (?, ?, ?)',
+        ['e1', Uint8List(8192), EmbeddingModel.current],
+      );
+      await appDb.close();
+
+      // Reopening is what an upgraded install does.
+      appDb = await AppDatabase.create(null, supportDir.path, dbName);
+
+      final info = await appDb.rawDb.select(
+        'PRAGMA table_info(emails_embeddings)',
+      );
+      final chunkColumn = info.firstWhere((r) => r['name'] == 'chunk_index');
+      expect(
+        chunkColumn['pk'],
+        greaterThan(0),
+        reason: 'chunk_index must be part of the key, or two chunks of one '
+            'email overwrite each other instead of coexisting',
+      );
+
+      final rows = await appDb.rawDb.select('SELECT * FROM emails_embeddings');
+      expect(rows, isEmpty, reason: 'whole-body vectors must not survive');
+
+      // The point of discarding them: the email is queued again.
+      final missing = await DatabaseRepository(
+        appDb,
+      ).getEmailsWithMissingEmbeddings();
+      expect(missing.map((e) => e.id), ['e1']);
 
       await appDb.close();
       if (dbFile.existsSync()) dbFile.deleteSync();
