@@ -2,7 +2,7 @@
 
 Status: **Phases 1–3 and 6 implemented, plus §13 field autocomplete.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 6 — email chunking, per §16. §13 — `field:` value autocomplete over contacts, tags, landmarks, collections and the fixed vocabularies, per §13f. Phases 4, 5, 7 still proposal.
 
-**One measurement is outstanding and is not optional: `similarityFloorRatio` for mail (§16d item 4).** 0.75 was fitted to whole-body vectors on a corpus where the Mode B fetch covered every row. Chunking breaks both premises — the mail corpus grows to ~30,800 vectors against a 10,000-row fetch, so the median is drawn from the top third, and short fragments score differently from whole bodies. Both biases push the floor up, i.e. toward pruning mail that should have survived. Re-derive it from the chunked archive once the backfill completes.
+**The outstanding floor measurement is done: mail is floored at 0.70, files stay at 0.75 (§16f).** Only half the predicted problem was real. The sample bias was, and is worth exactly 0.04 — Mode B reads its median from the top third of 30,791 mail vectors, and correcting for that arithmetically gives 0.677–0.722 across ten probe queries. The distribution change was not: chunking made mail retrieval *better* at an unchanged ratio, because an email now matches on the fragment the query is about instead of on its whole diluted body.
 
 Person resolution deliberately requires a preposition: a bare name in free text is *not* treated as a person. §2b's "n-gram matching plus the prepositional patterns" reads either way, and this is the reading whose failure mode is visible — a hard filter removes results silently, so searching for the word "mike" must not narrow the archive to one person's mail without saying so.
 
@@ -798,7 +798,8 @@ path is therefore a ceiling on total recall, not a page size.
 | `HybridRanker.retrieverWeights` | all 1.0 | `hybrid_ranker.dart:23` | Flat on purpose — weighting before real usage data just encodes a guess. |
 | `SearchService.fusionWindow` | 500 | `search_service.dart:39` | Lexical rows entering fusion. |
 | `VectorRetriever.candidateLimit` | 2000 | `vector_retriever.dart:82` | Memory **ceiling**, not the relevance gate. Was 300; see 15d. |
-| `VectorRetriever.similarityFloorRatio` | 0.75 | `vector_retriever.dart` | Fraction of the *background-to-best* span a hit must clear. See 15e. **Owed a re-measurement for mail since chunking — §16d item 4.** |
+| `VectorRetriever.similarityFloorRatio` | 0.75 | `vector_retriever.dart` | Fraction of the *background-to-best* span a hit must clear. Files only. See 15e. |
+| `VectorRetriever.emailSimilarityFloorRatio` | 0.70 | `vector_retriever.dart` | The same gate for mail. Lower because Mode B samples mail's median from the top third of the corpus and so reads it too high. Measured in §16f. |
 | `VectorRetriever.minimumCandidatesForFloor` | 50 | `vector_retriever.dart` | Below this the median *is* one of the answers. See 15e. |
 | `VectorRetriever.modeACandidateCap` | 4000 | `vector_retriever.dart` | ~32 MB of blobs — where reading them stops being free. |
 | `VectorRetriever.modeAEmailChunkCap` | 8000 | `vector_retriever.dart` | The cap counts rows, and a mail row is now a body chunk. At 1.92 chunks per email the plain cap would reach half as many emails as before chunking — a recall loss caused purely by storage layout, worst on the long threads chunking was adopted to reach. |
@@ -1163,12 +1164,12 @@ cannot be until the backfill finishes:
    5×, since the chunks of one thread are near neighbours and tend to match
    together) and the Mode A row cap for mail, which counts rows: left at 4,000 it
    would have scored barely half as many *emails* as before chunking.
-4. **The floor. Not done, and the one real debt this leaves.** §15e measures the
-   similarity floor from the per-modality *median*. Chunking changes both the
-   distribution (fragments, not whole bodies) and the sample (Mode B now fetches
-   10,000 of ~30,800 mail vectors, so the median is drawn from the top third).
-   Both bias the floor upward. Re-measure `similarityFloorRatio` for mail after
-   the backfill; do not assume 0.75 still holds.
+4. **The floor. Done — mail moved to 0.70, files stayed at 0.75.** §15e measures
+   the similarity floor from the per-modality *median*, and chunking was
+   expected to bias it upward two ways: the distribution (fragments, not whole
+   bodies) and the sample (Mode B fetches 10,000 of 30,791 mail vectors, so the
+   median is drawn from the top third). Measured, only the sample bias was
+   real; see §16f.
 5. **Backfill. Done, by discarding.** The migration drops the stored vectors
    rather than carrying them forward as chunk 0. That is not a shortcut around
    the migration, it *is* the migration: a copied row keeps the current
@@ -1209,3 +1210,77 @@ Two traps worth repeating:
 - **Pair the bootstrap.** All variants answer the same probes, so probe difficulty
   cancels only if the resampling is paired. Unpaired CIs here are roughly twice
   as wide and would have called the chunking result insignificant.
+
+### 16f. The floor, re-measured (§16d item 4)
+
+Run against the finished backfill: **30,791 chunk vectors over 20,343 emails**,
+Mode B fetching the best 10,000 chunk rows, deduplicated to best-per-email
+exactly as `_rankFromDistance` does. Ten probe queries, chosen to span the kinds
+of thing a personal archive is asked for.
+
+**The prediction was half right, and the half that was wrong is the interesting
+one.** Two biases were expected, both pushing the floor up:
+
+*The sample bias is real and is worth 0.04.* Mode B's median is the median of
+the top third, not of the corpus. Taking the true corpus median for the same
+query and asking where it sits in Mode B's own normalized frame gives a
+consistently negative answer — the floor is being built from a baseline that is
+11–29% of the spread too high:
+
+| query | corpus median | Mode B median | best | corpus median's position in Mode B's frame |
+|---|---|---|---|---|
+| `white dog` | 0.332 | 0.375 | 0.647 | −0.155 |
+| `family` | 0.443 | 0.500 | 0.723 | −0.256 |
+| `flight confirmation` | 0.491 | 0.531 | 0.720 | −0.210 |
+| `hotel reservation` | 0.474 | 0.507 | 0.764 | −0.127 |
+| `invoice past due` | 0.491 | 0.546 | 0.733 | −0.291 |
+| `birthday party invitation` | 0.414 | 0.447 | 0.650 | −0.162 |
+| `job offer salary` | 0.402 | 0.432 | 0.668 | −0.126 |
+| `car insurance renewal` | 0.459 | 0.492 | 0.787 | −0.112 |
+| `doctor appointment` | 0.392 | 0.427 | 0.643 | −0.159 |
+| `software license key` | 0.474 | 0.509 | 0.763 | −0.137 |
+
+A floor is `median + ratio * (best − median)`, so holding the same *absolute*
+cut while the median shifts up by `d` means `ratio' = 0.75 − 0.25 · d / spread`.
+That is **0.677 to 0.722**, and **0.707** at the mean — the whole correction,
+stated without appeal to judgment.
+
+*The distribution bias did not appear.* The worry was that short fragments would
+score unlike whole bodies and prune harder. The opposite happened: at an
+unchanged 0.75, `white dog` now keeps 3 where it kept 1 and `flight
+confirmation` keeps 11 where it kept 6. Deduplicating by an email's *best* chunk
+lifts the top of the distribution while the median — 85% of emails are still
+single-chunk — barely moves. That is chunking's intended recall gain showing up
+in the floor's own terms, not a regression to correct.
+
+**Chosen: 0.70.** It is the sample correction rounded toward recall, and
+deliberately not a fresh fit. The pre-chunking corpus was discarded by the
+migration (§16d item 5) and cannot be re-fitted against, so the only honest move
+is to correct the part that is measurable.
+
+Two checks, neither of which chose the number but both of which had to permit
+it:
+
+- **Topical inspection.** `flight confirmation` is genuinely on topic through
+  rank 15 — a Marriott reservation confirmation at 0.720 normalized — and turns
+  questionable at 16 (`RE: AT&T onsite`). 0.75 cut it at 11, discarding four
+  real itineraries. Queries do disagree inside 0.65–0.72: `white dog` would
+  ideally cut at 0.65, where a fourth puppy-adoption forward survives and the
+  word-trivia newsletter just below it does not. There is no ratio that is right
+  for every query, which is why the arithmetic and not the eyeballing picks it.
+- **Ground truth.** 40 emails sampled, a verbatim 14-word span lifted from each,
+  and the source email's own position measured. Restricted to the 19 probes the
+  retriever actually surfaced (rank ≤ 20 — a probe at rank 840 is a retrieval
+  miss no floor can fix, and averaging it in hides what the floor costs), 0.75
+  and 0.70 lose the identical 2, 0.65 loses 1, 0.60 loses none. So 0.70 costs
+  nothing here; it is a constraint satisfied, not evidence for the value.
+
+**Per modality, not per mode**, which leaves it slightly loose in Mode A: Mode A
+slices by date rather than by similarity, so its median is unbiased and 0.75
+would still be correct there. A ratio varying by mode as well as modality is two
+constants to explain for 0.05 of spread, and the error runs toward keeping
+results rather than hiding them.
+
+**Files were not touched.** ~4,700 file vectors against the same 10,000-row
+fetch is still full coverage, so their median is the real one and the premise
+0.75 was fitted under still holds. §12's 50k tripwire is where that changes.

@@ -113,7 +113,44 @@ class VectorRetriever {
   /// the distribution does not reveal whether the top hit means anything.
   /// Keeping the residual one or two out of the first page is a ranking
   /// concern, not a retrieval one.
+  ///
+  /// Mail uses [emailSimilarityFloorRatio] instead; this value stands for
+  /// files, whose vectors the Mode B fetch still covers completely.
   static const similarityFloorRatio = 0.75;
+
+  /// The same gate for mail, lower for a reason that is arithmetic rather than
+  /// taste.
+  ///
+  /// The floor reads the median as "what this query scores against nothing in
+  /// particular", and that reading is only true when the sample it is taken
+  /// over is the corpus. Chunking pushed mail past that: Mode B ranks by
+  /// fetching the best `candidateLimit * 5` = 10,000 chunk rows out of 30,791,
+  /// so the median it sees is the median of the **top third**. Measured over
+  /// ten probe queries against the finished archive, the true corpus median
+  /// sits 0.112 to 0.291 spread-units below the one the floor actually uses
+  /// (mean 0.174). A floor is `median + ratio * (best - median)`, so shifting
+  /// the median up by `d` and holding the same absolute cut means
+  /// `ratio' = 0.75 - 0.25 * d / spread` — 0.677 to 0.722 across those
+  /// queries, 0.707 at the mean. Rounded to **0.70**, i.e. toward recall.
+  ///
+  /// Corroborated by inspection rather than derived from it. `flight
+  /// confirmation` on this archive is genuinely on topic through rank 15 (a
+  /// Marriott reservation confirmation at 0.720 normalized) and turns
+  /// questionable at 16; 0.75 cut it at 11, discarding four real itineraries.
+  /// Queries do disagree inside 0.65-0.72 — `white dog` would ideally cut at
+  /// 0.65, where a fourth puppy-adoption forward survives and the word-trivia
+  /// newsletter below it does not — so 0.70 is deliberately *not* a fresh fit.
+  /// The pre-chunking corpus is gone and cannot be re-fitted against; the
+  /// sample bias is the one part that is measurable, and this corrects that
+  /// and nothing else.
+  ///
+  /// It is applied per modality rather than per mode, which leaves it very
+  /// slightly loose in Mode A. Mode A slices by date, not by similarity, so
+  /// its median is unbiased and 0.75 would still be right there — but a ratio
+  /// that varied by mode as well as by modality would be two constants to
+  /// explain for 0.05 of spread, and the error runs toward keeping results
+  /// rather than hiding them.
+  static const emailSimilarityFloorRatio = 0.70;
 
   /// Below this many candidates the floor is not applied at all.
   ///
@@ -377,15 +414,11 @@ class VectorRetriever {
   /// the corpus that is also the real median, and past that point the sample
   /// skews high, which biases the floor *upward* and prunes harder.
   ///
-  /// **Mail has now crossed that line and this ratio is owed a re-measurement.**
-  /// Chunking multiplies the mail corpus to ~39,000 vectors (§16c) against a
-  /// 10,000-row fetch, so the mail median is drawn from the top quarter rather
-  /// than the whole. The distribution moved as well as the sample: chunks are
-  /// short fragments and score differently from whole bodies, and 0.75 was
-  /// fitted to whole bodies. Both push the same way — a floor that prunes more
-  /// than intended — and the honest correction is to re-derive it from the
-  /// chunked archive once the backfill completes, per §16d item 4, not to
-  /// guess a new constant here.
+  /// **Mail has crossed that line**, at 30,791 vectors against a 10,000-row
+  /// fetch, which is why it is floored by [emailSimilarityFloorRatio] rather
+  /// than [similarityFloorRatio]. The ratio is chosen off `hits.first.type`,
+  /// which the single-modality precondition above is what makes sound. Files
+  /// are unaffected — ~4,700 vectors is still full coverage.
   ///
   /// A spread of zero or less means every candidate scored alike and there is
   /// no signal to separate: scaling would then invert the comparison, since
@@ -403,7 +436,11 @@ class VectorRetriever {
     final spread = best - baseline;
     if (spread <= 0) return hits.take(limit).toList();
 
-    final floor = baseline + spread * similarityFloorRatio;
+    final ratio =
+        hits.first.type == SearchResultType.email
+            ? emailSimilarityFloorRatio
+            : similarityFloorRatio;
+    final floor = baseline + spread * ratio;
     final kept = <VectorHit>[];
     for (final hit in hits) {
       // Sorted, so the first hit below the floor ends it.
