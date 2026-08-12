@@ -1,8 +1,8 @@
 # Unified Search — Implementation Plan
 
-Status: **Phases 1–3 and 6 implemented.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 6 — email chunking, per §16. Phases 4, 5, 7 still proposal.
+Status: **Phases 1–3 and 6 implemented, plus §13 field autocomplete.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 6 — email chunking, per §16. §13 — `field:` value autocomplete over contacts, tags, landmarks, collections and the fixed vocabularies, per §13f. Phases 4, 5, 7 still proposal.
 
-**One measurement is outstanding and is not optional: `similarityFloorRatio` for mail (§16d item 4).** 0.75 was fitted to whole-body vectors on a corpus where the Mode B fetch covered every row. Chunking breaks both premises — the mail corpus grows to ~39,000 vectors against a 10,000-row fetch, so the median is drawn from the top quarter, and short fragments score differently from whole bodies. Both biases push the floor up, i.e. toward pruning mail that should have survived. Re-derive it from the chunked archive once the backfill completes.
+**One measurement is outstanding and is not optional: `similarityFloorRatio` for mail (§16d item 4).** 0.75 was fitted to whole-body vectors on a corpus where the Mode B fetch covered every row. Chunking breaks both premises — the mail corpus grows to ~30,800 vectors against a 10,000-row fetch, so the median is drawn from the top third, and short fragments score differently from whole bodies. Both biases push the floor up, i.e. toward pruning mail that should have survived. Re-derive it from the chunked archive once the backfill completes.
 
 Person resolution deliberately requires a preposition: a bare name in free text is *not* treated as a person. §2b's "n-gram matching plus the prepositional patterns" reads either way, and this is the reading whose failure mode is visible — a hard filter removes results silently, so searching for the word "mike" must not narrow the archive to one person's mail without saying so.
 
@@ -406,7 +406,7 @@ Item 1 is built; items 2–4 do not exist yet. Ordered by value-per-unit-effort:
 
    The original stopping rule was "if neither signal shows up, single-vector is fine and Phase 6 drops entirely." Signal 1 showed up and is the whole result. Signal 2 (a general skew toward short emails) was not tested directly and did not need to be.
 
-   One correction to the reasoning above, worth keeping because it inverted the cost argument: chunking was assumed to be *more* expensive. It is cheaper on this corpus. Nothing truncates before the model ([model_manager.py:305](aiserver/src/aichat/model_manager.py:305) passes no `max_length`), so attention runs quadratic over the full body — a 60k-character email costs 145s whole and 75s chunked. Projected across the corpus: **~22h single-vector vs ~13h chunked.**
+   One correction to the reasoning above, worth keeping because it inverted the cost argument: chunking was assumed to be *more* expensive. It is cheaper on this corpus. Nothing truncates before the model ([model_manager.py:305](aiserver/src/aichat/model_manager.py:305) passes no `max_length`), so attention runs quadratic over the full body — a 60k-character email costs 145s whole and 75s chunked. Chunking is roughly 2× cheaper across the corpus; see §16c for why the absolute hour figures there are not to be quoted.
 2. **Text extraction** for PDF/DOCX/TXT. Belongs in `aiserver` (Python has real libraries; `pdfx` on the Flutter side renders pages, it doesn't extract text reliably). New endpoint `POST /util/extract-text` returning per-page text, mirroring the existing `/util/thumbnail` shape.
 3. **A `DocumentChunkIsolate`** following the exact `EmbeddingIsolate` pattern — control port, write relay, pause-during-scan, `SequentialWriteQueue`. That shape is well-established here; don't invent a new one.
 4. Chunking: ~512 tokens, ~64 overlap, prefer paragraph boundaries. Persist `page` so a result can deep-link into the PDF viewer.
@@ -426,7 +426,7 @@ Each phase ships something usable on its own.
 | **3** | Vector retriever (Mode A candidate rerank) + RRF + tier boost | "landscape photos near Banff", "party pictures from 2026" |
 | **4** | Query planner (LLM intent, off critical path, fails open) | Ambiguous queries route to the right modality |
 | **5** | Summarize handoff to `aichat`, **map-reduce over filtered sets (§2e)** | "Summarize my interactions with Russel Jong" — genuinely over all 412, not a top-50 sample |
-| **6** | Email chunking — **measured, adopted and built, see §16** | Retrieval of text inside quoted threads; also cuts backfill time from ~22h to ~13h |
+| **6** | Email chunking — **measured, adopted and built, see §16** | Retrieval of text inside quoted threads; also cuts backfill cost roughly in half (§16c) |
 | **7** | Document extraction + chunk embeddings | "Find my graduation speech" over PDFs |
 
 Phases 1–3 cover three of the four example queries. Phase 7 is the only one gated on new infrastructure.
@@ -488,7 +488,7 @@ This archive is partially synced (Gmail 309 messages, Yahoo 1,058, spanning 2019
 
 **Threshold: ~50,000 vectors in a single modality.** Per-modality, not total — a photo query scans only photo vectors, so the ceiling applies to the largest single corpus, not their sum.
 
-**Chunking moved mail most of the way to this line in one step.** The table above was taken when the archive held 1,279 mail vectors. Two PST imports took the corpus to 20,431 emails, and chunking multiplies that to a projected ~39,000 vectors (§16c) — roughly 78% of the tripwire, from a partially-synced archive. Mail, not photos, is now the modality to instrument first, and the next import is likely to cross it. Nothing here is a reason to pre-optimize: the point of a tripwire is that it is checked, and this one is close enough to check rather than assume.
+**Chunking moved mail most of the way to this line in one step.** The table above was taken when the archive held 1,279 mail vectors. Two PST imports took the corpus to 20,343 live emails, and chunking multiplies that to a measured ~30,800 vectors (§16c) — roughly 62% of the tripwire, from a partially-synced archive. Mail, not photos, is now the modality to instrument first, and the next import is likely to cross it. Nothing here is a reason to pre-optimize: the point of a tripwire is that it is checked, and this one is close enough to check rather than assume.
 
 | Vectors (one modality) | Scan reads | Verdict |
 |---|---|---|
@@ -606,6 +606,17 @@ Measured detail that reinforces this: `DISTINCT` defeats the prefix-range optimi
 ### 13f. Build order impact
 
 `emails_contacts` (table, parser, backfill) moves to **Phase 1** — §2b already depends on it, so autocomplete adds the UI and the suggestion providers, not the data layer. The dropdown itself lands in **Phase 2** with the search page.
+
+**Built 2026-08-11**, with one deliberate omission. `QueryTokenizer` locates the `field:` token under the caret and rewrites just its value; `FieldSuggestionProvider` has five implementations (contacts, tags, landmarks, collections, and the fixed vocabularies of `type:`/`has:`/`is:`), each caching its list and filtering in Dart per §13e; `SearchFieldCompletion` renders the dropdown with the keyboard contract from §13d.
+
+**Both query boxes complete, and the header one matters more.** The section above says the dropdown "lands in Phase 2 with the search page", which read as the search page's field alone — but the app-bar field is where a query is actually *composed*, from whatever module you happen to be in, and the results page is where you find out whether it worked. Completing only on the results page means discovering that `from:` matched nothing after navigating. So the completion behavior is split from the field's chrome: `SearchFieldCompletion` takes a `fieldBuilder`, and the two callers supply their own — a full-width pill on the search page, the 36px bordered input in the header. The dropdown renders in the app's overlay, so in the header it deliberately overhangs the bar's lower edge rather than being clipped inside it.
+
+Two things worth recording because they are not obvious from the section above:
+
+- **The tokenizer is now shared with `QueryParser` rather than duplicated.** Both have to answer "where does this value start and end" and a disagreement would be silent — suggesting against a token the parser reads differently, or replacing the wrong span when one is accepted. The parser delegates to it and its 35 tests pass unchanged, which is what makes the extraction safe to have done.
+- **`suggest()` takes the field as a parameter**, not just the typed text. Most providers serve one field, but the two that serve several split into different kinds: `from:`/`to:`/`cc:`/`participant:` share one address list, while `type:` and `is:` have nothing in common. Without the parameter the second kind cannot be written against the interface at all.
+
+**Not built: cache invalidation on scan completion.** Each provider loads once and holds its list for the lifetime of the search page, so a scan finishing mid-visit leaves new contacts and tags out of the dropdown until the page is next opened. §13e already calls this staleness benign and free text still finds anything missing, and the alternative was coupling the search page to `ScannerManager` for a case with no measured cost. Wire it if the dropdown is ever observed to be visibly behind.
 
 Tests:
 
@@ -1020,7 +1031,7 @@ Everything below follows from these numbers, so they come first.
 
 **Correction found during implementation: these lengths include HTML markup.** The producer fell back to the raw `html_body` when a message had no plain text, so the profile above measures markup as if it were prose. On the 380 HTML-only messages in this archive that is a 15× overstatement — 8,825 chunks raw against 587 with markup stripped — and the 243,841-character maximum is one of them (stripped, the largest is 21,387). The producer now uses `searchableBodyText`, the same stripped text the FTS index reads.
 
-This does not disturb the decision in 16b: every variant was measured against the same bodies, so the comparison holds. It does mean the **cost projections in 16c are upper bounds** — the real chunked backfill is smaller and faster than ~13h, because the messages that dominated the tail were mostly markup. Re-profile before quoting these percentiles again.
+This does not disturb the decision in 16b: every variant was measured against the same bodies, so the comparison holds. It does mean the **cost projections in 16c are upper bounds** — the real chunked backfill is smaller than they imply, because the messages that dominated the tail were mostly markup. It is now recomputed there: 30,821 vectors, not 38,815. Re-profile before quoting these percentiles again.
 
 Two facts that decide most of the argument:
 
@@ -1114,6 +1125,22 @@ Storage: 38,815 vectors instead of 20,180 (1.92× rows, 318 MB vs 165 MB at
 84% keep a single vector identical to today's. The migration is much smaller than
 "chunk every email" implies.
 
+**Recomputed on the stripped bodies the producer actually embeds (2026-08-11,
+during the backfill):** **30,821 vectors over 20,343 live emails** — 1.51× rows,
+241 MB — with **3,008 emails (14.8%) producing more than one chunk**. The
+multi-chunk *share* barely moved; what shrank is the tail, exactly as §16a
+predicts, because the messages that dominated it were mostly markup. Use these
+figures, not the ones above, for anything scale-related; §12's tripwire is
+recomputed against them.
+
+Wall-clock is the one number still unsettled. Throughput measured in flight
+varies between roughly 36 and 130 chunks/minute, because both embedding isolates
+pause whenever a scanner is syncing, so an average taken over a few minutes says
+more about scanner activity than about embedding cost. The ~22h/~13h projections
+above are per-body compute extrapolated from single calls against raw HTML: the
+*ratio* between them still holds, the absolute hours do not. Record the real
+elapsed time when this backfill finishes and replace both.
+
 ### 16d. What implementing this requires
 
 Not a config flip. In order — items 1–3 and 5 are **built**; item 4 is not, and
@@ -1139,7 +1166,7 @@ cannot be until the backfill finishes:
 4. **The floor. Not done, and the one real debt this leaves.** §15e measures the
    similarity floor from the per-modality *median*. Chunking changes both the
    distribution (fragments, not whole bodies) and the sample (Mode B now fetches
-   10,000 of ~39,000 mail vectors, so the median is drawn from the top quarter).
+   10,000 of ~30,800 mail vectors, so the median is drawn from the top third).
    Both bias the floor upward. Re-measure `similarityFloorRatio` for mail after
    the backfill; do not assume 0.75 still holds.
 5. **Backfill. Done, by discarding.** The migration drops the stored vectors

@@ -1,30 +1,9 @@
 import '../models/search_query.dart';
-
-const Map<String, FilterField> _fieldNames = {
-  'from': FilterField.from,
-  'to': FilterField.to,
-  'cc': FilterField.cc,
-  'participant': FilterField.participant,
-  'subject': FilterField.subject,
-  'has': FilterField.has,
-  'is': FilterField.is_,
-  'type': FilterField.type,
-  'after': FilterField.after,
-  'before': FilterField.before,
-  'in': FilterField.in_,
-  'tag': FilterField.tag,
-  'near': FilterField.near,
-};
+import 'query_tokenizer.dart';
 
 const int _defaultNearRadiusKm = 25;
 const int _bareYearMin = 1900;
 const int _bareYearMax = 2100;
-
-bool _isWhitespace(int code) =>
-    code == 0x20 || code == 0x09 || code == 0x0A || code == 0x0D;
-
-bool _isAsciiLetter(int code) =>
-    (code >= 0x41 && code <= 0x5A) || (code >= 0x61 && code <= 0x7A);
 
 /// Parses raw search-bar text into hard filters plus a free-text remainder.
 ///
@@ -39,78 +18,30 @@ class QueryParser {
     final filters = <QueryFilter>[];
     final textWords = <String>[];
 
-    final len = input.length;
-    var i = 0;
-    while (i < len) {
-      while (i < len && _isWhitespace(input.codeUnitAt(i))) {
-        i++;
-      }
-      if (i >= len) break;
-
-      final start = i;
-      var j = i;
-      final negated = input[j] == '-';
-      if (negated) j++;
-
-      final idStart = j;
-      while (j < len && _isAsciiLetter(input.codeUnitAt(j))) {
-        j++;
-      }
-      final identifier = input.substring(idStart, j).toLowerCase();
-      final field = _fieldNames[identifier];
-
-      if (field != null && j < len && input[j] == ':') {
-        var k = j + 1;
-        String value;
-        if (k < len && input[k] == '"') {
-          k++;
-          final valStart = k;
-          while (k < len && input[k] != '"') {
-            k++;
-          }
-          value = input.substring(valStart, k);
-          if (k < len) k++; // skip closing quote
-        } else {
-          final valStart = k;
-          while (k < len && !_isWhitespace(input.codeUnitAt(k))) {
-            k++;
-          }
-          value = input.substring(valStart, k);
-        }
-        final end = k;
-
-        final consumed = _tryAddFilter(
-          filters,
-          field: field,
-          value: value,
-          negated: negated,
-        );
-        if (consumed) {
-          i = end;
-          continue;
-        }
-        // Field matched but the value didn't hold up (bad date, empty
-        // value): the whole token as typed falls back to free text so
-        // nothing is silently dropped or half-parsed.
-        if (value.isEmpty) {
-          // Explicit "drop" case (e.g. `from:` mid-autocomplete) — no
-          // filter, no free text.
-          i = end;
-          continue;
-        }
-        textWords.add(input.substring(start, end));
-        i = end;
+    for (final token in QueryTokenizer.scan(input)) {
+      final field = token.field;
+      if (field == null) {
+        textWords.add(token.text);
         continue;
       }
 
-      // Not a recognized field:value token — the whole whitespace-delimited
-      // word is free text, unknown-field tokens included.
-      var k = start;
-      while (k < len && !_isWhitespace(input.codeUnitAt(k))) {
-        k++;
+      final consumed = _tryAddFilter(
+        filters,
+        field: field,
+        value: token.text,
+        negated: token.negated,
+      );
+      if (consumed) continue;
+
+      // Field matched but the value didn't hold up (bad date, empty
+      // value): the whole token as typed falls back to free text so
+      // nothing is silently dropped or half-parsed.
+      if (token.text.isEmpty) {
+        // Explicit "drop" case (e.g. `from:` mid-autocomplete) — no
+        // filter, no free text.
+        continue;
       }
-      textWords.add(input.substring(start, k));
-      i = k;
+      textWords.add(input.substring(token.start, token.end));
     }
 
     final preferredTypes = _extractModality(filters, textWords);

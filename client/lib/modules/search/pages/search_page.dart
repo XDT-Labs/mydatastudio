@@ -13,7 +13,9 @@ import 'package:mydatastudio/modules/search/services/search_detail_repository.da
 import 'package:mydatastudio/modules/search/services/search_service.dart';
 import 'package:mydatastudio/modules/search/widgets/search_email_reader.dart';
 import 'package:mydatastudio/modules/search/widgets/search_email_sidebar.dart';
+import 'package:mydatastudio/modules/search/services/suggestions/field_suggestion_service.dart';
 import 'package:mydatastudio/modules/search/widgets/search_facet_bar.dart';
+import 'package:mydatastudio/modules/search/widgets/search_field.dart';
 import 'package:mydatastudio/modules/search/widgets/search_file_sidebar.dart';
 import 'package:mydatastudio/modules/search/widgets/search_filter_chips.dart';
 import 'package:mydatastudio/modules/search/widgets/search_lightbox.dart';
@@ -82,6 +84,11 @@ class _SearchPageState extends State<SearchPage> {
 
   late final SearchDetailRepository _detailLoader;
 
+  /// Backs the `field:` value dropdown. Null when there is no database — a
+  /// widget test, or a launch where the archive has not opened yet — and the
+  /// query box simply offers no completions rather than failing.
+  FieldSuggestionService? _suggestions;
+
   static const _panelWidth = 320.0;
   static const _panelWideWidth = 640.0;
 
@@ -99,6 +106,11 @@ class _SearchPageState extends State<SearchPage> {
     super.initState();
     _controller = TextEditingController(text: widget.initialQuery);
     _detailLoader = widget.detailLoader ?? const SearchDetailRepository();
+
+    final database = DatabaseManager.instance.database;
+    if (database != null) {
+      _suggestions = FieldSuggestionService.forDatabase(database);
+    }
 
     _scrollController.addListener(_onScroll);
 
@@ -358,9 +370,6 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.space): _OpenSelectedIntent(),
@@ -396,11 +405,11 @@ class _SearchPageState extends State<SearchPage> {
                     children: [
                       Padding(
                         padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
-                        child: _SearchBar(
+                        child: SearchField(
                           controller: _controller,
                           focusNode: _searchFocus,
                           onSubmitted: _onSubmitted,
-                          colorScheme: colorScheme,
+                          suggestions: _suggestions,
                         ),
                       ),
                       if (_isLoading)
@@ -696,51 +705,6 @@ class _PanelUnavailable extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _SearchBar extends StatelessWidget {
-  const _SearchBar({
-    required this.controller,
-    required this.focusNode,
-    required this.onSubmitted,
-    required this.colorScheme,
-  });
-
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final ValueChanged<String> onSubmitted;
-  final ColorScheme colorScheme;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      focusNode: focusNode,
-      autofocus: true,
-      onSubmitted: onSubmitted,
-      textInputAction: TextInputAction.search,
-      style: Theme.of(context).textTheme.bodyMedium,
-      decoration: InputDecoration(
-        hintText: 'Search files, emails, and more…',
-        prefixIcon: const Icon(Icons.search),
-        filled: true,
-        fillColor: colorScheme.surfaceContainerHigh,
-        contentPadding: const EdgeInsets.symmetric(vertical: 14),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
-          borderSide: BorderSide(color: colorScheme.primary, width: 2),
-        ),
-      ),
     );
   }
 }

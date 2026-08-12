@@ -2,14 +2,59 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/modules/search/services/suggestions/field_suggestion_service.dart';
+import 'package:mydatastudio/modules/search/widgets/search_field.dart';
 
-class AdaptiveAppBar extends StatelessWidget implements PreferredSizeWidget {
-  const AdaptiveAppBar({super.key, this.isDesktop = !kIsWeb});
+class AdaptiveAppBar extends StatefulWidget implements PreferredSizeWidget {
+  const AdaptiveAppBar({super.key, this.isDesktop = !kIsWeb, this.suggestions});
 
   final bool isDesktop;
 
+  /// Injection seam for widget tests, which have no database behind them.
+  /// In the app this is built from the open archive in [State.initState].
+  final FieldSuggestionService? suggestions;
+
   @override
   Size get preferredSize => const Size(double.infinity, 64);
+
+  @override
+  State<AdaptiveAppBar> createState() => _AdaptiveAppBarState();
+}
+
+class _AdaptiveAppBarState extends State<AdaptiveAppBar> {
+  /// Owned here rather than by the `TextField` so the completion overlay can
+  /// read the caret position and rewrite the value under it.
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
+
+  /// Null when there is no database yet, in which case the header field still
+  /// works and simply offers no completions.
+  FieldSuggestionService? _suggestions;
+
+  @override
+  void initState() {
+    super.initState();
+    _suggestions = widget.suggestions;
+    if (_suggestions != null) return;
+    final database = DatabaseManager.instance.database;
+    if (database != null) {
+      _suggestions = FieldSuggestionService.forDatabase(database);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _onSubmitted(String value) {
+    final query = value.trim();
+    if (query.isEmpty) return;
+    GoRouter.of(context).push('/search?q=${Uri.encodeQueryComponent(query)}');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -65,34 +110,46 @@ class AdaptiveAppBar extends StatelessWidget implements PreferredSizeWidget {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: TextField(
-                      style: TextStyle(
-                        color: themeData.colorScheme.onSurface,
-                        fontSize: 13,
-                      ),
-                      textInputAction: TextInputAction.search,
-                      // Search is reached from here rather than from a nav
-                      // entry: this field is already present on every screen,
-                      // and search is something you invoke from wherever you
-                      // are, not a place you navigate to.
-                      onSubmitted: (value) {
-                        final query = value.trim();
-                        if (query.isEmpty) return;
-                        GoRouter.of(
-                          context,
-                        ).push('/search?q=${Uri.encodeQueryComponent(query)}');
-                      },
-                      decoration: InputDecoration(
-                        hintText: 'Search everything...',
-                        hintStyle: TextStyle(
-                          color: themeData.colorScheme.onSurfaceVariant
-                              .withOpacity(0.6),
-                          fontSize: 13,
-                        ),
-                        border: InputBorder.none,
-                        isDense: true,
-                        contentPadding: EdgeInsets.zero,
-                      ),
+                    // Completion belongs here too, not just on the search
+                    // page: this field is where a query is composed from
+                    // wherever you happen to be, so it is the one that most
+                    // needs `from:` and `tag:` to be pickable rather than
+                    // guessed. Landing on the results page to discover the
+                    // filter matched nothing is the exact failure §13 exists
+                    // to remove.
+                    child: SearchFieldCompletion(
+                      controller: _controller,
+                      focusNode: _focusNode,
+                      onSubmitted: _onSubmitted,
+                      suggestions: _suggestions,
+                      fieldBuilder:
+                          (context, controller, focusNode, onSubmitted) =>
+                              TextField(
+                                controller: controller,
+                                focusNode: focusNode,
+                                style: TextStyle(
+                                  color: themeData.colorScheme.onSurface,
+                                  fontSize: 13,
+                                ),
+                                textInputAction: TextInputAction.search,
+                                // Search is reached from here rather than from
+                                // a nav entry: this field is already present on
+                                // every screen, and search is something you
+                                // invoke from wherever you are, not a place you
+                                // navigate to.
+                                onSubmitted: onSubmitted,
+                                decoration: InputDecoration(
+                                  hintText: 'Search everything...',
+                                  hintStyle: TextStyle(
+                                    color: themeData.colorScheme.onSurfaceVariant
+                                        .withOpacity(0.6),
+                                    fontSize: 13,
+                                  ),
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                              ),
                     ),
                   ),
                 ],
