@@ -284,7 +284,20 @@ class DatabaseRepository {
   /// per image and buys nothing: they are only ever looked at inside the email
   /// they decorate, and an HTML newsletter carries a dozen apiece. Worse, they
   /// then pollute similarity search. See `InlineAttachment`.
-  Future<List<File>> getFilesWithMissingEmbeddings({int limit = 10}) async {
+  /// [excludeCollections] holds collections whose storage is currently
+  /// unreachable — see `UnreachableCollections`. They are excluded *in the
+  /// query* rather than skipped after it, which is the difference between a
+  /// disconnected NAS costing nothing and it filling every batch of [limit]
+  /// with files that cannot be read, starving the ones that can.
+  Future<List<File>> getFilesWithMissingEmbeddings({
+    int limit = 10,
+    Set<String> excludeCollections = const {},
+  }) async {
+    final exclusion =
+        excludeCollections.isEmpty
+            ? ''
+            : 'AND f.collection_id NOT IN '
+                '(${List.filled(excludeCollections.length, '?').join(',')})';
     final rows = await db.select(
       '''
       SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner
@@ -299,9 +312,15 @@ class DatabaseRepository {
         AND f.is_deleted = 0
         AND f.is_inline = 0
         AND f.embedding_attempts < ?
+        $exclusion
       LIMIT ?
       ''',
-      [EmbeddingModel.current, maxEmbeddingAttempts, limit],
+      [
+        EmbeddingModel.current,
+        maxEmbeddingAttempts,
+        ...excludeCollections,
+        limit,
+      ],
     );
     return _filesWithResolvedPaths(rows);
   }

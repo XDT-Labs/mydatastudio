@@ -7,6 +7,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/modules/files/services/utilities/file_bytes_loader.dart';
+import 'package:mydatastudio/modules/files/services/utilities/unreachable_collections.dart';
 import 'package:mydatastudio/modules/files/services/utilities/vision_image.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/embedding_model.dart';
@@ -219,6 +220,11 @@ class EmbeddingIsolate {
     const kBatchSize = 10;
     var lastBatchLength = 0;
 
+    // Lives for the isolate's lifetime and is never persisted — a restart
+    // retries everything, which is the property that makes an outage
+    // survivable.
+    final unreachable = UnreachableCollections();
+
     while (true) {
       try {
         if (isPaused) {
@@ -283,6 +289,7 @@ class EmbeddingIsolate {
         // Query for a batch of files with missing embeddings
         final files = await repo.getFilesWithMissingEmbeddings(
           limit: kBatchSize,
+          excludeCollections: unreachable.deferred(),
         );
         lastBatchLength = files.length;
 
@@ -357,14 +364,29 @@ class EmbeddingIsolate {
                 'embedding': embedding,
               });
               logger.d("Sent embedding for file: ${file.path}");
+              // One success proves the storage is back; the whole collection
+              // returns to the queue rather than waiting out a backoff that
+              // was computed while it was away.
+              unreachable.recordSuccess(file.collectionId);
             } else if (rawBytes == null) {
               // Could not read the file at all — an unmounted volume, a cloud
               // token needing refresh, a network that isn't there. This says
               // nothing about whether the image can be embedded, so it must
               // not spend an attempt: five passes during an outage would
               // retire the photo permanently, and it would stay retired once
-              // the outage ended. Retried, unbudgeted, forever.
-              logger.w("Could not read file, will retry: ${file.path}");
+              // the outage ended.
+              //
+              // Retried without a budget, but not on a loop. The collection
+              // backs off instead, in memory only, so an absent NAS costs one
+              // failed read every so often rather than one every ten seconds
+              // per file — and stops holding batch slots that readable files
+              // are waiting for.
+              if (unreachable.recordFailure(file.collectionId)) {
+                logger.w(
+                  "Could not read file, deferring collection "
+                  "${file.collectionId}: ${file.path}",
+                );
+              }
             } else {
               // Read fine and still produced nothing: the bytes themselves are
               // the problem (truncated JPEG, unsupported encoding). That is
