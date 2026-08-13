@@ -1,6 +1,6 @@
 # Unified Search — Implementation Plan
 
-Status: **Phases 1–6 implemented, plus §13 field autocomplete.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 5 — `ResultSetSummarizer`: map-reduce over the whole filtered set, a coverage claim that never says "all" unless it read all of it, and the handoff into `aichat`. Phase 6 — email chunking, per §16. Phase 4 — `QueryPlanner`: one constrained-JSON call for modality intent, off the critical path, failing open to the order the search already produced (§17). §13 — `field:` value autocomplete over contacts, tags, landmarks, collections and the fixed vocabularies, per §13f. Phase 7 is still proposal.
+Status: **Phases 1–6 implemented, plus §13 field autocomplete.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 5 — `ResultSetSummarizer`: map-reduce over the whole filtered set, a coverage claim that never says "all" unless it read all of it, and the handoff into `aichat`. Phase 6 — email chunking, per §16. Phase 4 — `QueryPlanner`: one constrained-JSON call for modality intent, off the critical path, failing open to the order the search already produced (§17). §13 — `field:` value autocomplete over contacts, tags, landmarks, collections and the fixed vocabularies, per §13f. **Phase 7 is designed but unbuilt — §18. Its gating spike has been run and passed (§18a-1, §18a-2, §18d-1):** the `docling-rs` sdist builds on macOS, PDFs convert with full page provenance once a macOS `libpdfium.dylib` is vendored, and ~71% of the archive's non-PDF documents parse. Three constants changed — a 300k-character chunking gate, `HybridChunker` over `HierarchicalChunker`, and provenance by ref-resolution.
 
 **The outstanding floor measurement is done: mail is floored at 0.70, files stay at 0.75 (§16f).** Only half the predicted problem was real. The sample bias was, and is worth exactly 0.04 — Mode B reads its median from the top third of 30,791 mail vectors, and correcting for that arithmetically gives 0.677–0.722 across ten probe queries. The distribution change was not: chunking made mail retrieval *better* at an unchanged ratio, because an email now matches on the fragment the query is about instead of on its whole diluted body.
 
@@ -317,31 +317,25 @@ CREATE TABLE IF NOT EXISTS emails_embeddings (
   FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
 );
 
--- 4. Document chunks — Section 8. Deliberately deferred; listed here so the
---    shape is agreed before anything is written against it.
-CREATE TABLE IF NOT EXISTS file_chunks (
-  id           TEXT PRIMARY KEY,
-  file_id      TEXT NOT NULL,
-  chunk_index  INTEGER NOT NULL,
-  page         INTEGER,
-  text         TEXT NOT NULL,
-  FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS file_chunks_file_idx ON file_chunks (file_id);
+-- 4. Document chunks — Section 8. Superseded by §18e, which adds the columns
+--    a footnote needs (heading path, offsets) and a companion vector table.
+--    Kept here only so the diff between the sketch and the design is visible.
 
 -- 5. Saved searches (Section 9, optional)
 ```
 
-Chunk *vectors* need no new table: `files_embeddings` is already keyed `(file_id, type)` and its own comment anticipates `type='chunk'`.
-
-**A schema problem to settle when chunking is actually built — deferred, not decided.** `files_embeddings`' primary key is `(file_id, type)`, one row per type per file. A 40-page PDF has *many* chunks, all `type='chunk'`, so without a change the second overwrites the first. Two ways out:
+**A schema problem to settle when chunking is actually built — now settled as (b); see §18e.** `files_embeddings`' primary key is `(file_id, type)`, one row per type per file. A 40-page PDF has *many* chunks, all `type='chunk'`, so without a change the second overwrites the first. Two ways out:
 
 - **(a)** Key chunk vectors by `chunk_id` in a separate `file_chunks_embeddings` table.
 - **(b)** Add a chunk-sequence column and widen the PK to `(file_id, type, sequence)`.
 
-**Deferred to Phase 7; current preference is (b), now with a precedent.** Phase 6 took (b) for `emails_embeddings` and it was uneventful — the retriever needed no dedup work at all, because scoring by best-vector-per-id was already there for files carrying both an image and a description vector. The two things that did bite are both in §16d and both apply verbatim to `file_chunks`: the backfill queue must not be an outer join over the embedding table, and the write must *replace* an item's chunk set rather than upsert into it.
+**Settled as (b): one vector table for the whole archive, with chunk metadata in a separate `file_chunks` table that holds no vector.** The preference recorded here survived, and the Phase 6 precedent is why: `emails_embeddings` took (b) and it was uneventful — the retriever needed no dedup work at all, because scoring by best-vector-per-id was already there for files carrying both an image and a description vector. Chunks join that as a third kind of vector, not as a new mechanism. What (b) buys is singularity — one `model_version` for §15g to read, one backfill shape, one table for §12 to count.
 
-One factual note for whenever it's picked up: (b) alters a table holding live rows — 4,711 today — so it needs a migration and touches the existing insert paths in `upsertFileEmbedding` and `saveFileDescription`; (a) leaves those untouched and lets chunk vectors be scanned independently of image vectors, which matters because scanning chunks during a photo query is wasted work. Not an argument to settle now, just the cost to weigh then.
+An intermediate draft of §18e argued for (a) on the grounds that footnote metadata (page, heading path, offsets) has no home in a pure vector table. That is true and it does not distinguish the options: `file_chunks` exists under either one. Worth recording as a reasoning error rather than quietly fixing.
+
+The real cost of (b) is the one this section already named — a photo query pays to scan document chunks — and it is worse than it looks, because `vector_full_scan` cannot be pre-filtered, so a `type` filter does not avoid it. §18e-1 has the mitigation and the arithmetic.
+
+Two factual notes: (b) alters a table holding live rows — 5,576 today (2,808 `file`, 2,768 `description`) — so it needs the rebuild `_migrateFilesEmbeddingsKey` already performs, though `sequence INTEGER NOT NULL DEFAULT 0` keeps `upsertFileEmbedding` and `saveFileDescription` working untouched. And the two traps from §16d apply verbatim to chunks: the backfill queue must not be an outer join over the embedding table, and a write must *replace* an item's chunk set rather than upsert into it.
 
 *(Either way, this is the "silently overwrite" failure the existing `_migrateFilesEmbeddingsKey` comment at [database_manager.dart:660](client/lib/database_manager.dart:660) already warns about — worth not repeating.)*
 
@@ -415,10 +409,16 @@ Item 1 is built; items 2–4 do not exist yet. Ordered by value-per-unit-effort:
 
    One correction to the reasoning above, worth keeping because it inverted the cost argument: chunking was assumed to be *more* expensive. It is cheaper on this corpus. Nothing truncates before the model ([model_manager.py:305](aiserver/src/aichat/model_manager.py:305) passes no `max_length`), so attention runs quadratic over the full body — a 60k-character email costs 145s whole and 75s chunked. Chunking is roughly 2× cheaper across the corpus; see §16c for why the absolute hour figures there are not to be quoted.
 2. **Text extraction** for PDF/DOCX/TXT. Belongs in `aiserver` (Python has real libraries; `pdfx` on the Flutter side renders pages, it doesn't extract text reliably). New endpoint `POST /util/extract-text` returning per-page text, mirroring the existing `/util/thumbnail` shape.
-3. **A `DocumentChunkIsolate`** following the exact `EmbeddingIsolate` pattern — control port, write relay, pause-during-scan, `SequentialWriteQueue`. That shape is well-established here; don't invent a new one.
+3. **A `DocumentChunkIsolate`** following the exact `EmbeddingIsolate` pattern — control port, write relay, pause-during-scan, `SequentialWriteQueue`. That shape is well-established here; don't invent a new one. **Specified in §18j**, including the one place it cannot follow the pattern: it writes metadata *and* vectors, across two tables, in one transaction.
 4. Chunking: ~512 tokens, ~64 overlap, prefer paragraph boundaries. Persist `page` so a result can deep-link into the PDF viewer.
 
    Note the deliberate divergence from what mail ended up with (2,000 characters, 400 overlap, no boundary detection). Documents genuinely have structure to cut on and it survives extraction; quoted mail does not — the same thread arrives with `>` markers, with `On ... wrote:` preambles, with neither, and HTML-derived text often has no paragraph breaks left at all, so boundary detection would work best on the mail that needed it least. Keep paragraph-awareness for documents; do not backport it to email without a measurement.
+
+**Items 2–4 are designed in §18, against a census of the archive rather than a generic format list. Three things there supersede what is written above:**
+
+- The extraction engine is **`docling-rs`**, converting to a `DoclingDocument`, and the chunker runs **over that structure, not over the exported Markdown** — the Markdown-based chunker has an empty `meta.doc_items` and therefore no page numbers, which would forfeit item 4's whole purpose (§18c).
+- **Overlap is dropped**, not tuned to 64. The structured chunkers do not offer it, and item 4's own argument is why that is acceptable: a boundary at a heading or table row is one the author put there, and overlap exists to paper over arbitrary boundaries (§18c).
+- The format list above (PDF/DOCX/TXT) does not match the archive. It holds **zero** `.docx`, and its largest document population by far is legacy `.doc` — which `docling-rs` reads natively, though Python docling does not (§18a). Route by sniffing bytes, not by extension: this archive contains RTF files named `.doc`.
 
 ---
 
@@ -434,9 +434,9 @@ Each phase ships something usable on its own.
 | **4** | Query planner (LLM intent, off critical path, fails open) — **built, see §17** | Ambiguous queries route to the right modality |
 | **5** | Summarize handoff to `aichat`, **map-reduce over filtered sets (§2e)** — **built**, see §7 | "Summarize my interactions with Russel Jong" — genuinely over all 412, not a top-50 sample |
 | **6** | Email chunking — **measured, adopted and built, see §16** | Retrieval of text inside quoted threads; also cuts backfill cost roughly in half (§16c) |
-| **7** | Document extraction + chunk embeddings | "Find my graduation speech" over PDFs |
+| **7** | Document extraction + chunk embeddings — **designed, see §18**; step 0 is a gating spike | "Find my graduation speech" over documents |
 
-Phases 1–3 cover three of the four example queries. Phase 7 is the only one gated on new infrastructure.
+Phases 1–3 cover three of the four example queries. Phase 7 is the only one gated on new infrastructure — and §18d makes that literal: it opens with a build spike, because `docling-rs` publishes no macOS wheel and macOS is the only platform this app ships. §18h has the order within the phase.
 
 ---
 
@@ -1436,3 +1436,1084 @@ The one thing this does *not* rule out: expansion against **file names and
 descriptions**, where the corpus is small, the text is short, and there is no
 body text for a vector to work with. That is a different measurement on a
 different corpus, and Phase 7 changes its inputs anyway.
+
+---
+
+## 18. Phase 7 — document extraction and chunking, as designed
+
+Written before implementation, against a census of the actual archive rather
+than a generic format list. Nothing here is built.
+
+### 18a. What the archive actually holds
+
+Measured 2026-08-13, read-only against the live database. Every document-ish
+extension, no threshold:
+
+| ext | files | MB | `docling-rs` backend | measured (§18a-1) |
+|---|---|---|---|---|
+| `doc` | 229 | 20.2 | `InputFormat::Doc` — native CFB + MS-DOC | **61%** |
+| ~~`htm` + `html`~~ | ~~94~~ | ~~1.5~~ | supported, but **excluded by policy** — §18i | — |
+| `txt` | 63 | 1.0 | trivial without it | 98% |
+| `pdf` | 47 | 3.2 | `Pdf` — needs the model pack | untested |
+| `xls` | 19 | 5.2 | `InputFormat::Xls` — native BIFF8 via calamine | 100% |
+| `csv` | 7 | 0.3 | `Csv` | 67% |
+| `ppt` | 7 | 6.6 | `InputFormat::Ppt` — native CFB + MS-PPT | **43%**, near-empty |
+| `rtf` | 6 | 0.5 | `InputFormat::Rtf` — docling.rs extension (#209) | 100% |
+| `md` | 2 | 0.0 | trivial without it | — |
+| `docx` / `xlsx` / `pptx` | **0** | — | `Docx` / `Xlsx` / `Pptx` | — |
+
+Three facts in that table are load-bearing and none of them were assumed going
+in:
+
+- **The formats a generic pipeline targets are the ones this archive does not
+  have.** Zero `.docx`, zero `.xlsx`, zero `.pptx`. The single largest
+  population is `.doc`, and it is genuinely legacy: `file(1)` on a sample
+  reports six of eight as `Composite Document File V2` (Word 97 OLE2) and two
+  as `Rich Text Format` *misnamed* `.doc`. Extension is not format here, so
+  **routing must sniff bytes**.
+- **Legacy formats are the majority, at 261 of ~470 files — and the Rust port
+  reads all of them natively.** This corrects an earlier draft of this section,
+  which said docling could read none of them and scheduled them as an unsolved
+  final step. That was taken from *Python* docling's format list and is wrong
+  for `docling-rs`, whose `InputFormat` enum carries `Doc`, `Xls`, `Ppt` and
+  `Rtf` with backends of 1,293 / 161 / 877 / 1,148 lines respectively. Its own
+  comments note that **docling shells out to LibreOffice for `.doc` and `.rtf`
+  while the Rust port parses them in-process**.
+- **91% of documents are email attachments** — 360 of 395 live under
+  `files/email/<collection>/`. Document search here is substantially attachment
+  search, which is why §18f treats the parent-email link as part of the feature
+  rather than a later nicety.
+
+**This inverts the engine argument.** `docling-rs` was picked in §18d for speed,
+memory and the absence of torch, at the cost of a macOS build risk. On this
+corpus it is also the only one of the two that covers the majority of the
+files — Python docling would need a LibreOffice dependency to reach the same
+place. The macOS build risk is unchanged; what it buys went up.
+
+This is one person's archive and other users will hold `.docx`. It is still the
+only evidence available, and §16 set the precedent that this plan measures the
+corpus it has before building for the corpus it imagines. The general lesson is
+narrower and worth keeping: **a port's capabilities are not its upstream's.**
+
+> **Correction (2026-08-13, step 0).** The second bullet above says the Rust
+> port "reads all of them natively." That is true of the *enum* and false of
+> the *files*: run against this archive, `docling-rs` reads **61% of `.doc`
+> and 43% of `.ppt`**. The capability claim was read off the source; the
+> success rate had to be measured. See §18a-1 — it is the most consequential
+> result of the spike and it does not change the engine choice, only what the
+> engine is worth.
+
+#### 18a-1. What step 0 actually measured
+
+§18h's step 0 has been run. The build question is settled and three things
+that were assumed are not what was assumed.
+
+**The sdist builds.** `pip install docling-rs` on macOS arm64, Python 3.11,
+Rust 1.97.1: exit 0. No wheel exists for Darwin so pip takes the sdist and
+compiles it, `tokenizers` among the crates — confirming §18d's reading that
+`features = ["chunking"]` is on. One detail §18d did not predict: the wheel
+pulls in **Python `docling-core` 2.91.0** as a runtime dependency, so the
+object model (`DoclingDocument`, `prov`, `page_no`) is upstream's own, not a
+reimplementation. That is reassuring for provenance and it means the Rust port
+is not as self-contained as "no torch" suggests.
+
+**Format coverage, measured over every non-PDF document in the archive** (330
+candidates, read in place, read-only):
+
+| ext | ok | fail | rate |
+|---|---|---|---|
+| `xls` | 19 | 0 | **100%** |
+| `rtf` | 6 | 0 | **100%** |
+| `txt` | 62 | 1 | 98% |
+| `csv` | 4 | 2 | 67% |
+| `doc` | 140 | 89 | **61%** |
+| `ppt` | 3 | 4 | **43%** |
+| **all** | **234** | **96** | **71%** |
+
+The failures are not corrupt files. 65 of them are `no WordDocument stream`,
+and an independent OLE reader finds a top-level `WordDocument` stream in the
+ones sampled — 232 KB and 472 KB respectively, in files `file(1)` calls plain
+Word 8.0. The rest divide into `bad piece table`, `bad FIB magic`,
+`no 1Table stream` and `no 0Table stream`. These are defects in the port's
+MS-DOC reader, on a format frozen since 1997. `.ppt` is worse than its 43%
+suggests: the three that parse yield **4,980 characters between them** —
+slide titles, no body — so the practical `.ppt` yield is zero.
+
+**What this costs.** 89 unreadable `.doc` files is the single largest gap in
+the phase, and it is upstream's to fix, not ours. It does not reopen the
+engine choice: Python docling reaches these files only by shelling out to
+LibreOffice, which is a ~700 MB app dependency on the user's laptop, and that
+trade is worse than losing 89 files. It does mean §18h step 1 should be
+described honestly — it covers *most* of the archive's documents, not all —
+and that the failure path in §18i is load-bearing from day one rather than a
+rare case. `embedding_attempts` will be doing real work here.
+
+**Two findings that change the design, not just the estimate**, are large
+enough to have their own section — see §18a-2.
+
+#### 18a-2. Spreadsheets break the chunker, and the fix is a size gate
+
+Two measurements, both unexpected:
+
+**1. `HierarchicalChunker` does not split tables.** A table is one
+`doc_item`, so it becomes one chunk regardless of size. On `E-MAIL LIST.xls`
+— a 1999 mailing list — that is a **single chunk of 3,413,935 characters**.
+§18c-1 assumed the ceiling question was "512 or 1000"; the real answer is that
+the structured chunker has no ceiling at all, which makes `HybridChunker`
+**mandatory rather than preferable**. That is a strengthening of §18c-1's
+conclusion, not a reversal.
+
+**2. `HybridChunker` hangs on large tables, and cannot be interrupted.**
+With our own tokenizer at `max_tokens=512`:
+
+| md chars | chunks | time |
+|---|---|---|
+| 47,620 | 71 | 2.4 s |
+| 291,071 | 111 | 5.1 s |
+| 1,503,747 | — | **> 10 min, abandoned** |
+| 3,413,935 | — | **> 10 min, abandoned** |
+
+Five times the input for more than a hundred times the time: worse than
+quadratic. And `SIGALRM` does not interrupt it — the work happens in native
+code holding the GIL, so **a Python timeout cannot cancel a `chunk()` call**.
+Under the §18d design (`anyio.to_thread.run_sync`) a single spreadsheet would
+occupy a worker thread indefinitely, and `DocumentChunkIsolate` (§18j) would
+sit behind it forever. This is the one finding that could have shipped as a
+hang in production, because nothing in the archive's *file sizes* predicts it:
+`E-MAIL LIST.xls` is 1.8 MB on disk.
+
+Note also that 291,071 characters yielded 111 chunks — ~2,600 chars each, far
+above a 512-token budget. `HybridChunker` respects `max_tokens` between
+`doc_items` but will not subdivide one oversized table cell-wise. So even
+where it completes, table-heavy input does not honour the ceiling.
+
+**The fix is a character gate before chunking, not a timeout after it.**
+Because the call cannot be cancelled, the only safe control is to not make it:
+extract markdown (which is fast — 2.3 s for the 3.4 MB case), measure it, and
+refuse to chunk beyond a ceiling. **300,000 characters** is the measured safe
+point — the largest input that completed, at 5 s. Over that, store the
+extracted text in `file_chunks`/`file_chunks_fts` so the document stays
+lexically findable, skip the vectors, and log it. That degrades one file to
+BM25 instead of hanging the queue, which is the same fail-open posture §18j
+already takes when the embedding model is missing.
+
+**And the budget this was really about.** §18e-1 estimated files growing
+5,576 → ~12,600 vectors, +25%. Measured at 512 chars/chunk over what actually
+parses:
+
+| ext | files | chunks | median | max |
+|---|---|---|---|---|
+| `xls` | 19 | **10,616** | 23 | **6,668** |
+| `doc` | 140 | 2,381 | 9 | 161 |
+| `csv` | 4 | 2,076 | 13 | 2,049 |
+| `txt` | 62 | 645 | 1 | 453 |
+| `rtf` | 6 | 79 | 12 | 30 |
+| `ppt` | 3 | 11 | 2 | 8 |
+| **all** | **234** | **15,808** | | |
+
+15,808 chunks before a single PDF — so files go 5,576 → **21,384, +284%**,
+not +25%. But look at the distribution rather than the total: **three files
+produce 55% of all chunks** (`E-MAIL LIST.xls` 6,668, `Stock.csv` 2,049,
+`Good4Mike.xls` 1,504-ish), and they are a mailing list, a stock ticker
+export, and a contact dump. Thousands of near-identical rows — one line,
+`| "0" in receive e-mail field |`, repeats for thousands of lines — vectorized
+into thousands of near-identical vectors, all competing for slots in a scan
+that §18e-1 established **cannot be pre-filtered**. That is not merely a
+storage cost, it is a retrieval-quality cost paid on every query.
+
+The 300,000-char gate resolves both problems with one rule. It removes the
+three pathological files, taking the real documents to **~5,000 chunks** and
+files to ~10,600 total — back inside §18e-1's original estimate and a fifth of
+the way to §12's 50,000 tripwire, rather than half. The gate is worth having
+on its own merits and the budget falls out of it for free.
+
+### 18b. Scanned PDFs are a predicted problem, not an observed one
+
+> **Confirmed workable (§18d-1).** PDF conversion needs a pdfium we vendor
+> ourselves — docling's asset bundle ships a Linux binary. With a macOS arm64
+> dylib in place the pipeline runs, so this section is actionable as written
+> and still argues for `do_ocr=False`.
+
+The concern that motivated OCR — "PDFs full of scanned pages have to work
+differently" — has **zero instances in this archive**. Sampling the PDFs on
+disk and counting text-showing operators inside their decompressed content
+streams gives 14–392 runs per file, every one of them born-digital; they are
+invoices and receipts. Nothing sampled needed OCR.
+
+OCR is also the most expensive thing docling offers: it is the reason for the
+~700 MB model pack, and it is the slowest path through the converter.
+
+**Decision: `do_ocr=False`, and instrument instead.** This is §12's tripwire
+applied to a second question. Extract without OCR; when a PDF page yields
+near-zero text per unit of page area, log it once per file with the same
+`_warnOnce` discipline `VectorRetriever` now uses. If that log stays empty the
+feature was correctly not built. If it fills up, it says exactly how many files
+and which ones, and OCR gets built against a number.
+
+### 18c. Chunk the document, not the markdown
+
+The natural reading of "convert to Markdown, then chunk the Markdown" picks
+`WindowChunker`, and that is the one choice that quietly forfeits the feature
+this phase exists to deliver.
+
+`docling_rs.chunking` ships three chunkers. The distinction that matters:
+
+- `WindowChunker(max_words, overlap)` — operates on the *rendered Markdown*.
+  Its own documentation states `meta.doc_items` **is empty**. No `doc_items`
+  means no `prov`, which means **no page number**.
+- `HierarchicalChunker()` — structure-driven over the `DoclingDocument`. Needs
+  no tokenizer. `chunk.meta.doc_items` carries JSON-pointer refs into the
+  document, and through them `prov[].page_no`.
+- `HybridChunker(tokenizer=<path>, max_tokens=…)` — the same, plus
+  tokenization-aware merging and splitting.
+
+Page provenance survives only on the structured path. So the pipeline is
+**bytes → `DoclingDocument` → chunks → markdown per chunk**, and the
+document-wide `export_to_markdown()` is never the thing that gets cut up. It
+is still worth keeping for display, but it is not the chunking input.
+
+`chunker.contextualize(chunk)` prepends the heading path (`# Outer > Inner`)
+to the chunk text. That is the direct analogue of §16d item 2 — headers
+prefixing every email chunk — and it is what keeps a chunk lifted from the
+middle of a 40-page contract attributable to the section it came from. Embed
+the contextualized text; store the raw text for display.
+
+~~**Start with `HierarchicalChunker`.**~~ **Superseded by step 0 — start with
+`HybridChunker`.** The original reasoning was that `HybridChunker` takes a
+*path to a `tokenizer.json`* rather than an HF model name, and whether one
+existed for the embedding model was an open question that should not block the
+phase. Both halves of that resolved, in opposite directions:
+
+- **The tokenizer exists and is already on disk.** `tokenizer.json`, 11.4 MB,
+  a real HF `tokenizers` BPE file, ships inside the
+  `Qwen-Qwen3-VL-Embedding-2B-local` snapshot the app already downloads. So
+  `max_tokens` can be counted against *our own* tokenizer rather than
+  docling's bundled all-MiniLM default. (Its `model_max_length` is 262,144 —
+  confirming §16c that nothing truncates before the model, and that the 512
+  ceiling below is our cost decision, not a model limit.)
+- **`HierarchicalChunker` is not safe here**, because it has no size ceiling
+  at all and this archive contains a table that becomes a single 3.4-million
+  character chunk (§18a-2).
+
+Measured on a real 25 KB Word document, `HybridChunker(tokenizer=…,
+max_tokens=512, merge_peers=True)` produced **41 chunks in 0.13 s, median 461
+chars, max 1,812, every one carrying its heading path** — which is precisely
+the behaviour §18c-1 specifies below. Use it, subject to the §18a-2 size gate.
+
+**On overlap, and why documents can give it up.** §16d item 2 calls email's 400
+characters of overlap load-bearing: it guarantees a phrase shorter than 400
+characters is never split across two chunks and matchable by neither. The
+structured chunkers offer no overlap, and this is an acceptable trade for
+exactly the reason §8 item 4 already gave for diverging from mail — documents
+have real structure to cut on. A boundary at a heading, list item or table row
+is a boundary the author put there; a boundary at character 2,000 is arbitrary,
+and overlap exists to paper over arbitrariness. Quoted mail had no reliable
+boundaries, so it needed the paper. If a measurement later shows phrases lost
+at chunk seams, `WindowChunker` buys overlap back at the price of page numbers
+— which is to say the trade should be made deliberately, not by default.
+
+#### 18c-1. Chunk size — sections first, and why the ceiling stays at 512
+
+**Split on headings and subheadings first, then size within each section.** That
+is the design, and it needs no new code: it is what the structured chunkers
+already do. `HierarchicalChunker` cuts on document structure, so headings and
+subheadings *are* its boundaries. `HybridChunker` adds exactly two behaviours on
+top — split a section that exceeds `max_tokens`, and merge undersized successive
+peers that share a heading path.
+
+So "ideally a smaller subsection is just one chunk" is already true and costs
+nothing to get: nothing splits a section that is under the ceiling. Worth
+stating plainly because it is the part that looks like work and is not. (The
+merge behaviour is `merge_peers`. **Step 0 confirmed it is exposed**: the Rust
+port's signature is `HybridChunker(tokenizer: Optional[str] = None, max_tokens:
+int = 256, merge_peers: bool = True)`. Note the default `max_tokens` is 256,
+so the 512 below must be passed explicitly.)
+
+**The ceiling is 512 tokens, not a 512–1000 range**, and the reasoning is
+narrower than it first appears. A variable ceiling does nothing for small
+sections — a 300-token section is one chunk under either setting. Raising 512 to
+1000 changes exactly one band: sections *between* 512 and 1000 tokens, which
+stay whole instead of splitting in two. So the whole question is whether a
+900-token section retrieves better as one chunk or as two, and three things say
+two:
+
+- **§16 measured it on this archive.** Email chunking won +0.081 MRR (95% CI
+  [+0.047, +0.117]) precisely because a smaller unit matches on the fragment the
+  query is about instead of on a diluted whole. A higher ceiling walks back
+  toward the dilution that finding is about.
+- **Embedding cost roughly doubles.** Attention is quadratic and nothing
+  truncates before the model ([model_manager.py:305](aiserver/src/aichat/model_manager.py:305)
+  passes no `max_length`) — §16c measured a 60k-character email at 145s whole
+  against 75s chunked. Half as many chunks at ~4× the cost each is ~2× overall.
+  On ~470 documents that is affordable (§18g); it should still be a knowing
+  trade rather than a default.
+- **It moves the similarity floor.** §15e derives the floor from the
+  per-modality *median* similarity, so changing typical chunk length changes the
+  distribution it is measured against. §16f had to re-measure mail's floor for
+  exactly this reason and landed on 0.70. Documents need their own floor
+  measurement regardless — but there is no reason to move the target twice.
+
+**The one genuine argument for a higher ceiling is tables, and it is specific.**
+A table split across chunks loses its header row on the second half, which makes
+that half close to useless as a retrieval unit — worse than a merely long chunk.
+§18b established that this archive's PDFs are invoices and receipts, so
+table-heavy content is the common case here rather than a corner. **Check in the
+step-0 spike whether the chunker splits large tables at all**; if it does, set
+the ceiling around the tables actually present, not around prose.
+
+Note that `max_tokens` exists only on `HybridChunker`, which needs a
+`tokenizer.json` path — so the ceiling and the tokenizer question in §18c are
+one decision, not two. `HierarchicalChunker` has no size ceiling at all: it
+emits whatever the structure gives it, which is fine for a well-structured
+document and unbounded for one with no headings.
+
+### 18d. Packaging — the part with real risk
+
+**There is no macOS wheel for `docling-rs`, in any release.** The project
+publishes `manylinux_2_28_aarch64`, `manylinux_2_28_x86_64` and `win_amd64`,
+plus an sdist; its install line reads "CPU wheels: Linux x86-64/arm64, Windows;
+sdist elsewhere". macOS is the only platform this app currently ships.
+
+Consequences, in order of how much they should worry us:
+
+1. **No macOS wheel means no upstream macOS CI evidence.** The package
+   describes its own status as *experimental*. Building from sdist on Darwin is
+   a path upstream does not demonstrably test.
+2. **`make build-python` gains a Rust compile.** The sdist needs a Rust
+   toolchain at 1.88+ (workspace MSRV). This machine already satisfies it —
+   see the correction under the table.
+3. **End users are unaffected.** PyInstaller bundles the built extension; the
+   toolchain requirement lands on the build machine and on notarization CI, not
+   on the laptop running the app.
+
+**Do this first, before any other Phase 7 work: verify the sdist builds on
+macOS arm64 and converts one real PDF from this archive.** It is a short spike
+and it is genuinely gating — if it fails, the extraction engine changes and
+everything downstream of §18c changes with it.
+
+**What the build actually needs**, checked against the sdist and this machine
+on 2026-08-13. Nothing is missing:
+
+| requirement | source | this machine |
+|---|---|---|
+| Rust **≥ 1.88.0** | `rust-version` in `docling`, `docling-pdf`, `docling-asr` (`docling-core` wants 1.85) | 1.97.1 ✓ |
+| Python ≥ 3.9 | `requires-python`; bindings are `abi3-py39`, so one build covers every version | 3.11.15 ✓ |
+| a C/C++ toolchain | PyO3 linking | Apple clang 17, Xcode CLT ✓ |
+| maturin ≥ 1.5, < 2 | `[build-system] requires` | fetched automatically by PEP 517 ✓ |
+| ONNX Runtime | `ort` 2.0.0-rc.13 with `download-binaries` | downloaded, not compiled ✓ |
+
+> **Correction (2026-08-13).** An earlier draft of this table recorded Rust
+> **1.83.0** and scheduled `rustup update stable` as the spike's first step.
+> That was a misreading — `rustc --version` on this machine reports **1.97.1**,
+> comfortably above the 1.88.0 MSRV. No toolchain upgrade is required, and the
+> only remaining unknown in this section is whether the sdist *builds*, not
+> whether it *can*. Kept visible rather than overwritten: the risk register
+> above still stands, and the difference between "blocked on an upgrade" and
+> "blocked on nothing" is worth not quietly losing.
+
+Expect a slow first build regardless: `[profile.release] lto = "thin"` and a
+large dependency tree. `abi3-py39` is the detail that keeps this a one-time
+cost — the built extension is not tied to 3.11, so a Python bump later does not
+force a rebuild.
+
+One question already answered by reading the sdist: **`docling-py` compiles
+`docling` with `features = ["chunking"]`**, which pulls in the `tokenizers`
+crate. So `HybridChunker` and its `max_tokens` ceiling are present in the
+published bindings — what remains open in §18c-1 is only whether a
+`tokenizer.json` exists for *our* embedding model, and whether `merge_peers` is
+exposed.
+
+#### 18d-1. PDF needs a pdfium we supply ourselves — diagnosed and solved
+
+> **Resolved (2026-08-13).** Option (1) below was tried and **works**: a
+> stock macOS arm64 pdfium dylib makes the whole PDF pipeline function,
+> provenance included. This section is kept in full because the diagnosis is
+> the valuable part — the failure mode is misreported by the library, and
+> without this write-up it would cost an afternoon to rediscover. See the
+> resolution note at the end.
+
+
+Step 0 was designed to catch a *build* failure. The build passed; the failure
+is at runtime, one layer further in, and it lands squarely on the format this
+phase was mostly about.
+
+`docling_rs.download_models()` completed successfully on this machine — **35
+minutes, exit 0, and 2.0 GB on disk**, not the ~700 MB estimated below. It
+fetched the layout, TableFormer, OCR, picture-classifier and code-formula
+models, and one pdfium build:
+
+```
+docling_cache/.pdfium/lib/libpdfium.so:
+  ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked
+```
+
+**That is a Linux x86-64 binary.** There is no `.dylib` anywhere in the 2.0 GB
+cache and no arm64 build of pdfium in it at all. macOS cannot load an ELF
+object, so PDF conversion fails even with every path resolved correctly:
+
+```
+PDFIUM_DYNAMIC_LIB_PATH -> …/docling_cache/.pdfium/lib   (absolute)
+libpdfium.so exists     -> True
+convert('quickref.pdf') -> ConversionError: pdfium error:
+                           the pdfium library is not installed
+```
+
+The error message is misleading — the library *is* installed, it is simply for
+the wrong operating system — which is worth writing down because it would cost
+an afternoon to diagnose from the message alone. Verified twice, with relative
+and absolute `artifacts_path`, after `ensure_env()` set all eight `DOCLING_*`
+variables correctly.
+
+**What this would have cost, had it stood.** Everything that needs pdfium:
+PDFs (47 files), image conversion, and OCR — §18b's tripwire included. It
+never affected steps 1–4: `.doc`, `.xls`, `.rtf`, `.txt`, `.csv` need neither
+models nor pdfium, and they are ~85% of this archive's documents. As it turned
+out the fix is a 3.4 MB dylib (see the resolution below), so the cost is one
+build-time vendoring step rather than a lost format.
+
+**This is consistent with §18d's headline risk rather than a surprise.** "No
+macOS wheel means no upstream macOS CI evidence" — this is exactly what that
+risk looks like when it fires. The asset bundle is built for the platforms
+that have wheels.
+
+**Options, none of them free**, in the order I would try them:
+
+1. **Supply a macOS arm64 pdfium ourselves.** `PDFIUM_DYNAMIC_LIB_PATH` is a
+   plain directory pointer, and prebuilt macOS arm64 pdfium dylibs are
+   published by `bblanchon/pdfium-binaries`. Cheapest thing that could work,
+   and testable in minutes — but unverified, and it assumes the Rust side is
+   only missing the binary rather than the platform support.
+2. **Extract PDF text without docling.** Born-digital PDFs (§18b measured all
+   47 as having text layers) need a text extractor, not a layout model. This
+   forfeits `page_no` from docling but a text extractor can supply page
+   numbers directly, which is what the footnote actually needs.
+3. **Wait for upstream.** The project calls itself experimental; macOS assets
+   may land. Not a plan.
+
+Recommend trying (1) before writing any PDF code, and treating (2) as the
+fallback that keeps the footnote feature alive. Either way, **PDF should be
+sequenced last and separately**, which is where §18h already puts it.
+
+**Resolution — option (1), measured.** `pdfium-mac-arm64.tgz` (3.4 MB) from
+`bblanchon/pdfium-binaries` release `chromium/7999` unpacks to a single
+`lib/libpdfium.dylib`, *Mach-O 64-bit arm64*. Pointing
+`PDFIUM_DYNAMIC_LIB_PATH` at that directory is the entire fix:
+
+| file | convert | chunks | provenance |
+|---|---|---|---|
+| `quickref.pdf`, 10 pp → 38 laid-out pages | 4.2 s | 25 | 1,755 items, page + bbox + charspan |
+| `invoice_2025.pdf` | 1.1 s | 3 | 16 items, pages 1–2 |
+
+So the Rust side was only ever missing the binary, not macOS support. Three
+consequences for shipping:
+
+1. **`make build-python` must vendor a macOS arm64 pdfium**, and PyInstaller
+   must bundle the dylib. It is 3.4 MB — negligible next to the model pack,
+   and unlike the models it cannot be a runtime download from docling, since
+   docling's downloader is what serves the wrong platform in the first place.
+2. **Do not call `docling_rs.download_models()` and assume the result.** It
+   returns success having written an unusable pdfium. Whatever the app does
+   at runtime must point `PDFIUM_DYNAMIC_LIB_PATH` at *our* dylib explicitly,
+   and the §18h step-5 work should assert the loaded library is Mach-O rather
+   than trusting the download.
+3. **The model pack is 2.0 GB, not ~700 MB** (35 minutes on a fast
+   connection). That materially changes the "PDF asks first" UX below: this is
+   a download a user must opt into deliberately, with progress and a size
+   shown up front, not a quiet fetch on first PDF. The good news is the split
+   still holds — `.doc`/`.xls`/`.rtf`/`.txt`/`.csv` need none of it.
+
+One cosmetic oddity worth not chasing: converted PDFs report
+`origin.mimetype = 'text/plain'` and a filename with the extension stripped.
+The PDF pipeline demonstrably ran — 38 pages with bounding boxes — so this is
+a mislabel in the port, not a sign of a text fallback.
+
+**The ~700 MB model pack is a download, not a bundle.** Declarative formats
+(DOCX, XLSX, CSV, MD, and the legacy binaries) need no models at all; only the PDF and image
+pipeline does. The app already owns this problem — `ModelDownloadManager`,
+`POST /util/download-model` and `GET /util/model-status` exist for GGUF files
+and the same machinery applies, with `artifacts_path` pointed at Application
+Support instead of `~/.cache/docling.rs`. That split is also the natural
+shipping order: text and HTML extraction works with zero download, PDF asks
+first.
+
+### 18e. Schema — resolving the §6 deferral as (b), one vector table
+
+§6 left `files_embeddings` open between **(a)** separate chunk tables and
+**(b)** widening the primary key, preferring (b). **(b) it is: every vector in
+this archive stays in `files_embeddings`, and chunk metadata gets its own
+table.**
+
+An earlier draft of this section chose (a) on two arguments. Recording why one
+of them was wrong, because it is the kind of wrong that is easy to repeat:
+
+- **"Footnote metadata has no home in a pure vector table" — true, and it does
+  not imply (a).** Nothing requires page and heading path to live wherever the
+  vectors live. `file_chunks` holds the metadata under either option, so this
+  argument does not distinguish them at all. It only looked decisive because it
+  was stated next to a table definition.
+- **"A photo query would pay to scan document chunks" — true, and it survives.**
+  This is the real cost of (b) and §18e-1 below is about paying it.
+
+Against that sits what (b) buys, which is mostly *singularity*: one place a
+file's vectors live, one `model_version` to read for §15g provenance and
+staleness, one backfill shape, one table for the §12 tripwire to count, and
+symmetry with `emails_embeddings`, which took (b) and was uneventful. The
+retriever's best-vector-per-`file_id` dedup already spans multiple vector types
+per file — chunks join that as a third kind rather than as a new mechanism.
+
+```sql
+-- files_embeddings gains a sequence column; PK widens to (file_id, type,
+-- sequence). DEFAULT 0 keeps every existing insert path working unchanged —
+-- `upsertFileEmbedding` and `saveFileDescription` write one row per type and
+-- simply never set it. Chunks set sequence = chunk_index.
+--
+-- This alters a live table (5,576 rows: 2,808 'file', 2,768 'description'), so
+-- it needs the same rebuild `_migrateFilesEmbeddingsKey` already performs.
+CREATE TABLE files_embeddings (
+  file_id            TEXT NOT NULL,
+  type               TEXT NOT NULL DEFAULT 'file',
+  sequence           INTEGER NOT NULL DEFAULT 0,
+  qwen3_vl_embedding BLOB,
+  model_version      TEXT,
+  PRIMARY KEY (file_id, type, sequence),
+  FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+);
+
+-- Chunk metadata only — no vector. Joined to the row above on
+-- (file_id, chunk_index) = (file_id, sequence) where type = 'chunk'.
+--
+-- `text` is the raw chunk; the embedded form is this text contextualized with
+-- its heading path (§18c) and is not stored twice. `page` is NULL for formats
+-- with no pages (HTML, TXT, MD) — a fact about the format, not a missing
+-- value, and the UI cites those by heading instead.
+CREATE TABLE IF NOT EXISTS file_chunks (
+  file_id       TEXT NOT NULL,
+  chunk_index   INTEGER NOT NULL,
+  page          INTEGER,
+  heading_path  TEXT,
+  char_start    INTEGER,
+  char_end      INTEGER,
+  text          TEXT NOT NULL,
+  PRIMARY KEY (file_id, chunk_index),
+  FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+);
+```
+
+`file_chunks` is keyed by `(file_id, chunk_index)` rather than carrying a
+surrogate `id`, so the join to its vector is the primary key on both sides and
+no extra index is needed.
+
+**Document text also gets its own FTS index.** `files_fts` cannot carry it:
+it is an external-content table (`content='files'`), so it can only index
+columns of `files`, and chunk text lives in `file_chunks`. Without a second
+index, extracted document text would be reachable by vector search and by
+nothing else — which would leave Phase 7's own motivating query, *"find my
+graduation speech"*, dependent on semantic similarity for what is a known-item
+lookup. §3 puts known-item retrieval on BM25 deliberately.
+
+```sql
+CREATE VIRTUAL TABLE IF NOT EXISTS file_chunks_fts USING fts5(
+  text,
+  content='file_chunks', content_rowid='rowid',
+  tokenize='unicode61 remove_diacritics 2'
+);
+```
+
+Same external-content triggers as `files_fts` and `emails_fts`, including the
+delete trigger that replays OLD values — FTS5 keeps no copy of the row, so a
+delete can only retract terms it is handed (the existing comment above
+`emails_fts_ai` in `database_manager.dart` explains this and applies verbatim).
+Only `text` is indexed; `heading_path` is display metadata, not a search field.
+
+#### 18e-1. The cost of one table, and the lever that pays it
+
+**`type` cannot be filtered out of a Mode B scan.** This is the trap, and the
+class doc at [vector_retriever.dart:44](client/lib/modules/search/services/retrievers/vector_retriever.dart:44)
+already states it: `vector_full_scan` **cannot be pre-filtered** — it computes a
+distance against every row in the table and returns the best N, and a `WHERE` on
+the surrounding query filters *that result, not the scan*. Mode B already
+carries a `WHERE ${filter.sql}`, so adding `type IN ('file','description')` is
+syntactically free and semantically useless: the scan still touches every chunk,
+and chunks still consume slots in the raw top-N *before* the filter runs. A bare
+query like `sunset` takes exactly this path.
+
+**The lever is the over-fetch multiplier, and it is precedented twice.** Mode B
+for files already fetches `limit * 5`, and the comment at
+[vector_retriever.dart:324](client/lib/modules/search/services/retrievers/vector_retriever.dart:324)
+gives the reason: a file carries up to two vectors, image and description, and
+both compete for slots before dedup collapses them. §16d item 3 raised mail's
+multiplier from 2× to 5× for the same reason when chunking landed. Raising it is
+close to free by §15d's accounting — the bound limits how many
+`(rowid, distance)` pairs come back, and no blobs travel with them.
+
+The arithmetic to watch: 5,576 file vectors at ~2 per file leaves 5× with about
+2.5× of headroom. Roughly 7,000 document chunks would make chunks ~55% of the
+table and cut effective headroom below the 2× the two-vector case already
+consumes. **So the multiplier rises with the chunk share, and the number should
+come from a count, not a guess.**
+
+**One prediction, flagged as a prediction.** In a shared text/image space,
+text-to-text similarity typically runs higher than text-to-image, so document
+chunks may crowd out photographs *disproportionately* rather than in proportion
+to their share of the table. If that is real, a bare photo query is where it
+shows, and a fixed multiplier bump will not be enough. This is cheap to measure
+once chunks exist and should be measured before the phase is called done — §16e
+applies, including its warning that thirty probes will not resolve it.
+
+**Two things this does not cost.** The §12 tripwire is not in danger: files go
+from 5,576 to roughly 12,600, about a quarter of the 50,000 threshold, and the
+instrumentation added for §12 reports the number without anyone having to
+remember to look. And Mode A is unaffected — its filter is real SQL against a
+bounded candidate set, so `type IN (…)` there works exactly as expected.
+
+> **Measured (2026-08-13, §18a-2).** "Roughly 7,000 document chunks" was low.
+> Ungated, the non-PDF corpus alone yields **15,808** — files to 21,384, +284%,
+> and chunks become 74% of the table, which is well past the point where a 5×
+> multiplier has any headroom left. The distribution matters more than the
+> total: **three files supply 55% of those chunks**, and all three are
+> spreadsheet-shaped, thousands of near-identical rows each. That is the
+> "crowds out disproportionately" prediction two paragraphs above, arriving
+> early and from an unexpected direction — not long documents, but wide tables.
+> With the §18a-2 300,000-character gate the corpus lands at ~5,000 chunks and
+> ~10,600 total, back inside the original estimate. The multiplier still has
+> to be re-derived from a real count once chunks exist; the gate is what keeps
+> that count sane.
+
+**Chunks per document are deliberately uncapped**, and that interacts with the
+over-fetch above in a way worth stating before it is discovered. A very long
+document produces very many chunks, all of them near neighbours of each other,
+so a single document can occupy a large share of the raw top-N and still
+collapse to one result after dedup — the §16d item 3 problem that forced mail's
+multiplier from 2× to 5×, in its most concentrated form.
+
+The cap was considered and rejected on §15d's reasoning: a ceiling on chunks is
+not "page two" of a document, it is a region of the document that becomes
+permanently unsearchable, and a personal archive holding a 400-page scanned
+deposition should be able to find the paragraph that matters. So the cost is
+paid in the multiplier instead, where it degrades ranking rather than deleting
+recall. Worth watching once real documents are chunked: if one enormous file
+starves everything else out of the top-N, the answer is a per-document cap on
+*how many of its chunks may occupy the fetch window*, not a cap on how many
+chunks it has.
+
+> **This is in tension with §18a-2's size gate, and the tension is real —
+> flagging rather than resolving it.** "Keep it unlimited; if we do have
+> documents that big we need to search the whole document" was a deliberate
+> decision, and the 300,000-character gate does not honour it: over that
+> ceiling a file gets lexical indexing and no vectors. Three things about how
+> the two fit together:
+>
+> - **The premise the decision rested on turned out to be false, but only just
+>   off-target.** "I don't think we'll have documents that big" — there are
+>   three, at 0.3 M, 1.5 M and 3.4 M characters. None of them is a *document*.
+>   They are a mailing list, a stock export and a contact dump.
+> - **The gate is not a ranking trade, it is a liveness one.** The cap
+>   rejected above was rejected because it deletes recall to protect ranking.
+>   The gate exists because the chunker does not return and cannot be
+>   cancelled (§18a-2); without it the queue stops, and every *other* document
+>   loses its vectors too.
+> - **It costs less recall than it looks.** A gated file keeps full-text
+>   search over its complete extracted text via `file_chunks_fts`, so it stays
+>   findable by any word in it — which for a table of names and addresses is
+>   the better retrieval path anyway. What is lost is semantic search over
+>   that one file.
+>
+> If the tension should be resolved the other way, the honest fix is not
+> raising the ceiling — it is chunking oversized tables ourselves, row-wise,
+> instead of asking `HybridChunker` to. That is real work and it is not in
+> this phase's scope; it is written down here so the choice stays visible.
+
+### 18f. What retrieval has to learn — the divergence from email
+
+§6 says of `emails_embeddings.chunk_index`: *"nothing downstream reads
+chunk_index, it exists to make the rows distinct and the order reproducible."*
+**Documents invert this exactly.** The winning chunk's page *is* the footnote,
+so chunk identity has to survive scoring rather than being collapsed away.
+
+Concretely, three changes, and the first is the one that will be easy to get
+wrong because the existing code makes forgetting it feel natural:
+
+1. **The dedup path must remember which chunk won, not just its score.**
+   `VectorRetriever` already scores best-vector-per-id and deduplicates — it
+   inherited that from files carrying both an image and a description vector,
+   and email chunking needed nothing more (§16d item 3). Here the argmax has to
+   be carried out of the loop alongside the max.
+2. **`SearchResult` gains chunk provenance** — page, heading path, and enough
+   to deep-link. §7's result presentation renders it as a footnote: *page 13 of
+   xyz.pdf*. For page-less formats it is the heading path.
+
+   **Step 0 measured this, and it splits cleanly by format.**
+
+   | format | `prov` items | result |
+   |---|---|---|
+   | `pdf` | 1,755 on a 38-page file | **`page_no` + `bbox` + `charspan`, on 25 of 25 chunks** |
+   | `doc` / `ppt` / `xls` | **0** | headings only |
+
+   So the footnote is `page N of x.pdf` exactly as originally specified for
+   PDFs, and the *heading path* for the ~85% of this archive that is not PDF.
+   The non-PDF backends emit no `prov` at all — inherent, since a `.doc` has
+   no pages until something lays it out. Word's own metadata knows (`file(1)`
+   reports *Number of Pages: 27*) but that count never reaches the parsed
+   document. What is always populated is `headings`: **96 of 96 chunks** on
+   the sampled Word document, e.g. `['Allaire External Web Publishing Policy:
+   Summary']`. Build the UI to take the heading path as the anchor it always
+   has, and the page as the enrichment PDFs add.
+
+   **Getting the page out takes one extra step that is easy to miss**, and
+   getting it wrong looks exactly like "PDFs have no provenance" — which is
+   what an earlier draft of this bullet concluded, wrongly.
+   `chunk.meta.doc_items` in the Rust port is a list of **`self_ref` strings**
+   (`'#/texts/144'`), not item objects, so `chunk.meta.doc_items[0].prov[0]
+   .page_no` does not resolve. The provenance lives on the *document*: walk
+   `document.iterate_items()` once to build a `self_ref → prov` index, then
+   resolve each chunk's refs against it. That also hands `char_start` /
+   `char_end` to §18e's `file_chunks` schema for free, via `prov.charspan`.
+
+   One shape detail for the UI: a chunk can span pages — the sampled PDF's
+   chunks resolved to sets like `[2, 3]` and `[5, 6, 7]`. Store the first page
+   as the footnote target, since that is where the reader should land.
+3. **Attachment hits should surface their parent email.** With 91% of documents
+   arriving as attachments (§18a), a chunk hit inside `files/email/<id>/…` that
+   cannot point back at the message it came with is a dead end in the common
+   case, not the rare one.
+4. **The lexical side needs the same collapse.** `file_chunks_fts` returns chunk
+   rowids, and fusion operates on results, not fragments — so chunks must be
+   reduced to their best-scoring one per `file_id` *before* they enter RRF,
+   mirroring what the vector path already does. Doing it after fusion is the
+   bug that looks like it works: ten chunks of one PDF each take a rank slot,
+   and RRF then reads that document as ten separate corroborating results.
+
+**A document can now arrive from three retrievers**, which is one more source
+than §15f's double-listing analysis assumed: `files_fts` on its name,
+description and path; `file_chunks_fts` on its text; and the vector pass on its
+chunk embeddings. §15f is about an item appearing in two lists arriving as an
+equal of the best result in each; a third list makes it worse, not different.
+The existing dedup-then-fuse ordering is the fix and it already exists — the
+requirement is that document chunks join it as *one item with three sources*
+rather than as three items.
+
+Two traps from §16d transfer verbatim and should be assumed rather than
+rediscovered: the backfill queue must be `NOT EXISTS`, never an outer join over
+the chunk table, or one file re-embeds once per chunk it already owns and the
+queue stops draining; and a write must **replace** a file's chunk set rather
+than upsert into it, because a re-extracted document can be shorter and the
+orphaned tail keeps its `files` row alive, so no cascade ever reaps it.
+
+### 18g. Cost, and why this phase is cheap to measure
+
+~470 documents at a few chunks each is single-digit thousands of vectors,
+against 30,791 for mail. The backfill is short enough to re-run on a whim,
+which means the chunk size, the chunker choice and the overlap trade in §18c
+can all be settled by measurement rather than argument — and per §16e, thirty
+probes will not resolve the difference, so build the probe set properly or do
+not bother.
+
+### 18h. Build order within the phase
+
+| Step | Why it is where it is |
+|---|---|
+| 0 | **Spike — gating (§18d).** Four questions, below |
+| 1 | **Built.** `POST /util/extract-text` returning chunks with provenance. Every non-PDF format — including legacy `.doc`/`.xls`/`.ppt`/`.rtf` — needs no model download, so this step already covers most of the archive's documents. Route by sniffing bytes (§18a), resolve cloud paths (§18i). See §18h-1 |
+| 2 | `files_embeddings` PK widened to `(file_id, type, sequence)`, `file_chunks` + `file_chunks_fts` DDL (§18e); `DocumentChunkIsolate` registered as the fourth background isolate (§18j) and its queue (§18i) |
+| 3 | Retrieval: chunk vectors into `VectorRetriever` with argmax carried through dedup, `file_chunks_fts` into the lexical path collapsed per file *before* fusion, **Mode B over-fetch raised against a real chunk count** (§18e-1, §18f) |
+| 4 | Footnotes in the result UI, and the parent-email link for attachments |
+| 5 | PDF pipeline behind the model download; scanned-page tripwire logging. **Prerequisite: vendor a macOS arm64 `libpdfium.dylib` (§18d-1)** — docling's own download ships a Linux binary and reports success |
+| 6 | **Measure the document similarity floor** (§18i) — files' 0.75 was measured on image vectors and does not transfer |
+
+An earlier draft ended with a further step for legacy `.doc`/`.xls`/`.ppt`/
+`.rtf`, described as the largest population and unsolved. It is neither:
+`docling-rs` reads all four natively (§18a), so they ride along with step 1 as
+declarative formats needing no model download. Byte-sniffing rather than
+extension-trusting is the only thing they add, and §18a shows that is required
+regardless — this archive has RTF files named `.doc`.
+
+Step 1 adds one thing step 0 found: **the §18a-2 size gate** — measure the
+extracted markdown and refuse to chunk past 300,000 characters. It belongs in
+step 1 rather than later because without it a single spreadsheet hangs a
+worker thread with no way to cancel it, and that failure is invisible until it
+happens.
+
+**Step 0 — run 2026-08-13. Results.** One afternoon against real files from
+this archive. Only the first question was gating; the rest set constants the
+later steps would otherwise have guessed at. Full evidence in §18a-1 / §18a-2.
+
+| # | question | answer |
+|---|---|---|
+| 1 | Does the sdist build on macOS arm64 and convert archive files? | **Builds — yes**, exit 0 on Python 3.11 / Rust 1.97.1. **Converts — yes for PDF** (after vendoring pdfium, §18d-1); **71% of non-PDF documents**, 61% of `.doc` |
+| 2 | Does `prov[].page_no` arrive populated? | **Yes for PDF** — page + bbox + charspan on 25/25 chunks, via ref resolution (§18f). **No for `.doc`/`.xls`/`.ppt`** — `headings` arrives instead, on 96/96 chunks |
+| 3 | Does the chunker split large tables? | **No.** `HierarchicalChunker` emits one 3.4 M-char chunk; `HybridChunker` hangs >10 min on the same input and cannot be interrupted |
+| 4 | Is `merge_peers` exposed, is a `tokenizer.json` available? | **Yes and yes** — `HybridChunker(tokenizer, max_tokens=256, merge_peers=True)`; our model's 11.4 MB `tokenizer.json` is already on disk |
+
+**The gate is passed** — the engine choice stands and nothing downstream of
+§18c changes shape. Three constants came back different from the assumption
+and are now written into the sections they belong to: use `HybridChunker` not
+`HierarchicalChunker` (§18c), gate input at 300,000 characters before chunking
+(§18a-2, §18i), and resolve chunk `doc_items` refs against the document to get
+provenance at all (§18f) — with the heading path as the anchor for every
+non-PDF format.
+
+**The PDF half took a detour worth recording.** docling's own 2.0 GB asset
+download ships a **Linux x86-64 pdfium** and nothing else, so PDF conversion
+failed on macOS with a misleading *"pdfium library is not installed"*. Dropping
+in a stock macOS arm64 `libpdfium.dylib` fixed it completely (§18d-1). With
+that in place both PDF questions answer yes: conversion works (4.2 s for a
+38-page file) and **`page_no`, `bbox` and `charspan` are all present on every
+chunk**, once chunk `doc_items` refs are resolved against the document (§18f).
+
+**Net: the gate passes.** Nothing in §18 needs redesigning. Steps 1–4 are
+unblocked and better specified than before; step 5 is unblocked too, at the
+cost of one new build requirement — vendor a macOS pdfium (§18d-1). The
+substantive changes are the §18a-2 size gate, `HybridChunker` over
+`HierarchicalChunker`, the ref-resolution step for provenance, and the
+knowledge that ~29% of non-PDF documents will not parse at all.
+
+
+#### 18h-1. Step 1 as built
+
+`POST /util/extract-text`, in `document_extractor.py` with the handler in
+`routes.py`. 23 tests; the full aiserver suite is 143 green. Two decisions
+differ from how this step was described, both deliberate.
+
+**It takes bytes, not a path.** The original sketch had the server open the
+file and download cloud documents itself. That would have reintroduced exactly
+what AUDIT H2 structurally closed for the thumbnail endpoint — its docstring is
+explicit that the client sends bytes "so the server never opens a file off
+disk", making the endpoint no longer an arbitrary-local-file read oracle. A
+path-taking extractor would be the same oracle with a different name, and
+`_assert_within_roots` would not save it: documents legitimately live outside
+the app's data roots, on the user's own drives. So the client resolves
+`local_path` → `download_url` → temp (§18i) and posts the bytes. `filename`
+survives as a *hint* only.
+
+**Sniffing is required by the library, not just by §18a.** `DocumentStream`
+routes on the extension in the `name` it is handed and *raises* on a mismatch
+rather than falling back — measured: OLE2 bytes named `.rtf` produce
+`missing {\rtf header`. So the server sniffs magic bytes and hands docling a
+synthesized name carrying the format the content deserves. The extension is
+consulted only where content cannot speak: which application wrote an OLE2
+container, and the textual formats that have no signature.
+
+**Status codes carry §18i's permanent/transient split**, because the client
+needs it to decide whether to burn an `embedding_attempts`:
+
+| code | meaning | client action |
+|---|---|---|
+| 415 | excluded or unrecognised format | never retry, do not count |
+| 422 | recognised but unparseable — the ~29% of `.doc` | count toward retirement |
+| 400 | malformed payload | bug, not data |
+
+**One bug the tests caught, worth recording.** `HybridChunker` does not fall
+back when handed `tokenizer=None` — it raises at `chunk()` time. The tokenizer
+ships inside the *embedding model's* snapshot, so "no tokenizer" means the
+embedding model has not been downloaded yet, and the endpoint would have
+returned 422 for every document on a fresh install. That is precisely
+backwards from §18j, which requires extraction to keep working so text reaches
+`file_chunks_fts` and search degrades to BM25 rather than to nothing. It now
+falls back to `HierarchicalChunker`, which is safe *only* because the §18a-2
+gate has already run — the unbounded chunker can never be handed the
+pathological table that made bounding necessary.
+
+**Verified against real archive files**, with the real tokenizer and a
+vendored pdfium:
+
+| file | format | gated | chunks | provenance |
+|---|---|---|---|---|
+| `quickref.pdf` | pdf | no | 27 | pages 1, 3, 5, 6, 8… |
+| `publishing_guide.doc` | doc | no | 41 | heading path on all 41 |
+| `invoice_2025.pdf` | pdf | no | 1 | page 1 |
+| `E-MAIL LIST.xls` | xls | **yes** | 1 | — returns immediately instead of hanging |
+
+Note the complementarity: PDFs yield pages and no headings, `.doc` yields
+headings and no pages. Neither format gives both, so §18f's footnote must
+render from whichever arrived.
+
+### 18i. What gets extracted, when, and what happens when it fails
+
+§18h step 2 names a `DocumentChunkIsolate` without saying what it pulls from.
+That queue is where the §16d traps live, so it is specified here rather than
+left to the implementation.
+
+**Eligibility.** A `NOT EXISTS` against the chunk vectors, never an outer join —
+an outer join emits one copy of a file per chunk row it already owns, so a batch
+of 100 becomes a handful of files re-embedded dozens of times each and the queue
+stops draining (§16d). Roughly:
+
+```sql
+SELECT f.id, f.path, f.local_path, f.download_url, f.content_type
+FROM files f
+WHERE f.is_deleted = 0
+  AND <format allowlist, below>
+  AND f.embedding_attempts < 5
+  AND NOT EXISTS (
+        SELECT 1 FROM files_embeddings e
+        WHERE e.file_id = f.id AND e.type = 'chunk'
+          AND e.model_version = ?
+      )
+LIMIT ?
+```
+
+**Write the chunk set in one transaction — delete-then-insert.** This does two
+jobs at once. It enforces §16d's "replace, don't upsert" rule, which matters
+because a re-extracted document can be *shorter* and the orphaned tail keeps its
+`files` row alive, so no cascade ever reaps it — those chunks would sit in the
+index holding superseded text and be scored by every search. And it keeps the
+`model_version` signal honest: a crash midway through a non-transactional write
+leaves some chunks carrying the current version, which is exactly the state the
+`NOT EXISTS` above reads as *finished*, permanently freezing a half-indexed
+document.
+
+**Format allowlist, by sniffed bytes.** §18a established that extension is not
+format in this archive — six of eight sampled `.doc` files are OLE2 and two are
+RTF wearing the wrong name. Route on content, and treat the extension as a hint
+for the queue filter only.
+
+**`.ppt` is a candidate for exclusion, on evidence rather than policy.** Step 0
+parsed 3 of 7 and those three yielded 4,980 characters between them — slide
+titles, no body text, median chunk 12 characters (§18a-1). A `.ppt` chunk is
+therefore a near-empty vector that can still win a scan slot. This is 7 files
+and not worth agonising over; the point is that "supported" and "useful"
+diverged here, and the allowlist should reflect the second. Recommend
+excluding `.ppt` until a `.pptx` corpus exists to justify the backend.
+
+**`.htm` and `.html` are excluded entirely** — a policy decision, not a
+capability limit; `docling-rs` reads HTML fine. 71 of the 94 HTML files here are
+email attachments, overwhelmingly the HTML part of a message whose body is
+already indexed in `emails_fts` and `emails_embeddings`. Indexing them creates a
+*document* that competes with its own *email* on identical text — §15f's
+double-listing distortion sourced from a single piece of content, which no
+amount of dedup-by-id catches because they are genuinely two different rows.
+The remaining 23 are saved web pages. The whole category is 94 files, and it is
+one line in the allowlist to reverse if it turns out to be missed.
+
+**Re-extraction is driven by `date_last_modified`.** A file whose modification
+date moves has its chunk set cleared, which re-queues it through the `NOT
+EXISTS` above with no separate "needs re-extraction" flag to keep in sync. The
+scanner already updates that column; the only new behaviour is the clear.
+
+**A size gate sits between extraction and chunking, and it is not optional.**
+§18a-2 measured `HybridChunker` taking over ten minutes on a 3.4 M-character
+spreadsheet with no way to cancel it: the work runs in native code holding the
+GIL, so `SIGALRM` never fires and `anyio.to_thread.run_sync` cannot reclaim the
+thread. A timeout is therefore not a control here — the only control is to
+decline the call. So:
+
+1. Extract markdown (fast even on the pathological file — 2.3 s).
+2. If it exceeds **300,000 characters**, write the text to `file_chunks` /
+   `file_chunks_fts` as a single un-vectorized row, log it, and stop.
+3. Otherwise chunk and embed normally.
+
+The document stays lexically findable, the queue keeps draining, and the three
+files that produce 55% of this archive's chunks stop distorting every vector
+scan (§18a-2). Treat the gated case as a *success* for `embedding_attempts`
+purposes — it is a deliberate outcome, not a failure, and retrying it five
+times would only re-hang the thread five times.
+
+**Failures need to distinguish permanent from transient, and documents make
+this urgent.** `embedding_attempts` only resets on success, so five failures
+retire a file forever — a gap already on the backlog for photos. Documents hit
+it far harder: an encrypted PDF, a truncated `.doc`, a format the sniffer cannot
+place. Those *should* retire, and permanently. What must not retire is a file
+that failed because the aiserver was restarting or the volume was offline —
+the case commit `9cb486d` addressed for unreachable collections. So the counter
+should increment on *unprocessable content* and not on *unavailable service*,
+and the two are distinguishable at the call site: a conversion error from
+docling is the former, a transport failure is the latter.
+
+Step 0 showed this path carries far more traffic than "an encrypted PDF" hints
+at: **96 of 330 documents fail conversion outright**, 89 of them `.doc` files
+that `docling-rs` misparses (§18a-1). They are permanent by the definition
+above — a `ConversionError` is unprocessable content — so they will each burn
+five attempts and retire. That is the correct behaviour and it is worth
+knowing it will happen to roughly a fifth of the corpus rather than
+discovering it from a quiet log. Worth logging the parse-error text
+specifically: if a future `docling-rs` release fixes the MS-DOC reader, the
+recovery is to clear `embedding_attempts` for exactly those files, and that is
+only possible if the reason was recorded.
+
+**Cloud files have no filesystem path.** `path` may be a `gdrive://<id>` URI;
+the row also carries `local_path` and `download_url`. Resolution order is
+`local_path` → download via `download_url` to a temp file → skip and log. In
+this archive it is 8 of 467 documents and 6 already hold a local copy, so this
+is correctness rather than throughput — but an extractor that assumes `path` is
+openable will silently do nothing on a Drive-only document.
+
+**One measurement is owed before this phase is done: the document similarity
+floor.** §15e derives the floor from a modality's *background* similarity, and
+files currently sit at 0.75 — a number measured over image and description
+vectors. Chunked document text is a different distribution, which is precisely
+why mail had to be re-measured and moved to 0.70 (§16f). Reuse that method:
+probe queries spanning what a personal archive gets asked for, the per-modality
+median from the same Mode B window the retriever actually sees, and correct for
+the fact that the window is drawn from the top of the corpus rather than all of
+it.
+
+### 18j. `DocumentChunkIsolate` — the fourth background isolate
+
+§8 item 3 says to follow the `EmbeddingIsolate` pattern and not invent a new
+shape. That is right, and this section says what following it actually means,
+because the pattern is a lifecycle spread across several files rather than a
+base class to extend.
+
+**There are three of these already**, not two: `EmbeddingIsolate` (file and
+description vectors), `EmailEmbeddingIsolate` (email chunk vectors) and
+`FileDescriptionIsolate` (AI descriptions of images). `DocumentChunkIsolate` is
+the fourth and touches every place the other three are named.
+
+**Why a fourth isolate rather than a branch inside `EmbeddingIsolate`**, which
+already polls `files` and writes `files_embeddings`: extraction is a different
+and far heavier operation than embedding. Converting a 40-page PDF through
+docling is seconds to tens of seconds of CPU, and folding it in would let one
+large document stall the image-embedding queue behind it. Separate isolates also
+mean document extraction can be paused, shipped, or disabled on its own.
+
+**Registration**, in `database_manager.dart`, mirroring the existing three:
+
+- a `DocumentChunkIsolate? _documentChunkIsolate` field
+- a `_startDocumentChunkIsolate(String storagePath)` calling
+  `start(storagePath, AppConstants.dbName, RootIsolateToken.instance!)`
+- **a fourth 500 ms stagger** in `startBackgroundServices`, with the same
+  `if (generation != _startGeneration) return;` guard the others carry. That
+  guard is not boilerplate: the comment above it records that the vault can lock
+  during the stagger window and `stopBackgroundServices` can null the fields
+  mid-flight, so without the check this call would go on to assign a fresh
+  isolate nothing holds a reference to — left running against a locked vault
+  with no way to stop it.
+- `stop()` in `stopBackgroundServices`, and entries in **both**
+  `pauseEmbeddingIsolates` and `resumeEmbeddingIsolates` — the pause-during-scan
+  contract, which matters more here than for the others because extraction is
+  the most expensive background work in the app.
+
+Startup cost: the stagger becomes four × 500 ms. That is 2 s before the last
+isolate opens its connection, which is the price of not re-creating the
+`SQLITE_BUSY` contention the stagger exists to avoid.
+
+**Two HTTP dependencies, not one.** The existing isolates call
+`POST /util/embedding` only. This one calls `POST /util/extract-text` first,
+then `POST /util/embedding` per chunk — so it needs the same `updateUrl`
+subscription to `MainApp.llmServiceUrl` and the same vault-DEK hand-off, and it
+must tolerate the extract endpoint being present while the embedding model is
+not (and the reverse). Extraction results are worth keeping even when embedding
+is unavailable: the text goes to `file_chunks` and `file_chunks_fts`, which
+makes the document lexically searchable immediately, and the vectors fill in
+later. That ordering is deliberate — it means a failed or missing embedding
+model degrades document search to BM25 rather than to nothing.
+
+**The write relay needs a new case, and it is not shaped like the other two.**
+`handleEmbeddingMessage` switches on `table` and today handles exactly two
+shapes: `files_embeddings` carries one `embedding`, `emails_embeddings` carries
+an `embeddings` list replacing the email's chunk set. Documents carry **vectors
+and metadata together** — page, heading path, offsets and text belong to
+`file_chunks` while the vectors belong to `files_embeddings`, and §18i requires
+both to land in one transaction. So the message carries a chunk list of records
+rather than a list of vectors, and the handler calls a single
+`repo.replaceFileChunks(fileId, chunks)` that does the delete-then-insert across
+both tables atomically. Naming follows `replaceEmailEmbeddings`.
+
+Putting the transaction in the relay rather than the isolate is not a style
+choice — the relay runs on the main isolate's connection, which is the only one
+that writes (see `CLAUDE.md`), so it is the only place the atomicity §18i asks
+for can actually be obtained.
+
+**What it polls** is §18i's eligibility query. The isolate opens its own
+`AppDatabase` connection for that read, exactly as the other three do, and
+writes nothing through it.
