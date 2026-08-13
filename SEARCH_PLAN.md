@@ -1,6 +1,6 @@
 # Unified Search — Implementation Plan
 
-Status: **Phases 1–3, 5 and 6 implemented, plus §13 field autocomplete.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 5 — `ResultSetSummarizer`: map-reduce over the whole filtered set, a coverage claim that never says "all" unless it read all of it, and the handoff into `aichat`. Phase 6 — email chunking, per §16. §13 — `field:` value autocomplete over contacts, tags, landmarks, collections and the fixed vocabularies, per §13f. Phases 4 and 7 still proposal.
+Status: **Phases 1–6 implemented, plus §13 field autocomplete.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 5 — `ResultSetSummarizer`: map-reduce over the whole filtered set, a coverage claim that never says "all" unless it read all of it, and the handoff into `aichat`. Phase 6 — email chunking, per §16. Phase 4 — `QueryPlanner`: one constrained-JSON call for modality intent, off the critical path, failing open to the order the search already produced (§17). §13 — `field:` value autocomplete over contacts, tags, landmarks, collections and the fixed vocabularies, per §13f. Phase 7 is still proposal.
 
 **The outstanding floor measurement is done: mail is floored at 0.70, files stay at 0.75 (§16f).** Only half the predicted problem was real. The sample bias was, and is worth exactly 0.04 — Mode B reads its median from the top third of 30,791 mail vectors, and correcting for that arithmetically gives 0.677–0.722 across ten probe queries. The distribution change was not: chunking made mail retrieval *better* at an unchanged ratio, because an email now matches on the fragment the query is about instead of on its whole diluted body.
 
@@ -431,7 +431,7 @@ Each phase ships something usable on its own.
 | **1** | Query parser + FTS5 tables/triggers/backfill + contacts index + **natural-language person resolution (§2b)** | `from:`/`to:`/date filters work; `emails from mike nimer` resolves to the same filter; keyword search across email + filenames + descriptions |
 | **2** | Search page, wired to the app-bar field. BM25 only. Filter chips, facets | End-to-end usable search. Ship it. |
 | **3** | Vector retriever (Mode A candidate rerank) + RRF + tier boost | "landscape photos near Banff", "party pictures from 2026" |
-| **4** | Query planner (LLM intent, off critical path, fails open) | Ambiguous queries route to the right modality |
+| **4** | Query planner (LLM intent, off critical path, fails open) — **built, see §17** | Ambiguous queries route to the right modality |
 | **5** | Summarize handoff to `aichat`, **map-reduce over filtered sets (§2e)** — **built**, see §7 | "Summarize my interactions with Russel Jong" — genuinely over all 412, not a top-50 sample |
 | **6** | Email chunking — **measured, adopted and built, see §16** | Retrieval of text inside quoted threads; also cuts backfill cost roughly in half (§16c) |
 | **7** | Document extraction + chunk embeddings | "Find my graduation speech" over PDFs |
@@ -1291,3 +1291,92 @@ results rather than hiding them.
 **Files were not touched.** ~4,700 file vectors against the same 10,000-row
 fetch is still full coverage, so their median is the real one and the premise
 0.75 was fitted under still holds. §12's 50k tripwire is where that changes.
+
+---
+
+## 17. The query planner (Phase 4) — as built, and what measuring it changed
+
+`query_planner.dart`. One call, one question: **which kind of thing is this
+search for?** It runs only when the deterministic parse produced no answer, it
+cannot emit a filter, and it fails open to the order the search already
+published. Three numbers below moved a design decision; each was measured
+against gemma4:12b on this machine, not chosen.
+
+### 17a. What it does, and the ceiling on what it can do
+
+The model returns one or two words from a four-word vocabulary. Those become
+`ParsedQuery.preferredTypes` — the identical field a typed "family photos"
+produces — and are applied as `ResultRanking.modalityPreferenceBoost`. There is
+no path from the model's answer to a `WHERE` clause. Membership is settled by
+the retrievers before the planner is consulted, so **the worst a wrong answer
+can do is order the results badly**, and a test asserts exactly that: the set of
+ids before and after a refinement is identical.
+
+Re-ranking in place is exact rather than approximate. The preference multiplier
+is the last one applied and it was 1.0 for every row while no preference was
+stated, so multiplying the matching rows by it now yields precisely the list
+`HybridRanker.fuse` would have produced had the preference been known — with no
+second retrieval, no second embedding, and no second set of totals to
+reconcile.
+
+Two guards decide whether a returned plan is still welcome. A newer search owns
+the page — applying the plan then would order one query's results by another
+query's meaning. Or the user has scrolled, in which case the thing they were
+looking at would move; a mildly worse order is the better outcome.
+
+### 17b. `photo`, not `image` — the enum is part of the prompt
+
+The finding worth carrying forward. With `image` in the schema's enum, **every
+one of five photo queries answered `["video","video"]`** — `white dog`, `snow
+mountains`, `wedding`, `kids soccer game`, `sunset over the lake` — and not one
+said `image`. Changing that single word to `photo`, with the prompt otherwise
+untouched, took the same twelve queries from 5 misses to **0 misses, 11 hits**
+(the twelfth, `graduation speech`, is genuinely ambiguous and was scored as
+neither).
+
+The model was not confused about the query. The prompt said the archive holds
+"photos"; the enum offered `image`; `video` was the nearest word it had to the
+one it wanted. A constrained enum is not a validation layer bolted onto a
+prompt — it *is* prompt text, and it has to speak the same language as the
+sentence above it. `photo` is translated to the app's `image` in code, where a
+deterministic mapping belongs (Rule 5).
+
+### 17c. An unbounded array is a grammar loop
+
+Before `maxItems` was added, every photo query ran to the 64-token cap emitting
+`"video","video","video",…` and came back unparseable, at **3.5s** against
+**1.1s** for the same query afterwards. An unbounded `array` compiles to a GBNF
+rule permitting infinite repetition, and when the model's distribution over the
+enum is flat it never selects the closing bracket. `minItems`/`maxItems` are
+load-bearing, not documentation.
+
+### 17d. The ~800 ms budget in §2c is not achievable, and does not need to be
+
+Measured, warm model, n=12: **median 1.08s, range 1.01–1.15s**. An 800 ms bound
+would discard nearly every answer it had already paid for. The timeout is 3s —
+the median plus room for the one thing that genuinely slows it, `state.
+generation_lock` serializing a planner call behind a running summarize.
+
+What §2c was protecting is preserved by structure rather than by the number:
+the refinement is not awaited. Results are on screen before the planner is
+called, and every failure path returns the order the user already has.
+
+### 17e. Fail-open belongs in the code, not in the prompt
+
+The first prompt carried the rule in words — "choose all four if unsure" — and
+the model took it as a licence: **5 of 10 queries named all four kinds**,
+including `white dog` and `snow mountains`. Asking instead where the answer is
+*most likely* to be, and treating an all-four answer as no opinion in code,
+is what produced 17b's result. A model cannot talk itself out of an opinion the
+caller is enforcing.
+
+### 17f. `expanded_terms` deliberately not built
+
+§2c's JSON also carries synonyms (`graduation speech` → `commencement`,
+`valedictorian`). Modality intent only **reorders** what was retrieved;
+expanded terms would change **what is retrieved**, which means a second BM25
+pass, a second embedding, a second fusion, and a results list whose membership
+changes a second after it was read. That is a different feature with a different
+risk profile, and it should be measured on its own — including whether the
+synonyms this model produces beat the vector pass that already exists to catch
+exactly these cases.

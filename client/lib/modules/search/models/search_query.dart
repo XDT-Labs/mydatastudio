@@ -194,6 +194,22 @@ class ParsedQuery {
     );
   }
 
+  /// This query with an inferred modality preference attached.
+  ///
+  /// Separate from [copyWith] because it is a different kind of act: the
+  /// planner is guessing, and a guess must only ever fill a silence. Applied
+  /// to a query that already named a kind it would overwrite what the user
+  /// actually said, so callers gate on [QueryPlanner.isAmbiguous] — this only
+  /// makes that impossible to do by accident by being impossible to miss.
+  ParsedQuery withPreferredTypes(Set<String> types) {
+    return ParsedQuery(
+      filters: filters,
+      freeText: freeText,
+      raw: raw,
+      preferredTypes: types,
+    );
+  }
+
   /// A field may repeat (`from:a from:b`); callers OR these together rather
   /// than treating the second as overriding the first.
   List<QueryFilter> filtersFor(FilterField f) {

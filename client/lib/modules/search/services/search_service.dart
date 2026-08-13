@@ -7,6 +7,8 @@ import 'package:mydatastudio/modules/search/services/near_resolver.dart';
 import 'package:mydatastudio/modules/search/services/person_resolver.dart';
 import 'package:mydatastudio/modules/search/services/query_embedder.dart';
 import 'package:mydatastudio/modules/search/services/query_parser.dart';
+import 'package:mydatastudio/modules/search/services/query_planner.dart';
+import 'package:mydatastudio/modules/search/services/result_ranking.dart';
 import 'package:mydatastudio/modules/search/services/retrievers/bm25_retriever.dart';
 import 'package:mydatastudio/modules/search/services/retrievers/vector_retriever.dart';
 import 'package:mydatastudio/services/rx_service.dart';
@@ -43,6 +45,17 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
   /// with no AI subprocess can turn the semantic pass off entirely.
   QueryEmbedder embedder = AiServerQueryEmbedder.instance;
 
+  /// Overridable for the same reasons as [embedder].
+  QueryPlanner planner = QueryPlanner();
+
+  /// The in-flight modality refinement, or null when none is running.
+  ///
+  /// Exposed because it is the one part of a search that deliberately outlives
+  /// the future [invoke] returns: awaiting the search is awaiting the results,
+  /// and the refinement is not allowed to hold those up. A test that needs to
+  /// see the refined order awaits this instead of sleeping.
+  Future<void>? refinement;
+
   /// The parse of the query currently in [sink], so the UI can render filter
   /// chips that match the results it is showing rather than re-parsing and
   /// risking the two disagreeing. Holds the *resolved* query, so paging reuses
@@ -57,6 +70,10 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
   /// The fused ranking, or null when this search is lexical-only.
   List<SearchResult>? _ranked;
   int _shown = 0;
+
+  /// Increments on every search, so a refinement that arrives after the user
+  /// has typed something else can tell that it is answering a stale question.
+  int _generation = 0;
 
   /// Keys already published, so the lexical tail cannot re-show a row that the
   /// fused head already placed.
@@ -90,6 +107,7 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
       _ranked = null;
       _shown = 0;
       _emitted.clear();
+      final generation = ++_generation;
 
       // Nothing to constrain and nothing to rank is not an empty result, it is
       // the absence of a query — returning "no results found" for it reads as
@@ -154,7 +172,7 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
         ranked,
       );
 
-      return _publish(
+      final published = _publish(
         _sliceRanked(
           lexical: lexical,
           limit: command.limit,
@@ -162,6 +180,13 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
           extraFiles: additions.files,
         ),
       );
+
+      // Deliberately not awaited. Results are on screen at this point and the
+      // model takes about a second to answer; blocking on it would trade a
+      // search that is fast and sometimes ordered slightly worse for one that
+      // is always a second slower.
+      refinement = _refine(resolved, generation);
+      return published;
     } catch (e, stackTrace) {
       // A malformed query must not leave the page spinning forever. Parsing
       // is total by construction, so anything landing here is a storage-level
@@ -271,6 +296,67 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
     if (_sourceFilter == source) return;
 
     await invoke(SearchCommand(query.raw, database, sourceFilter: source));
+  }
+
+  /// Asks the model what kind of thing [query] is looking for, and reorders
+  /// the results it already published if the answer arrives in time to matter.
+  ///
+  /// Only ever a **reorder**. The planner cannot add or remove a row — it
+  /// returns modality words, and they are applied as the same preference
+  /// multiplier a typed "family photos" would have produced. Membership was
+  /// settled by the retrievers before this ran, so the worst outcome available
+  /// here is a list in a slightly worse order, never a missing result.
+  ///
+  /// Re-ranking the fused list in place is exact rather than approximate:
+  /// [ResultRanking.modalityPreferenceBoost] is the last multiplier applied,
+  /// and with no preference stated it was 1.0 for every row. Multiplying the
+  /// matching rows by it now yields precisely the list [HybridRanker.fuse]
+  /// would have produced had the preference been known — without a second
+  /// retrieval, a second embedding, or a second set of totals to reconcile.
+  Future<void> _refine(ParsedQuery query, int generation) async {
+    // A lexical-only search has no fused list to reorder. Its order comes from
+    // pages of SQL, and reordering the first page alone would leave the list
+    // disagreeing with its own tail.
+    if (_ranked == null) return;
+    if (!QueryPlanner.isAmbiguous(query)) return;
+
+    try {
+      final shownAtStart = _shown;
+      final types = await planner.plan(query);
+      if (types == null) return;
+
+      // Two ways the answer can arrive too late to be welcome. A newer search
+      // owns the page now — reordering it would apply one query's preference
+      // to another query's results. Or the user has scrolled, and pulling rows
+      // out from under a reader mid-list is worse than a mildly worse order:
+      // the thing they were looking at moves.
+      if (generation != _generation || _shown != shownAtStart) return;
+
+      final ranked = _ranked;
+      if (ranked == null) return;
+
+      lastQuery = query.withPreferredTypes(types);
+      _ranked =
+          [
+            for (final r in ranked)
+              r.withScore(
+                r.score *
+                    (types.contains(r.modality)
+                        ? ResultRanking.modalityPreferenceBoost
+                        : 1.0),
+              ),
+          ]..sort((a, b) => b.score.compareTo(a.score));
+
+      // Republished at exactly the length already on screen, so the list
+      // reorders without growing or shrinking under the reader.
+      _shown = 0;
+      _emitted.clear();
+      _publish(_sliceRanked(limit: shownAtStart));
+    } catch (e, stackTrace) {
+      // Nothing here is allowed to surface. The search already succeeded; a
+      // failed refinement means the user keeps the order they already have.
+      logger.d('SearchService: modality refinement failed: $e\n$stackTrace');
+    }
   }
 
   /// Takes the next [limit] fused results, advancing the display cursor.
