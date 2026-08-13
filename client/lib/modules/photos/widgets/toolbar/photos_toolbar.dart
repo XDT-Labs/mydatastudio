@@ -306,40 +306,6 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
             BatchActionService.instance.downloadSelected(_selectedIds);
           },
         ),
-        IconButton(
-          icon: const Icon(Icons.delete_outline),
-          tooltip: 'Delete',
-          color: colorScheme.error,
-          onPressed: () async {
-            final count = _selectedIds.length;
-            final confirm = await showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                backgroundColor: Theme.of(ctx).colorScheme.surfaceContainer,
-                title: Text('Delete $count item(s)?'),
-                content: const Text(
-                  'Are you sure you want to move selected photos to trash?',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    child: const Text('Cancel'),
-                  ),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Theme.of(ctx).colorScheme.error,
-                    ),
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    child: const Text('Delete'),
-                  ),
-                ],
-              ),
-            );
-            if (confirm == true) {
-              await BatchActionService.instance.deleteSelected(_selectedIds);
-            }
-          },
-        ),
       ],
     );
   }

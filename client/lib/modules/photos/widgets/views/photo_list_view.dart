@@ -134,141 +134,153 @@ class _PhotoListViewState extends State<PhotoListView> {
       color: colorScheme.onSurfaceVariant,
     );
 
-    return Column(
-      children: [
-        // Fixed Header Row
-        Container(
-          height: 40,
-          color: colorScheme.surfaceContainerLow,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              // Column 1: Thumbnail + Title
-              Expanded(
-                flex: 3,
-                child: InkWell(
-                  onTap: () => _onSortHeaderTapped(PhotoSortOrder.title),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const double minWidth = 850.0;
+        final double width = constraints.maxWidth < minWidth ? minWidth : constraints.maxWidth;
+
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: width,
+            child: Column(
+              children: [
+                // Fixed Header Row
+                Container(
+                  height: 40,
+                  color: colorScheme.surfaceContainerLow,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
                     children: [
-                      Flexible(
-                        child: Text(
-                          'Thumbnail + Title',
-                          style: headerStyle,
-                          overflow: TextOverflow.ellipsis,
+                      // Column 1: Thumbnail + Title
+                      Expanded(
+                        flex: 3,
+                        child: InkWell(
+                          onTap: () => _onSortHeaderTapped(PhotoSortOrder.title),
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  'Thumbnail + Title',
+                                  style: headerStyle,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              _buildSortIndicator(PhotoSortOrder.title),
+                            ],
+                          ),
                         ),
                       ),
-                      _buildSortIndicator(PhotoSortOrder.title),
+                      // Column 2: Date
+                      SizedBox(
+                        width: 140,
+                        child: InkWell(
+                          onTap: () => _onSortHeaderTapped(PhotoSortOrder.dateDesc),
+                          child: Row(
+                            children: [
+                              Text('Date', style: headerStyle),
+                              _buildSortIndicator(PhotoSortOrder.dateDesc),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // Column 3: Location
+                      SizedBox(
+                        width: 160,
+                        child: Text('Location', style: headerStyle),
+                      ),
+                      // Column 4: Camera / Details
+                      SizedBox(
+                        width: 200,
+                        child: InkWell(
+                          onTap: () => _onSortHeaderTapped(PhotoSortOrder.size),
+                          child: Row(
+                            children: [
+                              Text('Camera / Details', style: headerStyle),
+                              _buildSortIndicator(PhotoSortOrder.size),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // Column 5: Actions
+                      SizedBox(
+                        width: 150,
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Text('Actions', style: headerStyle),
+                        ),
+                      ),
                     ],
                   ),
                 ),
-              ),
-              // Column 2: Date
-              SizedBox(
-                width: 140,
-                child: InkWell(
-                  onTap: () => _onSortHeaderTapped(PhotoSortOrder.dateDesc),
-                  child: Row(
-                    children: [
-                      Text('Date', style: headerStyle),
-                      _buildSortIndicator(PhotoSortOrder.dateDesc),
-                    ],
-                  ),
-                ),
-              ),
-              // Column 3: Location
-              SizedBox(
-                width: 160,
-                child: Text('Location', style: headerStyle),
-              ),
-              // Column 4: Camera / Details
-              SizedBox(
-                width: 200,
-                child: InkWell(
-                  onTap: () => _onSortHeaderTapped(PhotoSortOrder.size),
-                  child: Row(
-                    children: [
-                      Text('Camera / Details', style: headerStyle),
-                      _buildSortIndicator(PhotoSortOrder.size),
-                    ],
-                  ),
-                ),
-              ),
-              // Column 5: Actions
-              SizedBox(
-                width: 150,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Text('Actions', style: headerStyle),
-                ),
-              ),
-            ],
-          ),
-        ),
 
-        // Virtualized Scrollable Rows
-        Expanded(
-          child: ListView.builder(
-            itemCount: widget.files.length,
-            itemBuilder: (context, index) {
-              final file = widget.files[index];
-              final isSelected = widget.selectedIds.contains(file.id);
+                // Virtualized Scrollable Rows
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: widget.files.length,
+                    itemBuilder: (context, index) {
+                      final file = widget.files[index];
+                      final isSelected = widget.selectedIds.contains(file.id);
 
-              return _PhotoListRowTile(
-                key: ValueKey(file.id),
-                file: file,
-                isSelected: isSelected,
-                onTap: () {
-                  if (widget.onTapRow != null) {
-                    widget.onTapRow!(file);
-                  } else {
-                    SelectionService.instance.handleTap(file, widget.files);
-                    ViewStateService.instance.setInfoMedia(file);
-                  }
-                },
-                onDoubleTap: () {
-                  if (widget.onDoubleTapRow != null) {
-                    widget.onDoubleTapRow!(file);
-                  } else {
-                    ViewStateService.instance.openLightbox(file);
-                  }
-                },
-                onSelect: () {
-                  if (widget.onSelectRow != null) {
-                    widget.onSelectRow!(file);
-                  } else {
-                    SelectionService.instance.toggle(file.id);
-                  }
-                },
-                onToggleFavorite: () async {
-                  if (widget.onToggleFavoriteRow != null) {
-                    widget.onToggleFavoriteRow!(file);
-                  } else {
-                    await PhotosRepository().toggleFavorite(file.id);
-                    await PhotosService.instance.refresh();
-                  }
-                },
-                onOpenLightbox: () {
-                  if (widget.onOpenLightboxRow != null) {
-                    widget.onOpenLightboxRow!(file);
-                  } else {
-                    ViewStateService.instance.openLightbox(file);
-                  }
-                },
-                onOpenInfo: () {
-                  if (widget.onOpenInfoRow != null) {
-                    widget.onOpenInfoRow!(file);
-                  } else {
-                    ViewStateService.instance.openInfo(file);
-                  }
-                },
-                onDownload: widget.onDownloadRow != null
-                    ? () => widget.onDownloadRow!(file)
-                    : () => BatchActionService.instance.downloadSingle(file),
-              );
-            },
+                      return _PhotoListRowTile(
+                        key: ValueKey(file.id),
+                        file: file,
+                        isSelected: isSelected,
+                        onTap: () {
+                          if (widget.onTapRow != null) {
+                            widget.onTapRow!(file);
+                          } else {
+                            ViewStateService.instance.openInfo(file);
+                          }
+                        },
+                        onDoubleTap: () {
+                          if (widget.onDoubleTapRow != null) {
+                            widget.onDoubleTapRow!(file);
+                          } else {
+                            ViewStateService.instance.openLightbox(file);
+                          }
+                        },
+                        onSelect: () {
+                          if (widget.onSelectRow != null) {
+                            widget.onSelectRow!(file);
+                          } else {
+                            SelectionService.instance.handleCheckboxTap(file, widget.files);
+                          }
+                        },
+                        onToggleFavorite: () async {
+                          if (widget.onToggleFavoriteRow != null) {
+                            widget.onToggleFavoriteRow!(file);
+                          } else {
+                            await PhotosRepository().toggleFavorite(file.id);
+                            await PhotosService.instance.refresh();
+                          }
+                        },
+                        onOpenLightbox: () {
+                          if (widget.onOpenLightboxRow != null) {
+                            widget.onOpenLightboxRow!(file);
+                          } else {
+                            ViewStateService.instance.openLightbox(file);
+                          }
+                        },
+                        onOpenInfo: () {
+                          if (widget.onOpenInfoRow != null) {
+                            widget.onOpenInfoRow!(file);
+                          } else {
+                            ViewStateService.instance.openInfo(file);
+                          }
+                        },
+                        onDownload: widget.onDownloadRow != null
+                            ? () => widget.onDownloadRow!(file)
+                            : () => BatchActionService.instance.downloadSingle(file),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 }
@@ -367,13 +379,17 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
                 flex: 3,
                 child: Row(
                   children: [
-                    SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: Checkbox(
-                        value: widget.isSelected,
-                        activeColor: colorScheme.primary,
-                        onChanged: (_) => widget.onSelect(),
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: widget.onSelect,
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Checkbox(
+                          value: widget.isSelected,
+                          activeColor: colorScheme.primary,
+                          onChanged: (_) => widget.onSelect(),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),

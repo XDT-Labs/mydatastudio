@@ -1,16 +1,27 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' as io;
 
+import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/album.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/email/pages/email_page.dart';
+import 'package:mydatastudio/modules/email/services/email_repository.dart';
+import 'package:mydatastudio/modules/files/pages/rx_files_page.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/tabbed_metadata_section.dart';
+import 'package:mydatastudio/modules/photos/models/photo_source.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 import 'package:mydatastudio/modules/photos/utils/byte_formatter.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/tag_chip.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 
 /// A right slide-over sidebar for inspecting and editing photo metadata,
 /// tags, and album membership.
@@ -18,9 +29,14 @@ class InfoSidebar extends StatefulWidget {
   const InfoSidebar({
     super.key,
     this.repository,
+    this.tileProvider,
   });
 
   final PhotosRepository? repository;
+
+  /// Optional injected [TileProvider] for the LOCATION tab's map, for widget
+  /// tests (e.g. FakeMemoryTileProvider) to avoid real network requests.
+  final TileProvider? tileProvider;
 
   @override
   State<InfoSidebar> createState() => _InfoSidebarState();
@@ -36,6 +52,11 @@ class _InfoSidebarState extends State<InfoSidebar> {
   List<String> _tags = [];
   List<Album> _allAlbums = [];
   Set<String> _fileAlbumIds = {};
+
+  Collection? _collection;
+  PhotoSource? _source;
+  Map<String, IfdTag>? _exifData;
+  bool _loadingExif = false;
 
   @override
   void initState() {
@@ -63,15 +84,94 @@ class _InfoSidebarState extends State<InfoSidebar> {
       _currentFile = file;
       _isEditingTitle = false;
       _titleController.text = file?.name ?? '';
+      _collection = null;
+      _source = null;
+      _exifData = null;
     });
     if (file != null) {
       _loadTagsAndAlbums(file.id);
+      _loadCollection(file);
+      _loadSource(file);
+      _loadExif(file);
     } else {
       setState(() {
         _tags = [];
         _allAlbums = [];
         _fileAlbumIds = {};
       });
+    }
+  }
+
+  Future<void> _loadCollection(File file) async {
+    try {
+      final collection = await CollectionRepository().collectionById(
+        file.collectionId,
+      );
+      if (mounted && _currentFile?.id == file.id) {
+        setState(() => _collection = collection);
+      }
+    } catch (_) {
+      // No DB available or the collection was deleted out from under an
+      // open file — the EXIF/Location/Similar tabs just stay hidden.
+    }
+  }
+
+  Future<void> _loadSource(File file) async {
+    final repo = widget.repository ?? PhotosRepository();
+    try {
+      final source = await repo.sourceFor(file);
+      if (mounted && _currentFile?.id == file.id) {
+        setState(() => _source = source);
+      }
+    } catch (_) {
+      // No DB available — the Source row falls back to the collection id.
+    }
+  }
+
+  /// Opens the message this photo was attached to in the Email module.
+  Future<void> _openSourceEmail(String emailId) async {
+    final db = DatabaseManager.instance.database;
+    if (db == null) return;
+
+    final emails = await EmailRepository(db).getAllById([emailId]);
+    if (!mounted || emails.isEmpty) return;
+
+    // Queued before routing: EmailPage picks the request up when it mounts.
+    EmailPage.openEmailRequest.add(emails.first);
+    GoRouter.of(context).go('/email');
+  }
+
+  /// Opens this photo's folder in the Files module, with the file selected.
+  void _openSourceFile(File file) {
+    // The photos module rewrites `path` to an absolute one for thumbnailing
+    // (see PhotosRepository._fileWithAbsolutePath); the Files module navigates
+    // by the DB-relative `parent`, which that rewrite leaves untouched.
+    RxFilesPage.openFileRequest.add(file);
+    GoRouter.of(context).go('/files');
+  }
+
+  // The photos module only ever holds images or videos (see
+  // PhotosRepository's `_isMedia` filter), so "not a video" is sufficient.
+  bool _isImage(File file) => !file.contentType.startsWith('video/');
+
+  Future<void> _loadExif(File file) async {
+    if (!_isImage(file)) return;
+
+    // Photos loaded through PhotosRepository already carry an absolute
+    // `path` (see photos_repository.dart's _fileWithAbsolutePath), unlike
+    // the DB-relative paths File models normally hold.
+    final ioFile = io.File(file.path);
+    if (!await ioFile.exists()) return;
+
+    setState(() => _loadingExif = true);
+    try {
+      final exif = await readExifFromFile(ioFile);
+      if (mounted && _currentFile?.id == file.id) {
+        setState(() => _exifData = exif);
+      }
+    } catch (_) {}
+    if (mounted && _currentFile?.id == file.id) {
+      setState(() => _loadingExif = false);
     }
   }
 
@@ -173,12 +273,6 @@ class _InfoSidebarState extends State<InfoSidebar> {
         _fileAlbumIds = fileAlbums.map((a) => a.id).toSet();
       });
     }
-  }
-
-  Future<void> _openInFinder(String path) async {
-    try {
-      await Process.run('open', ['-R', path]);
-    } catch (_) {}
   }
 
   String _formatLocation(double? lat, double? lng) {
@@ -379,9 +473,11 @@ class _InfoSidebarState extends State<InfoSidebar> {
                 label: 'Location',
                 value: _formatLocation(file.latitude, file.longitude),
               ),
-              _MetadataRow(
-                label: 'Source',
-                value: file.collectionId,
+              _SourceRow(
+                source: _source,
+                fallback: file.collectionId,
+                onOpenEmail: _openSourceEmail,
+                onOpenFile: () => _openSourceFile(file),
               ),
               const Divider(height: 24),
 
@@ -487,42 +583,122 @@ class _InfoSidebarState extends State<InfoSidebar> {
                 ),
               const Divider(height: 24),
 
-              // 7. Action buttons (bottom)
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _openInFinder(file.path),
-                      icon: const Icon(Icons.folder_open, size: 18),
-                      label: const Text('Open in Finder'),
-                    ),
+              // 7. EXIF / Location / Similar tabs (same section used by the
+              // Files module's file details drawer)
+              if (_collection != null) ...[
+                DefaultTabController(
+                  length: _isImage(file) ? 3 : 1,
+                  child: TabbedMetadataSection(
+                    file: file,
+                    collection: _collection!,
+                    exifData: _exifData,
+                    isLoadingExif: _loadingExif,
+                    showExif: _isImage(file),
+                    tileProvider: widget.tileProvider,
+                    onNavigateToFile: (target) {
+                      ViewStateService.instance.openInfo(target);
+                    },
+                    onDeleteFile: (_) {
+                      PhotosService.instance.refresh();
+                    },
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: colorScheme.error,
-                        side: BorderSide(color: colorScheme.error),
-                      ),
-                      onPressed: () async {
-                        final repo = widget.repository ?? PhotosRepository();
-                        await repo.deleteFile(file.id);
-                        await PhotosService.instance.refresh();
-                        ViewStateService.instance.closeInfo();
-                      },
-                      icon: const Icon(Icons.delete_outline, size: 18),
-                      label: const Text('Delete'),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The `Source` row: where the photo came from, as a
+/// `<collection>/<folder>/<leaf>` trail, and a way back to it.
+///
+/// A photo in the grid gives no clue whether it was scanned off disk or pulled
+/// out of a mailbox, and no way to reach whatever surrounded it. So the trail
+/// is a link in both cases — to the message for an attachment, to the folder
+/// for a file.
+class _SourceRow extends StatelessWidget {
+  const _SourceRow({
+    required this.source,
+    required this.fallback,
+    required this.onOpenEmail,
+    required this.onOpenFile,
+  });
+
+  final PhotoSource? source;
+
+  /// Shown until [source] resolves, and if it never does.
+  final String fallback;
+
+  final Future<void> Function(String emailId) onOpenEmail;
+  final VoidCallback onOpenFile;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final resolved = source;
+
+    if (resolved == null) {
+      return _MetadataRow(label: 'Source', value: fallback);
+    }
+
+    final isEmail = resolved.isEmail;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              'Source',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          Expanded(
+            child: InkWell(
+              onTap: isEmail
+                  ? () => onOpenEmail(resolved.emailId!)
+                  : onOpenFile,
+              borderRadius: BorderRadius.circular(4),
+              child: Tooltip(
+                message: isEmail
+                    ? 'Open this email'
+                    : 'Show this file in Files',
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1.0, right: 4.0),
+                      child: Icon(
+                        isEmail ? Icons.email_outlined : Icons.folder_outlined,
+                        size: 13,
+                        color: colorScheme.primary,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        resolved.path,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.primary,
+                          fontWeight: FontWeight.w500,
+                          decoration: TextDecoration.underline,
+                          decorationColor: colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
