@@ -504,7 +504,11 @@ This archive is partially synced (Gmail 309 messages, Yahoo 1,058, spanning 2019
 | 100,000 | 800 MB | ~0.5–1 s — fix it |
 | 500,000 | 4 GB | unusable |
 
-**Decision: do not pre-optimize; instrument instead.** In Phase 3, log per-query vector count and latency. When a single modality crosses 50k, switch Mode B to `vector_quantize` + `vector_quantize_scan` — already compiled into the bundled `vector_*.dylib`, verified present. That is precisely why §4 requires `VectorRetriever` to sit behind an interface: the swap must be a one-class change, not a redesign.
+**Decision: do not pre-optimize; instrument instead.** When a single modality crosses 50k, switch Mode B to `vector_quantize` + `vector_quantize_scan` — already compiled into the bundled `vector_*.dylib`, verified present.
+
+**The instrumentation this asked of Phase 3 was not built with Phase 3; it exists now** (`VectorRetriever.quantizeThreshold`). Every Mode B scan logs its modality, the corpus size, the rows returned and the elapsed milliseconds, and warns once per run past the threshold, naming the swap. Corpus size is a separate `COUNT(*)` rather than the returned row count, which is always `limit * 5` and says nothing — measured at 1.05 ms against 30,790 rows, because the composite primary key leaves SQLite a small index to count from instead of a 500 MB table.
+
+Mode A is instrumented alongside it for a different and louder failure. Reaching `modeACandidateCap` means the filtered set was ordered by date and only its most recent slice was scored — a recall loss that is **invisible in the results**, because a candidate that was never scored looks exactly like one that did not match. §15b documented it; nothing said when it happened. That is precisely why §4 requires `VectorRetriever` to sit behind an interface: the swap must be a one-class change, not a redesign.
 
 Two things that blunt this risk regardless of corpus size:
 

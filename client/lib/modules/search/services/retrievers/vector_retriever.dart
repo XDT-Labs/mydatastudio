@@ -191,6 +191,56 @@ class VectorRetriever {
   /// which is what this constant is for.
   static const modeAEmailChunkCap = modeACandidateCap * 2;
 
+  /// Corpus size, in one modality, at which brute-force scanning stops being
+  /// the right answer — §12's tripwire.
+  ///
+  /// Per modality and not in total, because a photo query scans only photo
+  /// vectors. The number is not a cliff: §12 measures 50,000 vectors as 400 MB
+  /// read per scan, which is "acceptable, start watching", against ~0.5–1s at
+  /// 100,000. Crossing it is the cue to swap Mode B onto `vector_quantize` +
+  /// `vector_quantize_scan`, both already compiled into the bundled
+  /// `vector_*.dylib`.
+  ///
+  /// It is instrumented rather than pre-optimised, which only works if
+  /// something actually reports the number. Mail reached ~30,800 vectors from a
+  /// *partially* synced archive — 62% of this — and the next import is the
+  /// likely crossing, so the alternative to measuring is finding out from a
+  /// search that got slow.
+  static const quantizeThreshold = 50000;
+
+  /// Emitted once per modality per run, so a warning is a signal rather than a
+  /// line in a wall of identical lines.
+  static final _announced = <String>{};
+
+  /// The §12 warning for a corpus of [vectors], or null while it is fine.
+  @visibleForTesting
+  static String? tripwireMessage(SearchResultType type, int vectors) {
+    if (vectors < quantizeThreshold) return null;
+    return 'VectorRetriever: ${type.name} vectors have reached $vectors, past '
+        "§12's $quantizeThreshold tripwire — full scans are now the slow path. "
+        'Switch Mode B to vector_quantize_scan.';
+  }
+
+  /// The warning for a Mode A candidate set that hit its ceiling, or null.
+  ///
+  /// Distinct from the tripwire and, when it fires, more urgent. Reaching the
+  /// cap means the filtered set was ordered by date and only its most recent
+  /// slice was scored — a **recall loss that is invisible in the results**,
+  /// because what fell off the end looks exactly like something that did not
+  /// match. §15b documents it; nothing said when it happened.
+  @visibleForTesting
+  static String? capMessage(SearchResultType type, int rowsRead, int cap) {
+    if (rowsRead < cap) return null;
+    return 'VectorRetriever: Mode A read the full $cap-row cap for '
+        '${type.name}; older candidates past it were never scored. Results are '
+        'incomplete by recency, not by relevance.';
+  }
+
+  void _warnOnce(String key, String? message) {
+    if (message == null || !_announced.add(key)) return;
+    logger.w(message);
+  }
+
   /// Ranked candidates for [query], best first.
   Future<List<VectorHit>> search(
     ParsedQuery query, {
@@ -264,6 +314,10 @@ class VectorRetriever {
         ''',
         [...filter.params, modeACandidateCap],
       );
+      _warnOnce(
+        'cap-file',
+        capMessage(SearchResultType.file, rows.length, modeACandidateCap),
+      );
       return _rankInDart(rows, queryVector, SearchResultType.file, limit);
     }
 
@@ -271,8 +325,10 @@ class VectorRetriever {
     // vectors — the image itself and its AI description — and both compete for
     // slots in the scan's raw top-N, so a single photo can occupy two of them
     // before deduplication collapses it back to one.
-    final rows = await db.select(
-      '''
+    final rows = await _fullScan(
+      table: 'files_embeddings',
+      type: SearchResultType.file,
+      sql: '''
       SELECT emb.file_id AS id, v.distance AS distance
       FROM files_embeddings emb
       JOIN files f ON f.id = emb.file_id
@@ -282,7 +338,7 @@ class VectorRetriever {
       WHERE ${filter.sql}
       ORDER BY v.distance ASC
       ''',
-      [_toJsonArray(queryVector), limit * 5, ...filter.params],
+      params: [_toJsonArray(queryVector), limit * 5, ...filter.params],
     );
     return _rankFromDistance(rows, SearchResultType.file, limit);
   }
@@ -305,6 +361,10 @@ class VectorRetriever {
         ''',
         [...filter.params, modeAEmailChunkCap],
       );
+      _warnOnce(
+        'cap-email',
+        capMessage(SearchResultType.email, rows.length, modeAEmailChunkCap),
+      );
       return _rankInDart(rows, queryVector, SearchResultType.email, limit);
     }
 
@@ -314,8 +374,10 @@ class VectorRetriever {
     // and they crowd the scan's raw top-N before dedup collapses them to one
     // email. 5x mirrors the files multiplier and comfortably covers the
     // measured 1.92 vectors per email (§16c).
-    final rows = await db.select(
-      '''
+    final rows = await _fullScan(
+      table: 'emails_embeddings',
+      type: SearchResultType.email,
+      sql: '''
       SELECT emb.email_id AS id, v.distance AS distance
       FROM emails_embeddings emb
       JOIN emails e ON e.id = emb.email_id
@@ -325,9 +387,61 @@ class VectorRetriever {
       WHERE ${filter.sql}
       ORDER BY v.distance ASC
       ''',
-      [_toJsonArray(queryVector), limit * 5, ...filter.params],
+      params: [_toJsonArray(queryVector), limit * 5, ...filter.params],
     );
     return _rankFromDistance(rows, SearchResultType.email, limit);
+  }
+
+  /// Runs a Mode B scan and records what it cost.
+  ///
+  /// This is the measurement §12 asked Phase 3 for and Phase 3 did not ship.
+  /// The decision it feeds is a real one — swap to `vector_quantize_scan` — and
+  /// it has a threshold attached, so the alternative to logging the number is
+  /// finding out from a search that got slow and having nothing to say about
+  /// when it started.
+  ///
+  /// Both figures matter and neither substitutes for the other. Elapsed time is
+  /// what a user feels; corpus size is what predicts it, and it is the one
+  /// stated as a threshold. Rows returned is neither — Mode B always fetches
+  /// `limit * 5` — which is exactly why the count is a separate query.
+  ///
+  /// The count is affordable: measured at **1.05 ms against 30,790 rows**,
+  /// because a composite primary key gives SQLite a small index to count from
+  /// instead of walking a 500 MB table. Mode B is also the rare path — any
+  /// query carrying a filter never reaches here.
+  Future<List<Map<String, Object?>>> _fullScan({
+    required String table,
+    required SearchResultType type,
+    required String sql,
+    required List<Object?> params,
+  }) async {
+    final watch = Stopwatch()..start();
+    final rows = await db.select(sql, params);
+    watch.stop();
+
+    final corpus = await _countVectors(table);
+    logger.d(
+      'VectorRetriever: Mode B ${type.name} scan — $corpus vectors, '
+      '${rows.length} rows back, ${watch.elapsedMilliseconds} ms',
+    );
+    _warnOnce('tripwire-${type.name}', tripwireMessage(type, corpus));
+    return rows;
+  }
+
+  /// Rows in [table], or -1 when the count itself fails.
+  ///
+  /// -1 rather than 0 or a throw: this is instrumentation, and a failure to
+  /// measure a search must never become a failure to run one. A negative
+  /// reading is visibly not a corpus size, so it cannot be mistaken for an
+  /// empty table in a log or trip the threshold.
+  Future<int> _countVectors(String table) async {
+    try {
+      final rows = await db.select('SELECT COUNT(*) AS n FROM $table');
+      return (rows.first['n'] as num?)?.toInt() ?? -1;
+    } catch (e) {
+      logger.d('VectorRetriever: could not count $table: $e');
+      return -1;
+    }
   }
 
   /// Mode A: cosine against every candidate blob, deduplicated to the best hit

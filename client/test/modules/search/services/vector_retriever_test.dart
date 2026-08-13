@@ -402,4 +402,72 @@ void main() {
       await db.close();
     });
   });
+
+  group('knowing when a limit binds (§12)', () {
+    test('a corpus under the tripwire says nothing', () {
+      // Silence is the normal state. A warning that fires on every search is
+      // one nobody reads by the time it matters.
+      expect(
+        VectorRetriever.tripwireMessage(
+          SearchResultType.email,
+          VectorRetriever.quantizeThreshold - 1,
+        ),
+        isNull,
+      );
+    });
+
+    test('a corpus at the tripwire names the remedy, not just the problem', () {
+      // §12 pairs the threshold with a specific swap — vector_quantize_scan,
+      // already compiled into the bundled dylib — and the whole value of
+      // measuring is that whoever reads the warning does not have to go and
+      // rediscover that. Mail is at ~62% of this from a partially-synced
+      // archive, so the next import is the likely crossing.
+      final message = VectorRetriever.tripwireMessage(
+        SearchResultType.email,
+        VectorRetriever.quantizeThreshold,
+      );
+
+      expect(message, isNotNull);
+      expect(message, contains('email'));
+      expect(message, contains('vector_quantize_scan'));
+    });
+
+    test('a Mode A read below its cap says nothing', () {
+      expect(
+        VectorRetriever.capMessage(
+          SearchResultType.file,
+          VectorRetriever.modeACandidateCap - 1,
+          VectorRetriever.modeACandidateCap,
+        ),
+        isNull,
+      );
+    });
+
+    test('a Mode A read that fills its cap admits what it dropped', () {
+      // The louder of the two, and the reason this is not only about speed.
+      // Mode A orders its candidate set by date, so filling the cap means the
+      // oldest candidates were never scored at all — and a result that was
+      // never scored is indistinguishable, in the results, from one that did
+      // not match. The archive exists to hold decades of material; losing the
+      // old half of it silently is the failure mode worth a warning.
+      final message = VectorRetriever.capMessage(
+        SearchResultType.file,
+        VectorRetriever.modeACandidateCap,
+        VectorRetriever.modeACandidateCap,
+      );
+
+      expect(message, isNotNull);
+      expect(message, contains('never scored'));
+    });
+
+    test('mail counts chunks, so it gets the larger cap', () {
+      // A row is a body chunk now, not an email. At the measured 1.92 chunks
+      // per email the plain cap would reach barely half as many messages as it
+      // did before chunking, so the two caps must not converge by accident.
+      expect(
+        VectorRetriever.modeAEmailChunkCap,
+        greaterThan(VectorRetriever.modeACandidateCap),
+      );
+    });
+  });
 }
