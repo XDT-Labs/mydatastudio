@@ -61,9 +61,7 @@ class Bm25Retriever {
             ? 0
             : await _count('emails', 'emails_fts', 'e', emailWhere, match);
     final fileTotal =
-        fileWhere == null
-            ? 0
-            : await _count('files', 'files_fts', 'f', fileWhere, match);
+        fileWhere == null ? 0 : await _countFiles(fileWhere, match);
 
     // Only row retrieval honours [onlySource]. Counting is unrestricted.
     final fetchEmails =
@@ -139,6 +137,33 @@ class Bm25Retriever {
     return (rows.first['c'] as num?)?.toInt() ?? 0;
   }
 
+  /// Files matching [match] in either index, counted once each.
+  ///
+  /// Separate from [_count] because a file has two indexes and a document that
+  /// matches only on its text would otherwise be returned by [_searchFiles]
+  /// and missing from the total — a count the user can scroll past, which is
+  /// the same class of bug as one they cannot reach. `COUNT(DISTINCT f.id)`
+  /// rather than `COUNT(*)`: the union emits one row per matching chunk.
+  Future<int> _countFiles(SourceFilter where, String? match) async {
+    if (match == null) {
+      final rows = await db.select(
+        'SELECT COUNT(*) AS c FROM files AS f WHERE ${where.sql}',
+        where.params,
+      );
+      return (rows.first['c'] as num?)?.toInt() ?? 0;
+    }
+    final rows = await db.select(
+      '''
+      SELECT COUNT(DISTINCT f.id) AS c
+      FROM ($_fileMatchUnion) m
+      JOIN files f ON f.id = m.file_id
+      WHERE ${where.sql}
+      ''',
+      [match, match, ...where.params],
+    );
+    return (rows.first['c'] as num?)?.toInt() ?? 0;
+  }
+
   Future<List<SearchResult>> _searchEmails(
     SourceFilter filter,
     String? match,
@@ -183,16 +208,16 @@ class Bm25Retriever {
         match != null
             ? await db.select(
               '''
-            SELECT $_fileColumns,
-                   bm25(files_fts, $_fileWeights) AS score
-            FROM files_fts
-            JOIN files f ON f.rowid = files_fts.rowid
+            SELECT $_fileColumns, MIN(m.score) AS score
+            FROM ($_fileMatchUnion) m
+            JOIN files f ON f.id = m.file_id
             LEFT JOIN collections c ON c.id = f.collection_id
-            WHERE files_fts MATCH ? AND ${filter.sql}
+            WHERE ${filter.sql}
+            GROUP BY f.id
             ORDER BY score ASC
             LIMIT ? OFFSET ?
             ''',
-              [match, ...filter.params, limit, offset],
+              [match, match, ...filter.params, limit, offset],
             )
             : await db.select(
               '''
@@ -272,22 +297,65 @@ class Bm25Retriever {
             : SearchFilters.forFiles(query);
     if (filter == null) return const {};
 
-    final table = type == SearchResultType.email ? 'emails' : 'files';
-    final ftsTable =
-        type == SearchResultType.email ? 'emails_fts' : 'files_fts';
-    final alias = type == SearchResultType.email ? 'e' : 'f';
-
-    final rows = await db.select(
-      'SELECT $alias.id AS id FROM $ftsTable '
-      'JOIN $table AS $alias ON $alias.rowid = $ftsTable.rowid '
-      'WHERE $ftsTable MATCH ? AND ${filter.sql} '
-      'AND $alias.id IN (${_placeholders(ids.length)})',
-      [match, ...filter.params, ...ids],
-    );
+    // Files are asked across both indexes for the same reason the totals are:
+    // a document the vector pass found and BM25 also matched *on its text* is
+    // an agreement, not a semantic addition, and counting it as one would
+    // overstate the total by however many documents the two agreed on.
+    final rows =
+        type == SearchResultType.file
+            ? await db.select(
+              '''
+          SELECT DISTINCT f.id AS id
+          FROM ($_fileMatchUnion) m
+          JOIN files f ON f.id = m.file_id
+          WHERE ${filter.sql} AND f.id IN (${_placeholders(ids.length)})
+          ''',
+              [match, match, ...filter.params, ...ids],
+            )
+            : await db.select(
+              'SELECT e.id AS id FROM emails_fts '
+              'JOIN emails AS e ON e.rowid = emails_fts.rowid '
+              'WHERE emails_fts MATCH ? AND ${filter.sql} '
+              'AND e.id IN (${_placeholders(ids.length)})',
+              [match, ...filter.params, ...ids],
+            );
     return {for (final row in rows) row['id'] as String};
   }
 
   static String _placeholders(int count) => List.filled(count, '?').join(', ');
+
+  /// A file's lexical matches, from both of its indexes, one row per match.
+  ///
+  /// Two indexes rather than one because `files_fts` is external-content over
+  /// `files` and can only hold that table's columns — chunk text lives in
+  /// `file_chunks`, so it needs its own index (§18e). A file can therefore
+  /// match on its name *and* on several of its passages.
+  ///
+  /// **The collapse to one row per file happens here, before the results
+  /// leave this retriever, and that ordering is the whole point.** Fusion
+  /// operates on results, not fragments: ten matching chunks of one PDF
+  /// arriving as ten rows would each take a rank slot and each collect its own
+  /// reciprocal-rank contribution, so RRF would read one document as ten
+  /// separate corroborating results. That is the double-listing distortion
+  /// §15f measures at 2x, in its most concentrated form. The caller's
+  /// `GROUP BY f.id` with `MIN(score)` is what prevents it — `MIN` because
+  /// bm25 scores ascend, so the smallest is the best match.
+  ///
+  /// Chunk text is unweighted while `files_fts` weights name over path over
+  /// description. There is nothing to weight *between* here — one column — and
+  /// no evidence yet on how a body hit should trade against a filename hit.
+  /// Left deliberately plain rather than guessed at.
+  static const _fileMatchUnion = '''
+      SELECT f2.id AS file_id, bm25(files_fts, $_fileWeights) AS score
+      FROM files_fts
+      JOIN files f2 ON f2.rowid = files_fts.rowid
+      WHERE files_fts MATCH ?
+      UNION ALL
+      SELECT fc.file_id AS file_id, bm25(file_chunks_fts) AS score
+      FROM file_chunks_fts
+      JOIN file_chunks fc ON fc.rowid = file_chunks_fts.rowid
+      WHERE file_chunks_fts MATCH ?
+  ''';
 
   static const _fileColumns =
       'f.id, f.name, f.path, f.description, f.content_type, f.date_created, '

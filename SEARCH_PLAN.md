@@ -2215,7 +2215,7 @@ not bother.
 | 0 | **Spike — gating (§18d).** Four questions, below |
 | 1 | **Built.** `POST /util/extract-text` returning chunks with provenance. Every non-PDF format — including legacy `.doc`/`.xls`/`.ppt`/`.rtf` — needs no model download, so this step already covers most of the archive's documents. Route by sniffing bytes (§18a), resolve cloud paths (§18i). See §18h-1 |
 | 2 | **Built.** `files_embeddings` PK widened to `(file_id, type, sequence)`, `file_chunks` + `file_chunks_fts` DDL (§18e); `DocumentChunkIsolate` registered as the fourth background isolate (§18j) and its queue (§18i). See §18h-2 |
-| 3 | Retrieval: chunk vectors into `VectorRetriever` with argmax carried through dedup, `file_chunks_fts` into the lexical path collapsed per file *before* fusion, **Mode B over-fetch raised against a real chunk count** (§18e-1, §18f) |
+| 3 | **Built.** Retrieval: chunk vectors into `VectorRetriever` with argmax carried through dedup, `file_chunks_fts` into the lexical path collapsed per file *before* fusion, **Mode B over-fetch raised** (§18e-1, §18f). See §18h-3 |
 | 4 | Footnotes in the result UI, and the parent-email link for attachments |
 | 5 | PDF pipeline behind the model download; scanned-page tripwire logging. **Prerequisite: vendor a macOS arm64 `libpdfium.dylib` (§18d-1)** — docling's own download ships a Linux binary and reports success |
 | 6 | **Measure the document similarity floor** (§18i) — files' 0.75 was measured on image vectors and does not transfer |
@@ -2397,6 +2397,65 @@ per chunk, relay.
   because the write pairs vectors to chunks by position — a short list has to
   be a prefix. The text still lands whole, so the document is immediately
   keyword-searchable and the tail is embedded on a later pass.
+
+#### 18h-3. Step 3 as built
+
+Retrieval learns about chunks on both sides. 11 new tests; the client suite is
+997 green with the same one pre-existing failure.
+
+**The over-fetch multiplier could not be derived the way §18e-1 asked**, since
+no chunks existed yet, so it is picked on a corpus argument and instrumented to
+correct itself. `modeBFileOverFetch = 8`, with the reasoning written down: the
+projected post-gate file corpus is ~10,600 vectors, `candidateLimit` is 2,000,
+and 8× fetches 16,000 — enough to keep the scan effectively exhaustive as the
+archive grows by half again.
+
+Worth stating plainly, because it changes how much the constant matters: **at
+today's corpus almost any multiplier would look correct.** 5× already fetches
+10,000 of ~10,600 vectors, so the top-N is nearly the whole table and dedup
+cannot starve anything. The multiplier only begins to matter once the corpus
+outgrows the fetch — which is why the real deliverable here is
+`overFetchMessage`, a warning that fires when the fetch drops below half the
+corpus. That is the measurement §18e-1 wanted, arriving when it can actually
+be taken rather than guessed at now.
+
+Mode A needed the same correction for the same reason mail did: chunk rows
+inflate the row budget, so a document-heavy filtered set would spend the whole
+4,000-row cap on a few hundred files. `modeAFileChunkCap` doubles it, matching
+the ceiling mail already accepted, and `capMessage` reports if it binds.
+
+**One trap in carrying the argmax.** `files_embeddings.sequence` is `NOT NULL
+DEFAULT 0`, so *every* image and description row reads sequence 0. Reading the
+column directly would have attached "chunk 0" to every photo in the archive
+and rendered a footnote citing a passage that does not exist. The dedup path
+therefore reads `type` first and only then `sequence` — the guard is the
+feature, not the lookup.
+
+**The lexical side collapses in SQL, before results leave the retriever.** A
+file can now match in two indexes at once, so `_searchFiles` unions
+`files_fts` and `file_chunks_fts` and groups by `f.id` taking `MIN(score)`
+(bm25 ascends, so the smallest is the best passage). Doing it later would be
+the §15f double-listing distortion in its most concentrated form: ten matching
+chunks of one PDF would each take a rank slot and each collect its own
+reciprocal-rank contribution, so RRF would read one document as ten
+corroborating results.
+
+Two consequences that were easy to miss, and both are counting bugs rather
+than ranking ones:
+
+- **`fileTotal` had to learn the union too.** Counting `files_fts` alone
+  would omit a document that matches only on its text — which the results page
+  would then show, giving a total smaller than the list beneath it.
+- **`matchingIds` had to as well.** It exists to tell an agreement between the
+  two retrievers from a genuine semantic addition; blind to chunk text it
+  would have called every chunk-only match an addition and overstated the
+  total by however many documents the two passes actually agreed on.
+
+**Where step 3 stops.** `VectorHit.chunkSequence` survives deduplication,
+which is what this step required, but it stops at `HybridRanker` — that builds
+`SearchResult`s from the lexical loader, so nothing carries the winning chunk
+into a result yet. Threading it through `SearchResult` and rendering the
+footnote is step 4, and until then the provenance is retrieved and unused.
 
 ### 18i. What gets extracted, when, and what happens when it fails
 

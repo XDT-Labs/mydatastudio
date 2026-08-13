@@ -27,15 +27,29 @@ class VectorHit {
   /// reason RRF was chosen over score blending.
   final double similarity;
 
+  /// Which chunk won, when the winning vector was a document chunk.
+  ///
+  /// Null for a photo or its description, and for every email — those are
+  /// scored by their best vector and nothing downstream needs to know which.
+  /// Documents invert that: §6 says of `emails_embeddings.chunk_index`
+  /// *"nothing downstream reads chunk_index"*, but the winning chunk's page
+  /// **is** the footnote, so here the argmax has to survive deduplication
+  /// rather than being collapsed away with the scores it was chosen by.
+  ///
+  /// Matches `files_embeddings.sequence`, which is `file_chunks.chunk_index`.
+  final int? chunkSequence;
+
   const VectorHit({
     required this.type,
     required this.id,
     required this.similarity,
+    this.chunkSequence,
   });
 
   @override
   String toString() =>
-      'VectorHit(${type.name}, $id, ${similarity.toStringAsFixed(4)})';
+      'VectorHit(${type.name}, $id, ${similarity.toStringAsFixed(4)}'
+      '${chunkSequence == null ? '' : ', chunk $chunkSequence'})';
 }
 
 /// Semantic retrieval over the Qwen3-VL embeddings.
@@ -191,6 +205,49 @@ class VectorRetriever {
   /// which is what this constant is for.
   static const modeAEmailChunkCap = modeACandidateCap * 2;
 
+  /// Ceiling on rows read in Mode A **for files**, once documents are chunked.
+  ///
+  /// Same argument as [modeAEmailChunkCap] and a larger correction, because
+  /// documents chunk far harder than mail does: 1.92 chunks per email against
+  /// a measured median of 9 per document (§18a-2). A filtered set that happens
+  /// to be document-heavy would otherwise spend the whole 4,000-row budget on
+  /// a few hundred files.
+  ///
+  /// Deliberately not scaled by the full 9x. The cap bounds *memory* — 8,000
+  /// vectors is ~65 MB of blobs, the same ceiling mail already accepted — and
+  /// a filter selective enough to be in Mode A rarely returns thousands of
+  /// documents. If this starts binding, [capMessage] says so.
+  static const modeAFileChunkCap = modeACandidateCap * 2;
+
+  /// Mode B's over-fetch multiplier, per modality.
+  ///
+  /// The bound limits how many `(rowid, distance)` pairs come back and no
+  /// blobs travel with them, so raising it is close to free — the reason it
+  /// went 2x → 5x for mail when chunking landed (§16d).
+  ///
+  /// **What the multiplier is really for** is surviving deduplication. A
+  /// single item holding many vectors can occupy many of the scan's raw top-N
+  /// slots and still collapse to one result, so the fetch has to be large
+  /// enough that other items are still represented underneath it.
+  ///
+  /// Files move to 8x on a corpus argument rather than a per-item one, which
+  /// is the honest way to pick it here. The projected post-chunking file
+  /// corpus is ~10,600 vectors (§18a-2: ~5,000 document chunks over the 5,576
+  /// image and description vectors already stored). At `candidateLimit` 2,000
+  /// a 5x fetch is 10,000 — within a rounding error of scanning everything,
+  /// so today the multiplier barely binds at all and any value near it would
+  /// look fine. 8x fetches 16,000, which keeps the scan complete as the
+  /// archive grows by half again before the question has to be revisited.
+  ///
+  /// This is provisional by construction: §18e-1 asks for a number derived
+  /// from a real chunk count, and there were none when this was written.
+  /// [overFetchMessage] is what reports the moment it stops covering the
+  /// corpus, so the correction comes from a measurement rather than a guess.
+  static const modeBFileOverFetch = 8;
+
+  /// Mail's multiplier, unchanged at the value §16d measured it to.
+  static const modeBEmailOverFetch = 5;
+
   /// Corpus size, in one modality, at which brute-force scanning stops being
   /// the right answer — §12's tripwire.
   ///
@@ -235,6 +292,38 @@ class VectorRetriever {
         '${type.name}; older candidates past it were never scored. Results are '
         'incomplete by recency, not by relevance.';
   }
+
+  /// The warning for a Mode B fetch that no longer covers its corpus, or null.
+  ///
+  /// Distinct from both warnings above, and the one that decides
+  /// [modeBFileOverFetch]. While the fetch is at least the corpus the scan is
+  /// exhaustive and the multiplier is irrelevant; past that it is a genuine
+  /// top-N, and a top-N is where many chunks of one document can crowd out
+  /// other documents entirely before dedup collapses them to a single result.
+  ///
+  /// Fires on the ratio rather than on equality because the harm is gradual:
+  /// a fetch covering 80% of the corpus is nearly exhaustive, one covering 20%
+  /// is a real ranking risk. The threshold is where "raise the multiplier"
+  /// becomes the right response — which is the number §18e-1 asked for and
+  /// could not have, since no chunks existed when it was written.
+  @visibleForTesting
+  static String? overFetchMessage(
+    SearchResultType type,
+    int fetched,
+    int corpus,
+  ) {
+    if (corpus <= 0 || fetched <= 0) return null;
+    if (fetched >= corpus * overFetchCoverageFloor) return null;
+    return 'VectorRetriever: Mode B for ${type.name} fetched $fetched of '
+        '$corpus vectors — under '
+        '${(overFetchCoverageFloor * 100).round()}% coverage, so a document '
+        'with many chunks can crowd others out of the top-N before dedup. '
+        'Raise the over-fetch multiplier.';
+  }
+
+  /// Fraction of a corpus the Mode B fetch should reach before the multiplier
+  /// is considered too small. Not a cliff — see [overFetchMessage].
+  static const overFetchCoverageFloor = 0.5;
 
   void _warnOnce(String key, String? message) {
     if (message == null || !_announced.add(key)) return;
@@ -305,31 +394,35 @@ class VectorRetriever {
     if (query.hasFilters) {
       final rows = await db.select(
         '''
-        SELECT emb.file_id AS id, emb.qwen3_vl_embedding AS v
+        SELECT emb.file_id AS id, emb.qwen3_vl_embedding AS v,
+               emb.type AS emb_type, emb.sequence AS emb_sequence
         FROM files_embeddings emb
         JOIN files f ON f.id = emb.file_id
         WHERE ${filter.sql} AND emb.qwen3_vl_embedding IS NOT NULL
         ORDER BY f.date_created DESC
         LIMIT ?
         ''',
-        [...filter.params, modeACandidateCap],
+        [...filter.params, modeAFileChunkCap],
       );
       _warnOnce(
         'cap-file',
-        capMessage(SearchResultType.file, rows.length, modeACandidateCap),
+        capMessage(SearchResultType.file, rows.length, modeAFileChunkCap),
       );
       return _rankInDart(rows, queryVector, SearchResultType.file, limit);
     }
 
     // The over-fetch is not slack, it is required. A file carries up to two
-    // vectors — the image itself and its AI description — and both compete for
-    // slots in the scan's raw top-N, so a single photo can occupy two of them
-    // before deduplication collapses it back to one.
+    // vectors — the image itself and its AI description — and a *document*
+    // carries one per chunk, a measured median of nine. All of them compete
+    // for slots in the scan's raw top-N, so a single file can occupy many
+    // before deduplication collapses it back to one. See [modeBFileOverFetch].
     final rows = await _fullScan(
       table: 'files_embeddings',
       type: SearchResultType.file,
+      fetched: limit * modeBFileOverFetch,
       sql: '''
-      SELECT emb.file_id AS id, v.distance AS distance
+      SELECT emb.file_id AS id, v.distance AS distance,
+             emb.type AS emb_type, emb.sequence AS emb_sequence
       FROM files_embeddings emb
       JOIN files f ON f.id = emb.file_id
       JOIN vector_full_scan(
@@ -338,7 +431,11 @@ class VectorRetriever {
       WHERE ${filter.sql}
       ORDER BY v.distance ASC
       ''',
-      params: [_toJsonArray(queryVector), limit * 5, ...filter.params],
+      params: [
+        _toJsonArray(queryVector),
+        limit * modeBFileOverFetch,
+        ...filter.params,
+      ],
     );
     return _rankFromDistance(rows, SearchResultType.file, limit);
   }
@@ -387,7 +484,12 @@ class VectorRetriever {
       WHERE ${filter.sql}
       ORDER BY v.distance ASC
       ''',
-      params: [_toJsonArray(queryVector), limit * 5, ...filter.params],
+      fetched: limit * modeBEmailOverFetch,
+      params: [
+        _toJsonArray(queryVector),
+        limit * modeBEmailOverFetch,
+        ...filter.params,
+      ],
     );
     return _rankFromDistance(rows, SearchResultType.email, limit);
   }
@@ -414,6 +516,7 @@ class VectorRetriever {
     required SearchResultType type,
     required String sql,
     required List<Object?> params,
+    required int fetched,
   }) async {
     final watch = Stopwatch()..start();
     final rows = await db.select(sql, params);
@@ -425,6 +528,7 @@ class VectorRetriever {
       '${rows.length} rows back, ${watch.elapsedMilliseconds} ms',
     );
     _warnOnce('tripwire-${type.name}', tripwireMessage(type, corpus));
+    _warnOnce('overfetch-${type.name}', overFetchMessage(type, fetched, corpus));
     return rows;
   }
 
@@ -470,6 +574,7 @@ class VectorRetriever {
     if (queryNorm == 0) return const [];
 
     final best = <String, double>{};
+    final winningChunk = <String, int?>{};
     for (final row in rows) {
       final blob = row['v'];
       if (blob is! Uint8List) continue;
@@ -479,12 +584,20 @@ class VectorRetriever {
       final similarity = _cosine(query, vector, queryNorm);
       final id = row['id'] as String;
       final existing = best[id];
-      if (existing == null || similarity > existing) best[id] = similarity;
+      if (existing == null || similarity > existing) {
+        best[id] = similarity;
+        winningChunk[id] = _chunkSequenceOf(row);
+      }
     }
 
     final hits = [
       for (final entry in best.entries)
-        VectorHit(type: type, id: entry.key, similarity: entry.value),
+        VectorHit(
+          type: type,
+          id: entry.key,
+          similarity: entry.value,
+          chunkSequence: winningChunk[entry.key],
+        ),
     ]..sort((a, b) => b.similarity.compareTo(a.similarity));
     return floorAndCap(hits, limit);
   }
@@ -497,20 +610,41 @@ class VectorRetriever {
     int limit,
   ) {
     final best = <String, double>{};
+    final winningChunk = <String, int?>{};
     for (final row in rows) {
       final distance = (row['distance'] as num?)?.toDouble();
       if (distance == null) continue;
       final similarity = 1.0 - distance / 2.0;
       final id = row['id'] as String;
       final existing = best[id];
-      if (existing == null || similarity > existing) best[id] = similarity;
+      if (existing == null || similarity > existing) {
+        best[id] = similarity;
+        winningChunk[id] = _chunkSequenceOf(row);
+      }
     }
 
     final hits = [
       for (final entry in best.entries)
-        VectorHit(type: type, id: entry.key, similarity: entry.value),
+        VectorHit(
+          type: type,
+          id: entry.key,
+          similarity: entry.value,
+          chunkSequence: winningChunk[entry.key],
+        ),
     ]..sort((a, b) => b.similarity.compareTo(a.similarity));
     return floorAndCap(hits, limit);
+  }
+
+  /// The chunk index a row's vector belongs to, or null if it is not a chunk.
+  ///
+  /// Guarded on `emb_type` rather than reading `emb_sequence` directly,
+  /// because that column is `NOT NULL DEFAULT 0`: every image and description
+  /// row carries sequence 0, and treating those as "chunk 0" would attach a
+  /// footnote citing a passage that does not exist to every photo in the
+  /// archive.
+  static int? _chunkSequenceOf(Map<String, Object?> row) {
+    if (row['emb_type'] != 'chunk') return null;
+    return (row['emb_sequence'] as num?)?.toInt();
   }
 
   /// Drops hits that do not stand far enough above the background, then
