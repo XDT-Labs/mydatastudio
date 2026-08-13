@@ -562,6 +562,38 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS file_landmarks_landmark_idx '
       'ON file_landmarks (landmark);',
     );
+    // The embedded gazetteer (assets/gazetteer/cities.tsv.gz). Seeded lazily
+    // by GazetteerRepository the first time a location search runs, not here:
+    // this method also executes on the scanner and embedding isolates, which
+    // have no asset bundle, and ~70k inserts have no business on the startup
+    // path of a user who never opens Photos.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS locations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        region TEXT,
+        country TEXT NOT NULL,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        population INTEGER NOT NULL DEFAULT 0,
+        search_name TEXT NOT NULL,
+        search_alt TEXT
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS locations_search_name_idx '
+      'ON locations (search_name);',
+    );
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS locations_search_alt_idx '
+      'ON locations (search_alt);',
+    );
+    // Photo location search filters on a lat/lng bounding box; without this
+    // every query is a full scan of the files table.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS files_latlng_idx '
+      'ON files (latitude, longitude);',
+    );
     await _migrateFilesEmbeddingsKey();
     final added = await _addMissingColumns();
 

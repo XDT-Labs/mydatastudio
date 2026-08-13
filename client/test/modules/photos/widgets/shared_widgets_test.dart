@@ -159,7 +159,7 @@ void main() {
   });
 
   group('AnimatedInfoPanel', () {
-    testWidgets('animates width based on isOpen property', (tester) async {
+    testWidgets('occupies its full width when open', (tester) async {
       await tester.pumpWidget(
         createTestApp(
           const AnimatedInfoPanel(
@@ -169,14 +169,74 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
 
       expect(find.text('Panel Content'), findsOneWidget);
-
-      final animatedContainer = tester.widget<AnimatedContainer>(
-        find.byType(AnimatedContainer),
-      );
-      expect(animatedContainer.constraints?.tighten().maxWidth ?? 320, 320);
+      expect(tester.getSize(find.byType(AnimatedInfoPanel)).width, 320);
     });
+
+    testWidgets('takes no width when closed', (tester) async {
+      await tester.pumpWidget(
+        createTestApp(
+          const AnimatedInfoPanel(
+            isOpen: false,
+            width: 320,
+            child: Text('Panel Content'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.getSize(find.byType(AnimatedInfoPanel)).width, 0);
+    });
+
+    testWidgets(
+      'grows from the right edge so the panel slides in beside the content',
+      (tester) async {
+        // The panel used to size from its left edge, which drew it in its
+        // final position on the first frame and then wiped it into view —
+        // reading as the sidebar landing on top of the grid rather than
+        // arriving next to it. Anchoring right is what the Files module's
+        // details drawer does.
+        // Laid out the way PhotosApp lays it out — pinned to the right of the
+        // view it shares a Row with — since that is what makes "which edge
+        // moves" observable at all.
+        Widget alongsideContent({required bool isOpen}) => createTestApp(
+          SizedBox(
+            width: 800,
+            height: 600,
+            child: Row(
+              children: [
+                const Expanded(child: SizedBox.expand()),
+                AnimatedInfoPanel(
+                  isOpen: isOpen,
+                  width: 320,
+                  child: const Text('Panel Content'),
+                ),
+              ],
+            ),
+          ),
+        );
+
+        await tester.pumpWidget(alongsideContent(isOpen: false));
+        await tester.pumpAndSettle();
+
+        final closedRight = tester.getTopRight(find.byType(AnimatedInfoPanel));
+
+        await tester.pumpWidget(alongsideContent(isOpen: true));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 125));
+
+        // Mid-animation the right edge has not moved; only the left one has.
+        expect(
+          tester.getTopRight(find.byType(AnimatedInfoPanel)).dx,
+          closeTo(closedRight.dx, 0.5),
+        );
+        final midWidth = tester.getSize(find.byType(AnimatedInfoPanel)).width;
+        expect(midWidth, greaterThan(0));
+        expect(midWidth, lessThan(320));
+      },
+    );
   });
 
   group('KeyboardShortcutsModal', () {

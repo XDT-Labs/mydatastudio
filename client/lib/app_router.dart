@@ -16,6 +16,7 @@ import 'package:mydatastudio/modules/social/pages/instagram_page.dart';
 import 'package:mydatastudio/modules/social/pages/new_social_page.dart';
 import 'package:mydatastudio/modules/social/pages/twitter_page.dart';
 import 'package:mydatastudio/modules/social/widgets/social_drawer.dart';
+import 'package:mydatastudio/pages/credits_page.dart';
 import 'package:mydatastudio/pages/home.dart';
 import 'package:mydatastudio/pages/login.dart';
 import 'package:mydatastudio/modules/aichat/pages/aichat_models_settings_page.dart';
@@ -124,6 +125,15 @@ class AppRouter {
                 pageBuilder: (context, state) => const RoutePage(
                   body: NavigationWrapper(
                     body: AichatSkillsSettingsPage(),
+                    drawer: SettingsDrawer(),
+                  ),
+                ),
+              ),
+              GoRoute(
+                path: 'credits',
+                pageBuilder: (context, state) => const RoutePage(
+                  body: NavigationWrapper(
+                    body: CreditsPage(),
                     drawer: SettingsDrawer(),
                   ),
                 ),

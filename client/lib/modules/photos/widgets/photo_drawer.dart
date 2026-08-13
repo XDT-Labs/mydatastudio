@@ -6,6 +6,7 @@ import 'package:mydatastudio/models/tables/album.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
+import 'package:mydatastudio/modules/photos/models/photo_place_filter.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
@@ -13,6 +14,7 @@ import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/dialogs/album_modal.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/drawer_nav_item.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/drawer_section.dart';
+import 'package:mydatastudio/modules/photos/widgets/drawer/location_search_field.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/source_group_header.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/storage_meter.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/tag_chip.dart';
@@ -230,6 +232,7 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
         _activeFilter.albumId != null ||
         _activeFilter.tag != null ||
         _activeFilter.location != null ||
+        _activeFilter.place != null ||
         _activeFilter.onlyFavorites;
   }
 
@@ -248,6 +251,29 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
     if (!isCurrent) {
       setState(() => _collapsedGroups.remove(group));
     }
+  }
+
+  /// Applies a place picked from the gazetteer, keeping the rest of the
+  /// filter — a location narrows what is already on screen rather than
+  /// replacing it, the way picking an album or a source does.
+  void _selectPlace(PhotoPlaceFilter place) {
+    final newFilter = _activeFilter.copyWith(place: place);
+    ViewStateService.instance.setActiveNav('place_${place.label}');
+    ViewStateService.instance.updateFilter(newFilter);
+    PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
+  }
+
+  void _clearPlace() {
+    final newFilter = _activeFilter.copyWith(place: null);
+    ViewStateService.instance.setActiveNav('all');
+    ViewStateService.instance.updateFilter(newFilter);
+    PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
+  }
+
+  void _changePlaceRadius(double radiusKm) {
+    final place = _activeFilter.place;
+    if (place == null) return;
+    _selectPlace(place.copyWith(radiusKm: radiusKm));
   }
 
   void _selectCollection(Collection c) {
@@ -652,62 +678,59 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                     const SizedBox(height: 12),
 
                     // Section 5 — Locations
+                    //
+                    // A search box rather than a list: the landmark names this
+                    // section used to enumerate are written only when the
+                    // vision model recognises something famous, so for most
+                    // libraries it was permanently empty. The EXIF coordinates
+                    // it searches instead are already there.
                     DrawerSection(
                       title: 'Locations',
                       icon: Icons.place_outlined,
                       initiallyExpanded: false,
-                      child:
-                          _locationCounts.isEmpty
-                              ? Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12.0,
-                                  vertical: 6.0,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          LocationSearchField(
+                            selected: _activeFilter.place,
+                            onSelected: _selectPlace,
+                            onCleared: _clearPlace,
+                            onRadiusChanged: _changePlaceRadius,
+                          ),
+                          // Landmarks the image analysis did recognise still
+                          // deserve a shortcut when there are any.
+                          if (_locationCounts.isNotEmpty)
+                            ..._locationCounts.entries.map((entry) {
+                              final loc = entry.key;
+                              final count = entry.value;
+                              final isActive = _activeFilter.location == loc;
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 2.0),
+                                child: DrawerNavItem(
+                                  label: loc,
+                                  icon: Icons.location_on,
+                                  count: count > 0 ? count : null,
+                                  isActive: isActive,
+                                  onTap: () {
+                                    final newFilter = isActive
+                                        ? const PhotoFilter()
+                                        : PhotoFilter(location: loc);
+                                    ViewStateService.instance.setActiveNav(
+                                      isActive ? 'all' : 'loc_$loc',
+                                    );
+                                    ViewStateService.instance.updateFilter(
+                                      newFilter,
+                                    );
+                                    PhotosService.instance.invoke(
+                                      PhotosServiceCommand(newFilter),
+                                    );
+                                  },
                                 ),
-                                child: Text(
-                                  'No locations',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              )
-                              : Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children:
-                                    _locationCounts.entries.map((entry) {
-                                      final loc = entry.key;
-                                      final count = entry.value;
-                                      final isActive =
-                                          _activeFilter.location == loc;
-                                      return Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 2.0,
-                                        ),
-                                        child: DrawerNavItem(
-                                          label: loc,
-                                          icon: Icons.location_on,
-                                          count: count > 0 ? count : null,
-                                          isActive: isActive,
-                                          onTap: () {
-                                            final newFilter =
-                                                isActive
-                                                    ? const PhotoFilter()
-                                                    : PhotoFilter(
-                                                      location: loc,
-                                                    );
-                                            ViewStateService.instance
-                                                .setActiveNav(
-                                                  isActive ? 'all' : 'loc_$loc',
-                                                );
-                                            ViewStateService.instance
-                                                .updateFilter(newFilter);
-                                            PhotosService.instance.invoke(
-                                              PhotosServiceCommand(newFilter),
-                                            );
-                                          },
-                                        ),
-                                      );
-                                    }).toList(),
-                              ),
+                              );
+                            }),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 16),
 
