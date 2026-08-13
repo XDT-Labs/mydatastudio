@@ -667,6 +667,11 @@ class AppDatabase {
     await _createSearchIndexes();
     await _backfillSearchIndexes();
     await _createGeoIndexes();
+
+    // Strictly after _addMissingColumns (reads `embedding_attempts`) and after
+    // `file_chunks` exists above, and after _backfillSearchIndexes because it
+    // takes the next `user_version` from the one that sets it.
+    await _unretirePdfsRetiredByMissingPdfium();
   }
 
   /// Creates the gazetteer table and the coordinate index `near:` scans.
@@ -751,6 +756,48 @@ class AppDatabase {
 
     await _reapOrphanedThumbnails();
     await _db.execute('PRAGMA user_version = $reapVersion');
+  }
+
+  /// Un-retires PDFs that were retired by a bug rather than by their contents.
+  ///
+  /// The document extractor answered 422 — *unprocessable content* — when the
+  /// aiserver simply had no `libpdfium` to read PDFs with. The client counts a
+  /// 422 toward [DatabaseRepository.maxEmbeddingAttempts], so five passes
+  /// retired every PDF in the archive permanently, and they would have stayed
+  /// retired after the library arrived: `embedding_attempts` only resets on
+  /// success, and success was impossible. Measured here at 29 of 47 PDFs
+  /// before the PDF pipeline had even shipped. The server now answers 503 for
+  /// this, which costs no attempt (search plan §18i).
+  ///
+  /// Scoped to PDFs with no chunks rather than to all documents, because that
+  /// is exactly the bug's blast radius — PDF is the only format needing
+  /// pdfium. A blanket reset would also un-retire the ~36 `.doc` files that
+  /// genuinely cannot be parsed, which would burn their budget again for
+  /// nothing.
+  ///
+  /// Gated on `PRAGMA user_version`: this corrects a specific historical
+  /// state, and re-running it would keep resurrecting files that later retire
+  /// for real reasons.
+  Future<void> _unretirePdfsRetiredByMissingPdfium() async {
+    const pdfRecoveryVersion = 4;
+
+    final rows = await _db.select('PRAGMA user_version');
+    final current = rows.isEmpty ? 0 : (rows.first.values.first as int? ?? 0);
+    if (current >= pdfRecoveryVersion) return;
+
+    final result = await _db.execute('''
+      UPDATE files SET embedding_attempts = 0
+      WHERE embedding_attempts > 0
+        AND lower(name) LIKE '%.pdf'
+        AND NOT EXISTS (SELECT 1 FROM file_chunks fc WHERE fc.file_id = files.id)
+    ''');
+    if (result.affectedRows > 0) {
+      logger.i(
+        'AppDatabase: cleared embedding_attempts on ${result.affectedRows} '
+        'PDFs retired while pdfium was unavailable',
+      );
+    }
+    await _db.execute('PRAGMA user_version = $pdfRecoveryVersion');
   }
 
   /// Deletes cached thumbnails no `files` row references any more.

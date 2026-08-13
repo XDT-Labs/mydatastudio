@@ -363,6 +363,16 @@ class DocumentChunkIsolate {
         logger.d('Skipping unsupported document $filename');
         return null;
       }
+
+      // 503 means the *server* cannot read this format yet — a missing
+      // pdfium, an undownloaded model. The document is fine and will extract
+      // once the dependency lands, so this must cost no attempt: five of these
+      // would retire the file permanently before the feature that reads it
+      // ever ships. Returning null is exactly the unreachable-file path.
+      if (response.statusCode == 503) {
+        logger.d('Extraction unavailable for $filename; will retry later');
+        return null;
+      }
       if (response.statusCode == 422) {
         return _Extraction.failed(response.body);
       }

@@ -29,8 +29,10 @@ but they additionally need docling's model pack *and* a macOS ``libpdfium``
 this project must vendor itself — docling's own downloader ships a Linux
 binary and reports success (§18d-1). Until §18h step 5 sets
 ``PDFIUM_DYNAMIC_LIB_PATH`` and ``artifacts_path``, a PDF reaches ``_convert``
-and comes back as a 422. The formats that make up ~85% of the archive
-(.doc/.xls/.rtf/.txt/.csv) need neither.
+and comes back as a **503** — ``ExtractionUnavailable``, deliberately not a
+422, so a PDF does not spend its retry budget waiting for a library. The
+formats that make up ~85% of the archive (.doc/.xls/.rtf/.txt/.csv) need
+neither.
 """
 from __future__ import annotations
 
@@ -57,6 +59,31 @@ EMBEDDING_MODEL_DIR = "Qwen-Qwen3-VL-Embedding-2B-local"
 
 class UnsupportedFormat(Exception):
     """The bytes are not a document we index, or not one docling can read."""
+
+
+class ExtractionUnavailable(Exception):
+    """This server cannot extract this format *right now* — a missing
+    dependency, not a bad document.
+
+    The distinction is the whole of §18i's permanent/transient split, and
+    getting it wrong is expensive in a way that is invisible at the time. A PDF
+    that fails because ``libpdfium`` is not installed looks exactly like a
+    corrupt PDF from the caller's side, so the client counts an attempt; five
+    passes later the file is retired permanently, and it stays retired after
+    the library is installed. Measured on this archive that had already
+    retired 29 of 47 PDFs before the PDF pipeline was even scheduled to ship.
+    """
+
+
+# Substrings that mark a docling failure as environmental rather than about the
+# document. Matched on the message because the Rust bindings raise one
+# ConversionError for everything — there is no exception type to switch on.
+_UNAVAILABLE_MARKERS = (
+    "pdfium",
+    "library is not installed",
+    "model not found",
+    "download_dependencies",
+)
 
 
 @dataclass
@@ -218,6 +245,24 @@ def _convert(data: bytes, fmt: str):
     OCR is the expensive path; a scanned PDF yields little text instead of
     costing minutes, and §18b's tripwire is what notices.
     """
+    try:
+        return _convert_raw(data, fmt)
+    except ExtractionUnavailable:
+        raise
+    except Exception as e:
+        # Re-raise environmental failures as their own type so the route can
+        # answer 503 instead of 422 — see ExtractionUnavailable. Matched on the
+        # message because the bindings raise one ConversionError for
+        # everything; there is no exception type to switch on.
+        message = str(e).lower()
+        if any(marker in message for marker in _UNAVAILABLE_MARKERS):
+            raise ExtractionUnavailable(str(e)) from e
+        raise
+
+
+def _convert_raw(data: bytes, fmt: str):
+    """The docling call itself, split out so the classification above can be
+    tested without a real missing library."""
     from docling_rs import DocumentConverter, DocumentStream
 
     converter = DocumentConverter(do_ocr=False)

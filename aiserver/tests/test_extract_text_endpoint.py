@@ -15,6 +15,7 @@ import base64
 import pytest
 from fastapi import HTTPException
 
+from aichat import document_extractor as de
 from aichat.document_extractor import MAX_CHUNK_INPUT_CHARS
 from aichat.models import ExtractTextRequest
 from aichat.routes import extract_text
@@ -94,6 +95,30 @@ async def test_unreadable_content_reports_unprocessable_not_unsupported():
         await _extract(truncated_ole2, "broken.doc")
 
     assert exc.value.status_code == 422
+
+
+async def test_missing_dependency_reports_unavailable_not_unprocessable(
+    monkeypatch,
+):
+    """A PDF that fails because libpdfium is absent is not a bad PDF.
+
+    Answering 422 here makes the client spend a retry attempt, and five passes
+    retire the file permanently — before the feature that could read it has
+    even shipped. Measured on the dev archive: 29 of 47 PDFs retired this way.
+    503 costs no attempt.
+    """
+    def _raise(*args, **kwargs):
+        raise RuntimeError(
+            "parse error: pdf: pdfium error: the pdfium library is not "
+            "installed. PDF/image conversion needs pdfium + the ONNX models"
+        )
+
+    monkeypatch.setattr(de, "_convert_raw", _raise)
+
+    with pytest.raises(HTTPException) as exc:
+        await _extract(b"%PDF-1.5\n", "invoice.pdf")
+
+    assert exc.value.status_code == 503
 
 
 async def test_invalid_base64_is_rejected_before_any_extraction():

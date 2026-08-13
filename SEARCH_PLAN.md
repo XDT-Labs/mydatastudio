@@ -2457,6 +2457,60 @@ which is what this step required, but it stops at `HybridRanker` — that builds
 into a result yet. Threading it through `SearchResult` and rendering the
 footnote is step 4, and until then the provenance is retrieved and unused.
 
+#### 18h-4. Two failure classes seen in the first live run
+
+The isolate ran against the real archive for the first time. 95 documents and
+544 chunks indexed. Two error classes showed up in the log, and only one of
+them was working as intended.
+
+**`no WordDocument stream` — upstream's bug, and correctly retired.** 62 of
+202 readable `.doc` files fail this way, and the files are *valid*. Checked
+directly: `wIdent = 0xA5EC`, `nFib = 0xC1` (Word 97), the `WordDocument` and
+`1Table` streams both present at the CFB root, and `1Table` is what the FIB's
+`fWhichTblStm` bit asks for. Byte-identical header fields to the 140 files
+that parse fine, so it is not a format-version split. Walking the directory's
+red-black tree confirmed the entry is reachable in **all 65** failures exactly
+as it is in the 140 successes — so it is not a container-traversal bug either.
+Whatever fails is inside docling's reader, past the point any structural check
+can see, and the message is misleading. Not worth further local diagnosis;
+worth an upstream report with these numbers.
+
+A smaller group is a genuine limitation rather than a bug: 6 files report
+`bad FIB magic` and carry `wIdent = 0xA5DC` with `nFib` 0x65/0x68 — **Word
+6.0/95**, which the Rust port does not implement. Correct rejection, unhelpful
+wording.
+
+The retry budget behaved: those files reached `embedding_attempts = 5` and
+dropped out of the queue. **No loop.** This is the one place the design's
+permanent/transient split worked as written.
+
+**PDF — our bug, and it silently retired a whole format.** Every PDF failed
+with docling's *"the pdfium library is not installed"*, which
+`/util/extract-text` classified as **422 unprocessable content**. That counts
+an attempt, so after five passes **29 of 47 PDFs were retired permanently** —
+before §18h step 5 had shipped the pdfium they were waiting for, and they
+would have *stayed* retired afterwards, because `embedding_attempts` only
+resets on success and success was impossible.
+
+This is precisely the distinction §18i draws — *"the counter should increment
+on unprocessable content and not on unavailable service"* — and the section
+lists the transient cases as an aiserver restart or an offline volume. A
+missing native library is the same class and was not on the list, so the code
+did not treat it as one. The general shape worth remembering: **an
+unimplemented feature looks exactly like broken data from the caller's side**,
+and the default classification will be the damaging one.
+
+Two changes:
+
+- `ExtractionUnavailable` → **503**, matched on the failure message because
+  the bindings raise one `ConversionError` for everything. The isolate treats
+  503 like an unreachable file: no attempt spent, retry later.
+- A one-off `user_version` migration clears `embedding_attempts` for PDFs with
+  no chunk rows. Scoped to PDFs deliberately — that is the bug's exact blast
+  radius, since PDF is the only format needing pdfium, and a blanket reset
+  would also un-retire the ~36 `.doc` files that genuinely cannot be parsed
+  and burn their budget again for nothing.
+
 ### 18i. What gets extracted, when, and what happens when it fails
 
 §18h step 2 names a `DocumentChunkIsolate` without saying what it pulls from.

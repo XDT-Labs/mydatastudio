@@ -127,6 +127,85 @@ void main() {
     });
   });
 
+  group('recovering PDFs retired by a missing pdfium', () {
+    test('clears attempts on PDFs that never produced chunks', () async {
+      final db = await freshDb('chunk_pdf_recovery_test.db');
+      await insertFile(db, 'f1');
+      // What the bug did: the server answered 422 for "no libpdfium", the
+      // client counted it as unparseable content, and five passes retired a
+      // perfectly good PDF permanently — embedding_attempts only resets on
+      // success, and success was impossible until the library arrived.
+      await db.rawDb.execute(
+        "UPDATE files SET embedding_attempts = 5 WHERE id = 'f1'",
+      );
+      await db.rawDb.execute('PRAGMA user_version = 3');
+      final path = db.path!;
+      final name = db.name!;
+      await db.close();
+
+      final reopened = await AppDatabase.create(null, path, name);
+      final rows = await reopened.rawDb.select(
+        'SELECT embedding_attempts FROM files WHERE id = ?',
+        ['f1'],
+      );
+
+      expect(rows.first['embedding_attempts'], 0);
+      await reopened.close();
+    });
+
+    test('leaves a PDF that already extracted alone', () async {
+      final db = await freshDb('chunk_pdf_recovery_done_test.db');
+      await insertFile(db, 'f1');
+      await db.rawDb.execute(
+        "UPDATE files SET embedding_attempts = 2 WHERE id = 'f1'",
+      );
+      await db.rawDb.execute(
+        'INSERT INTO file_chunks (file_id, chunk_index, text) '
+        "VALUES ('f1', 0, 'already extracted')",
+      );
+      await db.rawDb.execute('PRAGMA user_version = 3');
+      final path = db.path!;
+      final name = db.name!;
+      await db.close();
+
+      final reopened = await AppDatabase.create(null, path, name);
+      final rows = await reopened.rawDb.select(
+        'SELECT embedding_attempts FROM files WHERE id = ?',
+        ['f1'],
+      );
+
+      expect(rows.first['embedding_attempts'], 2,
+          reason: 'this file was never blocked by the missing library');
+      await reopened.close();
+    });
+
+    test('leaves genuinely unparseable .doc files retired', () async {
+      final db = await freshDb('chunk_pdf_recovery_doc_test.db');
+      await db.rawDb.execute(
+        'INSERT INTO files (id, collection_id, name, path, parent, '
+        'content_type, size, embedding_attempts) '
+        "VALUES ('d1', 'col-1', 'broken.doc', '/tmp/broken.doc', '/tmp', "
+        "'application/msword', 100, 5)",
+      );
+      await db.rawDb.execute('PRAGMA user_version = 3');
+      final path = db.path!;
+      final name = db.name!;
+      await db.close();
+
+      final reopened = await AppDatabase.create(null, path, name);
+      final rows = await reopened.rawDb.select(
+        'SELECT embedding_attempts FROM files WHERE id = ?',
+        ['d1'],
+      );
+
+      expect(rows.first['embedding_attempts'], 5,
+          reason:
+              'docling cannot read these at all; un-retiring them would burn '
+              'the budget again for nothing');
+      await reopened.close();
+    });
+  });
+
   group('file_chunks_fts', () {
     test('indexes chunk text so a document is findable by its contents',
         () async {

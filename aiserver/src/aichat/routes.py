@@ -886,6 +886,12 @@ async def extract_text(request: ExtractTextRequest) -> Dict[str, Any]:
         result = await run_in_threadpool(
             document_extractor.extract, raw_bytes, request.filename
         )
+    except document_extractor.ExtractionUnavailable as e:
+        # 503, not 422: the document is fine, this server cannot read the
+        # format yet. The client must not spend a retry attempt on it, or the
+        # file retires permanently before the dependency ever arrives (§18i).
+        print(f"[WARN] Extraction unavailable for {request.filename!r}: {e}")
+        raise HTTPException(status_code=503, detail=str(e))
     except document_extractor.UnsupportedFormat as e:
         # 415, not 400: the request is well-formed, we decline the media type.
         # The client uses this to mark the file permanently unprocessable
