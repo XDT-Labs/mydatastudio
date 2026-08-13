@@ -1374,13 +1374,65 @@ including `white dog` and `snow mountains`. Asking instead where the answer is
 is what produced 17b's result. A model cannot talk itself out of an opinion the
 caller is enforcing.
 
-### 17f. `expanded_terms` deliberately not built
+### 17f. `expanded_terms` — measured, and not built
 
 §2c's JSON also carries synonyms (`graduation speech` → `commencement`,
-`valedictorian`). Modality intent only **reorders** what was retrieved;
-expanded terms would change **what is retrieved**, which means a second BM25
-pass, a second embedding, a second fusion, and a results list whose membership
-changes a second after it was read. That is a different feature with a different
-risk profile, and it should be measured on its own — including whether the
-synonyms this model produces beat the vector pass that already exists to catch
-exactly these cases.
+`valedictorian`). It was deferred on the argument that the vector pass already
+exists to catch exactly these cases, and that argument was worth testing rather
+than asserting. It was tested on 2026-08-13, against the live archive
+(20,342 emails, 30,790 chunk vectors), read-only.
+
+**Method.** For each query, three sets over mail: **A** — BM25 on the free text
+the app actually searches; **B** — A OR'd with each model-supplied expansion
+term; **C** — the vector pass reproduced exactly (Mode B's 10,000-row fetch,
+best chunk per email, the 0.70 floor). The deciding number is |(B−A)−C|: what
+expansion adds that the semantic pass did not already have.
+
+**Result — the additions are real, and they are all tail.**
+
+| Query | BM25 A → B | Vector kept | Added, not in C | Median percentile of the additions |
+|---|---|---|---|---|
+| graduation speech | 0 → 200 | 27 | 198 | 73 (p25 **50**) |
+| doctor appointment | 3 → 161 | 7 | 158 | 71 |
+| job offer | 43 → 155 | 3 | 112 | 92 |
+| rent payment | 3 → 132 | 29 | 127 | 79 |
+| software subscription | 18 → 84 | 2 | 66 | 96 |
+| birthday party | 12 → 191 | 9 | 177 | 87 |
+
+Percentile is the added email's own best-chunk similarity to the **original**
+query, against all 20,342 emails: 50 is an arbitrary email. So the additions are
+not noise — they are mildly related, consistently better than random. They are
+also, by construction, everything that sat *below the similarity floor*, and
+that is the finding: **expansion's contribution is precisely the tail the floor
+was measured to remove.** p96 of 20,342 is rank ~800, and §16f's inspection put
+the on-topic boundary for mail at around rank 15.
+
+Three things make that worse rather than better in practice:
+
+- **There is no gate to apply.** The floor works because cosine has a
+  background level to measure against (§15e). BM25 has no equivalent, so an
+  expansion term enters as an OR'd disjunct at full recall and the only bound
+  is the page size. `graduation speech` matches nothing in this archive and is
+  currently an honest zero; expansion turns it into 200 results, a quarter of
+  them at or below an arbitrary email.
+- **RRF would promote them.** Fusion reads rank position within a list, so
+  whatever ranks first in an expansion-driven lexical list arrives as an equal
+  of the best photograph — the double-listing distortion of §15f, sourced from
+  a word the user never typed.
+- **The output shape is the one this model handles worst.** 2 of 8 queries
+  degenerated inside a *string* (`'eanceeanceeance…'`, `'-flight info-flight
+  info…'`) and were unparseable — §17c's grammar loop, where `maxItems` cannot
+  help because the repetition is within one element. 4 of the 6 that parsed
+  still contained corrupted terms (`convocation_notes.docx`, `cake
+  orderifications,`, and one element holding 17 comma-separated phrases).
+
+**Decision: do not build it.** Not deferred pending effort — measured, and the
+measurement says the feature's entire contribution is material the retrieval
+stack already looked at and deliberately discarded. Reproduce with
+`expansion_probe.py` (not checked in; §16e's note on throwaway harnesses
+applies).
+
+The one thing this does *not* rule out: expansion against **file names and
+descriptions**, where the corpus is small, the text is short, and there is no
+body text for a vector to work with. That is a different measurement on a
+different corpus, and Phase 7 changes its inputs anyway.
