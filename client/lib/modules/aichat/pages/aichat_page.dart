@@ -351,9 +351,15 @@ class _AichatPage extends State<AichatPage> with RouteAware {
           (m.tokenCount != null && m.tokenCount! > 0)
               ? {'total_tokens': m.tokenCount!}
               : null;
-      chatItems.add(
-        TextMessageItem(role: m.role, text: m.content, usage: usage),
-      );
+      // System messages go to the model but not on screen. They are context
+      // rather than a turn — the search handoff seeds one holding the source
+      // material behind a summary, and rendering it would bury the summary
+      // under tens of thousands of characters nobody asked to read.
+      if (m.role != 'system') {
+        chatItems.add(
+          TextMessageItem(role: m.role, text: m.content, usage: usage),
+        );
+      }
       llmHistory.add({'role': m.role, 'content': m.content});
     }
 

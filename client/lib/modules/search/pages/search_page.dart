@@ -20,6 +20,7 @@ import 'package:mydatastudio/modules/search/widgets/search_file_sidebar.dart';
 import 'package:mydatastudio/modules/search/widgets/search_filter_chips.dart';
 import 'package:mydatastudio/modules/search/widgets/search_lightbox.dart';
 import 'package:mydatastudio/modules/search/widgets/search_result_tile.dart';
+import 'package:mydatastudio/modules/search/widgets/summarize_results_dialog.dart';
 
 /// Top-level search screen: a query box over a ranked, faceted result list,
 /// with a detail panel beside it for whichever result is selected.
@@ -474,6 +475,24 @@ class _SearchPageState extends State<SearchPage> {
     return _buildResults(context);
   }
 
+  /// Opens the summarize dialog for the set currently on screen.
+  ///
+  /// The semantic-only counts travel with it because they are what decides
+  /// whether the answer may say "all": they are the results no keyword
+  /// matched, which came from a top-K vector scan the summarizer's paging can
+  /// never reproduce.
+  void _summarizeResults(ParsedQuery query) {
+    showDialog<void>(
+      context: context,
+      builder:
+          (_) => SummarizeResultsDialog(
+            query: query,
+            semanticOnly: _results.emailSemanticOnly + _results.fileSemanticOnly,
+            retrieved: SearchService.instance.retrieved,
+          ),
+    );
+  }
+
   Widget _buildResults(BuildContext context) {
     final lastQuery = SearchService.instance.lastQuery;
     // The service already restricted retrieval to the selected facet, so what
@@ -493,12 +512,27 @@ class _SearchPageState extends State<SearchPage> {
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-          child: SearchFacetBar(
-            total: _results.total,
-            emailTotal: _results.emailTotal,
-            fileTotal: _results.fileTotal,
-            selected: _facet,
-            onSelected: _onFacetSelected,
+          child: Row(
+            children: [
+              Expanded(
+                child: SearchFacetBar(
+                  total: _results.total,
+                  emailTotal: _results.emailTotal,
+                  fileTotal: _results.fileTotal,
+                  selected: _facet,
+                  onSelected: _onFacetSelected,
+                ),
+              ),
+              // Explicit, never automatic. Summarizing is minutes of local
+              // inference over the whole set, and the user has to have
+              // finished choosing that set before it is worth spending.
+              if (lastQuery != null && _results.total > 0)
+                TextButton.icon(
+                  onPressed: () => _summarizeResults(lastQuery),
+                  icon: const Icon(Icons.auto_awesome, size: 16),
+                  label: const Text('Summarize these results'),
+                ),
+            ],
           ),
         ),
         // No "showing the first N of M" line: the facet counts already state

@@ -1,6 +1,6 @@
 # Unified Search — Implementation Plan
 
-Status: **Phases 1–3 and 6 implemented, plus §13 field autocomplete.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 6 — email chunking, per §16. §13 — `field:` value autocomplete over contacts, tags, landmarks, collections and the fixed vocabularies, per §13f. Phases 4, 5, 7 still proposal.
+Status: **Phases 1–3, 5 and 6 implemented, plus §13 field autocomplete.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 5 — `ResultSetSummarizer`: map-reduce over the whole filtered set, a coverage claim that never says "all" unless it read all of it, and the handoff into `aichat`. Phase 6 — email chunking, per §16. §13 — `field:` value autocomplete over contacts, tags, landmarks, collections and the fixed vocabularies, per §13f. Phases 4 and 7 still proposal.
 
 **The outstanding floor measurement is done: mail is floored at 0.70, files stay at 0.75 (§16f).** Only half the predicted problem was real. The sample bias was, and is worth exactly 0.04 — Mode B reads its median from the top third of 30,791 mail vectors, and correcting for that arithmetically gives 0.677–0.722 across ten probe queries. The distribution change was not: chunking made mail retrieval *better* at an unchanged ratio, because an email now matches on the fragment the query is about instead of on its whole diluted body.
 
@@ -390,7 +390,14 @@ Parsed filters render as **editable chips** above the results (`from: Russel Jon
 
 ### The summarize handoff
 
-A "Summarize these results" button on the result set — not automatic. It takes the top-N results, formats them, and opens the `aichat` module with that context prefilled. That satisfies *"Summarize all of my interactions with Russel Jong"* without entangling search latency with generation latency, and reuses `LocalLlmContentGenerator` rather than adding a second inference path.
+A "Summarize these results" button on the result set — not automatic. It satisfies *"Summarize all of my interactions with Russel Jong"* without entangling search latency with generation latency, and reuses the existing `/v1/chat/completions` endpoint rather than adding a second inference path.
+
+**Built, with one deliberate departure from the sentence above.** As written this said "takes the top-N results, formats them, and opens `aichat` with that context prefilled" — which contradicts §2e, since prefilling *is* truncation and 412 messages will not fit a context window. §2e is the more considered statement and wins: `ResultSetSummarizer` map-reduces the whole set first, and what gets prefilled is the finished summary plus its coverage sentence, not the raw results. Both halves survive that way — the handoff is still a handoff, and the completeness comes from map-reduce instead of from hoping the set is small.
+
+Two smaller choices worth recording:
+
+- **It does not go through `LocalLlmContentGenerator`.** That class adapts the endpoint to genui's streaming conversation surface, and a batch condensation is an intermediate artifact — routing 17 of them through it would put the working in the transcript instead of the answer. The endpoint is the same one; only the adapter is skipped.
+- **It retrieves through `Bm25Retriever` alone.** Its totals are `COUNT(*)` over the hard filters and every counted row is reachable by paging, which is the entire basis for saying "all 412". The vector path cannot make that claim at any corpus size — a top-K has no denominator — so when the on-screen set drew on vectors, the summary is reported as a sample and says so.
 
 ---
 
@@ -425,7 +432,7 @@ Each phase ships something usable on its own.
 | **2** | Search page, wired to the app-bar field. BM25 only. Filter chips, facets | End-to-end usable search. Ship it. |
 | **3** | Vector retriever (Mode A candidate rerank) + RRF + tier boost | "landscape photos near Banff", "party pictures from 2026" |
 | **4** | Query planner (LLM intent, off critical path, fails open) | Ambiguous queries route to the right modality |
-| **5** | Summarize handoff to `aichat`, **map-reduce over filtered sets (§2e)** | "Summarize my interactions with Russel Jong" — genuinely over all 412, not a top-50 sample |
+| **5** | Summarize handoff to `aichat`, **map-reduce over filtered sets (§2e)** — **built**, see §7 | "Summarize my interactions with Russel Jong" — genuinely over all 412, not a top-50 sample |
 | **6** | Email chunking — **measured, adopted and built, see §16** | Retrieval of text inside quoted threads; also cuts backfill cost roughly in half (§16c) |
 | **7** | Document extraction + chunk embeddings | "Find my graduation speech" over PDFs |
 

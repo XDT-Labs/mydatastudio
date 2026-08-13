@@ -62,6 +62,20 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
   /// fused head already placed.
   final Set<String> _emitted = {};
 
+  /// Everything this search retrieved and ranked, not only the pages published.
+  ///
+  /// The fused list is built in one pass — a reciprocal-rank score is
+  /// meaningless without both retrievers' lists — so it already holds far more
+  /// than the UI has shown. Exposing it lets a consumer work from the same
+  /// retrieval the user is looking at instead of re-deriving one: rebuilding
+  /// the set from `Bm25Retriever` alone gives a *different* set whenever free
+  /// text is involved, because the lexical count is `FTS MATCH ? AND filter`
+  /// and the vector pass contributed rows no keyword matched.
+  ///
+  /// Falls back to what has been published when the search was lexical-only,
+  /// where there is no fused list and paging reaches everything anyway.
+  List<SearchResult> get retrieved => _ranked ?? _accumulated.results;
+
   bool get hasMore => _accumulated.hasMore;
   bool get isLoadingMore => _isLoadingMore;
   SearchResultType? get sourceFilter => _sourceFilter;
