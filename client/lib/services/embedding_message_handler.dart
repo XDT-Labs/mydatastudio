@@ -1,12 +1,18 @@
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/models/tables/file_chunk.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 
 /// Handles `{'type': 'embedding', 'table': ..., 'id': ..., ...}` messages sent
 /// by the embedding isolates over their control port.
 ///
-/// Files carry a single `embedding`; emails carry `embeddings`, one per chunk
-/// of the body, replacing whatever the email had before (see
-/// [DatabaseRepository.replaceEmailEmbeddings]).
+/// Three shapes, because three things are being stored. Files carry a single
+/// `embedding`; emails carry `embeddings`, one per chunk of the body,
+/// replacing whatever the email had before (see
+/// [DatabaseRepository.replaceEmailEmbeddings]). Documents carry `chunks` —
+/// text and provenance — *and* optionally `embeddings`, because a document
+/// chunk is a vector plus the footnote metadata that cites it, and the two
+/// have to land together or a search result can match text it cannot show a
+/// source for.
 ///
 /// The embedding isolates open their own read-only-in-practice `AppDatabase`
 /// connection to poll for pending work, but no longer write results directly.
@@ -39,6 +45,26 @@ Future<void> handleEmbeddingMessage(
             (chunk as List).cast<double>(),
         ];
         await repo.replaceEmailEmbeddings(id, embeddings);
+        break;
+      case 'file_chunks':
+        // `embeddings` may be absent or short: the extractor declines to chunk
+        // very large documents (search plan §18a-2), which yields text with no
+        // vectors. That document is still worth storing — it stays findable
+        // through file_chunks_fts, which is the difference between degrading
+        // to keyword search and disappearing.
+        final chunks = [
+          for (final chunk in message['chunks'] as List)
+            FileChunk.fromPortMap(chunk as Map),
+        ];
+        final vectors = [
+          for (final vector in (message['embeddings'] as List?) ?? const [])
+            (vector as List).cast<double>(),
+        ];
+        // One call, one transaction, spanning file_chunks and
+        // files_embeddings. It belongs here rather than in the isolate because
+        // this runs on the main isolate's connection — the only one that
+        // writes — so this is the only place that atomicity is available.
+        await repo.replaceFileChunks(id, chunks, embeddings: vectors);
         break;
       default:
         logger.w('handleEmbeddingMessage: unknown table "$table"');

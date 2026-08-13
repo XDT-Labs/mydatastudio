@@ -6,6 +6,7 @@ import 'package:mydatastudio/services/embedding_model.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/models/tables/file_chunk.dart';
 import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 
@@ -60,7 +61,7 @@ class DatabaseRepository {
             (file_id, type, qwen3_vl_embedding, model_version)
           SELECT ?, ?, vector_as_f32(?), ?
           WHERE EXISTS (SELECT 1 FROM files WHERE id = ?)
-          ON CONFLICT(file_id, type) DO UPDATE SET
+          ON CONFLICT(file_id, type, sequence) DO UPDATE SET
             qwen3_vl_embedding = excluded.qwen3_vl_embedding,
             model_version = excluded.model_version
           ''',
@@ -79,7 +80,7 @@ class DatabaseRepository {
             (file_id, type, qwen3_vl_embedding, model_version)
           SELECT ?, ?, ?, ?
           WHERE EXISTS (SELECT 1 FROM files WHERE id = ?)
-          ON CONFLICT(file_id, type) DO UPDATE SET
+          ON CONFLICT(file_id, type, sequence) DO UPDATE SET
             qwen3_vl_embedding = excluded.qwen3_vl_embedding,
             model_version = excluded.model_version
           ''',
@@ -325,6 +326,80 @@ class DatabaseRepository {
     return _filesWithResolvedPaths(rows);
   }
 
+  /// Extensions the document queue offers to the extractor.
+  ///
+  /// A *hint*, not a decision: the server sniffs the bytes, because this
+  /// archive holds RTF files named `.doc` (search plan §18a). All this list
+  /// does is keep the queue from handing over photos and video.
+  ///
+  /// `htm`/`html` are excluded by policy — most are the HTML part of a mail
+  /// whose body is already indexed, so indexing them creates a document that
+  /// competes with its own email on identical text (§18i). `ppt` is excluded
+  /// on measurement: 43% parse, and those yield slide titles only (§18a-1).
+  static const documentExtensions = [
+    'pdf', 'doc', 'docx', 'rtf', 'xls', 'xlsx', 'csv', 'txt', 'md',
+  ];
+
+  /// Documents whose chunk set is missing or was built by an older model.
+  ///
+  /// **`NOT EXISTS`, never an outer join.** The join used by
+  /// [getFilesWithMissingEmbeddings] is correct there only because `type='file'`
+  /// is one row per file. A document has *many* chunk rows, so the same join
+  /// emits one copy of the file per chunk it already owns — a batch of 100
+  /// becomes a handful of files repeated dozens of times each, and the queue
+  /// stops draining while appearing to work (§16d).
+  ///
+  /// Selecting on `model_version` is what makes a model upgrade re-chunk
+  /// everything without a separate migration, and it is also why
+  /// [replaceFileChunks] must be transactional: a half-written set carrying
+  /// the current version reads here as finished.
+  ///
+  /// The version is read from `file_chunks`, not from the vectors, and the
+  /// difference is load-bearing. A document too large to chunk (§18a-2) is
+  /// stored as text with no vectors at all; asking the vector table whether it
+  /// has been processed would answer "no" every pass and re-extract it
+  /// forever. The chunk set is the record that this pipeline generation is
+  /// finished with the file, whether or not it produced vectors.
+  Future<List<File>> getFilesWithMissingChunks({
+    int limit = 5,
+    Set<String> excludeCollections = const {},
+  }) async {
+    final exclusion =
+        excludeCollections.isEmpty
+            ? ''
+            : 'AND f.collection_id NOT IN '
+                '(${List.filled(excludeCollections.length, '?').join(',')})';
+    final extensionFilter = documentExtensions
+        .map((_) => "lower(f.name) LIKE ?")
+        .join(' OR ');
+    final rows = await db.select(
+      '''
+      SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner
+      FROM files f
+      INNER JOIN collections c ON c.id = f.collection_id
+      WHERE f.is_deleted = 0
+        AND f.is_inline = 0
+        AND ($extensionFilter)
+        AND f.embedding_attempts < ?
+        AND NOT EXISTS (
+              SELECT 1 FROM file_chunks fc
+              WHERE fc.file_id = f.id
+                AND IFNULL(fc.model_version, '') = ?
+            )
+        $exclusion
+      LIMIT ?
+      ''',
+      [
+        ...documentExtensions.map((ext) => '%.$ext'),
+        maxEmbeddingAttempts,
+        EmbeddingModel.current,
+        ...excludeCollections,
+        limit,
+      ],
+    );
+    return _filesWithResolvedPaths(rows);
+  }
+
   /// Images that have failed embedding this many times are dropped from
   /// [getFilesWithMissingEmbeddings].
   ///
@@ -470,7 +545,7 @@ class DatabaseRepository {
             INSERT INTO files_embeddings
               (file_id, type, qwen3_vl_embedding, model_version)
             VALUES (?, 'description', vector_as_f32(?), ?)
-            ON CONFLICT(file_id, type) DO UPDATE SET
+            ON CONFLICT(file_id, type, sequence) DO UPDATE SET
               qwen3_vl_embedding = excluded.qwen3_vl_embedding,
               model_version = excluded.model_version
             ''',
@@ -484,7 +559,7 @@ class DatabaseRepository {
             INSERT INTO files_embeddings
               (file_id, type, qwen3_vl_embedding, model_version)
             VALUES (?, 'description', ?, ?)
-            ON CONFLICT(file_id, type) DO UPDATE SET
+            ON CONFLICT(file_id, type, sequence) DO UPDATE SET
               qwen3_vl_embedding = excluded.qwen3_vl_embedding,
               model_version = excluded.model_version
             ''',
@@ -629,6 +704,126 @@ class DatabaseRepository {
       logger.d(
         'replaceEmailEmbeddings: emailId=$emailId chunks=$affectedRows '
         'dim=${embeddings.first.length}',
+      );
+    }
+  }
+
+  /// Replaces every stored chunk for [fileId] — text, provenance and vectors —
+  /// in a single transaction.
+  ///
+  /// Unlike [replaceEmailEmbeddings] this spans two tables, because a document
+  /// chunk is a vector *and* the footnote metadata that cites it: `file_chunks`
+  /// holds the text, page and offsets, `files_embeddings` holds the vector at
+  /// `type='chunk'`, and `(file_id, chunk_index)` in the first is
+  /// `(file_id, sequence)` in the second. Splitting the write would let the two
+  /// disagree about what a document contains.
+  ///
+  /// [embeddings] may be shorter than [chunks] — that is the §18a-2 gated case,
+  /// where text was extracted but chunking was declined, so the document stays
+  /// findable through `file_chunks_fts` with no vectors at all. It may not be
+  /// *longer*: a vector with no chunk row is a hit that cannot be rendered.
+  ///
+  /// Replace rather than upsert, for the reason [replaceEmailEmbeddings] gives
+  /// — a re-extracted document can be shorter, and the orphaned tail keeps its
+  /// `files` row alive so no cascade ever reaps it. One transaction also keeps
+  /// `model_version` honest: a crash midway through a non-transactional write
+  /// leaves some chunks carrying the current version, which is exactly what
+  /// [getFilesWithMissingChunks] reads as *finished*, freezing a half-indexed
+  /// document forever.
+  Future<void> replaceFileChunks(
+    String fileId,
+    List<FileChunk> chunks, {
+    List<List<double>> embeddings = const [],
+  }) async {
+    if (embeddings.length > chunks.length) {
+      throw ArgumentError(
+        'replaceFileChunks: ${embeddings.length} embeddings for '
+        '${chunks.length} chunks — a vector with no chunk row cannot be '
+        'rendered as a result',
+      );
+    }
+
+    int chunkRows = 0;
+    await db.transaction((tx) async {
+      final exists = await tx.select(
+        'SELECT 1 FROM files WHERE id = ? LIMIT 1',
+        [fileId],
+      );
+      if (exists.isEmpty) return;
+
+      // Both deletes, always — a re-extraction that now yields no vectors
+      // (gated) must not leave the previous run's vectors behind.
+      await tx.execute('DELETE FROM file_chunks WHERE file_id = ?', [fileId]);
+      await tx.execute(
+        "DELETE FROM files_embeddings WHERE file_id = ? AND type = 'chunk'",
+        [fileId],
+      );
+
+      for (final chunk in chunks) {
+        final result = await tx.execute(
+          '''
+          INSERT INTO file_chunks
+            (file_id, chunk_index, page, heading_path, char_start, char_end,
+             text, model_version)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ''',
+          [
+            fileId,
+            chunk.chunkIndex,
+            chunk.page,
+            chunk.headingPath,
+            chunk.charStart,
+            chunk.charEnd,
+            chunk.text,
+            EmbeddingModel.current,
+          ],
+        );
+        chunkRows += result.affectedRows;
+      }
+
+      for (var index = 0; index < embeddings.length; index++) {
+        final embedding = embeddings[index];
+        final sequence = chunks[index].chunkIndex;
+        try {
+          await tx.execute(
+            '''
+            INSERT INTO files_embeddings
+              (file_id, type, sequence, qwen3_vl_embedding, model_version)
+            VALUES (?, 'chunk', ?, vector_as_f32(?), ?)
+            ''',
+            [
+              fileId,
+              sequence,
+              '[${embedding.join(',')}]',
+              EmbeddingModel.current,
+            ],
+          );
+        } catch (e) {
+          logger.w('vector_as_f32 unavailable, storing raw BLOB: $e');
+          final blob = Float32List.fromList(embedding).buffer.asUint8List();
+          await tx.execute(
+            '''
+            INSERT INTO files_embeddings
+              (file_id, type, sequence, qwen3_vl_embedding, model_version)
+            VALUES (?, 'chunk', ?, ?, ?)
+            ''',
+            [fileId, sequence, blob, EmbeddingModel.current],
+          );
+        }
+      }
+    });
+
+    // See upsertFileEmbedding: a missing `files` row makes this a silent
+    // no-op rather than a failure, so it has to be said out loud.
+    if (chunkRows == 0 && chunks.isNotEmpty) {
+      logger.w(
+        'replaceFileChunks: no rows written for fileId=$fileId — files row '
+        'missing or not yet visible to this connection',
+      );
+    } else {
+      logger.d(
+        'replaceFileChunks: fileId=$fileId chunks=$chunkRows '
+        'vectors=${embeddings.length}',
       );
     }
   }

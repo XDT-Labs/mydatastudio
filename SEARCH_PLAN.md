@@ -2214,7 +2214,7 @@ not bother.
 |---|---|
 | 0 | **Spike — gating (§18d).** Four questions, below |
 | 1 | **Built.** `POST /util/extract-text` returning chunks with provenance. Every non-PDF format — including legacy `.doc`/`.xls`/`.ppt`/`.rtf` — needs no model download, so this step already covers most of the archive's documents. Route by sniffing bytes (§18a), resolve cloud paths (§18i). See §18h-1 |
-| 2 | `files_embeddings` PK widened to `(file_id, type, sequence)`, `file_chunks` + `file_chunks_fts` DDL (§18e); `DocumentChunkIsolate` registered as the fourth background isolate (§18j) and its queue (§18i) |
+| 2 | **Built.** `files_embeddings` PK widened to `(file_id, type, sequence)`, `file_chunks` + `file_chunks_fts` DDL (§18e); `DocumentChunkIsolate` registered as the fourth background isolate (§18j) and its queue (§18i). See §18h-2 |
 | 3 | Retrieval: chunk vectors into `VectorRetriever` with argmax carried through dedup, `file_chunks_fts` into the lexical path collapsed per file *before* fusion, **Mode B over-fetch raised against a real chunk count** (§18e-1, §18f) |
 | 4 | Footnotes in the result UI, and the parent-email link for attachments |
 | 5 | PDF pipeline behind the model download; scanned-page tripwire logging. **Prerequisite: vendor a macOS arm64 `libpdfium.dylib` (§18d-1)** — docling's own download ships a Linux binary and reports success |
@@ -2326,6 +2326,77 @@ vendored pdfium:
 Note the complementarity: PDFs yield pages and no headings, `.doc` yields
 headings and no pages. Neither format gives both, so §18f's footnote must
 render from whichever arrived.
+
+#### 18h-2. Step 2 as built
+
+Schema, write path, queue and isolate. 21 new tests; the client suite is 986
+green with one pre-existing failure (`files.is_inline`, unrelated and failing
+identically on the commit before this work).
+
+**One prediction in §18e was wrong, and it broke fourteen tests.** That section
+says widening the key "keeps `upsertFileEmbedding` and `saveFileDescription`
+working untouched" because `sequence` defaults to 0. The default is fine; the
+*conflict target* is not. Both methods upsert with an explicit
+`ON CONFLICT(file_id, type)`, and SQLite requires that target to match a real
+unique index — so the moment the key became three columns, every image and
+description write failed with `ON CONFLICT clause does not match any PRIMARY
+KEY or UNIQUE constraint`. It surfaced immediately and loudly, which is the
+good version of this mistake; the fix is one column in four statements. Worth
+keeping because the reasoning error is repeatable: a column default protects
+*inserts*, not *conflict targets*.
+
+**`model_version` is stored on `file_chunks`, not only on the vector rows**,
+and this was not in the design. §18i's eligibility query reads the version off
+`files_embeddings`, which cannot express the gated case: an oversized document
+(§18a-2) has text and *no vectors at all*, so asking the vector table whether
+it has been processed answers "no" on every pass and re-extracts it forever.
+Stamping the chunk set records that this pipeline generation considered the
+file and is finished with it, whether or not it produced vectors. It is not
+redundant with the vector's copy — chunk *boundaries* depend on the embedding
+model too, because the token budget is counted with that model's tokenizer.
+
+The queue therefore reads:
+
+```sql
+AND NOT EXISTS (
+      SELECT 1 FROM file_chunks fc
+      WHERE fc.file_id = f.id AND IFNULL(fc.model_version, '') = ?
+    )
+```
+
+which keeps §16d's `NOT EXISTS` requirement, re-offers everything after a
+model upgrade, and leaves gated files alone. An earlier draft added a second
+`NOT EXISTS` over `file_chunks` to handle the gated case and silently broke
+re-chunking on upgrade — the two conditions cannot both be satisfied by
+consulting the vector table alone.
+
+**The migration preserves rows rather than discarding them**, unlike
+`_migrateEmailEmbeddingsToChunks`. Mail's rebuild threw away whole-body
+vectors because chunking is exactly what replaced them. Nothing about
+`sequence` invalidates an image vector, so every row is carried across with
+`sequence = 0` — and `model_version` with it, since dropping that would
+present several thousand valid vectors to the backfill queue as unfinished
+work. The base DDL was widened too, so a new database never runs the
+migration at all.
+
+**What the isolate reuses rather than reinvents.** §18i worried about cloud
+documents having no filesystem path; `FileBytesLoader.load()` already resolves
+local and `gdrive://` paths for the image isolates, so this is a call rather
+than a feature. `UnreachableCollections` likewise already encodes §18i's
+permanent/transient split at the collection level. The isolate's own
+contribution is narrower than the section implies: poll, load, extract, embed
+per chunk, relay.
+
+**Two ordering decisions inside the isolate**, both following from §18j's
+"text first" rule:
+
+- A **415** costs no attempt (a format we decline is not a failure of the
+  file), a **422** costs one (content we could not parse), and a transport
+  error costs none and backs the whole collection off.
+- Embedding **stops at the first failure** rather than skipping the bad chunk,
+  because the write pairs vectors to chunks by position — a short list has to
+  be a prefix. The text still lands whole, so the document is immediately
+  keyword-searchable and the tail is embedded on a later pass.
 
 ### 18i. What gets extracted, when, and what happens when it fails
 

@@ -14,6 +14,7 @@ import 'package:path_provider_platform_interface/path_provider_platform_interfac
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:mydatastudio/modules/files/services/document_chunk_isolate.dart';
 import 'package:mydatastudio/modules/files/services/embedding_isolate.dart';
 import 'package:mydatastudio/modules/files/services/file_description_isolate.dart';
 import 'package:mydatastudio/modules/email/services/email_embedding_isolate.dart';
@@ -43,6 +44,7 @@ class DatabaseManager {
   EmbeddingIsolate? _embeddingIsolate;
   EmailEmbeddingIsolate? _emailEmbeddingIsolate;
   FileDescriptionIsolate? _fileDescriptionIsolate;
+  DocumentChunkIsolate? _documentChunkIsolate;
   DatabaseRepository? _repository;
   bool _backgroundServicesStarted = false;
   VoidCallback? _vaultUnlockListener;
@@ -302,6 +304,12 @@ class DatabaseManager {
     if (appDatabase != null && _fileDescriptionIsolate == null) {
       await _startFileDescriptionIsolate(appDatabase!.path!);
     }
+
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (generation != _startGeneration) return;
+    if (appDatabase != null && _documentChunkIsolate == null) {
+      await _startDocumentChunkIsolate(appDatabase!.path!);
+    }
   }
 
   void stopBackgroundServices() {
@@ -313,6 +321,8 @@ class DatabaseManager {
     _emailEmbeddingIsolate = null;
     unawaited(_fileDescriptionIsolate?.stop());
     _fileDescriptionIsolate = null;
+    unawaited(_documentChunkIsolate?.stop());
+    _documentChunkIsolate = null;
   }
 
   Future<AppDatabase> _openDatabase(String dbDir) async {
@@ -386,11 +396,21 @@ class DatabaseManager {
     );
   }
 
+  Future<void> _startDocumentChunkIsolate(String storagePath) async {
+    _documentChunkIsolate = DocumentChunkIsolate();
+    await _documentChunkIsolate!.start(
+      storagePath,
+      AppConstants.dbName,
+      RootIsolateToken.instance!,
+    );
+  }
+
   void pauseEmbeddingIsolates() {
     logger.d("Pausing embedding isolates for active scanner/import");
     _embeddingIsolate?.pause();
     _emailEmbeddingIsolate?.pause();
     _fileDescriptionIsolate?.pause();
+    _documentChunkIsolate?.pause();
   }
 
   void resumeEmbeddingIsolates() {
@@ -400,6 +420,7 @@ class DatabaseManager {
     _embeddingIsolate?.resume();
     _emailEmbeddingIsolate?.resume();
     _fileDescriptionIsolate?.resume();
+    _documentChunkIsolate?.resume();
   }
 
   void dispose() {
@@ -551,6 +572,40 @@ class AppDatabase {
         model_version TEXT,
         PRIMARY KEY (email_id, chunk_index),
         FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
+      );
+    ''');
+    // The text and provenance behind each `type='chunk'` row in
+    // files_embeddings, keyed to match it: (file_id, chunk_index) here is
+    // (file_id, sequence) there. Kept in its own table rather than widened
+    // onto files_embeddings because a vector table should hold vectors —
+    // and because the footnote fields are what search *renders*, so they are
+    // read on every result and the blobs are not (search plan §18e).
+    //
+    // `page` is null for every format that has no pages, which is all of them
+    // except PDF; `heading_path` is the anchor those formats do carry.
+    //
+    // `model_version` lives here as well as on the vector row, and it is what
+    // the backfill queue actually reads. A document that was extracted but
+    // deliberately *not* embedded — the oversized case (§18a-2) — has chunk
+    // rows and no vectors, which is indistinguishable from "never embedded" if
+    // only the vector table is consulted, so it would be re-extracted on every
+    // pass forever. Stamping the chunk set records that this generation of the
+    // pipeline already considered the file and is done with it. It is not
+    // redundant with the vector's copy: chunk *boundaries* depend on the
+    // embedding model too, because the token budget is counted with that
+    // model's tokenizer.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS file_chunks (
+        file_id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        page INTEGER,
+        heading_path TEXT,
+        char_start INTEGER,
+        char_end INTEGER,
+        text TEXT NOT NULL,
+        model_version TEXT,
+        PRIMARY KEY (file_id, chunk_index),
+        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
       );
     ''');
     await _db.execute('''
@@ -821,6 +876,21 @@ class AppDatabase {
       );
     ''');
 
+    // A second files index, not a widening of the first. `files_fts` is
+    // external-content over `files`, and an external-content index can only
+    // hold columns of its content table — chunk text lives in `file_chunks`,
+    // so it is unreachable from there. Without this, a document's *contents*
+    // would be findable by vector search and by nothing else, leaving the
+    // known-item lookup that motivates document search ("find my graduation
+    // speech") with no lexical path at all.
+    await _db.execute('''
+      CREATE VIRTUAL TABLE IF NOT EXISTS file_chunks_fts USING fts5(
+        text,
+        content='file_chunks', content_rowid='rowid',
+        tokenize='unicode61 remove_diacritics 2'
+      );
+    ''');
+
     // An external-content delete must replay the OLD column values: FTS5 keeps
     // no copy of the row, so it can only find the terms to retract by being
     // handed what they were. Passing new values, or omitting them, silently
@@ -870,6 +940,33 @@ class AppDatabase {
         VALUES ('delete', old.rowid, old.name, old.path, old.description);
         INSERT INTO files_fts(rowid, name, path, description)
         VALUES (new.rowid, new.name, new.path, new.description);
+      END;
+    ''');
+
+    // Chunk rows are rewritten wholesale (delete-then-insert) rather than
+    // updated in place, so the delete trigger carries the real load here: it
+    // is what stops a re-extracted document's superseded text from staying
+    // matchable. The update trigger exists anyway — an external-content index
+    // that misses one write is silently wrong, not loudly broken.
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS file_chunks_fts_ai
+      AFTER INSERT ON file_chunks BEGIN
+        INSERT INTO file_chunks_fts(rowid, text) VALUES (new.rowid, new.text);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS file_chunks_fts_ad
+      AFTER DELETE ON file_chunks BEGIN
+        INSERT INTO file_chunks_fts(file_chunks_fts, rowid, text)
+        VALUES ('delete', old.rowid, old.text);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS file_chunks_fts_au
+      AFTER UPDATE ON file_chunks BEGIN
+        INSERT INTO file_chunks_fts(file_chunks_fts, rowid, text)
+        VALUES ('delete', old.rowid, old.text);
+        INSERT INTO file_chunks_fts(rowid, text) VALUES (new.rowid, new.text);
       END;
     ''');
 
@@ -1011,34 +1108,49 @@ class AppDatabase {
     }
   }
 
-  /// Rebuilds `files_embeddings` onto a `(file_id, type)` primary key when it
-  /// still has the original `file_id`-only key (with or without the `type`
-  /// column added by an earlier version of this migration).
+  /// Rebuilds `files_embeddings` onto a `(file_id, type, sequence)` primary
+  /// key, from either of the two earlier shapes: the original `file_id`-only
+  /// key, or the `(file_id, type)` key that replaced it.
   ///
   /// SQLite can't alter a primary key with `ALTER TABLE`, so this is a
   /// rename-recreate-copy-drop done inside a transaction. Safe to run on
-  /// every open: once the key covers `type` this is a single `PRAGMA
-  /// table_info` read and nothing else. A single-column key can't hold both
-  /// a 'file' and a 'description' embedding for the same file — the second
-  /// insert would silently overwrite the first's vector instead of adding a
-  /// row — so this has to land before anything writes a non-'file' row.
+  /// every open: once the key covers `sequence` this is a single `PRAGMA
+  /// table_info` read and nothing else.
+  ///
+  /// Two widenings, each forced by the same failure. `(file_id)` alone can't
+  /// hold both a 'file' and a 'description' embedding for one file — the
+  /// second insert silently overwrites the first's vector instead of adding a
+  /// row. `(file_id, type)` then can't hold a *document's* many `type='chunk'`
+  /// vectors, for exactly the same reason: a 40-page PDF would keep only
+  /// whichever chunk was written last. So this has to land before anything
+  /// writes a chunk row (search plan §18e).
+  ///
+  /// Unlike the mail equivalent below, **nothing is discarded**. `sequence`
+  /// defaults to 0, which is the correct value for every existing row: image
+  /// and description embeddings are one-per-type by nature. Carrying
+  /// `model_version` across matters for the same reason — dropping it would
+  /// present several thousand valid image vectors to the backfill queue as
+  /// unfinished work.
   Future<void> _migrateFilesEmbeddingsKey() async {
     final info = await _db.select('PRAGMA table_info(files_embeddings)');
     if (info.isEmpty) return;
-    Map<String, Object?>? typeColumn;
-    for (final row in info) {
-      if (row['name'] == 'type') {
-        typeColumn = row;
-        break;
-      }
-    }
-    final keyedByType = typeColumn != null && (typeColumn['pk'] as int) > 0;
-    if (keyedByType) return;
+    final columns = {
+      for (final row in info) row['name'] as String: row,
+    };
+    bool isKeyed(String column) =>
+        columns.containsKey(column) && (columns[column]!['pk'] as int) > 0;
+
+    if (isKeyed('sequence')) return;
 
     logger.i(
-      'AppDatabase: migrating files_embeddings to a (file_id, type) key',
+      'AppDatabase: migrating files_embeddings to a '
+      '(file_id, type, sequence) key',
     );
-    final hasTypeColumn = typeColumn != null;
+    // Both columns may be absent: `type` on the original shape, and
+    // `model_version` whenever this runs before _addMissingColumns on a
+    // database old enough to predate it.
+    final typeSource = columns.containsKey('type') ? 'type' : "'file'";
+    final hasModelVersion = columns.containsKey('model_version');
     await _db.transaction((tx) async {
       await tx.execute(
         'ALTER TABLE files_embeddings RENAME TO files_embeddings_old',
@@ -1047,14 +1159,18 @@ class AppDatabase {
         CREATE TABLE files_embeddings (
           file_id TEXT NOT NULL,
           type TEXT NOT NULL DEFAULT 'file',
+          sequence INTEGER NOT NULL DEFAULT 0,
           qwen3_vl_embedding BLOB,
-          PRIMARY KEY (file_id, type),
+          model_version TEXT,
+          PRIMARY KEY (file_id, type, sequence),
           FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
         )
       ''');
       await tx.execute('''
-        INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding)
-        SELECT file_id, ${hasTypeColumn ? 'type' : "'file'"}, qwen3_vl_embedding
+        INSERT INTO files_embeddings
+          (file_id, type, sequence, qwen3_vl_embedding, model_version)
+        SELECT file_id, $typeSource, 0, qwen3_vl_embedding,
+               ${hasModelVersion ? 'model_version' : 'NULL'}
         FROM files_embeddings_old
       ''');
       await tx.execute('DROP TABLE files_embeddings_old');
@@ -1802,9 +1918,10 @@ class AppDatabase {
     CREATE TABLE IF NOT EXISTS files_embeddings (
       file_id TEXT NOT NULL,
       type TEXT NOT NULL DEFAULT 'file',
+      sequence INTEGER NOT NULL DEFAULT 0,
       qwen3_vl_embedding BLOB,
       model_version TEXT,
-      PRIMARY KEY (file_id, type),
+      PRIMARY KEY (file_id, type, sequence),
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
     ''',
