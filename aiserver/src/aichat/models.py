@@ -135,6 +135,28 @@ class ThumbnailRequest(BaseModel):
     )
 
 
+class ExtractTextRequest(BaseModel):
+    """Request to extract and chunk a document supplied as raw bytes.
+
+    Bytes rather than a path, for the same reason as ``ThumbnailRequest``: the
+    server never opens a caller-named file, so the endpoint cannot be used as a
+    local-file read oracle (AUDIT H2). It also keeps cloud-file resolution on
+    the client, where ``local_path``/``download_url`` already live
+    (SEARCH_PLAN §18i).
+
+    ``filename`` is a *hint*, not a routing decision — the server sniffs the
+    bytes, because this archive contains RTF files named ``.doc`` (§18a). The
+    hint only disambiguates what content cannot say for itself: which
+    application wrote an OLE2 container, and the text formats that have no
+    magic number.
+    """
+    file_base64: str = Field(..., description="Base64-encoded source document bytes")
+    filename: Optional[str] = Field(
+        None,
+        description="Original filename, used only as a format hint (never to open a file)",
+    )
+
+
 class PstImportRequest(BaseModel):
     """Request to import and parse an Outlook PST file."""
     file_path: str = Field(..., description="Path to the PST file")

@@ -26,10 +26,12 @@ except ImportError:
 from .models import (
     ChatCompletionRequest, EmbeddingV1Request,
     EmbeddingRequest, DownloadModelRequest, DeleteModelRequest, ThumbnailRequest, PstImportRequest,
+    ExtractTextRequest,
 )
 from .skills import apply_skill, list_skills
 from .config import DEFAULT_MODEL_ALIAS
 from . import model_registry
+from . import document_extractor
 from .pst_parser import PstParser
 from .model_manager import (
     load_local_model,
@@ -853,6 +855,66 @@ def generate_thumbnail(request: ThumbnailRequest) -> Dict[str, Any]:
     except Exception as e:
         print(f"[ERROR] Thumbnail generation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate thumbnail.")
+
+
+async def extract_text(request: ExtractTextRequest) -> Dict[str, Any]:
+    """Extract a document to markdown and chunk it, for search Phase 7 (§18).
+
+    Runs off the event loop: conversion is seconds to tens of seconds on a
+    large file, and unlike the embedding endpoints there is no shared model
+    lock to serialize behind — docling holds no global state, so concurrent
+    extractions are safe and only bounded by the threadpool.
+
+    The one thing a caller cannot recover from is the chunker not returning:
+    §18a-2 measured a spreadsheet exceeding ten minutes with no way to
+    interrupt it, so oversized input is *declined* rather than attempted. Those
+    responses come back with ``gated: true`` and the full text in a single
+    chunk — searchable lexically, just not embedded.
+    """
+    import base64
+
+    payload = request.file_base64
+    if payload.startswith("data:"):
+        payload = payload.split(",", 1)[1]
+    try:
+        raw_bytes = base64.b64decode(payload)
+    except Exception as e:
+        print(f"[ERROR] Invalid base64 document payload: {e}")
+        raise HTTPException(status_code=400, detail="Invalid document payload.")
+
+    try:
+        result = await run_in_threadpool(
+            document_extractor.extract, raw_bytes, request.filename
+        )
+    except document_extractor.UnsupportedFormat as e:
+        # 415, not 400: the request is well-formed, we decline the media type.
+        # The client uses this to mark the file permanently unprocessable
+        # rather than retrying it (§18i).
+        raise HTTPException(status_code=415, detail=str(e))
+    except Exception as e:
+        # A parse failure is unprocessable *content* — §18i counts it toward
+        # embedding_attempts, unlike a transport error. 422 is what tells the
+        # two apart on the client side. Measured: ~29% of this archive's
+        # non-PDF documents land here (§18a-1).
+        print(f"[ERROR] Document extraction failed ({request.filename!r}): {e}")
+        raise HTTPException(status_code=422, detail=f"Could not extract document: {e}")
+
+    return {
+        "format": result.fmt,
+        "markdown_chars": result.markdown_chars,
+        "gated": result.gated,
+        "chunks": [
+            {
+                "chunk_index": c.chunk_index,
+                "text": c.text,
+                "page": c.page,
+                "heading_path": c.heading_path,
+                "char_start": c.char_start,
+                "char_end": c.char_end,
+            }
+            for c in result.chunks
+        ],
+    }
 
 
 async def import_pst(request: PstImportRequest):

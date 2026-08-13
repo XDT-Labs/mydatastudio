@@ -10,6 +10,7 @@ Endpoints:
   POST /util/model-status         Check (local disk only) whether a model is already downloaded
   POST /util/embedding            Multimodal embeddings (text or image)
   POST /util/thumbnail            Generate image thumbnails (incl. RAW formats)
+  POST /util/extract-text         Extract a document to markdown and chunk it
   POST /util/import/pst           Stream-parse an Outlook PST file
 """
 import json
@@ -183,6 +184,7 @@ app.post("/util/model-status", summary="Check whether a model is already downloa
 app.post("/util/delete-model", summary="Delete a downloaded GGUF model file")(routes.delete_model)
 app.post("/util/embedding", summary="Multimodal embeddings (text or image)")(routes.generate_embedding)
 app.post("/util/thumbnail", summary="Generate image thumbnail (incl. RAW formats)")(routes.generate_thumbnail)
+app.post("/util/extract-text", summary="Extract a document to markdown and chunk it")(routes.extract_text)
 app.post("/util/import/pst", summary="Stream-parse an Outlook PST file")(routes.import_pst)
 
 
