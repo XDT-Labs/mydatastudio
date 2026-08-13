@@ -567,6 +567,13 @@ class AppDatabase {
     // this method also executes on the scanner and embedding isolates, which
     // have no asset bundle, and ~70k inserts have no business on the startup
     // path of a user who never opens Photos.
+    // Derived data rebuilt from a shipped asset in seconds, so an outdated
+    // shape is dropped rather than migrated.
+    final locationColumns = await _db.select('PRAGMA table_info(locations)');
+    if (locationColumns.isNotEmpty &&
+        !locationColumns.any((c) => c['name'] == 'search_extra')) {
+      await _db.execute('DROP TABLE locations');
+    }
     await _db.execute('''
       CREATE TABLE IF NOT EXISTS locations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -577,7 +584,8 @@ class AppDatabase {
         longitude REAL NOT NULL,
         population INTEGER NOT NULL DEFAULT 0,
         search_name TEXT NOT NULL,
-        search_alt TEXT
+        search_alt TEXT,
+        search_extra TEXT
       );
     ''');
     await _db.execute(

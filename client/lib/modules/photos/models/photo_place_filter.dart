@@ -21,10 +21,25 @@ class PhotoPlaceFilter {
   final double longitude;
   final double radiusKm;
 
-  static const double defaultRadiusKm = 25;
+  static const double kmPerMile = 1.609344;
 
-  /// The radii offered in the drawer — a city, its metro, and its region.
-  static const List<double> radiusOptions = [5, 10, 25, 50, 100, 250];
+  /// Distances are stored in kilometres because [boundingBox] is metric, and
+  /// offered in miles because that is what the people using this think in.
+  static const List<double> radiusMileOptions = [1, 5, 10, 25, 50, 100, 250];
+
+  static const double defaultRadiusMiles = 25;
+  static const double defaultRadiusKm = defaultRadiusMiles * kmPerMile;
+
+  double get radiusMiles => radiusKm / kmPerMile;
+
+  /// The offered stop nearest [radiusKm], so the slider always rests on one
+  /// even for a radius that did not come from it.
+  double get nearestMileOption {
+    final miles = radiusMiles;
+    return radiusMileOptions.reduce(
+      (a, b) => (a - miles).abs() <= (b - miles).abs() ? a : b,
+    );
+  }
 
   /// The lat/lng box to filter on.
   ///
@@ -54,12 +69,14 @@ class PhotoPlaceFilter {
     );
   }
 
-  PhotoPlaceFilter copyWith({double? radiusKm}) {
+  PhotoPlaceFilter copyWith({double? radiusKm, double? radiusMiles}) {
     return PhotoPlaceFilter(
       label: label,
       latitude: latitude,
       longitude: longitude,
-      radiusKm: radiusKm ?? this.radiusKm,
+      radiusKm:
+          radiusKm ??
+          (radiusMiles != null ? radiusMiles * kmPerMile : this.radiusKm),
     );
   }
 

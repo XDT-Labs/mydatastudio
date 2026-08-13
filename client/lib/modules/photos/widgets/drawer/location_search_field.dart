@@ -19,7 +19,6 @@ class LocationSearchField extends StatefulWidget {
     required this.selected,
     required this.onSelected,
     required this.onCleared,
-    required this.onRadiusChanged,
     this.repository,
   });
 
@@ -28,7 +27,6 @@ class LocationSearchField extends StatefulWidget {
 
   final ValueChanged<PhotoPlaceFilter> onSelected;
   final VoidCallback onCleared;
-  final ValueChanged<double> onRadiusChanged;
 
   /// Injected in tests to avoid touching the database.
   final GazetteerRepository? repository;
@@ -224,37 +222,17 @@ class _LocationSearchFieldState extends State<LocationSearchField> {
                 ],
               ),
             ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Text(
-                  'Within',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: DropdownButton<double>(
-                    value: selected.radiusKm,
-                    isDense: true,
-                    isExpanded: true,
-                    underline: const SizedBox.shrink(),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurface,
-                    ),
-                    items: PhotoPlaceFilter.radiusOptions.map((km) {
-                      return DropdownMenuItem<double>(
-                        value: km,
-                        child: Text('${km.toStringAsFixed(0)} km'),
-                      );
-                    }).toList(),
-                    onChanged: (km) {
-                      if (km != null) widget.onRadiusChanged(km);
-                    },
-                  ),
-                ),
-              ],
+            const SizedBox(height: 4),
+            // The radius itself lives on the bar above the grid — adjusting it
+            // is something you do while watching the results change, not from
+            // a drawer you had to open to get here.
+            Text(
+              'Radius: ${selected.nearestMileOption.toStringAsFixed(0)} mi '
+              '— adjust above the grid',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                fontStyle: FontStyle.italic,
+              ),
             ),
           ],
         ],

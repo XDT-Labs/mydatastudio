@@ -256,8 +256,14 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
   /// Applies a place picked from the gazetteer, keeping the rest of the
   /// filter — a location narrows what is already on screen rather than
   /// replacing it, the way picking an album or a source does.
+  ///
+  /// The landmark filter is the exception, and is cleared. Both express "show
+  /// me this place", but one matches coordinates and the other a name the
+  /// image analysis wrote, so combining them asks for photos that are near
+  /// Chicago *and* tagged with some unrelated landmark — which is nothing.
+  /// Searching a city while a landmark was still selected emptied the grid.
   void _selectPlace(PhotoPlaceFilter place) {
-    final newFilter = _activeFilter.copyWith(place: place);
+    final newFilter = _activeFilter.copyWith(place: place, location: null);
     ViewStateService.instance.setActiveNav('place_${place.label}');
     ViewStateService.instance.updateFilter(newFilter);
     PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
@@ -268,12 +274,6 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
     ViewStateService.instance.setActiveNav('all');
     ViewStateService.instance.updateFilter(newFilter);
     PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
-  }
-
-  void _changePlaceRadius(double radiusKm) {
-    final place = _activeFilter.place;
-    if (place == null) return;
-    _selectPlace(place.copyWith(radiusKm: radiusKm));
   }
 
   void _selectCollection(Collection c) {
@@ -693,13 +693,44 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           LocationSearchField(
+                            // Keyed on the active filter so choosing any other
+                            // one — an album, a source, All Photos — rebuilds
+                            // this with empty state. The place filter itself
+                            // is already dropped by those (they replace the
+                            // filter outright), but the text typed here and
+                            // the suggestions under it live in the widget and
+                            // would otherwise sit there afterwards, reading as
+                            // a location filter that refused to clear.
+                            // Typing does not change the active nav, so an
+                            // in-progress search is left alone.
+                            key: ValueKey('location-search-$_activeNav'),
                             selected: _activeFilter.place,
                             onSelected: _selectPlace,
                             onCleared: _clearPlace,
-                            onRadiusChanged: _changePlaceRadius,
                           ),
-                          // Landmarks the image analysis did recognise still
-                          // deserve a shortcut when there are any.
+                          // Headed separately because the two are not variants
+                          // of one thing. Above searches coordinates and takes
+                          // a radius; below matches a name the image analysis
+                          // recognised, on photos that largely carry no
+                          // coordinates at all. Presented as one list, the
+                          // missing radius on these reads as a bug.
+                          if (_locationCounts.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                left: 12.0,
+                                bottom: 4.0,
+                              ),
+                              child: Text(
+                                'Recognised in photos',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ),
+                          ],
                           if (_locationCounts.isNotEmpty)
                             ..._locationCounts.entries.map((entry) {
                               final loc = entry.key;
@@ -713,6 +744,10 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                                   count: count > 0 ? count : null,
                                   isActive: isActive,
                                   onTap: () {
+                                    // Replaces the filter outright, which is
+                                    // also what drops any searched place —
+                                    // see _selectPlace for why the two cannot
+                                    // both be applied.
                                     final newFilter = isActive
                                         ? const PhotoFilter()
                                         : PhotoFilter(location: loc);

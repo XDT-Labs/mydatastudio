@@ -13,7 +13,7 @@ to ship with the app.
 Output: `assets/gazetteer/cities.tsv.gz`, one row per place —
 
     name <TAB> region <TAB> country <TAB> lat <TAB> lng <TAB> population
-         <TAB> search_name <TAB> search_alt
+         <TAB> search_name <TAB> search_alt <TAB> search_extra
 
 `region` and `country` are resolved to display names here rather than in Dart,
 so seeding the table at runtime is a straight parse with no lookup tables.
@@ -23,6 +23,13 @@ diacritics, because someone typing "zurich" on a US keyboard will never match
 a stored "Zürich". `search_alt` carries GeoNames' own ascii spelling when it
 differs from the folded name after that (their ascii form of Zürich is
 "Zuerich", which folding cannot produce), and is empty otherwise.
+
+`search_extra` holds everything that qualifies the name — region, the region's
+abbreviation, and country — as space-separated tokens, so "Naperville, IL"
+matches. People type a city together with its state, and matching on the name
+alone meant the suggestions emptied the moment they did. The abbreviation is
+carried explicitly because GeoNames stores the region as "Illinois" and nobody
+types that.
 
 Usage:
     python3 tool/build_gazetteer.py [--work-dir DIR]
@@ -166,6 +173,15 @@ def build(work_dir: pathlib.Path) -> None:
                 if search_alt == search_name:
                     search_alt = ""
 
+                # Deduplicated because "Luxembourg, Luxembourg, Luxembourg" is
+                # three tokens' worth of bytes for one token's worth of match.
+                extra_tokens: list[str] = []
+                for value in (region, admin1_code, country, country_code):
+                    for token in fold(value).replace(",", " ").split():
+                        if token and token not in extra_tokens:
+                            extra_tokens.append(token)
+                search_extra = " ".join(extra_tokens)
+
                 rows.append(
                     "\t".join(
                         [
@@ -177,6 +193,7 @@ def build(work_dir: pathlib.Path) -> None:
                             population,
                             search_name,
                             search_alt,
+                            search_extra,
                         ]
                     )
                 )

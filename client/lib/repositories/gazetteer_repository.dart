@@ -109,7 +109,7 @@ class GazetteerRepository {
       for (final line in lines) {
         if (line.isEmpty) continue;
         final f = line.split('\t');
-        if (f.length < 8) continue;
+        if (f.length < 9) continue;
         rows.add([
           f[0], // name
           f[1].isEmpty ? null : f[1], // region
@@ -119,13 +119,14 @@ class GazetteerRepository {
           int.tryParse(f[5]) ?? 0,
           f[6], // search_name
           f[7].isEmpty ? null : f[7], // search_alt
+          f[8], // search_extra
         ]);
       }
 
       await db.executeBatch(
         'INSERT INTO locations (name, region, country, latitude, longitude,'
-        ' population, search_name, search_alt)'
-        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        ' population, search_name, search_alt, search_extra)'
+        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         rows,
       );
       logger.i('GazetteerRepository: seeded ${rows.length} places');
@@ -142,17 +143,39 @@ class GazetteerRepository {
     }
   }
 
-  /// Places whose name starts with [query], most populous first.
+  /// `%` and `_` are literals in a typed query, not wildcards.
+  static String _escapeLike(String value) => value
+      .replaceAll(r'\', r'\\')
+      .replaceAll('%', r'\%')
+      .replaceAll('_', r'\_');
+
+  /// Splits a typed query into a place name and the qualifiers after it.
   ///
-  /// Prefix rather than substring matching: it is what the `search_name` index
-  /// can actually serve, and typing "san" to be offered "Sansepolcro" ahead of
-  /// "San Francisco" is not a useful autocomplete.
+  /// "Naperville, IL" is how people write a city, so the comma is a separator
+  /// and everything past it narrows the name rather than extending it.
+  static ({String name, List<String> qualifiers}) parseQuery(String query) {
+    final parts = fold(query).split(',');
+    final name = parts.first.trim();
+    final qualifiers = <String>[];
+    for (final part in parts.skip(1)) {
+      qualifiers.addAll(part.trim().split(RegExp(r'\s+')).where((t) => t.isNotEmpty));
+    }
+    return (name: name, qualifiers: qualifiers);
+  }
+
+  /// Places matching [query], most populous first.
+  ///
+  /// The name is matched as a prefix — it is what the `search_name` index can
+  /// serve, and offering "Sansepolcro" ahead of "San Francisco" for "san" is
+  /// not a useful autocomplete. Anything after a comma narrows that by region
+  /// or country, spelled out or abbreviated, so both "Springfield, Illinois"
+  /// and "Springfield, IL" reach the same place.
   Future<List<GazetteerPlace>> search(String query, {int limit = 20}) async {
     final db = _database;
     if (db == null) return [];
 
-    final folded = fold(query.trim());
-    if (folded.isEmpty) return [];
+    final parsed = parseQuery(query);
+    if (parsed.name.isEmpty) return [];
 
     try {
       await ensureSeeded();
@@ -160,23 +183,29 @@ class GazetteerRepository {
       return [];
     }
 
-    // `%` and `_` typed by the user are literals here, not wildcards.
-    final escaped = folded
-        .replaceAll(r'\', r'\\')
-        .replaceAll('%', r'\%')
-        .replaceAll('_', r'\_');
-    final pattern = '$escaped%';
+    final namePattern = '${_escapeLike(parsed.name)}%';
+    final where = StringBuffer(
+      "(search_name LIKE ? ESCAPE '\\' OR search_alt LIKE ? ESCAPE '\\')",
+    );
+    final args = <Object?>[namePattern, namePattern];
 
+    for (final qualifier in parsed.qualifiers) {
+      // Anchored to a token boundary so "il" reaches Illinois without also
+      // reaching Brazil.
+      where.write(" AND ' ' || search_extra LIKE ? ESCAPE '\\'");
+      args.add('% ${_escapeLike(qualifier)}%');
+    }
+
+    args.add(limit);
     final rows = await db.select(
       '''
       SELECT name, region, country, latitude, longitude, population
       FROM locations
-      WHERE search_name LIKE ? ESCAPE '\\'
-         OR search_alt LIKE ? ESCAPE '\\'
+      WHERE $where
       ORDER BY population DESC, name ASC
       LIMIT ?
       ''',
-      [pattern, pattern, limit],
+      args,
     );
 
     return rows.map((r) => GazetteerPlace.fromDbMap(r)).toList();

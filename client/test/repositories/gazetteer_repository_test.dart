@@ -50,11 +50,12 @@ void main() {
       double lng,
       int population, {
       String? searchAlt,
+      String? searchExtra,
     }) async {
       await db.execute(
         'INSERT INTO locations (name, region, country, latitude, longitude,'
-        ' population, search_name, search_alt)'
-        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        ' population, search_name, search_alt, search_extra)'
+        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           name,
           region,
@@ -64,6 +65,9 @@ void main() {
           population,
           GazetteerRepository.fold(name),
           searchAlt,
+          searchExtra ??
+              '${GazetteerRepository.fold(region)} '
+                  '${GazetteerRepository.fold(country)}',
         ],
       );
     }
@@ -155,6 +159,59 @@ void main() {
       expect(results.first.label, 'Austin, Texas, United States');
     });
 
+    test('finds a city typed with its state abbreviation', () async {
+      // "Naperville, IL" is how people write a US city, and matching the name
+      // alone meant the suggestions emptied the moment they typed the comma —
+      // so the place could not be picked and the grid stayed at zero photos.
+      await addPlace(
+        'Naperville',
+        'Illinois',
+        'United States',
+        41.78586,
+        -88.14729,
+        147100,
+        searchExtra: 'illinois il united states us',
+      );
+
+      expect(
+        (await gazetteer.search('Naperville, IL')).single.name,
+        'Naperville',
+      );
+      expect(
+        (await gazetteer.search('Naperville, Illinois')).single.name,
+        'Naperville',
+      );
+    });
+
+    test('a qualifier narrows same-named places to the right one', () async {
+      // Springfield is the canonical case: the state is the only thing that
+      // separates them, so ignoring it makes the search useless there.
+      await addPlace('Springfield', 'Illinois', 'United States', 39.80172,
+          -89.64371, 114394, searchExtra: 'illinois il united states us');
+      await addPlace('Springfield', 'Missouri', 'United States', 37.21533,
+          -93.29824, 169176, searchExtra: 'missouri mo united states us');
+
+      final results = await gazetteer.search('Springfield, IL');
+
+      expect(results.single.region, 'Illinois');
+    });
+
+    test('a qualifier matches whole tokens, not fragments', () async {
+      // '%il%' would otherwise pull in Brazil and every Illinois neighbour.
+      await addPlace('Santos', 'Sao Paulo', 'Brazil', -23.9608, -46.3336,
+          418375, searchExtra: 'sao paulo sp brazil br');
+
+      expect(await gazetteer.search('Santos, IL'), isEmpty);
+      expect((await gazetteer.search('Santos, BR')).single.name, 'Santos');
+    });
+
+    test('a qualifier that matches nothing returns nothing', () async {
+      await addPlace('Austin', 'Texas', 'United States', 30.26715, -97.74306,
+          974447, searchExtra: 'texas tx united states us');
+
+      expect(await gazetteer.search('Austin, ZZ'), isEmpty);
+    });
+
     test('seeds the shipped asset and finds a real city in it', () async {
       // The one test that exercises the whole pipeline the feature rests on:
       // the asset built by tool/build_gazetteer.py, parsed by _seed, matched
@@ -174,6 +231,12 @@ void main() {
 
       final rows = await db.select('SELECT COUNT(*) AS c FROM locations');
       expect(rows.first['c'] as int, greaterThan(50000));
+
+      // The form that was returning nothing, against the data that actually
+      // ships rather than a hand-built row.
+      final naperville = await GazetteerRepository(db).search('Naperville, IL');
+      expect(naperville.single.name, 'Naperville');
+      expect(naperville.single.region, 'Illinois');
     });
 
     test('label drops a region that just restates the city', () async {

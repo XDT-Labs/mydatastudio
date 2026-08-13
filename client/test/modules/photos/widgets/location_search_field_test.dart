@@ -50,7 +50,6 @@ void main() {
             repository: repo,
             onSelected: (_) {},
             onCleared: () {},
-            onRadiusChanged: (_) {},
           ),
         ),
       );
@@ -80,7 +79,6 @@ void main() {
             repository: FakeGazetteerRepository([_austin]),
             onSelected: (place) => selected = place,
             onCleared: () {},
-            onRadiusChanged: (_) {},
           ),
         ),
       );
@@ -110,7 +108,6 @@ void main() {
             repository: FakeGazetteerRepository([_austin]),
             onSelected: (_) {},
             onCleared: () {},
-            onRadiusChanged: (_) {},
           ),
         ),
       );
@@ -125,8 +122,9 @@ void main() {
       expect(find.text('Austin, Texas, United States'), findsNothing);
     });
 
-    testWidgets('shows the active place with a radius control', (tester) async {
-      double? newRadius;
+    testWidgets('shows the active place and points at the radius control', (
+      tester,
+    ) async {
 
       await tester.pumpWidget(
         _wrap(
@@ -139,20 +137,16 @@ void main() {
             repository: FakeGazetteerRepository(const []),
             onSelected: (_) {},
             onCleared: () {},
-            onRadiusChanged: (km) => newRadius = km,
           ),
         ),
       );
 
+      // The radius itself moved to the bar above the grid, where the results
+      // it changes are visible; the drawer says so rather than leaving the
+      // reader to hunt for it.
       expect(find.text('Austin, Texas, United States'), findsOneWidget);
-      expect(find.text('Within'), findsOneWidget);
-
-      await tester.tap(find.byType(DropdownButton<double>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('100 km').last);
-      await tester.pumpAndSettle();
-
-      expect(newRadius, 100);
+      expect(find.textContaining('25 mi'), findsOneWidget);
+      expect(find.textContaining('adjust above the grid'), findsOneWidget);
     });
 
     testWidgets('the active place can be cleared', (tester) async {
@@ -169,7 +163,6 @@ void main() {
             repository: FakeGazetteerRepository(const []),
             onSelected: (_) {},
             onCleared: () => cleared = true,
-            onRadiusChanged: (_) {},
           ),
         ),
       );
@@ -188,7 +181,6 @@ void main() {
             repository: FakeGazetteerRepository([_austin]),
             onSelected: (_) {},
             onCleared: () {},
-            onRadiusChanged: (_) {},
           ),
         ),
       );

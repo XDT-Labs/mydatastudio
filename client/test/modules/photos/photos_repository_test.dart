@@ -479,10 +479,25 @@ void main() {
       await addPhoto('houston.jpg', lat: 29.7604, lng: -95.3698); // ~235 km
 
       final names = (await photos.photos(
-        filter: const PhotoFilter(place: austin),
+        filter: PhotoFilter(place: austin.copyWith(radiusMiles: 5)),
       )).map((f) => f.name).toSet();
 
       expect(names, {'downtown.jpg'});
+    });
+
+    test('the default radius covers a metro area, not just downtown', () async {
+      // 25 miles. A default tight enough to exclude the next town over made
+      // the filter look broken on libraries whose photos are spread across
+      // one metro area — which is most of them.
+      await addPhoto('downtown.jpg', lat: 30.2672, lng: -97.7431);
+      await addPhoto('round-rock.jpg', lat: 30.5083, lng: -97.6789);
+      await addPhoto('houston.jpg', lat: 29.7604, lng: -95.3698);
+
+      final names = (await photos.photos(
+        filter: const PhotoFilter(place: austin),
+      )).map((f) => f.name).toSet();
+
+      expect(names, {'downtown.jpg', 'round-rock.jpg'});
     });
 
     test('a wider radius reaches further out', () async {
@@ -491,10 +506,10 @@ void main() {
       await addPhoto('houston.jpg', lat: 29.7604, lng: -95.3698);
 
       final names = (await photos.photos(
-        filter: PhotoFilter(place: austin.copyWith(radiusKm: 50)),
+        filter: PhotoFilter(place: austin.copyWith(radiusMiles: 250)),
       )).map((f) => f.name).toSet();
 
-      expect(names, {'downtown.jpg', 'round-rock.jpg'});
+      expect(names, {'downtown.jpg', 'round-rock.jpg', 'houston.jpg'});
     });
 
     test('photos with no coordinates never match a place', () async {
