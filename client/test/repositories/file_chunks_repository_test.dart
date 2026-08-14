@@ -232,23 +232,41 @@ void main() {
       expect(queued.map((f) => f.id).toList(), ['doc1']);
     });
 
-    test('skips Google Workspace files, whatever they are named', () async {
-      await open('repo_queue_workspace_test.db');
-      // A Google Doc named like markdown: it matches the extension hint and
-      // has no downloadable bytes at all (§18k). The queue cannot sniff
-      // content the way the extractor does, so content_type is the only
-      // signal available before a read.
+    Future<void> addWorkspaceFile(String id, String name, String kind) async {
       await db.rawDb.execute(
         'INSERT INTO files (id, collection_id, name, path, parent, '
         'content_type, size, date_created, date_last_modified) '
-        "VALUES ('gdoc', 'col-1', 'Plan.md', 'gdrive://abc', '/', "
-        "'application/vnd.google-apps.document', 100, 0, 0)",
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, 'col-1', name, 'gdrive://$id', '/',
+          'application/vnd.google-apps.$kind', 100, 0, 0],
       );
-      await addFile('real', ext: 'md');
+    }
+
+    test('offers Workspace documents by content type, not by name', () async {
+      await open('repo_queue_workspace_test.db');
+      // Named like markdown and not markdown. The queue cannot sniff content
+      // the way the extractor does, so content_type is the only signal
+      // available before a read — and these are fetched by export (§18k).
+      await addWorkspaceFile('gdoc', 'Plan.md', 'document');
+      await addWorkspaceFile('gsheet', 'Expenses / Receipts', 'spreadsheet');
 
       final queued = await repo.getFilesWithMissingChunks(limit: 50);
 
-      expect(queued.map((f) => f.id).toList(), ['real']);
+      expect(queued.map((f) => f.id).toSet(), {'gdoc', 'gsheet'},
+          reason: 'the spreadsheet has no extension at all, so an '
+              'extension-only filter would never reach it');
+    });
+
+    test('skips Workspace types that are not documents', () async {
+      await open('repo_queue_workspace_other_test.db');
+      await addWorkspaceFile('form', 'Signup Form', 'form');
+      await addWorkspaceFile('draw', 'Architecture', 'drawing');
+      await addWorkspaceFile('gdoc', 'Notes', 'document');
+
+      final queued = await repo.getFilesWithMissingChunks(limit: 50);
+
+      expect(queued.map((f) => f.id).toList(), ['gdoc'],
+          reason: 'a Form has no document export to ask for');
     });
 
     test('skips formats excluded by policy and by measurement', () async {

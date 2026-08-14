@@ -2867,7 +2867,8 @@ writes nothing through it.
 
 ### 18k. Google Workspace files are catalogued but never fetched
 
-**Status: the two bugs below are fixed; the export itself is still open.**
+**Status: built.** The two bugs below are fixed and the export is
+implemented — see the closing note.
 
 Found 2026-08-13 from a running chunk pass:
 
@@ -2928,13 +2929,31 @@ fixed. `DocumentChunkIsolate` now spends an attempt on a permanent failure and
 defers the collection only on a transient one. (2) The queue excludes
 `application/vnd.google-apps.%` by content type.
 
-**Still open: the export.** When it is built the target format is an easy call
-rather than a trade-off: export Docs as **DOCX** and Sheets as **XLSX**.
-`docling-rs` reads both natively with no model download (§18a), so a Workspace
-document would chunk through exactly the same path as any other — heading
-paths for the footnote included. Exporting to PDF would be worse in every
-respect: it needs the 2.0 GB model pack and a vendored pdfium (§18d-1), and it
-discards the structure the chunker uses.
+**The export, as built.** Docs → **DOCX**, Sheets → **XLSX**, Slides →
+**PPTX**, through Drive's `files.export`. The format choice was not close:
+`docling-rs` reads all three natively with no model download (§18a), so an
+exported Workspace file chunks through exactly the same path as any other
+document, heading paths included. PDF would have needed the vendored pdfium
+(§18d-1) and would have discarded the structure the chunker uses, to
+represent documents that never had pages.
 
-Sequenced after §18h step 4 — 4 files against a UI feature that affects every
-result.
+Three details that were not obvious from the outside:
+
+- **The exported bytes need a synthesized filename.** DOCX, XLSX and PPTX
+  share a ZIP signature, so the extractor sniffs the container and then needs
+  the *extension* to tell it which. A Workspace file's Drive name cannot
+  supply that — one here is a Google Doc called `Civic_Voice_Launch_Plan.md`,
+  which would route a Word export as markdown. `FileBytes.filenameHint`
+  carries the corrected name, and only exports set it.
+- **The queue matches these by content type, not extension.** `Expenses /
+  Receipts` has no extension at all, so an extension-only filter could never
+  reach it. Non-document Workspace types — Forms, Drawings, Sites, Shortcuts
+  — are excluded, since asking for a document export of a Form is a
+  round-trip that can only fail.
+- **`pptx` joined the allowlist, while `ppt` stays out.** §18a-1's 43%
+  measurement was of docling's *legacy CFB* MS-PPT reader, not its OOXML one,
+  so it does not carry over — and treating a local `.pptx` differently from an
+  exported deck would have been an inconsistency with no reason behind it.
+
+An export over Drive's 10 MB limit is classified **permanent**, since no retry
+can help; everything else on that path stays transient.

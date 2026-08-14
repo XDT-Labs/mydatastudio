@@ -287,7 +287,10 @@ class DocumentChunkIsolate {
 
     final extraction = await _extract(
       bytes,
-      file.name,
+      // An exported Workspace document is DOCX or XLSX regardless of what it
+      // is called in Drive, and those share a ZIP signature — so the loader's
+      // hint, not the file's name, is what lets the server route it (§18k).
+      loaded.filenameHint ?? file.name,
       serviceUrl,
       serviceToken,
       logger,

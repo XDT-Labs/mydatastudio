@@ -332,18 +332,37 @@ class DatabaseRepository {
   /// archive holds RTF files named `.doc` (search plan §18a). All this list
   /// does is keep the queue from handing over photos and video.
   ///
-  /// The queue cannot sniff — it has no bytes yet — which is why it also
-  /// excludes `application/vnd.google-apps.*` by content type. A Google Doc
-  /// named `Plan.md` matches `%.md` and is not markdown; it has no
-  /// downloadable bytes at all (§18k). Extension is not format here either,
-  /// and `content_type` is the only signal available before a read.
+  /// The queue cannot sniff — it has no bytes yet — so Workspace files are
+  /// matched by content type instead of by name, and excluded from the
+  /// extension branch entirely. A Google Doc named `Plan.md` matches `%.md`
+  /// and is not markdown; extension is not format here either, and
+  /// `content_type` is the only signal available before a read.
+
+  /// Google Workspace types worth exporting, keyed on by content type because
+  /// their names carry no reliable extension.
+  ///
+  /// Mirrors `FileBytesLoader.exportTargetFor`, which decides what each is
+  /// fetched as. Kept as a literal list rather than derived from that map so
+  /// the SQL stays a compile-time shape; the test asserts the two agree.
+  static const exportableWorkspaceTypes = [
+    'application/vnd.google-apps.document',
+    'application/vnd.google-apps.spreadsheet',
+    'application/vnd.google-apps.presentation',
+  ];
   ///
   /// `htm`/`html` are excluded by policy — most are the HTML part of a mail
   /// whose body is already indexed, so indexing them creates a document that
-  /// competes with its own email on identical text (§18i). `ppt` is excluded
-  /// on measurement: 43% parse, and those yield slide titles only (§18a-1).
+  /// competes with its own email on identical text (§18i).
+  ///
+  /// **`ppt` is excluded but `pptx` is not**, and the difference is the
+  /// parser rather than the medium. §18a-1 measured the *legacy binary*
+  /// format at 43% parse yielding slide titles only; that is docling's CFB
+  /// MS-PPT reader, not its OOXML one, so the finding does not carry over.
+  /// `pptx` earns its place here because Google Slides now exports to it
+  /// (§18k) — and a local `.pptx` and an exported deck should not be treated
+  /// differently for no reason.
   static const documentExtensions = [
-    'pdf', 'doc', 'docx', 'rtf', 'xls', 'xlsx', 'csv', 'txt', 'md',
+    'pdf', 'doc', 'docx', 'pptx', 'rtf', 'xls', 'xlsx', 'csv', 'txt', 'md',
   ];
 
   /// Documents whose chunk set is missing or was built by an older model.
@@ -378,6 +397,10 @@ class DatabaseRepository {
     final extensionFilter = documentExtensions
         .map((_) => "lower(f.name) LIKE ?")
         .join(' OR ');
+    final exportableTypes = List.filled(
+      exportableWorkspaceTypes.length,
+      '?',
+    ).join(', ');
     final rows = await db.select(
       '''
       SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner
@@ -385,8 +408,11 @@ class DatabaseRepository {
       INNER JOIN collections c ON c.id = f.collection_id
       WHERE f.is_deleted = 0
         AND f.is_inline = 0
-        AND ($extensionFilter)
-        AND f.content_type NOT LIKE 'application/vnd.google-apps.%'
+        AND (
+              ($extensionFilter
+               AND f.content_type NOT LIKE 'application/vnd.google-apps.%')
+              OR f.content_type IN ($exportableTypes)
+            )
         AND f.embedding_attempts < ?
         AND NOT EXISTS (
               SELECT 1 FROM file_chunks fc
@@ -398,6 +424,7 @@ class DatabaseRepository {
       ''',
       [
         ...documentExtensions.map((ext) => '%.$ext'),
+        ...exportableWorkspaceTypes,
         maxEmbeddingAttempts,
         EmbeddingModel.current,
         ...excludeCollections,

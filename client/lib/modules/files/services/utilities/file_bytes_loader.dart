@@ -27,9 +27,27 @@ class FileBytes {
   /// True when no future attempt can succeed.
   final bool permanent;
 
-  const FileBytes.ok(List<int> this.bytes) : permanent = false;
-  const FileBytes.transient() : bytes = null, permanent = false;
-  const FileBytes.permanent() : bytes = null, permanent = true;
+  /// The name these bytes should be *treated* as having, when it differs from
+  /// the file's own.
+  ///
+  /// Only exports set this, and they must. A Google Doc is exported as DOCX,
+  /// but its Drive name carries no extension — or worse, a misleading one:
+  /// this archive holds a Google Doc called `Civic_Voice_Launch_Plan.md`. The
+  /// extractor sniffs the ZIP signature that DOCX, XLSX and PPTX share and
+  /// then needs the extension to say *which*, so handing it the real name
+  /// would route a Word export as markdown or reject it outright.
+  final String? filenameHint;
+
+  const FileBytes.ok(List<int> this.bytes, {this.filenameHint})
+    : permanent = false;
+  const FileBytes.transient()
+    : bytes = null,
+      permanent = false,
+      filenameHint = null;
+  const FileBytes.permanent()
+    : bytes = null,
+      permanent = true,
+      filenameHint = null;
 
   bool get ok => bytes != null;
 }
@@ -56,26 +74,59 @@ class FileBytesLoader {
     DatabaseRepository repo,
     AppLogger logger,
   ) async {
-    // Checked before any network call, because this is a property of the
+    // Decided before any network call, because this is a property of the
     // format rather than of the request. Google Docs, Sheets and Slides are
-    // not stored as files; Drive's media endpoint refuses them by design with
-    // "Only files with binary content can be downloaded", and it will refuse
-    // them identically forever. They need `files.export` with a target
-    // format, which is not implemented (search plan §18k).
-    if (isGoogleNativeFormat(file.contentType)) {
+    // not stored as files at all; Drive's media endpoint refuses them by
+    // design and will refuse them identically forever, so they are fetched
+    // through `files.export` instead (search plan §18k).
+    final export = exportTargetFor(file.contentType);
+    if (isGoogleNativeFormat(file.contentType) && export == null) {
+      // A Workspace type with no useful document export — a Form, Drawing,
+      // Site or Shortcut. Permanent, and not worth an export round-trip.
       logger.d(
-        'Google Workspace file has no downloadable bytes: ${file.name} '
-        '(${file.contentType}) — needs export, see §18k',
+        'No document export for ${file.name} (${file.contentType}); skipping',
       );
       return const FileBytes.permanent();
     }
     if (file.path.startsWith('gdrive://')) {
-      final bytes = await _loadFromGDrive(file, repo, logger);
-      return bytes == null ? const FileBytes.transient() : FileBytes.ok(bytes);
+      return _loadFromGDrive(file, repo, logger, export: export);
     }
     final bytes = await _loadFromDisk(file, logger);
     return bytes == null ? const FileBytes.transient() : FileBytes.ok(bytes);
   }
+
+  /// What a Google Workspace file should be exported as, or null if nothing
+  /// useful.
+  ///
+  /// **DOCX and XLSX rather than PDF**, and the choice is not a close call:
+  /// `docling-rs` reads both natively with no model download, so an exported
+  /// Workspace document chunks through exactly the same path as any other —
+  /// heading paths for the footnote included (§18a). Exporting to PDF would
+  /// need the vendored pdfium (§18d-1) and would throw away the structure the
+  /// chunker uses, to represent a document that never had pages to begin with.
+  ///
+  /// Forms, Drawings, Sites and Shortcuts are absent deliberately: their
+  /// exports are either unavailable or not documents.
+  static ExportTarget? exportTargetFor(String? mimeType) =>
+      _exportTargets[mimeType];
+
+  static const _exportTargets = <String, ExportTarget>{
+    'application/vnd.google-apps.document': ExportTarget(
+      mimeType:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      extension: 'docx',
+    ),
+    'application/vnd.google-apps.spreadsheet': ExportTarget(
+      mimeType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      extension: 'xlsx',
+    ),
+    'application/vnd.google-apps.presentation': ExportTarget(
+      mimeType:
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      extension: 'pptx',
+    ),
+  };
 
   /// Google Workspace formats, which have no byte representation to download.
   ///
@@ -97,15 +148,16 @@ class FileBytesLoader {
     return ioFile.readAsBytes();
   }
 
-  static Future<List<int>?> _loadFromGDrive(
+  static Future<FileBytes> _loadFromGDrive(
     File file,
     DatabaseRepository repo,
-    AppLogger logger,
-  ) async {
+    AppLogger logger, {
+    ExportTarget? export,
+  }) async {
     final collection = await repo.getCollection(file.collectionId);
     if (collection == null) {
       logger.w("Collection not found for GDrive file: ${file.path}. Skipping.");
-      return null;
+      return const FileBytes.transient();
     }
 
     final fileId = file.path.replaceFirst('gdrive://', '');
@@ -138,18 +190,18 @@ class FileBytesLoader {
         // on every file forever.
         logger.e("GDrive token refresh failed: $e");
         await _flagNeedsReAuth(collection, repo, logger);
-        return null;
+        return const FileBytes.transient();
       } catch (e) {
         // Anything else (not configured, network blip) is worth retrying
         // later — don't force a reconnect for a transient failure.
         logger.e("GDrive token refresh failed: $e");
-        return null;
+        return const FileBytes.transient();
       }
     }
 
     if (accessToken == null) {
       logger.w("No access token for GDrive file: ${file.path}");
-      return null;
+      return const FileBytes.transient();
     }
 
     final driveApi = drive.DriveApi(
@@ -157,17 +209,49 @@ class FileBytesLoader {
     );
 
     try {
+      // Workspace documents go through `export`, everything else through the
+      // media endpoint. Two calls rather than one because Drive treats them as
+      // different operations, and asking for media on a Doc is a 403 by design.
       final media =
-          await driveApi.files
-                  .get(fileId, downloadOptions: drive.DownloadOptions.fullMedia)
-                  .timeout(const Duration(seconds: 30))
-              as drive.Media;
-      return await http.ByteStream(
+          export == null
+              ? await driveApi.files
+                      .get(
+                        fileId,
+                        downloadOptions: drive.DownloadOptions.fullMedia,
+                      )
+                      .timeout(const Duration(seconds: 30))
+                  as drive.Media
+              : (await driveApi.files
+                  .export(
+                    fileId,
+                    export.mimeType,
+                    downloadOptions: drive.DownloadOptions.fullMedia,
+                  )
+                  .timeout(const Duration(seconds: 60)))!;
+
+      final bytes = await http.ByteStream(
         media.stream,
       ).toBytes().timeout(const Duration(minutes: 5));
+
+      return FileBytes.ok(
+        bytes,
+        // Only on the export path: the extractor sniffs the shared ZIP
+        // signature and needs the extension to tell DOCX from XLSX. The
+        // file's own Drive name cannot supply it.
+        filenameHint: export == null ? null : '${file.name}.${export.extension}',
+      );
     } catch (e) {
+      // Drive refuses exports over 10 MB, permanently — no retry helps, and
+      // the message is stable enough to match. Everything else here is a
+      // network or auth condition worth retrying.
+      final message = e.toString().toLowerCase();
+      if (export != null &&
+          (message.contains('exceeds') || message.contains('too large'))) {
+        logger.w('Export too large for ${file.name}: $e');
+        return const FileBytes.permanent();
+      }
       logger.e("Error downloading GDrive file: $e");
-      return null;
+      return const FileBytes.transient();
     }
   }
 
@@ -182,4 +266,17 @@ class FileBytesLoader {
       logger.w("Failed to flag collection needsReAuth: $e");
     }
   }
+}
+
+/// The format a Google Workspace document is fetched as.
+class ExportTarget {
+  /// The MIME type asked of Drive's `files.export`.
+  final String mimeType;
+
+  /// The extension appended to the file's name so the extractor can tell
+  /// which OOXML format the exported bytes are. DOCX, XLSX and PPTX share a
+  /// ZIP signature, so the sniffer cannot decide this from content alone.
+  final String extension;
+
+  const ExportTarget({required this.mimeType, required this.extension});
 }
