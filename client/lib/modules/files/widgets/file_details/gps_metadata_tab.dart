@@ -1,5 +1,5 @@
 import 'package:exif/exif.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -29,7 +29,7 @@ class GpsMetadataTab extends StatelessWidget {
     if (!hasDbLocation && !hasExifLocation) {
       return const Center(
         child: Text(
-          'No GPS data found.',
+          'No location data found.',
           style: TextStyle(color: Colors.grey, fontSize: 12),
         ),
       );
@@ -52,7 +52,7 @@ class GpsMetadataTab extends StatelessWidget {
     if (lat == null || lng == null) {
       return const Center(
         child: Text(
-          'Invalid GPS data.',
+          'Invalid location data.',
           style: TextStyle(color: Colors.grey, fontSize: 12),
         ),
       );

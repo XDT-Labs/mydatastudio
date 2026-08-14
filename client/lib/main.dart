@@ -15,7 +15,7 @@ import 'package:mydatastudio/repositories/watchers/database_change_watcher.dart'
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/widgets/auth_dialog_manager.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:logger/logger.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:window_manager/window_manager.dart';
@@ -366,7 +366,13 @@ class MainAppState extends State<MainApp>
                               SelectableText(
                                 "Configured Location:\n${DatabaseManager.instance.storagePath ?? 'Unknown'}",
                                 style: const TextStyle(
-                                  fontFamily: 'monospace',
+                                  fontFamily: 'SF Mono',
+                                  fontFamilyFallback: [
+                                    'SF Mono',
+                                    'Menlo',
+                                    'Consolas',
+                                    'monospace',
+                                  ],
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -374,7 +380,13 @@ class MainAppState extends State<MainApp>
                               SelectableText(
                                 "Error Details:\n$_dbErrorPath",
                                 style: const TextStyle(
-                                  fontFamily: 'monospace',
+                                  fontFamily: 'SF Mono',
+                                  fontFamilyFallback: [
+                                    'SF Mono',
+                                    'Menlo',
+                                    'Consolas',
+                                    'monospace',
+                                  ],
                                   color: Colors.red,
                                 ),
                               ),
@@ -518,7 +530,13 @@ class MainAppState extends State<MainApp>
                               SelectableText(
                                 "Error Details:\n$_pythonErrorMsg",
                                 style: const TextStyle(
-                                  fontFamily: 'monospace',
+                                  fontFamily: 'SF Mono',
+                                  fontFamilyFallback: [
+                                    'SF Mono',
+                                    'Menlo',
+                                    'Consolas',
+                                    'monospace',
+                                  ],
                                   color: Colors.red,
                                 ),
                               ),

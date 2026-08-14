@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io' as io;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/database_manager.dart';
@@ -27,6 +27,7 @@ import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/files/notifications/path_changed_notification.dart';
 import 'package:mydatastudio/modules/files/notifications/file_notification.dart';
 import 'package:mydatastudio/models/tables/file_asset.dart';
+import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/modules/files/widgets/file_table.dart';
 import 'package:mocktail/mocktail.dart';
 
@@ -682,6 +683,136 @@ void main() {
 
       // Verify details drawer is closed because more than 1 file is selected
       expect(find.text('File Details'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a file deep-linked from Photos opens in its own collection and folder, '
+    'and tells the drawer which collection to highlight',
+    (WidgetTester tester) async {
+      // The Photos info sidebar links a photo back to its folder here. Two
+      // things have to happen at once and they pull against each other: the
+      // page must land on the file's collection *and* folder with the file
+      // open, while the left drawer — which only learns about collections from
+      // RxFilesPage.selectedCollection — must highlight that same collection.
+      // Publishing on that subject is what the drawer needs, but its listener
+      // resets to the collection root and closes the open file. The deep-link
+      // has to be exempt from that reset without being exempt from the
+      // notification.
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      ScannerManager.getInstance().scannerFactory =
+          (col) async => FakeCollectionScanner();
+
+      final user = AppUser(
+        id: const Uuid().v4(),
+        name: 'Integration Test User',
+        email: 'test@example.com',
+        password: 'password',
+        localStoragePath: tempDir.path,
+      );
+
+      // Two collections: the deep-link must reach the second one even though
+      // the first is what this page selects by default on a cold start.
+      final defaultPath = p.join(tempDir.path, 'default_files');
+      final targetPath = p.join(tempDir.path, 'target_files');
+      io.Directory(defaultPath).createSync();
+      io.Directory(p.join(targetPath, 'Trips')).createSync(recursive: true);
+
+      final defaultCollection = Collection(
+        id: 'default-col',
+        name: 'Default Collection',
+        path: defaultPath,
+        type: 'file',
+        scanner: AppConstants.scannerFileLocal,
+        scanStatus: 'idle',
+        needsReAuth: false,
+      );
+      final targetCollection = Collection(
+        id: 'target-col',
+        name: 'Target Collection',
+        path: targetPath,
+        type: 'file',
+        scanner: AppConstants.scannerFileLocal,
+        scanStatus: 'idle',
+        needsReAuth: false,
+      );
+
+      final deepLinked = model.File(
+        id: 'target-col:holiday.jpg',
+        name: 'holiday.jpg',
+        path: p.join('Trips', 'holiday.jpg'),
+        parent: 'Trips',
+        dateCreated: DateTime(2026, 5, 4),
+        dateLastModified: DateTime(2026, 5, 4),
+        collectionId: 'target-col',
+        contentType: 'application/image',
+        size: 3,
+        isDeleted: false,
+      );
+
+      await tester.runAsync(() async {
+        final dbMgr = DatabaseManager.instance;
+        await UserRepository(dbMgr.database!).saveUser(user);
+        final colRepo = CollectionRepository(dbMgr.database!);
+        await colRepo.addCollection(defaultCollection);
+        await colRepo.addCollection(targetCollection);
+        await ScannerManager.getInstance().registerScanner(defaultCollection);
+        await ScannerManager.getInstance().registerScanner(targetCollection);
+        await FileDesktopRepository(dbMgr.database!).create(deepLinked);
+      });
+
+      GetUserService.instance.sink.add(user);
+      DatabaseManager.isInitializedNotifier.value = true;
+      GetCollectionsService.instance.sink.add([
+        defaultCollection,
+        targetCollection,
+      ]);
+
+      // What the drawer listens to. Captured before the page mounts, because
+      // the whole point is the event the page publishes on its way to the file.
+      final highlighted = <Collection?>[];
+      final highlightSub = RxFilesPage.selectedCollection.listen(
+        (value) => highlighted.add(value as Collection?),
+      );
+      addTearDown(highlightSub.cancel);
+
+      // Queued before the page exists, exactly as the Photos sidebar does it.
+      RxFilesPage.openFileRequest.add(deepLinked);
+      addTearDown(() => RxFilesPage.openFileRequest.add(null));
+
+      await tester.runAsync(() async {
+        await tester.pumpWidget(
+          const MaterialApp(home: Scaffold(body: RxFilesPage())),
+        );
+
+        for (var i = 0; i < 40; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+          if (highlighted.any((c) => c?.id == 'target-col')) break;
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
+      });
+      await tester.pump();
+
+      expect(
+        highlighted.map((c) => c?.id),
+        contains('target-col'),
+        reason: 'the drawer highlights whatever last came through this subject',
+      );
+      expect(
+        highlighted.map((c) => c?.id),
+        isNot(contains('default-col')),
+        reason: 'the default auto-select must not fire over a pending link',
+      );
+
+      // And the reset that normally follows a collection change did not run:
+      // the file is still open, in its own folder rather than the root.
+      final page = tester.state(find.byType(RxFilesPage)) as dynamic;
+      expect(page.collection.id, 'target-col');
+      expect(page.path, 'Trips');
+      expect(page.selectedAsset?.id, deepLinked.id);
     },
   );
 }

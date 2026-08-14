@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:exif/exif.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
@@ -16,6 +16,8 @@ import 'package:http/http.dart' as http;
 import 'package:mydatastudio/modules/files/widgets/video_file_preview.dart';
 import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/file_metadata_section.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/image_description_section.dart';
+import 'package:mydatastudio/modules/files/widgets/file_details/tags_and_landmarks_section.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/folder_metadata_section.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/tabbed_metadata_section.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/image_preview_widget.dart';
@@ -86,27 +88,29 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
     final file = widget.asset as File;
     if (!_isImage(file)) return;
 
+    final ioFile = io.File(_resolvedPath(file));
+    if (!await ioFile.exists()) return;
+
     setState(() => _loadingExif = true);
     try {
-      final ioFile = io.File(_resolvedPath(file));
-      if (await ioFile.exists()) {
-        final exif = await readExifFromFile(ioFile);
-        if (mounted) {
-          setState(() {
-            _exifData = exif;
-            if (_resolution == null) {
-              final widthTag = exif['EXIF ExifImageWidth'] ?? exif['Image ImageWidth'];
-              final heightTag = exif['EXIF ExifImageLength'] ?? exif['Image ImageLength'];
-              if (widthTag != null && heightTag != null) {
-                final w = widthTag.printable.trim();
-                final h = heightTag.printable.trim();
-                if (w.isNotEmpty && h.isNotEmpty) {
-                  _resolution = '${w}x${h}';
-                }
+      final exif = await readExifFromFile(ioFile);
+      if (mounted) {
+        setState(() {
+          _exifData = exif;
+          if (_resolution == null) {
+            final widthTag =
+                exif['EXIF ExifImageWidth'] ?? exif['Image ImageWidth'];
+            final heightTag =
+                exif['EXIF ExifImageLength'] ?? exif['Image ImageLength'];
+            if (widthTag != null && heightTag != null) {
+              final w = widthTag.printable.trim();
+              final h = heightTag.printable.trim();
+              if (w.isNotEmpty && h.isNotEmpty) {
+                _resolution = '${w}x${h}';
               }
             }
-          });
-        }
+          }
+        });
       }
     } catch (_) {}
     if (mounted) setState(() => _loadingExif = false);
@@ -302,9 +306,22 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
                     _buildPreviewSection(),
                     const SizedBox(height: 16),
                     if (widget.asset is File) ...[
+                      if (isImage &&
+                          ((widget.asset as File).description
+                                  ?.trim()
+                                  .isNotEmpty ??
+                              false)) ...[
+                        ImageDescriptionSection(
+                          description: (widget.asset as File).description,
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                       FileMetadataSection(
                         file: widget.asset as File,
                         resolution: _resolution,
+                      ),
+                      TagsAndLandmarksSection(
+                        fileId: (widget.asset as File).id,
                       ),
                       const SizedBox(height: 16),
                       TabbedMetadataSection(

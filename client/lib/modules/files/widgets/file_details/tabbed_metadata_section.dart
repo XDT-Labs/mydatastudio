@@ -1,5 +1,5 @@
 import 'package:exif/exif.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -37,8 +37,8 @@ class TabbedMetadataSection extends StatelessWidget {
       children: [
         TabBar(
           tabs: [
-            if (showExif) const Tab(text: 'GPS'),
             if (showExif) const Tab(text: 'EXIF'),
+            if (showExif) const Tab(text: 'LOCATION'),
             const Tab(text: 'SIMILAR'),
           ],
           labelStyle: const TextStyle(
@@ -53,13 +53,13 @@ class TabbedMetadataSection extends StatelessWidget {
           child: TabBarView(
             children: [
               if (showExif)
+                ExifMetadataTab(exifData: exifData, isLoading: isLoadingExif),
+              if (showExif)
                 GpsMetadataTab(
                   exifData: exifData,
                   file: file,
                   tileProvider: tileProvider,
                 ),
-              if (showExif)
-                ExifMetadataTab(exifData: exifData, isLoading: isLoadingExif),
               SimilarFilesTab(
                 file: file,
                 collection: collection,

@@ -16,6 +16,9 @@ class CustomPathProviderPlatform extends PathProviderPlatform {
   Future<String?> getLibraryPath() => original.getLibraryPath();
 
   @override
+  Future<String?> getApplicationCachePath() => original.getApplicationCachePath();
+
+  @override
   Future<String?> getApplicationDocumentsPath() => original.getApplicationDocumentsPath();
 
   @override

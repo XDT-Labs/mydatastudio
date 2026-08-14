@@ -11,7 +11,7 @@ import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/oauth/desktop_oauth_manager.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:uuid/uuid.dart';
@@ -82,11 +82,18 @@ extension LoginProviderExtension on LoginProviders {
   }
 
   /// OAuth client ID.
-  /// Evaluation happens at compile-time via --dart-define or --dart-define-from-file.
-  Future<String> get clientId async {
-    final db = DatabaseManager.instance.database;
-    if (db != null) {
-      final rows = await db.select(
+  ///
+  /// Defaults to [DatabaseManager]'s singleton connection — correct for
+  /// main-isolate/UI callers, which is everything except the scanner/
+  /// embedding worker isolates. Isolates never touch `DatabaseManager` (it's
+  /// a singleton, and each spawned isolate gets its own separate copy of all
+  /// static state — its `database` field is always null there), so they
+  /// must pass their own local [db], or this silently resolves to an empty
+  /// string exactly as if nothing were configured.
+  Future<String> clientId([AppDatabase? db]) async {
+    final database = db ?? DatabaseManager.instance.database;
+    if (database != null) {
+      final rows = await database.select(
         "SELECT * FROM providers WHERE service = ?",
         [key],
       );
@@ -117,11 +124,12 @@ extension LoginProviderExtension on LoginProviders {
 
   /// OAuth client secret.
   /// Google requires client_secret for desktop apps even with PKCE enabled.
-  /// Evaluation happens at compile-time via --dart-define or --dart-define-from-file.
-  Future<String> get clientSecret async {
-    final db = DatabaseManager.instance.database;
-    if (db != null) {
-      final rows = await db.select(
+  ///
+  /// See [clientId] for why isolate callers must pass their own local [db].
+  Future<String> clientSecret([AppDatabase? db]) async {
+    final database = db ?? DatabaseManager.instance.database;
+    if (database != null) {
+      final rows = await database.select(
         "SELECT * FROM providers WHERE service = ?",
         [key],
       );

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/modules/email/widgets/email_detail/attachment_thumbnail_widget.dart';
 

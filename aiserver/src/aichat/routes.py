@@ -12,6 +12,15 @@ from typing import Dict, Any, Generator, Optional
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from PIL import Image
+try:
+    from pillow_heif import register_heif_opener
+
+    # Registers a HEIF/HEIC opener with PIL.Image.open so generate_thumbnail's
+    # plain Image.open() branch (below) can decode .heic/.heif bytes with no
+    # format-specific code path, the same way it already handles JPEG/PNG/etc.
+    register_heif_opener()
+except ImportError:
+    pass
 
 from .models import (
     ChatCompletionRequest, EmbeddingV1Request,
@@ -460,6 +469,8 @@ async def generate_chat_completion(request: ChatCompletionRequest):
             kwargs["temperature"] = request.temperature
         if request.max_tokens is not None:
             kwargs["max_tokens"] = request.max_tokens
+        if request.response_format is not None:
+            kwargs["response_format"] = request.response_format
 
         if request.stream:
             current_model = get_current_model_id()

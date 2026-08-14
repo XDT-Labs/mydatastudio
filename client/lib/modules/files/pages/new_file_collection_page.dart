@@ -14,7 +14,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:reactive_forms/reactive_forms.dart';
 import 'package:uuid/uuid.dart';
@@ -144,8 +144,8 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
       _authState = _DriveAuthState.checking;
     });
 
-    final clientId = await LoginProviders.googleDrive.clientId;
-    final clientSecret = await LoginProviders.googleDrive.clientSecret;
+    final clientId = await LoginProviders.googleDrive.clientId();
+    final clientSecret = await LoginProviders.googleDrive.clientSecret();
 
     if (!mounted) return;
 

@@ -85,15 +85,21 @@ class GoogleAuthService {
   /// Use this overload inside isolates where DB access or a [Collection] object
   /// is not available. The caller is responsible for persisting the new token
   /// if needed.
+  ///
+  /// [db] should be the caller's own local `AppDatabase` when called from a
+  /// worker isolate — see [LoginProviders.clientId] for why omitting it
+  /// there silently resolves the client ID/secret to empty strings instead
+  /// of the ones actually configured in Settings.
   static Future<TokenRefreshResult> refreshTokens({
     required String accessToken,
     required String refreshToken,
+    AppDatabase? db,
   }) async {
     final provider = LoginProviders.google;
     final url = Uri.parse(provider.tokenEndpoint);
 
-    final clientId = await provider.clientId;
-    final clientSecret = await provider.clientSecret;
+    final clientId = await provider.clientId(db);
+    final clientSecret = await provider.clientSecret(db);
 
     if (clientId.isEmpty || clientSecret.isEmpty) {
       throw ProviderConfigurationException(

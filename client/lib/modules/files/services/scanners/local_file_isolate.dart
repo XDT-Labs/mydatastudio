@@ -14,6 +14,7 @@ import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
 import 'package:path/path.dart' as p;
 import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/modules/files/services/utilities/exif_extractor.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:mydatastudio/scanners/scan_isolate_support.dart';
@@ -730,6 +731,21 @@ class LocalFileIsolateWorker {
       final bool isImage = getMimeType(name) == FilesConstants.mimeTypeImage;
 
       if (mtimeMatches && (!isImage || hasThumbnail)) {
+        // A cached row with no GPS coordinates is ambiguous: it may genuinely
+        // have none, or it may predate GPS extraction being wired up at all.
+        // Retry extraction on every cache hit until it succeeds once, then
+        // the non-null result is trusted from then on.
+        double? latitude = cached.latitude;
+        double? longitude = cached.longitude;
+        if (isImage && latitude == null && longitude == null) {
+          final gps = await ExifExtractor().extractLatLng(
+            absPath,
+            cached.contentType,
+          );
+          latitude = gps['latitude'] as double?;
+          longitude = gps['longitude'] as double?;
+        }
+
         // Return a copy with the new scan time to prevent deletion
         result['isCacheHit'] = true;
         result['file'] = File(
@@ -747,8 +763,8 @@ class LocalFileIsolateWorker {
           thumbnail: cached.thumbnail,
           downloadUrl: cached.downloadUrl,
           emailId: cached.emailId,
-          latitude: cached.latitude,
-          longitude: cached.longitude,
+          latitude: latitude,
+          longitude: longitude,
           localPath: cached.localPath,
         );
         return result;
@@ -756,6 +772,14 @@ class LocalFileIsolateWorker {
     }
 
     final mimeType = getMimeType(name);
+
+    double? latitude;
+    double? longitude;
+    if (mimeType == FilesConstants.mimeTypeImage) {
+      final gps = await ExifExtractor().extractLatLng(absPath, mimeType);
+      latitude = gps['latitude'] as double?;
+      longitude = gps['longitude'] as double?;
+    }
 
     result['file'] = File(
       id: fileId,
@@ -770,6 +794,8 @@ class LocalFileIsolateWorker {
       size: file_.lengthSync(),
       contentType: mimeType,
       thumbnail: null,
+      latitude: latitude,
+      longitude: longitude,
     );
 
     return result;
@@ -785,6 +811,8 @@ class LocalFileIsolateWorker {
       case 'tif':
       case 'psd':
       case 'nef':
+      case 'heic':
+      case 'heif':
         return FilesConstants.mimeTypeImage;
       case 'pdf':
         return FilesConstants.mimeTypePdf;

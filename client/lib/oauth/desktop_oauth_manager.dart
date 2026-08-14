@@ -31,8 +31,8 @@ class DesktopOAuthManager extends DesktopLoginManager {
   }) async {
     // The oauth2 package auto-generates PKCE (code_verifier + S256 code_challenge)
     // for all grants. Google requires client_secret alongside PKCE for desktop apps.
-    final clientId = await loginProvider.clientId;
-    final clientSecret = await loginProvider.clientSecret;
+    final clientId = await loginProvider.clientId();
+    final clientSecret = await loginProvider.clientSecret();
 
     if (clientId.isEmpty || clientSecret.isEmpty) {
       throw ProviderConfigurationException(

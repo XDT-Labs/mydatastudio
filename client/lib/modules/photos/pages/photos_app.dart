@@ -1,144 +1,272 @@
 import 'dart:async';
-import 'dart:core';
-
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/models/tables/file.dart';
-import 'package:mydatastudio/modules/photos/services/photos_by_date_service.dart';
-import 'package:mydatastudio/modules/photos/widgets/photo_card.dart';
-import 'package:flutter/material.dart';
-import 'package:timeline_tile/timeline_tile.dart';
+import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
+import 'package:mydatastudio/modules/photos/services/photos_service.dart';
+import 'package:mydatastudio/modules/photos/services/selection_service.dart';
+import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
+import 'package:mydatastudio/modules/photos/widgets/dialogs/keyboard_shortcuts_modal.dart';
+import 'package:mydatastudio/modules/photos/widgets/sidebar/animated_info_panel.dart';
+import 'package:mydatastudio/modules/photos/widgets/sidebar/info_sidebar.dart';
+import 'package:mydatastudio/modules/photos/widgets/toolbar/photos_toolbar.dart';
+import 'package:mydatastudio/modules/photos/widgets/toolbar/place_filter_bar.dart';
+import 'package:mydatastudio/modules/photos/widgets/viewer/fullscreen_viewer.dart';
+import 'package:mydatastudio/modules/photos/widgets/keyboard_shortcut_handler.dart';
+import 'package:mydatastudio/modules/photos/widgets/views/photo_grid.dart';
+import 'package:mydatastudio/modules/photos/widgets/views/photo_list_view.dart';
+import 'package:mydatastudio/modules/photos/widgets/views/photo_map_view.dart';
 
+import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
+
+/// Main orchestration page for the Photos application module.
 class PhotosApp extends StatefulWidget {
-  const PhotosApp({super.key});
+  const PhotosApp({super.key, this.photosRepository});
 
-  //String sortColumn, bool direction
+  final PhotosRepository? photosRepository;
 
   @override
-  State<PhotosApp> createState() => _PhotosApp();
+  State<PhotosApp> createState() => _PhotosAppState();
 }
 
-class _PhotosApp extends State<PhotosApp> {
-  StreamSubscription? _photosSub;
+class _PhotosAppState extends State<PhotosApp> {
+  late final PhotosRepository _photosRepo;
 
-  Map<String, List<File>> photos = {};
+  StreamSubscription? _viewModeSub;
+  StreamSubscription? _photosSub;
+  StreamSubscription? _geoFilesSub;
+  StreamSubscription? _infoOpenSub;
+  StreamSubscription? _lightboxSub;
+  StreamSubscription? _filterSub;
+  StreamSubscription? _selectionSub;
+
+  PhotoViewMode _viewMode = PhotoViewMode.grid;
+  List<File> _files = [];
+  List<File> _geoFiles = [];
+  bool _isInfoOpen = false;
+  File? _lightboxMedia;
+  Set<String> _selectedIds = {};
+  PhotoFilter _activeFilter = const PhotoFilter();
 
   @override
   void initState() {
-    PhotosByDateService photosByDateService = PhotosByDateService();
+    super.initState();
+    _photosRepo = widget.photosRepository ?? PhotosRepository();
+    _viewMode = ViewStateService.instance.viewMode.value;
+    _files = PhotosService.instance.sink.valueOrNull ?? [];
+    _geoFiles = PhotosService.instance.photosWithLocation.valueOrNull ?? [];
+    _isInfoOpen = ViewStateService.instance.isInfoOpen.value;
+    _lightboxMedia = ViewStateService.instance.lightboxMedia.value;
+    _selectedIds = SelectionService.instance.selectedIds.value;
+    _activeFilter = ViewStateService.instance.activeFilter.value;
 
-    _photosSub = photosByDateService.sink.listen((value) {
-      setState(() {
-        photos = value;
-      });
+    _viewModeSub = ViewStateService.instance.viewMode.listen((mode) {
+      if (mounted) setState(() => _viewMode = mode);
     });
 
-    photosByDateService.invoke(PhotosByDateServiceCommand()); //load all
-    super.initState();
+    _photosSub = PhotosService.instance.sink.listen((files) {
+      if (mounted) setState(() => _files = files);
+    });
+
+    _geoFilesSub = PhotosService.instance.photosWithLocation.listen((files) {
+      if (mounted) setState(() => _geoFiles = files);
+    });
+
+    _infoOpenSub = ViewStateService.instance.isInfoOpen.listen((isOpen) {
+      if (mounted) setState(() => _isInfoOpen = isOpen);
+    });
+
+    _lightboxSub = ViewStateService.instance.lightboxMedia.listen((media) {
+      if (mounted) setState(() => _lightboxMedia = media);
+    });
+
+    _filterSub = ViewStateService.instance.activeFilter.listen((filter) {
+      if (mounted) setState(() => _activeFilter = filter);
+      PhotosService.instance.invoke(PhotosServiceCommand(filter));
+    });
+
+    _selectionSub = SelectionService.instance.selectedIds.listen((ids) {
+      if (mounted) setState(() => _selectedIds = ids);
+    });
   }
 
   @override
   void dispose() {
+    _viewModeSub?.cancel();
     _photosSub?.cancel();
+    _geoFilesSub?.cancel();
+    _infoOpenSub?.cancel();
+    _lightboxSub?.cancel();
+    _filterSub?.cancel();
+    _selectionSub?.cancel();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    Size size = MediaQuery.of(context).size;
-    //final authService = Provider.of<AuthProvider>(context, listen: false);
-    //final textTheme = Theme.of(context).textTheme;
-    //layout props
-    double dateW = 210;
-    double imgW = 125;
-    //double columnsW = ((size.width - 150) / imgW);
-    double ratio = 1 - ((size.width - dateW) / size.width);
+  Widget _buildActiveView() {
+    switch (_viewMode) {
+      case PhotoViewMode.grid:
+        return PhotoGrid(
+          files: _files,
+          selectedIds: _selectedIds,
+        );
+      case PhotoViewMode.list:
+        return PhotoListView(
+          files: _files,
+          selectedIds: _selectedIds,
+        );
+      case PhotoViewMode.map:
+        return PhotoMapView(
+          files: _geoFiles,
+          selectedIds: _selectedIds,
+        );
+    }
+  }
 
-    List<String> keys = photos.keys.toList();
-    keys.sort((a, b) => b.compareTo(a));
+  /// Applies a new radius, in miles, to the place already being filtered on.
+  void _setPlaceRadiusMiles(double miles) {
+    final place = _activeFilter.place;
+    if (place == null) return;
+    _applyFilter(
+      _activeFilter.copyWith(place: place.copyWith(radiusMiles: miles)),
+    );
+  }
 
-    return Scaffold(
-      appBar: AppBar(
-        centerTitle: false,
-        title: const Text("My Photos"),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1.0),
-          child: Container(height: 1.0, color: Colors.grey.shade300),
+  void _clearPlace() {
+    ViewStateService.instance.setActiveNav('all');
+    _applyFilter(_activeFilter.copyWith(place: null, location: null));
+  }
+
+  void _applyFilter(PhotoFilter filter) {
+    ViewStateService.instance.updateFilter(filter);
+    PhotosService.instance.invoke(PhotosServiceCommand(filter));
+  }
+
+  Widget _buildInfoPanel() {
+    return AnimatedInfoPanel(
+      isOpen: _isInfoOpen,
+      child: const InfoSidebar(),
+    );
+  }
+
+  Widget _buildStatusBar(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+
+    final videoCount = _files.where((f) {
+      final mime = f.contentType;
+      return mime.startsWith('video/') ||
+          f.name.endsWith('.mp4') ||
+          f.name.endsWith('.mov') ||
+          f.name.endsWith('.avi');
+    }).length;
+    final photoCount = _files.length - videoCount;
+
+    String countText = '$photoCount photos, $videoCount videos';
+    if (_selectedIds.isNotEmpty) {
+      countText = '${_selectedIds.length} items selected · $countText';
+    }
+
+    return Container(
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainer,
+        border: Border(
+          top: BorderSide(color: colorScheme.outlineVariant),
         ),
-        actions: <Widget>[
-          IconButton(
-            // TODO: disable is no files are checked
-            icon: const Icon(Icons.filter_list, color: Colors.black),
-            tooltip: 'Download File(s)',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('todo: show filter')),
-              );
-            },
+      ),
+      child: Row(
+        children: [
+          Text(
+            countText,
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
+          const Spacer(),
+          Text(
+            'SPACE: View · I: Info · ESC: Close',
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 8),
           IconButton(
-            // TODO: disable is no files are checked
-            icon: const Icon(Icons.search, color: Colors.black),
-            tooltip: 'Delete File(s)',
+            icon: const Icon(Icons.keyboard_outlined),
+            tooltip: 'Keyboard Shortcuts',
+            iconSize: 16,
+            padding: const EdgeInsets.all(4),
+            constraints: const BoxConstraints(),
             onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('todo: show search')),
+              showDialog<void>(
+                context: context,
+                builder: (context) => const KeyboardShortcutsModal(),
               );
             },
           ),
         ],
       ),
-      body: SizedBox(
-        height: double.infinity,
-        child: ListView.builder(
-          shrinkWrap: true,
-          padding: const EdgeInsets.all(8),
-          scrollDirection: Axis.vertical,
-          itemCount: keys.length,
-          itemBuilder: (BuildContext ctxt, int indx) {
-            //get all files linked to date key
-            List<File> files = photos[keys[indx]] ?? [];
-            return Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: TimelineTile(
-                alignment: TimelineAlign.manual,
-                lineXY: ratio,
-                isFirst: indx == 0,
-                indicatorStyle: IndicatorStyle(
-                  width: 40,
-                  indicatorXY: 0,
-                  color: Colors.purple,
-                  padding: const EdgeInsets.all(8),
-                  iconStyle: IconStyle(
-                    color: Colors.white,
-                    iconData: Icons.calendar_month,
-                  ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyboardShortcutHandler(
+      child: Stack(
+        children: [
+          Column(
+            children: [
+              const PhotosToolbar(),
+              // Shown for either kind of location filter — a searched place or
+              // a landmark picked from the drawer — so the grid never sits
+              // narrowed with nothing on screen explaining it.
+              if (_activeFilter.place != null || _activeFilter.location != null)
+                PlaceFilterBar(
+                  place: _activeFilter.place,
+                  landmark: _activeFilter.location,
+                  matchCount: _files.length,
+                  onRadiusChanged: _setPlaceRadiusMiles,
+                  onCleared: _clearPlace,
                 ),
-                startChild: SizedBox(
-                  width: 150,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 16, 8, 0),
-                    child: Align(
-                      alignment: Alignment.topRight,
-                      child: Text(
-                        keys[indx],
-                        textWidthBasis: TextWidthBasis.longestLine,
-                      ),
-                    ),
-                  ),
-                ),
-                endChild: Wrap(
-                  spacing: 4,
-                  runSpacing: 4,
-                  direction: Axis.horizontal,
+              Expanded(
+                child: Row(
                   children: [
-                    ...files.map((f) {
-                      return PhotoCard(file: f, width: imgW);
-                    }),
+                    Expanded(
+                      child: _buildActiveView(),
+                    ),
+                    _buildInfoPanel(),
                   ],
                 ),
               ),
-            );
-          },
-        ),
+              _buildStatusBar(context),
+            ],
+          ),
+          if (_lightboxMedia != null)
+            Positioned.fill(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: FullscreenViewer(
+                      currentFile: _lightboxMedia!,
+                      mediaList: _files,
+                      onClose: () => ViewStateService.instance.setLightboxMedia(null),
+                      onOpenInfo: (file) => ViewStateService.instance.openInfo(file),
+                      onToggleFavorite: (file) async {
+                        await _photosRepo.toggleFavorite(file.id);
+                        final updatedList = await PhotosService.instance.refresh();
+                        final updated = updatedList.firstWhere(
+                          (f) => f.id == file.id,
+                          orElse: () => file..isFavorite = !file.isFavorite,
+                        );
+                        ViewStateService.instance.setLightboxMedia(updated);
+                      },
+                    ),
+                  ),
+                  _buildInfoPanel(),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

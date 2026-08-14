@@ -1,15 +1,107 @@
 import 'package:mydatastudio/app_router.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class FamilyDamApp extends StatelessWidget {
   const FamilyDamApp({super.key});
 
+  static const String _fontFamily = '.AppleSystemUIFont';
+  static const List<String> _fontFamilyFallback = [
+    'Inter',
+    'Segoe UI',
+    'sans-serif',
+  ];
+
   ThemeData _buildTheme(ColorScheme colorScheme, BuildContext context) {
-    final baseTextTheme = GoogleFonts.publicSansTextTheme(
-      Theme.of(context).textTheme,
-    );
+    final textTheme = ThemeData.light()
+        .textTheme
+        .copyWith(
+          displayLarge: const TextStyle(
+            fontSize: 56,
+            fontWeight: FontWeight.normal,
+            letterSpacing: -0.5,
+          ),
+          displayMedium: const TextStyle(
+            fontSize: 44,
+            fontWeight: FontWeight.normal,
+            letterSpacing: -0.5,
+          ),
+          displaySmall: const TextStyle(
+            fontSize: 36,
+            fontWeight: FontWeight.normal,
+            letterSpacing: -0.25,
+          ),
+          headlineLarge: const TextStyle(
+            fontSize: 32,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.2,
+          ),
+          headlineMedium: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.2,
+          ),
+          headlineSmall: const TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.15,
+          ),
+          titleLarge: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.15,
+          ),
+          titleMedium: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.1,
+          ),
+          titleSmall: const TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.1,
+          ),
+          bodyLarge: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w400,
+            height: 1.4,
+            letterSpacing: -0.1,
+          ),
+          bodyMedium: const TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w400,
+            height: 1.4,
+            letterSpacing: -0.1,
+          ),
+          bodySmall: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w400,
+            height: 1.35,
+            letterSpacing: 0.0,
+          ),
+          labelLarge: const TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.1,
+          ),
+          labelMedium: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 0.0,
+          ),
+          labelSmall: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 0.2,
+          ),
+        )
+        .apply(
+          fontFamily: _fontFamily,
+          fontFamilyFallback: _fontFamilyFallback,
+          bodyColor: colorScheme.onSurface,
+          displayColor: colorScheme.onSurface,
+        );
 
     return ThemeData(
       useMaterial3: true,
@@ -22,74 +114,7 @@ class FamilyDamApp extends StatelessWidget {
         elevation: 0,
         scrolledUnderElevation: 0,
       ),
-      textTheme: baseTextTheme
-          .copyWith(
-            displayLarge: GoogleFonts.montserrat(
-              fontSize: 57,
-              fontWeight: FontWeight.normal,
-            ),
-            displayMedium: GoogleFonts.montserrat(
-              fontSize: 45,
-              fontWeight: FontWeight.normal,
-            ),
-            displaySmall: GoogleFonts.montserrat(
-              fontSize: 36,
-              fontWeight: FontWeight.normal,
-            ),
-            headlineLarge: GoogleFonts.montserrat(
-              fontSize: 32,
-              fontWeight: FontWeight.normal,
-            ),
-            headlineMedium: GoogleFonts.montserrat(
-              fontSize: 28,
-              fontWeight: FontWeight.normal,
-            ),
-            headlineSmall: GoogleFonts.montserrat(
-              fontSize: 24,
-              fontWeight: FontWeight.normal,
-            ),
-            titleLarge: GoogleFonts.publicSans(
-              fontSize: 22,
-              fontWeight: FontWeight.w400,
-            ),
-            titleMedium: GoogleFonts.publicSans(
-              fontSize: 16,
-              fontWeight: FontWeight.w400,
-            ),
-            titleSmall: GoogleFonts.publicSans(
-              fontSize: 14,
-              fontWeight: FontWeight.w400,
-            ),
-            bodyLarge: GoogleFonts.publicSans(
-              fontSize: 16,
-              fontWeight: FontWeight.w400,
-            ),
-            bodyMedium: GoogleFonts.publicSans(
-              fontSize: 14,
-              fontWeight: FontWeight.w400,
-            ),
-            bodySmall: GoogleFonts.publicSans(
-              fontSize: 12,
-              fontWeight: FontWeight.w400,
-            ),
-            labelLarge: GoogleFonts.publicSans(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-            labelMedium: GoogleFonts.publicSans(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-            labelSmall: GoogleFonts.publicSans(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              letterSpacing: 0.5,
-            ),
-          )
-          .apply(
-            bodyColor: colorScheme.onSurface,
-            displayColor: colorScheme.onSurface,
-          ),
+      textTheme: textTheme,
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: colorScheme.surfaceContainerLowest,
         foregroundColor: colorScheme.primary,
@@ -102,9 +127,15 @@ class FamilyDamApp extends StatelessWidget {
         indicatorShape: const StadiumBorder(),
         selectedIconTheme: IconThemeData(color: colorScheme.primary),
         unselectedIconTheme: IconThemeData(color: colorScheme.onSurfaceVariant),
-        selectedLabelTextStyle: GoogleFonts.inter(color: colorScheme.primary),
-        unselectedLabelTextStyle: GoogleFonts.inter(
+        selectedLabelTextStyle: TextStyle(
+          color: colorScheme.primary,
+          fontFamily: _fontFamily,
+          fontFamilyFallback: _fontFamilyFallback,
+        ),
+        unselectedLabelTextStyle: TextStyle(
           color: colorScheme.onSurfaceVariant,
+          fontFamily: _fontFamily,
+          fontFamilyFallback: _fontFamilyFallback,
         ),
       ),
       drawerTheme: DrawerThemeData(
@@ -123,10 +154,12 @@ class FamilyDamApp extends StatelessWidget {
           }
           return Colors.transparent;
         }),
-        headingTextStyle: GoogleFonts.inter(
+        headingTextStyle: TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w500,
           color: colorScheme.onSurfaceVariant,
+          fontFamily: _fontFamily,
+          fontFamilyFallback: _fontFamilyFallback,
         ),
       ),
       checkboxTheme: CheckboxThemeData(

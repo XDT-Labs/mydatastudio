@@ -1,5 +1,5 @@
 import 'package:mydatastudio/app_logger.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Module logger. AppLogger reaches the session log file; print() does not.
 final AppLogger _logger = AppLogger(null);

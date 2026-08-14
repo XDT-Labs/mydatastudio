@@ -141,6 +141,19 @@ class CollectionRepository {
     }, label: 'CollectionRepository.updateScanStatus');
   }
 
+  /// Flags [id] as needing reconnection — the single implementation for the
+  /// `needs_re_auth = 1` update, shared by every scanner/loader that hits a
+  /// dead OAuth refresh token (Gmail, Google Drive scanner, file bytes
+  /// loader) so the app's existing reconnect prompt fires instead of the
+  /// scan/load failing silently forever.
+  Future<void> markNeedsReAuth(String id) async {
+    return retryOnLock(() async {
+      await db.execute('UPDATE collections SET needs_re_auth = 1 WHERE id = ?', [
+        id,
+      ]);
+    }, label: 'CollectionRepository.markNeedsReAuth');
+  }
+
   /// Update the scan date for services that check external systems on a schedule, such as email
   void updateLastScanDate(Collection collection, DateTime? value) async {
     collection.lastScanDate = DateTime.now();

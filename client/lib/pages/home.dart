@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 import 'package:mydatastudio/services/get_collections_service.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});

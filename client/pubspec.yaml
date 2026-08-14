@@ -84,7 +84,6 @@ dependencies:
   plugin_platform_interface: ^2.1.8
   uuid: ^4.6.0
   intl: ^0.20.2
-  package_info_plus: ^8.1.1
   desktop_window: ^0.4.4
   window_manager: ^0.5.2
   screen_retriever: ^0.2.2
@@ -109,6 +108,9 @@ dependencies:
 
 
 
+  flutter_localizations: any
+  material_ui: any
+  package_info_plus: any
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -150,6 +152,9 @@ flutter:
   assets:
     - assets/
     - assets/images/google-drive.png
+    # Embedded place list for the Photos location search — see
+    # assets/gazetteer/README.md for the source and its CC BY 4.0 attribution.
+    - assets/gazetteer/cities.tsv.gz
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware

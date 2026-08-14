@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
@@ -15,6 +15,7 @@ import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:mydatastudio/modules/files/services/embedding_isolate.dart';
+import 'package:mydatastudio/modules/files/services/file_description_isolate.dart';
 import 'package:mydatastudio/modules/email/services/email_embedding_isolate.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:uuid/uuid.dart';
@@ -38,6 +39,7 @@ class DatabaseManager {
   AppDatabase? appDatabase;
   EmbeddingIsolate? _embeddingIsolate;
   EmailEmbeddingIsolate? _emailEmbeddingIsolate;
+  FileDescriptionIsolate? _fileDescriptionIsolate;
   DatabaseRepository? _repository;
   bool _backgroundServicesStarted = false;
   VoidCallback? _vaultUnlockListener;
@@ -274,6 +276,12 @@ class DatabaseManager {
     if (appDatabase != null && _emailEmbeddingIsolate == null) {
       await _startEmailEmbeddingIsolate(appDatabase!.path!);
     }
+
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (generation != _startGeneration) return;
+    if (appDatabase != null && _fileDescriptionIsolate == null) {
+      await _startFileDescriptionIsolate(appDatabase!.path!);
+    }
   }
 
   void stopBackgroundServices() {
@@ -283,6 +291,8 @@ class DatabaseManager {
     _embeddingIsolate = null;
     unawaited(_emailEmbeddingIsolate?.stop());
     _emailEmbeddingIsolate = null;
+    unawaited(_fileDescriptionIsolate?.stop());
+    _fileDescriptionIsolate = null;
   }
 
   Future<AppDatabase> _openDatabase(String dbDir) async {
@@ -347,10 +357,20 @@ class DatabaseManager {
     );
   }
 
+  Future<void> _startFileDescriptionIsolate(String storagePath) async {
+    _fileDescriptionIsolate = FileDescriptionIsolate();
+    await _fileDescriptionIsolate!.start(
+      storagePath,
+      AppConstants.dbName,
+      RootIsolateToken.instance!,
+    );
+  }
+
   void pauseEmbeddingIsolates() {
     logger.d("Pausing embedding isolates for active scanner/import");
     _embeddingIsolate?.pause();
     _emailEmbeddingIsolate?.pause();
+    _fileDescriptionIsolate?.pause();
   }
 
   void resumeEmbeddingIsolates() {
@@ -359,6 +379,7 @@ class DatabaseManager {
     );
     _embeddingIsolate?.resume();
     _emailEmbeddingIsolate?.resume();
+    _fileDescriptionIsolate?.resume();
   }
 
   void dispose() {
@@ -509,6 +530,79 @@ class AppDatabase {
         FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
       );
     ''');
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS file_tags (
+        file_id TEXT NOT NULL,
+        tag TEXT NOT NULL,
+        PRIMARY KEY (file_id, tag),
+        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS file_tags_tag_idx ON file_tags (tag);',
+    );
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS album_files (
+        album_id TEXT NOT NULL,
+        file_id TEXT NOT NULL,
+        PRIMARY KEY (album_id, file_id),
+        FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+      );
+    ''');
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS file_landmarks (
+        file_id TEXT NOT NULL,
+        landmark TEXT NOT NULL,
+        PRIMARY KEY (file_id, landmark),
+        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS file_landmarks_landmark_idx '
+      'ON file_landmarks (landmark);',
+    );
+    // The embedded gazetteer (assets/gazetteer/cities.tsv.gz). Seeded lazily
+    // by GazetteerRepository the first time a location search runs, not here:
+    // this method also executes on the scanner and embedding isolates, which
+    // have no asset bundle, and ~70k inserts have no business on the startup
+    // path of a user who never opens Photos.
+    // Derived data rebuilt from a shipped asset in seconds, so an outdated
+    // shape is dropped rather than migrated.
+    final locationColumns = await _db.select('PRAGMA table_info(locations)');
+    if (locationColumns.isNotEmpty &&
+        !locationColumns.any((c) => c['name'] == 'search_extra')) {
+      await _db.execute('DROP TABLE locations');
+    }
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS locations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        region TEXT,
+        country TEXT NOT NULL,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        population INTEGER NOT NULL DEFAULT 0,
+        search_name TEXT NOT NULL,
+        search_alt TEXT,
+        search_extra TEXT
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS locations_search_name_idx '
+      'ON locations (search_name);',
+    );
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS locations_search_alt_idx '
+      'ON locations (search_alt);',
+    );
+    // Photo location search filters on a lat/lng bounding box; without this
+    // every query is a full scan of the files table.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS files_latlng_idx '
+      'ON files (latitude, longitude);',
+    );
+    await _migrateFilesEmbeddingsKey();
     final added = await _addMissingColumns();
 
     // Only on the open that introduces the column, so a large archive pays for
@@ -594,6 +688,56 @@ class AppDatabase {
     }
   }
 
+  /// Rebuilds `files_embeddings` onto a `(file_id, type)` primary key when it
+  /// still has the original `file_id`-only key (with or without the `type`
+  /// column added by an earlier version of this migration).
+  ///
+  /// SQLite can't alter a primary key with `ALTER TABLE`, so this is a
+  /// rename-recreate-copy-drop done inside a transaction. Safe to run on
+  /// every open: once the key covers `type` this is a single `PRAGMA
+  /// table_info` read and nothing else. A single-column key can't hold both
+  /// a 'file' and a 'description' embedding for the same file — the second
+  /// insert would silently overwrite the first's vector instead of adding a
+  /// row — so this has to land before anything writes a non-'file' row.
+  Future<void> _migrateFilesEmbeddingsKey() async {
+    final info = await _db.select('PRAGMA table_info(files_embeddings)');
+    if (info.isEmpty) return;
+    Map<String, Object?>? typeColumn;
+    for (final row in info) {
+      if (row['name'] == 'type') {
+        typeColumn = row;
+        break;
+      }
+    }
+    final keyedByType = typeColumn != null && (typeColumn['pk'] as int) > 0;
+    if (keyedByType) return;
+
+    logger.i(
+      'AppDatabase: migrating files_embeddings to a (file_id, type) key',
+    );
+    final hasTypeColumn = typeColumn != null;
+    await _db.transaction((tx) async {
+      await tx.execute(
+        'ALTER TABLE files_embeddings RENAME TO files_embeddings_old',
+      );
+      await tx.execute('''
+        CREATE TABLE files_embeddings (
+          file_id TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'file',
+          qwen3_vl_embedding BLOB,
+          PRIMARY KEY (file_id, type),
+          FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+        )
+      ''');
+      await tx.execute('''
+        INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding)
+        SELECT file_id, ${hasTypeColumn ? 'type' : "'file'"}, qwen3_vl_embedding
+        FROM files_embeddings_old
+      ''');
+      await tx.execute('DROP TABLE files_embeddings_old');
+    });
+  }
+
   /// Columns added to [schemaDDL] after the initial schema shipped.
   ///
   /// The DDL above only runs for a brand-new database, so an existing install
@@ -612,6 +756,19 @@ class AppDatabase {
         // Whether the attachment is part of the message body — a spacer, logo
         // or tracking pixel — rather than something the sender attached.
         'is_inline': 'INTEGER NOT NULL DEFAULT 0',
+        'is_favorite': 'INTEGER NOT NULL DEFAULT 0',
+        // AI-generated or user-entered description of the file's contents.
+        'description': 'TEXT',
+        // How many times FileDescriptionIsolate has tried and failed to
+        // generate a description for this file (unreadable image, model
+        // returned no usable analysis, embedding failed, ...). Without this,
+        // a file that can never succeed gets re-selected and retried by
+        // getFilesWithMissingDescriptions forever.
+        'description_attempts': 'INTEGER NOT NULL DEFAULT 0',
+      },
+      'albums': {
+        'description': 'TEXT',
+        'cover_file_id': 'TEXT',
       },
     };
 
@@ -1175,8 +1332,14 @@ class AppDatabase {
       longitude REAL,
       local_path TEXT,
       content_id TEXT,
-      is_inline INTEGER NOT NULL DEFAULT 0
+      is_inline INTEGER NOT NULL DEFAULT 0,
+      is_favorite INTEGER NOT NULL DEFAULT 0,
+      description TEXT
     );
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS idx_files_active_date
+      ON files (is_deleted, is_inline, date_created);
     ''',
     // folders
     '''
@@ -1198,16 +1361,72 @@ class AppDatabase {
     '''
     CREATE TABLE IF NOT EXISTS albums (
       id TEXT PRIMARY KEY,
-      name TEXT NOT NULL
+      name TEXT NOT NULL,
+      description TEXT,
+      cover_file_id TEXT
+    );
+    ''',
+    // file_tags
+    '''
+    CREATE TABLE IF NOT EXISTS file_tags (
+      file_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      PRIMARY KEY (file_id, tag),
+      FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag);
+    ''',
+    // album_files
+    '''
+    CREATE TABLE IF NOT EXISTS album_files (
+      album_id TEXT NOT NULL,
+      file_id TEXT NOT NULL,
+      PRIMARY KEY (album_id, file_id),
+      FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+      FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
     ''',
     // files_embeddings
+    //
+    // Keyed on (file_id, type) rather than file_id alone: a file needs one
+    // embedding row per kind of thing it was computed from — the image
+    // itself ('file'), a generated description's text ('description'), and
+    // eventually PDF RAG chunks ('chunk') — all sharing the same vector
+    // column so similarity search can scan across (or filter within) them.
     '''
     CREATE TABLE IF NOT EXISTS files_embeddings (
-      file_id TEXT PRIMARY KEY,
+      file_id TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'file',
       qwen3_vl_embedding BLOB,
+      PRIMARY KEY (file_id, type),
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
+    ''',
+    // file_tags
+    '''
+    CREATE TABLE IF NOT EXISTS file_tags (
+      file_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      PRIMARY KEY (file_id, tag),
+      FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS file_tags_tag_idx ON file_tags (tag);
+    ''',
+    // file_landmarks
+    '''
+    CREATE TABLE IF NOT EXISTS file_landmarks (
+      file_id TEXT NOT NULL,
+      landmark TEXT NOT NULL,
+      PRIMARY KEY (file_id, landmark),
+      FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS file_landmarks_landmark_idx ON file_landmarks (landmark);
     ''',
     // emails_embeddings
     '''

@@ -1,5 +1,5 @@
 import 'package:exif/exif.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/info_row.dart';
 
 class ExifMetadataTab extends StatelessWidget {

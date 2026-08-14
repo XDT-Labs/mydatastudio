@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 
 class SettingsDrawer extends StatefulWidget {
@@ -87,6 +87,15 @@ class _SettingsDrawerState extends State<SettingsDrawer> {
                 onTap: () => GoRouter.of(context).go('/settings/aichat-skills'),
               ),
             ],
+            // About section — a top-level entry rather than a nested one, so
+            // the attribution the embedded data is licensed on is reachable
+            // without knowing to expand anything.
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Credits & Licenses'),
+              selected: currentRoute == '/settings/credits',
+              onTap: () => GoRouter.of(context).go('/settings/credits'),
+            ),
           ],
         ),
       ),

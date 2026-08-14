@@ -17,9 +17,10 @@ import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner
 import 'package:mydatastudio/modules/email/widgets/email_details.dart';
 import 'package:mydatastudio/modules/email/widgets/email_table.dart';
 import 'package:mydatastudio/modules/email/widgets/scanning_placeholder_widget.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_breadcrumb/flutter_breadcrumb.dart';
 import 'package:moment_dart/moment_dart.dart';
@@ -63,6 +64,68 @@ bool shouldRefreshForImport({
   return true;
 }
 
+/// What the message pane should show when [folderId] becomes the folder on
+/// screen, and whether a deep-link request is still outstanding afterwards.
+///
+/// Selecting a folder normally closes whatever message is open — the detail
+/// view covers the whole pane, so leaving it up makes clicking a folder look
+/// dead. A message deep-linked via [EmailPage.openEmailRequest] has to survive
+/// that, and it cannot simply be exempt: reaching a message in another
+/// collection resets the folder to null on the way there, and giving up on
+/// that reset lands the user in the right mailbox with nothing open. Three
+/// outcomes, then:
+///
+///   * the folder is the message's own — arrived, so show it;
+///   * no folder at all — the transient reset a collection switch performs,
+///     so keep waiting;
+///   * some other folder — a real navigation away, so the request is over.
+///
+/// Arrival deliberately does *not* consume the request. The target folder is
+/// published more than once on the way in — the collection switch forwards it,
+/// and the request itself publishes it — and a one-shot rule opened the
+/// message on the first of those and closed it again on the second, which
+/// looked exactly like the link doing nothing. Keeping the request live makes
+/// every repeat idempotent.
+///
+/// [hasArrived] is what makes "some other folder" mean two different things.
+/// `EmailPage.selectedFolder` is static and outlives the page, so subscribing
+/// replays whichever folder was last open — an event that arrives *before* the
+/// deep-link's own and names a different folder. Read as navigation, it ends
+/// the request before it is served, and the page lands on the right folder
+/// with no message shown. So before arrival a foreign folder is stale state to
+/// be ignored; only afterwards is it the user going somewhere else.
+///
+/// Kept free of widget state so the rule can be exercised on its own.
+({Email? open, bool keepPending}) resolvePendingEmail({
+  required Email? pending,
+  required bool hasArrived,
+  required String? folderId,
+}) {
+  if (pending == null) return (open: null, keepPending: false);
+  if (pending.folderId == folderId) return (open: pending, keepPending: true);
+  if (folderId == null) return (open: null, keepPending: true);
+  return (open: null, keepPending: !hasArrived);
+}
+
+/// Whether [folders] describe [collectionId] — i.e. whether this list is safe
+/// to auto-select a folder out of.
+///
+/// GetEmailFoldersService is a singleton with a single shared sink, so after
+/// switching mailboxes the previous collection's folders can still arrive
+/// while the request for the new one is in flight. Auto-selecting from that
+/// list sets a folder id belonging to a different collection, and the message
+/// query — which filters on collection *and* folder — then matches nothing:
+/// the mailbox opens completely empty, with any open message closed.
+///
+/// Only reachable when something switches collections, which is why the
+/// mailbox that happens to be first in the list never showed it.
+///
+/// Kept free of widget state so the rule can be exercised on its own.
+bool foldersBelongTo(List<EmailFolder> folders, String? collectionId) {
+  if (folders.isEmpty || collectionId == null) return false;
+  return folders.first.collectionId == collectionId;
+}
+
 class EmailPage extends StatefulWidget {
   const EmailPage({super.key});
 
@@ -71,6 +134,15 @@ class EmailPage extends StatefulWidget {
   static BehaviorSubject<String?> selectedFolder =
       BehaviorSubject<String?>.seeded(null);
   static BehaviorSubject<bool> isDeleting = BehaviorSubject<bool>.seeded(false);
+
+  /// A message another module wants opened here — the Photos info sidebar
+  /// links an attachment back to the mail it came from this way.
+  ///
+  /// Seeded and behaviour-backed on purpose: the caller pushes the message and
+  /// *then* routes to `/email`, so the value has to still be there when this
+  /// page mounts and subscribes. The page clears it once consumed.
+  static BehaviorSubject<Email?> openEmailRequest =
+      BehaviorSubject<Email?>.seeded(null);
 
   @override
   State<EmailPage> createState() => _EmailPage();
@@ -87,6 +159,7 @@ class _EmailPage extends State<EmailPage> {
   StreamSubscription? _folderSub;
   StreamSubscription? _scannerSub;
   StreamSubscription? _pstProgressSub;
+  StreamSubscription? _openEmailSub;
 
   List<Collection> collections = [];
   Collection? collection;
@@ -112,6 +185,18 @@ class _EmailPage extends State<EmailPage> {
   DateTime? _lastImportRefresh;
   Email? selectedEmail;
 
+  /// A message requested via [EmailPage.openEmailRequest] that is waiting for
+  /// its own folder to become the one on screen. Held here because switching
+  /// collection and folder both clear the open message by design, and a
+  /// deep-linked one has to survive that reset.
+  Email? _pendingEmail;
+
+  /// Whether [_pendingEmail]'s folder has been on screen at least once.
+  ///
+  /// Until it has, a folder event naming somewhere else is leftover state
+  /// rather than a decision — see [resolvePendingEmail].
+  bool _pendingEmailArrived = false;
+
   /// Latest import progress per collection id.
   ///
   /// A single slot would be overwritten by whichever archive reported last, so
@@ -123,6 +208,13 @@ class _EmailPage extends State<EmailPage> {
 
   @override
   void initState() {
+    // Read before anything is subscribed below. GetCollectionsService replays
+    // its last value the moment it is listened to, and that listener is
+    // attached first — so the default-mailbox select would otherwise fire
+    // before the openEmailRequest listener even exists, and land on top of the
+    // message the user asked for.
+    _pendingEmail = EmailPage.openEmailRequest.valueOrNull;
+
     _scrollController.addListener(_onScroll);
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
     _collectionService = GetCollectionsService.instance;
@@ -132,7 +224,11 @@ class _EmailPage extends State<EmailPage> {
       setState(() {
         collections = emailCollections;
       });
-      if (emailCollections.isNotEmpty) {
+      // A deep-link brings its own collection and folder. This runs while that
+      // one is still resolving — it is triggered by the postFrame invoke below
+      // — so without the guard the first mailbox in the list is selected out
+      // from under it, and the folder auto-select then follows.
+      if (emailCollections.isNotEmpty && _pendingEmail == null) {
         if (EmailPage.selectedCollection.value == null) {
           _needsFolderAutoSelect = true;
           EmailPage.selectedCollection.add(emailCollections.first);
@@ -146,14 +242,28 @@ class _EmailPage extends State<EmailPage> {
       if (value != null && collection != value) {
         setState(() {
           collection = value;
-          EmailPage.selectedFolder.add(null);
+          // A pending deep-link already knows which folder it wants, so hand
+          // that straight over instead of resetting to "no folder" and letting
+          // the INBOX auto-select fight it.
+          EmailPage.selectedFolder.add(_pendingEmail?.folderId);
           selectedFolderName = null;
           selectedEmail = null;
-          _needsFolderAutoSelect = true;
+          _needsFolderAutoSelect = _pendingEmail == null;
         });
         _refreshEmails();
         _listenToScannerStatus(value);
       }
+    });
+
+    _openEmailSub = EmailPage.openEmailRequest.listen((email) {
+      if (email == null) return;
+      // Armed here rather than inside _openRequestedEmail, which has to await
+      // a collection lookup first. Everything that would trample the request —
+      // the default collection, the INBOX auto-select — happens during that
+      // await, so the guard has to be up before it starts.
+      _pendingEmail = email;
+      _pendingEmailArrived = false;
+      _openRequestedEmail(email);
     });
 
     _emailsSub = GetEmailsService.instance.sink.listen((_) {
@@ -167,8 +277,20 @@ class _EmailPage extends State<EmailPage> {
         // Picking a folder is a request to see that folder's messages, so the
         // open message has to close — the detail view covers the whole pane,
         // and leaving it up made clicking a folder in the drawer look dead.
+        //
+        // The exception is a deep-linked message — see [resolvePendingEmail].
+        final outcome = resolvePendingEmail(
+          pending: _pendingEmail,
+          hasArrived: _pendingEmailArrived,
+          folderId: value,
+        );
+        if (outcome.open != null) _pendingEmailArrived = true;
+        if (!outcome.keepPending) {
+          _pendingEmail = null;
+          _pendingEmailArrived = false;
+        }
         setState(() {
-          selectedEmail = null;
+          selectedEmail = outcome.open;
           if (value == null) selectedFolderName = null;
         });
         _refreshEmails();
@@ -179,7 +301,20 @@ class _EmailPage extends State<EmailPage> {
       List<EmailFolder> folders,
     ) {
       if (mounted) {
-        if (_needsFolderAutoSelect && folders.isNotEmpty) {
+        // GetEmailFoldersService is a singleton with one shared sink, so this
+        // list may still be the *previous* collection's — a request for the
+        // new one is in flight. Auto-selecting out of it sets a folder id that
+        // does not exist in the collection now on screen, and the message
+        // query then matches nothing: the mailbox opens completely empty.
+        // Switching between two archives is what makes this reachable, which
+        // is why it only showed up on the ones that are not first in the list.
+        final isCurrentCollection = foldersBelongTo(folders, collection?.id);
+
+        // A deep-link supplies its own folder; jumping to INBOX here would
+        // land the user somewhere the requested message isn't.
+        if (_needsFolderAutoSelect &&
+            isCurrentCollection &&
+            _pendingEmail == null) {
           _needsFolderAutoSelect = false;
           final inbox =
               folders
@@ -223,6 +358,30 @@ class _EmailPage extends State<EmailPage> {
       _collectionService?.invoke(GetCollectionsServiceCommand("email"));
     });
     super.initState();
+  }
+
+  /// Shows [email] — switching collection and folder to reach it — in
+  /// response to [EmailPage.openEmailRequest].
+  ///
+  /// The message itself is opened by the `selectedFolder` listener rather than
+  /// here, once the folder it lives in is the one on screen.
+  Future<void> _openRequestedEmail(Email email) async {
+    // Consumed straight away: the request is a one-shot, and leaving it on the
+    // subject would re-open the message every time this page is revisited.
+    EmailPage.openEmailRequest.add(null);
+
+    final target =
+        collections.where((c) => c.id == email.collectionId).firstOrNull ??
+        await CollectionRepository().collectionById(email.collectionId);
+    if (!mounted || target == null) return;
+
+    _pendingEmail = email;
+    if (collection?.id != target.id) {
+      // The collection listener forwards the pending message's folder.
+      EmailPage.selectedCollection.add(target);
+    } else {
+      EmailPage.selectedFolder.add(email.folderId);
+    }
   }
 
   void _refreshEmails() {
@@ -427,6 +586,7 @@ class _EmailPage extends State<EmailPage> {
     _collectionsServiceSub?.cancel();
     _selectedCollectionSub?.cancel();
     _selectedFolderSub?.cancel();
+    _openEmailSub?.cancel();
     _folderSub?.cancel();
     _scannerSub?.cancel();
     _pstProgressSub?.cancel();

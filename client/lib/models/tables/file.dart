@@ -36,6 +36,10 @@ class File implements FileAsset {
   /// banner. Set by the scanners via `InlineAttachment`, and the reason the
   /// photos module and the embedding isolate can ignore that traffic.
   bool isInline;
+  bool isFavorite;
+
+  /// AI-generated or user-entered description of the file's contents.
+  String? description;
 
   File({
     required this.id,
@@ -57,6 +61,8 @@ class File implements FileAsset {
     this.localPath,
     this.contentId,
     this.isInline = false,
+    this.isFavorite = false,
+    this.description,
   });
 
   factory File.fromDbMap(Map<String, dynamic> map) {
@@ -93,6 +99,8 @@ class File implements FileAsset {
       localPath: map['local_path'] as String?,
       contentId: map['content_id'] as String?,
       isInline: (map['is_inline'] as int? ?? 0) != 0,
+      isFavorite: (map['is_favorite'] as int? ?? 0) != 0,
+      description: map['description'] as String?,
     );
   }
 
@@ -117,6 +125,8 @@ class File implements FileAsset {
       'local_path': localPath,
       'content_id': contentId,
       'is_inline': isInline ? 1 : 0,
+      'is_favorite': isFavorite ? 1 : 0,
+      'description': description,
     };
   }
 }

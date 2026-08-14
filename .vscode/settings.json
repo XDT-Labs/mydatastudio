@@ -1,4 +1,5 @@
 {
+    "python.defaultInterpreterPath": "${workspaceFolder}/aiserver/.venv/bin/python",
     "java.compile.nullAnalysis.mode": "automatic",
     "sqltools.connections": [
         {

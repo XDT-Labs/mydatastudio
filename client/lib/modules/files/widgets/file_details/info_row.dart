@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 Widget infoRow(String label, String value, {String? tooltip}) {
   Widget valueWidget = Text(
@@ -51,7 +51,7 @@ Widget infoRowSelectable(String label, String value) {
         const SizedBox(height: 2),
         SelectableText(
           value,
-          style: const TextStyle(fontSize: 11, color: Colors.black54),
+          style: const TextStyle(fontSize: 11),
         ),
       ],
     ),
