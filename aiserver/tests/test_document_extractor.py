@@ -564,3 +564,68 @@ class _CompletedProcess:
     def __init__(self, returncode, stdout):
         self.returncode = returncode
         self.stdout = stdout
+
+
+# ── Legacy text encodings (§18n) ─────────────────────────────────────────────
+#
+# docling reads the textual formats as UTF-8 and raises on the first byte that
+# is not. A 1999 CSV exported from Windows is not UTF-8, and one byte in one
+# Swedish surname was enough to lose all 14kB of it — logins, ids and addresses
+# that are pure ASCII and perfectly readable.
+
+# `...a.se,385081,Mats R\x86de` — the real bytes, at the real offset.
+LEGACY_CSV = (
+    b"login,id,name\r\n"
+    b"mats,385081,Mats R\x86de\r\n"
+    b"bob,46495,Bob Kafato\r\n"
+)
+
+
+class TestEncodingRecovery:
+    def test_utf8_is_passed_through_untouched(self):
+        """The common case must be byte-identical, not round-tripped through a
+        detector that could disagree with itself."""
+        data = "name,city\nZoë,Zürich\n".encode("utf-8")
+        assert de._as_utf8(data, "csv") is data
+
+    def test_a_legacy_encoding_is_transcoded(self):
+        """The whole point: one undecodable byte must not cost the document."""
+        result = de._as_utf8(LEGACY_CSV, "csv")
+
+        assert result is not LEGACY_CSV
+        result.decode("utf-8")  # no exception: docling can now read it
+
+    def test_the_ascii_the_file_is_mostly_made_of_survives(self):
+        """What is actually being rescued. The detector may or may not land on
+        the right character for byte 0x86; everything either side of it is
+        unambiguous and is what someone would search for."""
+        text = de._as_utf8(LEGACY_CSV, "csv").decode("utf-8")
+
+        assert "385081" in text
+        assert "Bob Kafato" in text
+        assert "login,id,name" in text
+
+    def test_a_binary_format_is_never_transcoded(self):
+        """A .doc carries its encoding inside the container. Rewriting those
+        bytes as though they were text would corrupt the file on its way to a
+        parser that was reading it correctly."""
+        ole2 = OLE2_MAGIC + b"\x86\x00\x91"
+        assert de._as_utf8(ole2, "doc") is ole2
+
+    def test_undecodable_input_is_left_for_docling_to_refuse(self, monkeypatch):
+        """When nothing decodes, the honest outcome is the original parse
+        error — a 422 that spends an attempt — not a fabricated document."""
+        monkeypatch.setattr(de, "_detect_text", lambda data: None)
+        assert de._as_utf8(LEGACY_CSV, "csv") is LEGACY_CSV
+
+    def test_transcoding_happens_before_docling_sees_the_bytes(self, monkeypatch):
+        """`_convert` is the seam both `extract` and `extract_markdown` share,
+        so the description path gets this for free."""
+        seen = []
+        monkeypatch.setattr(
+            de, "_convert_raw", lambda data, fmt: seen.append(data) or _FakeDocument("ok")
+        )
+
+        de._convert(LEGACY_CSV, "csv")
+
+        seen[0].decode("utf-8")  # no exception

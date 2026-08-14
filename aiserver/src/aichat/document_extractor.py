@@ -379,6 +379,7 @@ def _convert(data: bytes, fmt: str):
     OCR is the expensive path; a scanned PDF yields little text instead of
     costing minutes, and §18b's tripwire is what notices.
     """
+    data = _as_utf8(data, fmt)
     try:
         return _convert_raw(data, fmt)
     except ExtractionUnavailable:
@@ -395,6 +396,66 @@ def _convert(data: bytes, fmt: str):
         if recovered is not None:
             return recovered
         raise
+
+
+# ── Legacy text encodings (§18n) ─────────────────────────────────────────────
+#
+# docling reads the textual formats as UTF-8 and raises on the first byte that
+# is not one. This archive is full of files that predate UTF-8 being the
+# default anywhere: a 1999 CSV exported from Windows cost all 14kB of itself —
+# logins, ids and addresses, pure ASCII and perfectly readable — over a single
+# byte in a single Swedish surname.
+#
+# Only the formats docling reads *as text* need this. Everything else carries
+# its encoding declaration inside the container, and rewriting those bytes
+# would corrupt a file that was being read correctly.
+_TRANSCODABLE = frozenset(_TEXTUAL.values())
+
+
+def _detect_text(data: bytes) -> Optional[str]:
+    """Best guess at what this byte string says, or None if there is none.
+
+    charset_normalizer ships with `requests`, so this adds nothing to the
+    bundle. It is a *guess*: for the CSV above it picks cp1250, which is
+    coherent and may still be the wrong codepage for one accented character in
+    one name. That trade is deliberate — the alternative on offer is not a
+    perfect reading, it is no reading at all.
+    """
+    from charset_normalizer import from_bytes
+
+    best = from_bytes(data).best()
+    if best is None:
+        return None
+    print(
+        f"[INFO] extract-text: not UTF-8; re-read as {best.encoding} "
+        f"(coherence {best.coherence:.2f})",
+        flush=True,
+    )
+    return str(best)
+
+
+def _as_utf8(data: bytes, fmt: str) -> bytes:
+    """Hand docling something it can read, or hand back what we were given.
+
+    Returning the original object unchanged on the UTF-8 path matters: the
+    common case must not be round-tripped through a detector that could
+    disagree with the bytes it was handed.
+    """
+    if fmt not in _TRANSCODABLE:
+        return data
+
+    try:
+        data.decode("utf-8")
+        return data
+    except UnicodeDecodeError:
+        pass
+
+    text = _detect_text(data)
+    if text is None:
+        # Nothing decodes it. The honest outcome is docling's own parse error —
+        # a 422 that spends an attempt — rather than a fabricated document.
+        return data
+    return text.encode("utf-8")
 
 
 def _convert_raw(data: bytes, fmt: str):

@@ -3235,3 +3235,59 @@ will retire again, which is correct and costs ten attempts across the archive.
 This supersedes the reasoning in the PDF pass's own docstring, which left
 `.doc` alone on the belief that those files genuinely could not be parsed.
 That belief was never measured; when it was, it was wrong.
+
+### 18n. Files older than UTF-8
+
+```
+[ERROR] Document extraction failed ('allGalleryLogins.CSV'):
+        parse error: input is not valid UTF-8: invalid utf-8 sequence of 1 bytes from index 1358
+```
+
+Byte 1358 is `0x86`, and it sits inside a Swedish surname in a 1999 CSV sent to
+a `.se` address. docling reads the textual formats as UTF-8 and raises on the
+first byte that is not one, so **one byte cost all 14kB of the file** — logins,
+ids and email addresses that are pure ASCII and entirely readable.
+
+This is the description path, not the chunking path. §18l made
+`extract_markdown` accept the unchunkable formats precisely so a spreadsheet
+could still be found by prose, and this is the first thing it tried to read.
+
+#### Detect, transcode, then hand it over
+
+`charset_normalizer` already ships as a `requests` dependency, so this adds
+nothing to the bundle. UTF-8 input is returned as the *same object*, untouched
+— the common case must not be round-tripped through a detector that could
+disagree with bytes that were already correct. Only input that fails a strict
+UTF-8 decode is detected and re-encoded.
+
+Scoped to `_TEXTUAL` (txt, csv, md). Every other format carries its encoding
+declaration inside its container, and rewriting those bytes would corrupt a
+file that was being read correctly — a `.doc` full of `0x86` is not a `.doc`
+in the wrong codepage.
+
+The hook is `_convert`, the seam `extract` and `extract_markdown` share, so
+chunking and descriptions both get it.
+
+#### It is a guess, and that is the right trade
+
+For this CSV the detector picks **cp1250 at 0.72 coherence**, which renders the
+byte as `†`. A Swedish source and a `.se` address suggest the truth is closer
+to `å` — cp437, say, or cp850. So one character in one surname is probably
+still wrong.
+
+That is worth being explicit about, because the alternative on offer was never
+a perfect reading. It was **no reading at all**: 14kB of unambiguous ASCII
+discarded over one ambiguous byte. Detection buys back everything either side
+of the character it may get wrong, and the things someone would actually search
+this file for — a login, an id, an address — are in that ASCII.
+
+When nothing decodes, the bytes are handed to docling unchanged so its own
+parse error stands: a 422 that spends an attempt, rather than a fabricated
+document.
+
+#### Measured
+
+71 textual files in the archive: **67 already UTF-8, 3 legacy (all detected
+cp1250), 0 undecodable.** A small blast radius today. The value is mostly that
+it stops being a class of failure — the next archive imported from a 1990s mail
+store will not lose files to it.
