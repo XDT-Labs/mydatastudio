@@ -130,6 +130,16 @@ class VectorRetriever {
   ///
   /// Mail uses [emailSimilarityFloorRatio] instead; this value stands for
   /// files, whose vectors the Mode B fetch still covers completely.
+  ///
+  /// **Documents keep this ratio too, and that is a measurement rather than an
+  /// omission** (§18h step 6). Mail needed 0.70 because its Mode B fetch
+  /// covered only the top third of its corpus, biasing the median it reads
+  /// upward; the correction was about *coverage*, not about text. Files have
+  /// no such bias — 6,202 vectors today and ~10,600 projected against a
+  /// 16,000-row fetch — so the median the floor sees is the true corpus
+  /// median and 0.75 applies unchanged. What documents needed was not a
+  /// different ratio but a floor of their own, computed over documents rather
+  /// than over documents pooled with photographs: see [floorByModality].
   static const similarityFloorRatio = 0.75;
 
   /// The same gate for mail, lower for a reason that is arithmetic rather than
@@ -599,7 +609,7 @@ class VectorRetriever {
           chunkSequence: winningChunk[entry.key],
         ),
     ]..sort((a, b) => b.similarity.compareTo(a.similarity));
-    return floorAndCap(hits, limit);
+    return floorByModality(hits, limit);
   }
 
   /// Mode B: the extension already ranked these; collapse duplicates and map
@@ -632,7 +642,7 @@ class VectorRetriever {
           chunkSequence: winningChunk[entry.key],
         ),
     ]..sort((a, b) => b.similarity.compareTo(a.similarity));
-    return floorAndCap(hits, limit);
+    return floorByModality(hits, limit);
   }
 
   /// The chunk index a row's vector belongs to, or null if it is not a chunk.
@@ -673,6 +683,46 @@ class VectorRetriever {
   /// 0.75 of a negative number is larger than the number. The floor is skipped
   /// in that case and the ceiling alone applies.
   @visibleForTesting
+  /// Floors documents and photographs separately, then merges.
+  ///
+  /// [floorAndCap]'s contract is that its input holds **one modality**,
+  /// because it reads the best score and the median from that input and a
+  /// mixed list measures one population against the other's scale. Chunked
+  /// documents broke that contract without changing the type: a document and a
+  /// photograph are both `SearchResultType.file`, and they do not score on
+  /// comparable scales.
+  ///
+  /// Measured on this archive over ten probe queries, the median document
+  /// chunk scores **+0.098 to +0.332 above the median photograph** for the
+  /// same query — typically +0.30, with document medians around 0.42–0.46
+  /// against 0.09–0.15 for images. That is the same cross-modal gap §16e
+  /// found between mail and photos, inside a single result type.
+  ///
+  /// Pooled, the floor is set by whichever population is larger, which makes
+  /// it drift as the archive indexes rather than being a property of the
+  /// query. Projected from 626 chunks to §18a-2's ~5,000, the pooled floor
+  /// rises 0.014–0.029 and `birthday party photos` loses 37% of the
+  /// photographs that currently survive it — a recall loss caused entirely by
+  /// how much *unrelated* text happens to be indexed.
+  ///
+  /// Splitting on [VectorHit.chunkSequence] rather than on content type is
+  /// deliberate: it asks "did a document passage win this hit", which is
+  /// exactly the population whose scale differs.
+  static List<VectorHit> floorByModality(List<VectorHit> hits, int limit) {
+    final documents = <VectorHit>[];
+    final rest = <VectorHit>[];
+    for (final hit in hits) {
+      (hit.chunkSequence == null ? rest : documents).add(hit);
+    }
+    if (documents.isEmpty || rest.isEmpty) return floorAndCap(hits, limit);
+
+    final kept = [
+      ...floorAndCap(documents, limit),
+      ...floorAndCap(rest, limit),
+    ]..sort((a, b) => b.similarity.compareTo(a.similarity));
+    return kept.take(limit).toList();
+  }
+
   static List<VectorHit> floorAndCap(List<VectorHit> hits, int limit) {
     if (hits.isEmpty) return const [];
     if (hits.length < minimumCandidatesForFloor) {

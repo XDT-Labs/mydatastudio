@@ -2225,7 +2225,7 @@ not bother.
 | 3 | **Built.** Retrieval: chunk vectors into `VectorRetriever` with argmax carried through dedup, `file_chunks_fts` into the lexical path collapsed per file *before* fusion, **Mode B over-fetch raised** (§18e-1, §18f). See §18h-3 |
 | 4 | **Built.** Footnotes in the result UI, and the parent-email link for attachments. See §18h-5 |
 | 5 | **Built.** PDF pipeline and scanned-page tripwire, on a vendored macOS `libpdfium.dylib`. **The model download turned out to be unnecessary** — see §18h-6 |
-| 6 | **Measure the document similarity floor** (§18i) — files' 0.75 was measured on image vectors and does not transfer |
+| 6 | **Built.** Measured the document similarity floor (§18i). The ratio transfers unchanged; what did not transfer was sharing a floor with photographs. See §18h-7 |
 
 An earlier draft ended with a further step for legacy `.doc`/`.xls`/`.ppt`/
 `.rtf`, described as the largest population and unsolved. It is neither:
@@ -2611,6 +2611,68 @@ the Linux pdfium.
 the pack matters, and the next person to see PDFs working would have no way to
 know it is unused. If OCR is ever wanted, that is the line to add — along with
 the download UX this step no longer needs.
+
+#### 18h-7. Step 6 as built — the floor, and what actually needed fixing
+
+Measured 2026-08-13 against 626 real chunk vectors over 133 documents, using
+the running aiserver to embed ten probe queries. 3 new tests; the client suite
+is 1,013 green.
+
+**The ratio transfers unchanged, and the reason it does is the interesting
+part.** This step existed because "files' 0.75 was measured on image vectors
+and does not transfer". It does. Mail moved to 0.70 for a reason that was
+never about text: its Mode B fetch covered only the top third of its corpus,
+so the median the floor reads sits above the true corpus median (§16f). Files
+have no such bias — 6,202 vectors today, ~10,600 projected, against a
+16,000-row fetch — so the median is the real one and 0.75 stands. **A number
+that survives its re-measurement is a result, not a non-event**; the wrong
+move would have been to change it for symmetry with mail.
+
+**What did need fixing was found by the same measurement.** Document chunks
+and photographs do not score on comparable scales:
+
+| query | doc median | photo median | gap |
+|---|---|---|---|
+| product requirements | 0.459 | 0.127 | **+0.332** |
+| invoice total due | 0.446 | 0.116 | +0.330 |
+| hotel confirmation | 0.462 | 0.148 | +0.314 |
+| birthday party photos | 0.267 | 0.090 | +0.177 |
+| my dog in the snow | 0.232 | 0.134 | +0.098 |
+
+Typically **+0.30**, and it is the same cross-modal gap §16e found between
+mail and photographs — except this one lives *inside a single result type*.
+`floorAndCap` documents its own precondition: the input must hold one
+modality, because it reads the best score and the median from that input.
+Chunked documents broke that precondition without changing the type.
+
+**Pooled, the floor stops describing the query and starts describing the
+index.** It is set by whichever population is larger, so it moves as chunking
+progresses. Projected from today's 626 chunks to §18a-2's ~5,000, the pooled
+floor rises 0.014–0.029 and `birthday party photos` loses **37%** of the
+photographs that currently survive it — recall lost purely because unrelated
+text got indexed. Today's 4.5:1 photo-to-chunk ratio is what is masking this;
+finishing the backfill is what would have exposed it, in the form of photo
+searches quietly getting worse.
+
+`floorByModality` splits on [VectorHit.chunkSequence] — "did a document
+passage win this hit", which is precisely the population whose scale differs
+— floors each side against its own background, then merges. It is a no-op
+when only one population is present.
+
+**Two things the measurement showed in passing.** `invoice total due` now
+tops out at `Invoice-IO4U3S79-0001.pdf` (0.715), so the step 5 PDF pipeline is
+demonstrably working against the live archive. And documents still surface for
+photo queries (`family at the beach` keeps 6 at 0.75), which is the limitation
+[similarityFloorRatio] already documents for mail: a floor derived from a
+modality's own best hit means a modality always contributes *something* and
+cannot recognise that it has nothing to say. Keeping those off the first page
+is a ranking concern, not a retrieval one.
+
+**One caveat, stated because it is transient and easy to misread.**
+[minimumCandidatesForFloor] is 50, and it now applies per population. While
+fewer than 50 documents are chunked, document hits bypass the floor entirely
+— correct by the existing rule (a small candidate set is already selective)
+but it means early-backfill behaviour is not what steady state will look like.
 
 ### 18i. What gets extracted, when, and what happens when it fails
 

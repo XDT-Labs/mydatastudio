@@ -229,6 +229,65 @@ void main() {
     });
   });
 
+  group('per-modality flooring', () {
+    // Measured on this archive: document chunks score ~+0.30 above photographs
+    // for the same query. Pooled, the floor is set by whichever population is
+    // larger, so it drifts as the archive indexes rather than describing the
+    // query — projected to ~5,000 chunks, `birthday party photos` loses 37% of
+    // the photographs that currently survive.
+    List<VectorHit> hits({required int docs, required int photos}) => [
+      for (var i = 0; i < docs; i++)
+        VectorHit(
+          type: SearchResultType.file,
+          id: 'doc$i',
+          // Documents: high and tightly clustered.
+          similarity: i == 0 ? 0.72 : 0.42 - i * 0.0005,
+          chunkSequence: i,
+        ),
+      for (var i = 0; i < photos; i++)
+        VectorHit(
+          type: SearchResultType.file,
+          id: 'img$i',
+          // Photographs: a genuine winner well above a low background.
+          similarity: i < 3 ? 0.62 - i * 0.01 : 0.12 - i * 0.00001,
+        ),
+    ]..sort((a, b) => b.similarity.compareTo(a.similarity));
+
+    test('keeps a strong photograph that a pooled floor would cut', () {
+      final ranked = hits(docs: 200, photos: 200);
+
+      final pooled = VectorRetriever.floorAndCap(ranked, 2000);
+      final split = VectorRetriever.floorByModality(ranked, 2000);
+
+      final pooledPhotos = pooled.where((h) => h.chunkSequence == null).length;
+      final splitPhotos = split.where((h) => h.chunkSequence == null).length;
+      expect(splitPhotos, greaterThan(pooledPhotos),
+          reason: 'the photo baseline is far below the document one, so a '
+              'pooled median measures photographs against text');
+    });
+
+    test('still floors documents against documents', () {
+      final split = VectorRetriever.floorByModality(
+        hits(docs: 200, photos: 200),
+        2000,
+      );
+      final docs = split.where((h) => h.chunkSequence != null).toList();
+
+      expect(docs, isNotEmpty);
+      expect(docs.length, lessThan(200),
+          reason: 'a separate floor must still be a floor');
+    });
+
+    test('is a no-op when only one population is present', () {
+      final onlyPhotos = hits(docs: 0, photos: 200);
+      expect(
+        VectorRetriever.floorByModality(onlyPhotos, 2000).length,
+        VectorRetriever.floorAndCap(onlyPhotos, 2000).length,
+        reason: 'nothing to separate, so nothing should change',
+      );
+    });
+  });
+
   group('Mode B over-fetch reporting', () {
     test('is silent while the fetch covers the corpus', () {
       expect(
