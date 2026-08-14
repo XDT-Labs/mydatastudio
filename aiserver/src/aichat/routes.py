@@ -883,9 +883,19 @@ async def extract_text(request: ExtractTextRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="Invalid document payload.")
 
     try:
-        result = await run_in_threadpool(
-            document_extractor.extract, raw_bytes, request.filename
-        )
+        if request.chunk:
+            result = await run_in_threadpool(
+                document_extractor.extract, raw_bytes, request.filename
+            )
+        else:
+            # The description path (§18l). Reads formats the chunking path
+            # declines — a spreadsheet is precisely what descriptions are for.
+            result = await run_in_threadpool(
+                document_extractor.extract_markdown,
+                raw_bytes,
+                request.filename,
+                request.max_chars,
+            )
     except document_extractor.ExtractionUnavailable as e:
         # 503, not 422: the document is fine, this server cannot read the
         # format yet. The client must not spend a retry attempt on it, or the
@@ -920,6 +930,9 @@ async def extract_text(request: ExtractTextRequest) -> Dict[str, Any]:
             }
             for c in result.chunks
         ],
+        # Present only for chunk=false; the chunking path carries its text in
+        # `chunks` and would otherwise send the whole document twice.
+        **({"markdown": result.markdown} if result.markdown is not None else {}),
     }
 
 

@@ -361,8 +361,26 @@ class DatabaseRepository {
   /// `pptx` earns its place here because Google Slides now exports to it
   /// (§18k) — and a local `.pptx` and an exported deck should not be treated
   /// differently for no reason.
+  ///
+  /// **Spreadsheets are excluded entirely — `csv`, `xls`, `xlsx`.** A row is
+  /// not a passage. Chunking one produces windows of delimited fields, and the
+  /// embedding of a window of fields is not close to the embedding of any
+  /// question a person asks, because there is no sentence in it for the model
+  /// to place. They are also the most expensive format to chunk by a wide
+  /// margin — 14 chunks a file against 4.7 for everything else — so they buy
+  /// the least retrieval for the most vectors.
+  ///
+  /// Little is lost by it. A spreadsheet stays findable by name and metadata
+  /// through `files_fts`, and a lookup in a table is a keyword lookup anyway.
+  /// §18l then gives these files the semantic route their rows never could
+  /// provide: a generated description, which is prose, and therefore lands in
+  /// the same space as the question.
+  ///
+  /// This is also what retired the size gate's worst case: the three files
+  /// that broke `HybridChunker` (§18a-2) were a stock export, a contact dump
+  /// and a mailing list.
   static const documentExtensions = [
-    'pdf', 'doc', 'docx', 'pptx', 'rtf', 'xls', 'xlsx', 'csv', 'txt', 'md',
+    'pdf', 'doc', 'docx', 'pptx', 'rtf', 'txt', 'md',
   ];
 
   /// Documents whose chunk set is missing or was built by an older model.
@@ -479,21 +497,82 @@ class DatabaseRepository {
   /// inline message-body asset), plus excluding files that have already
   /// exhausted [maxDescriptionAttempts].
   Future<List<File>> getFilesWithMissingDescriptions({int limit = 10}) async {
+    final extensionFilter = describableExtensions
+        .map((_) => 'lower(f.name) LIKE ?')
+        .join(' OR ');
+    final exportableTypes = List.filled(
+      exportableWorkspaceTypes.length,
+      '?',
+    ).join(', ');
     final rows = await db.select(
       '''
       SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner
       FROM files f
       INNER JOIN collections c ON c.id = f.collection_id
       WHERE f.description IS NULL
-        AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
+        AND (
+              f.content_type = 'application/image'
+              OR f.content_type LIKE 'image/%'
+              OR ($extensionFilter
+                  AND f.content_type NOT LIKE 'application/vnd.google-apps.%')
+              OR f.content_type IN ($exportableTypes)
+            )
         AND f.is_deleted = 0
         AND f.is_inline = 0
         AND f.description_attempts < ?
       LIMIT ?
       ''',
-      [maxDescriptionAttempts, limit],
+      [
+        ...describableExtensions.map((ext) => '%.$ext'),
+        ...exportableWorkspaceTypes,
+        maxDescriptionAttempts,
+        limit,
+      ],
     );
     return _filesWithResolvedPaths(rows);
+  }
+
+  /// Formats that can be *described*, which is a wider set than
+  /// [documentExtensions] can be.
+  ///
+  /// Spreadsheets are the difference, and they are the reason §18l exists.
+  /// They are excluded from chunking because a row is not a passage; a
+  /// description is the one representation of a spreadsheet that *is* prose,
+  /// so it lands in the same space as the question and gives back the semantic
+  /// route the chunk exclusion took away. A file with no chunks and no
+  /// description is reachable only by its filename.
+  static const describableExtensions = [
+    ...documentExtensions,
+    'csv', 'xls', 'xlsx',
+  ];
+
+  /// The head of a document's already-extracted text, for describing it.
+  ///
+  /// Reads `file_chunks` rather than re-extracting: for anything the chunking
+  /// path handled, the text is already on disk, and a second conversion of the
+  /// same bytes would cost seconds per file to produce what is already there.
+  /// Returns empty for a file with no chunks — a spreadsheet, or one not yet
+  /// reached — and the caller falls back to reading it from the source.
+  ///
+  /// Ordered by `chunk_index`, so what comes back is the *opening* of the
+  /// document. That is deliberate: a description is written from the title,
+  /// the headings and the first passages, which is also where a document says
+  /// what it is.
+  Future<String> getDescriptionSourceText(
+    String fileId, {
+    int maxChars = 8000,
+  }) async {
+    final rows = await db.select(
+      'SELECT text FROM file_chunks WHERE file_id = ? ORDER BY chunk_index',
+      [fileId],
+    );
+    final buffer = StringBuffer();
+    for (final row in rows) {
+      if (buffer.length >= maxChars) break;
+      buffer.writeln((row['text'] as String?) ?? '');
+    }
+    final text = buffer.toString();
+    return text.length > maxChars ? text.substring(0, maxChars) : text;
   }
 
   /// Records a failed description-generation attempt for [fileId] so

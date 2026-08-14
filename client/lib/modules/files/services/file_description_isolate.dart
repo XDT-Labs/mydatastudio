@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/file_bytes_loader.dart';
 import 'package:mydatastudio/modules/files/services/utilities/vision_image.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
@@ -28,6 +30,37 @@ const _kDescriptionPrompt =
     'List the name of any well-known landmark visible in the image (e.g. '
     '"Eiffel Tower"), or leave the landmarks array empty if none are '
     'visible.';
+
+/// The document equivalent, and deliberately not the image prompt (§18l).
+///
+/// Two differences carry the whole design. It asks what the document **is**,
+/// not what it says: a chunk already carries what it says, far better than a
+/// summary could, so a description that competed with chunks would add a worse
+/// copy of something already indexed. What no chunk holds is the document's
+/// identity — that this is an invoice, a résumé, a contract, a spreadsheet of
+/// gallery logins — which is how people actually search for files they half
+/// remember.
+///
+/// And it asks for the kind of sentence a person would type. The retrieval
+/// argument for descriptions is that prose lands in the same space as the
+/// question; a description written in filing-cabinet language would give that
+/// back for nothing.
+const _kDocumentDescriptionPrompt =
+    'This is the beginning of a document. Respond with JSON only, matching '
+    'the given schema. Write a short 1-2 sentence description of what this '
+    'document IS and what it is about — its kind (invoice, resume, contract, '
+    'meeting notes, spreadsheet of records), its subject, and any names, '
+    'organisations or dates that identify it. Describe the document, do not '
+    'summarise its contents. List common tags that would help someone find '
+    'it again. Leave landmarks empty.';
+
+/// How much of a document is read to describe it.
+///
+/// A description answers what the document *is*, and a document says that in
+/// its opening — title, headings, first rows. Past a few thousand characters
+/// the model is reading more to say the same thing, and the tail of a long
+/// document is the least identifying part of it.
+const _kDescriptionSourceChars = 8000;
 
 const _kDescriptionSchema = {
   'type': 'object',
@@ -270,6 +303,18 @@ class FileDescriptionIsolate {
             break;
           }
           try {
+            if (!_isImage(file)) {
+              await _describeDocument(
+                file,
+                repo,
+                serviceUrl!,
+                serviceToken,
+                replyTo,
+                logger,
+              );
+              continue;
+            }
+
             final rawBytes = await FileBytesLoader.load(file, repo, logger);
             if (rawBytes == null) {
               logger.w("Skipped unprocessable file: ${file.path}");
@@ -389,6 +434,216 @@ class FileDescriptionIsolate {
     }
   }
 
+  /// Whether this file is described by looking at it or by reading it.
+  ///
+  /// The queue holds both since §18l, and the two paths share everything after
+  /// the model call — the same `description` column, the same vector type, the
+  /// same attempt counter, so retrieval needed no changes at all.
+  @visibleForTesting
+  static bool isImage(File file) => _isImage(file);
+
+  static bool _isImage(File file) =>
+      file.contentType == 'application/image' ||
+      file.contentType.startsWith('image/');
+
+  /// Describes a document from its text (§18l).
+  ///
+  /// **Prefers the chunks already on disk.** For anything the chunking path
+  /// handled, the text has been extracted once already; converting the same
+  /// bytes a second time would cost seconds per file to produce what is
+  /// sitting in `file_chunks`. Only a file with no chunks — a spreadsheet,
+  /// which is deliberately never chunked, or one the queue has not reached —
+  /// is read from its source, and then with `chunk: false` so the server skips
+  /// the chunker entirely.
+  ///
+  /// A failure to *read* is not counted. The byte loader cannot tell an
+  /// unmounted NAS from a deleted file, and spending the attempt budget during
+  /// an outage retires the file permanently once the volume comes back — the
+  /// mistake §18i and `UnreachableCollections` both exist to prevent. A
+  /// failure to *describe* is counted, because it will fail the same way next
+  /// time.
+  static Future<void> _describeDocument(
+    File file,
+    DatabaseRepository repo,
+    String serviceUrl,
+    String? serviceToken,
+    SendPort replyTo,
+    AppLogger logger,
+  ) async {
+    var text = await repo.getDescriptionSourceText(file.id);
+
+    if (text.trim().isEmpty) {
+      final loaded = await FileBytesLoader.loadDetailed(file, repo, logger);
+      if (!loaded.ok) {
+        if (loaded.permanent) {
+          logger.w('No bytes to describe, retiring: ${file.name}');
+          replyTo.send({'type': 'descriptionFailed', 'id': file.id});
+        }
+        // Transient: leave the budget alone and try again next pass.
+        return;
+      }
+      final extracted = await _extractDescriptionText(
+        loaded.bytes!,
+        loaded.filenameHint ?? file.name,
+        serviceUrl,
+        serviceToken,
+        logger,
+      );
+      if (extracted == null) return; // Service-side; costs no attempt.
+      text = extracted;
+    }
+
+    if (text.trim().isEmpty) {
+      // Read successfully and there was nothing in it — the §18i rule: every
+      // path either produces a result or records an attempt, or the file is
+      // selected again on the very next pass, forever.
+      logger.w('Nothing to describe in ${file.name}');
+      replyTo.send({'type': 'descriptionFailed', 'id': file.id});
+      return;
+    }
+
+    final analysis = await _describeText(
+      file.name,
+      text,
+      serviceUrl,
+      serviceToken,
+      logger,
+    );
+    if (analysis == null) {
+      logger.w('No usable description for ${file.name}');
+      replyTo.send({'type': 'descriptionFailed', 'id': file.id});
+      return;
+    }
+
+    final embedding = await _embedText(
+      analysis.description,
+      serviceUrl,
+      serviceToken,
+      logger,
+    );
+    if (embedding == null) {
+      // The embedding model is a temporary condition, not a property of this
+      // file, so the description is dropped rather than stored unembedded:
+      // `description IS NULL` is what re-offers it, and a stored description
+      // with no vector would leave it findable by keyword only, silently.
+      logger.w('No description embedding for ${file.name}; will retry');
+      return;
+    }
+
+    replyTo.send({
+      'type': 'fileDescription',
+      'id': file.id,
+      'description': analysis.description,
+      'tags': analysis.tags,
+      'landmarks': const <String>[],
+      'embedding': embedding,
+    });
+    logger.d('Sent document description for ${file.name}');
+  }
+
+  /// Reads a document to text without chunking it, for the description path.
+  ///
+  /// Returns null when the failure belongs to the service rather than the
+  /// file, so the caller leaves the retry budget alone — the same contract as
+  /// `DocumentChunkIsolate._extract`.
+  static Future<String?> _extractDescriptionText(
+    List<int> bytes,
+    String filename,
+    String serviceUrl,
+    String? serviceToken,
+    AppLogger logger,
+  ) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$serviceUrl/util/extract-text'),
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(serviceToken),
+            },
+            body: jsonEncode({
+              'file_base64': base64Encode(bytes),
+              'filename': filename,
+              'chunk': false,
+              // The head of the document is where it says what it is, and it
+              // is all the prompt asks about. Reading a 3.4M-character stock
+              // export in full to describe its first page is the cost §18a-2
+              // already refused to pay.
+              'max_chars': _kDescriptionSourceChars,
+            }),
+          )
+          .timeout(const Duration(minutes: 5));
+
+      if (response.statusCode == 415) {
+        // A format we decline to read at all. Permanent, and the caller
+        // records it as such by returning an empty string rather than null.
+        logger.d('Not describable: $filename');
+        return '';
+      }
+      if (response.statusCode != 200) {
+        logger.w('extract-text ${response.statusCode} for $filename');
+        return null;
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return (data['markdown'] as String?) ?? '';
+    } catch (e) {
+      logger.e('Error reading $filename for description: $e');
+      return null;
+    }
+  }
+
+  /// The text-model half of [_describeImage] — same response contract, same
+  /// JSON schema, so both write through one path.
+  static Future<
+    ({String description, List<String> tags, List<String> landmarks})?
+  >
+  _describeText(
+    String filename,
+    String text,
+    String serviceUrl,
+    String? serviceToken,
+    AppLogger logger,
+  ) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$serviceUrl/v1/chat/completions'),
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(serviceToken),
+            },
+            body: jsonEncode({
+              'messages': [
+                {
+                  'role': 'user',
+                  // The filename is evidence, not decoration: "Invoice-C9GF
+                  // WWVU-0001.pdf" says more about what the document is than
+                  // its first paragraph often does.
+                  'content':
+                      '$_kDocumentDescriptionPrompt\n\n'
+                      'Filename: $filename\n\n$text',
+                },
+              ],
+              'stream': false,
+              'response_format': {
+                'type': 'json_object',
+                'schema': _kDescriptionSchema,
+              },
+            }),
+          )
+          .timeout(const Duration(minutes: 5));
+
+      if (response.statusCode != 200) {
+        logger.e('Chat completion ${response.statusCode}: ${response.body}');
+        return null;
+      }
+      return _parseDescription(response.body, logger);
+    } catch (e) {
+      logger.e('Error describing document: $e');
+      return null;
+    }
+  }
+
   static Future<
     ({String description, List<String> tags, List<String> landmarks})?
   >
@@ -444,42 +699,52 @@ class FileDescriptionIsolate {
         return null;
       }
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final choices = data['choices'] as List?;
-      if (choices == null || choices.isEmpty) {
-        logger.w("Chat completion returned no choices");
-        return null;
-      }
-      final message = (choices.first as Map<String, dynamic>)['message'];
-      final content = message is Map ? message['content'] as String? : null;
-      if (content == null || content.isEmpty) {
-        logger.w("Chat completion returned no content");
-        return null;
-      }
-
-      final parsed =
-          jsonDecode(stripJsonFence(content)) as Map<String, dynamic>;
-      final description = (parsed['description'] as String?)?.trim() ?? '';
-      if (description.isEmpty) {
-        logger.w("Chat completion returned an empty description");
-        return null;
-      }
-      final tags =
-          ((parsed['tags'] as List?) ?? const [])
-              .map((t) => t.toString())
-              .where((t) => t.isNotEmpty)
-              .toList();
-      final landmarks =
-          ((parsed['landmarks'] as List?) ?? const [])
-              .map((t) => t.toString())
-              .where((t) => t.isNotEmpty)
-              .toList();
-
-      return (description: description, tags: tags, landmarks: landmarks);
+      return _parseDescription(response.body, logger);
     } catch (e) {
       logger.e("Error calling Python chat completion service: $e");
       return null;
     }
+  }
+
+  /// Reads a description out of a chat completion body.
+  ///
+  /// Shared by the image and document paths so the two cannot drift in what
+  /// they accept — both ask the model for the same schema, and the fence
+  /// stripping below is needed by whichever of them the grammar bug happens
+  /// to hit.
+  static ({String description, List<String> tags, List<String> landmarks})?
+  _parseDescription(String body, AppLogger logger) {
+    final data = jsonDecode(body) as Map<String, dynamic>;
+    final choices = data['choices'] as List?;
+    if (choices == null || choices.isEmpty) {
+      logger.w("Chat completion returned no choices");
+      return null;
+    }
+    final message = (choices.first as Map<String, dynamic>)['message'];
+    final content = message is Map ? message['content'] as String? : null;
+    if (content == null || content.isEmpty) {
+      logger.w("Chat completion returned no content");
+      return null;
+    }
+
+    final parsed = jsonDecode(stripJsonFence(content)) as Map<String, dynamic>;
+    final description = (parsed['description'] as String?)?.trim() ?? '';
+    if (description.isEmpty) {
+      logger.w("Chat completion returned an empty description");
+      return null;
+    }
+    final tags =
+        ((parsed['tags'] as List?) ?? const [])
+            .map((t) => t.toString())
+            .where((t) => t.isNotEmpty)
+            .toList();
+    final landmarks =
+        ((parsed['landmarks'] as List?) ?? const [])
+            .map((t) => t.toString())
+            .where((t) => t.isNotEmpty)
+            .toList();
+
+    return (description: description, tags: tags, landmarks: landmarks);
   }
 
   /// Strips a ```json ... ``` (or bare ``` ... ```) markdown fence around

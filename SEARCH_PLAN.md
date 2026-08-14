@@ -3020,3 +3020,122 @@ Three details that were not obvious from the outside:
 
 An export over Drive's 10 MB limit is classified **permanent**, since no retry
 can help; everything else on that path stays transient.
+
+### 18l. Describe the file, because a row is not a passage
+
+Spreadsheets came out of the chunk queue — `csv`, `xls`, `xlsx` — and that
+decision creates the hole this section fills.
+
+**Why they left.** Chunking a spreadsheet produces windows of delimited fields.
+The embedding of a window of fields sits nowhere near the embedding of any
+question a person asks, because there is no sentence in it for the model to
+place: `logins,gallery,2019-04-11,admin` is not language, it is a record. They
+are also the most expensive format in the archive to chunk — **14 chunks a file
+against 4.7 for every other format** — so they were buying the least retrieval
+for the most vectors. Measured against the live archive, the only spreadsheets
+present are exports: password dumps, contact lists, statements. And the three
+files that broke `HybridChunker` badly enough to need §18a-2's size gate were
+all of this shape — a stock export, a contact dump, a mailing list.
+
+**What that cost, and what pays it back.** A spreadsheet with no chunks is
+reachable only by its filename. That is a real loss and the exclusion should
+not stand on its own. A *description* is the one representation of a
+spreadsheet that is prose — and prose is exactly the thing that lands in the
+same space as the question, which is the whole argument for why its rows could
+not. So the same property that disqualifies a spreadsheet from chunking is what
+makes describing it worthwhile.
+
+#### The machinery already existed
+
+Photos have carried AI descriptions since well before this phase, and the parts
+generalise without being changed:
+
+| Piece | Already there for images | Reused as-is |
+|---|---|---|
+| `files.description` | the caption text | yes |
+| `files_embeddings` `type='description'` | 2,762 vectors | yes |
+| `description_attempts` | retirement budget | yes |
+| `FileDescriptionIsolate` | the queue and write relay | branched |
+| Retrieval, dedup, per-modality floors | already rank `description` | **untouched** |
+
+That last row is the point. §16d's dedup already collapses a file's `file`,
+`description` and `chunk` vectors to one result and carries the argmax, so a
+document description competes on exactly the terms a photo description does and
+**retrieval needed no changes at all.** Measured on this archive, the
+description vector already beats the image vector for a text query on 44 of 45
+photos — descriptions are the stronger half of image search, and there is no
+reason to expect documents to differ.
+
+#### "Can we read this" and "should we chunk this" are two questions
+
+Separating them was forced, and getting it wrong the first time is instructive.
+The first attempt excluded spreadsheets at `sniff_format`, which is the layer
+every route passes through — and that would have taken the description away
+along with the chunks, since a description is generated *from the file's text*.
+So:
+
+- `_EXCLUDED_HINTS` — `htm`/`html`/`ppt`. Not read at all, by policy or by
+  measured parser quality.
+- `_UNCHUNKABLE` — `csv`/`xls`/`xlsx`. Read, never chunked.
+
+`extract()` refuses the second set; `extract_markdown()` accepts it and returns
+the text with no chunking, behind `chunk: false` on the existing endpoint.
+
+**A latent bug surfaced while making this split.** `_EXCLUDED_HINTS` was
+consulted *after* the magic-number table, and every format worth excluding has
+a signature — so `.ppt`, excluded on paper since §18a-1, was extracted in fact
+by any caller that sent one. Only the client's queue was enforcing the policy,
+which meant the rule and the code agreed exactly as long as two separate lists
+did. The exclusion check now runs first, and the test says why.
+
+#### Where the text comes from
+
+In order, cheapest first:
+
+1. **`file_chunks`, if the document has them.** The text was extracted once
+   already; converting the same bytes again would cost seconds per file to
+   produce what is on disk. Ordered by `chunk_index`, so what the model reads
+   is the *opening* of the document.
+2. **The source, with `chunk: false`.** Only for a file with no chunks: a
+   spreadsheet, or one the chunk queue has not reached yet.
+3. **Images keep the vision path**, unchanged.
+
+Capped at 8,000 characters either way. A description answers what a document
+*is*, and a document says that in its title, headings and first rows; past a
+few thousand characters the model reads more to say the same thing, and the
+tail of a long document is its least identifying part.
+
+#### The prompt asks what the document is, not what it says
+
+This is the difference between a description that earns its vector and one that
+adds a worse copy of something already indexed. **Chunks already carry what a
+document says**, in the document's own words, with provenance. A summary
+competing with them would lose on every axis. What no chunk holds is the
+document's *identity* — that this is an invoice, a résumé, a contract, a
+spreadsheet of gallery logins — which is how people search for files they only
+half remember.
+
+The filename goes into the prompt as evidence rather than decoration:
+`Invoice-C9GFWWVU-0001.pdf` says more about what a document is than its first
+paragraph often does.
+
+#### Failure classification, one more time
+
+The rule §18i arrived at holds here, and this path has the same three outcomes:
+
+- **Cannot read the bytes** (unmounted NAS, expired token) — no attempt spent.
+  Spending one during an outage retires the file permanently once the volume
+  returns, which is the mistake `UnreachableCollections` exists to prevent.
+- **Read it, nothing in it** — attempt spent. An outcome that is never recorded
+  is a loop, not a skip; §18i's eight-hour spin was exactly this.
+- **No embedding available** — the description is *dropped*, not stored.
+  `description IS NULL` is what re-offers the file, so a description stored
+  without its vector would leave the file findable by keyword only, and
+  silently. The model's absence is temporary; the record would not be.
+
+#### Cost
+
+369 documents and 26 spreadsheets, one chat completion each, against a corpus
+that already paid for 2,762 image descriptions. Nothing here is a new
+dependency: the same Gemma model, the same embedding model, the same isolate.
+

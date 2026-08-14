@@ -110,6 +110,9 @@ class Extraction:
     markdown_chars: int
     gated: bool
     chunks: List[Chunk]
+    # Only the description path (§18l) asks for the text itself; the chunking
+    # path reads it through `chunks` and would pay to send it twice.
+    markdown: Optional[str] = None
 
 
 # ── PDF runtime ──────────────────────────────────────────────────────────────
@@ -223,15 +226,29 @@ _MAGIC = (
 
 # Which OLE2 payload the extension claims. A wrong guess here costs one parse
 # error, not a security problem, so the hint is allowed to decide.
-_OLE2_BY_HINT = {"xls": "xls", "ppt": "ppt", "doc": "doc"}
+_OLE2_BY_HINT = {"xls": "xls", "doc": "doc"}
 _ZIP_BY_HINT = {"docx": "docx", "xlsx": "xlsx", "pptx": "pptx"}
 
 # Formats with no magic number at all — the hint is the only evidence.
 _TEXTUAL = {"txt": "txt", "csv": "csv", "md": "md", "markdown": "md"}
 
-# Deliberately absent from every table above: htm/html (§18i policy) and ppt
-# (§18a-1 measured 43% parse rate yielding slide titles only).
+# Formats we will not read at all, whatever their bytes say.
+#
+# * htm/html — §18i policy: most are the HTML part of a mail whose body is
+#   already indexed, so they compete with their own email on identical text.
+# * ppt — §18a-1 measured docling's legacy CFB reader at a 43% parse rate,
+#   yielding slide titles only. `pptx` is a different reader and stays.
 _EXCLUDED_HINTS = {"htm", "html", "ppt"}
+
+# Readable, but never chunked (§18l).
+#
+# A row is not a passage: a window of delimited fields embeds nowhere near any
+# question, and spreadsheets cost 14 chunks a file against 4.7 for every other
+# format — the least retrieval for the most vectors. They are still *read*,
+# because a description is generated from their text, and prose is the thing
+# their rows could never be. So "can we read this" and "should we chunk this"
+# are two questions, and this is the second one.
+_UNCHUNKABLE = {"csv", "xls", "xlsx"}
 
 
 def _hint_ext(filename_hint: Optional[str]) -> str:
@@ -250,17 +267,26 @@ def sniff_format(data: bytes, filename_hint: Optional[str] = None) -> Optional[s
     ext = _hint_ext(filename_hint)
     head = data[:8]
 
+    # Before the magic numbers, not after. An excluded format that *does* have
+    # a signature — every one of ppt, xls and xlsx — would otherwise be routed
+    # by its magic number and returned before the exclusion was ever consulted,
+    # which is exactly what `.ppt` did: declined on paper since §18a-1, and
+    # extracted in fact by any caller that sent one. The client's queue was the
+    # only thing enforcing the policy, so the rule and the code agreed only for
+    # as long as the two lists did.
+    if ext in _EXCLUDED_HINTS:
+        return None
+
     for magic, fmt in _MAGIC:
         if head.startswith(magic):
             if fmt == "_ole2":
+                # An unhinted OLE2 file is far more often a .doc than anything
+                # else; a wrong guess costs one parse error.
                 return _OLE2_BY_HINT.get(ext, "doc")
             if fmt == "_zip":
                 # A bare .zip is not a document; only the OOXML hints qualify.
                 return _ZIP_BY_HINT.get(ext)
             return fmt
-
-    if ext in _EXCLUDED_HINTS:
-        return None
 
     # No signature. Only textual formats may be claimed by extension alone —
     # otherwise a truncated binary named .doc would be handed to the MS-DOC
@@ -460,6 +486,35 @@ def _warn_if_scanned(document: Any, markdown: str, fmt: str) -> None:
         )
 
 
+def extract_markdown(
+    data: bytes, filename_hint: Optional[str] = None, limit: int = 0
+) -> Extraction:
+    """Read a document to markdown without chunking it (§18l).
+
+    The description path's entry point. It accepts everything ``extract``
+    accepts *and* the unchunkable formats, because a spreadsheet is exactly the
+    case descriptions exist for: readable, worth finding, and impossible to
+    chunk usefully.
+
+    ``limit`` truncates the returned text. A description is written from the
+    head of a document — the title, the headers, the first rows — so there is
+    no reason to carry three megabytes of a stock export back over HTTP to
+    summarise its first page. Zero means no limit.
+    """
+    fmt = sniff_format(data, filename_hint)
+    if fmt is None:
+        raise UnsupportedFormat(
+            f"unsupported or excluded document format (hint={filename_hint!r})"
+        )
+
+    markdown = _convert(data, fmt).export_to_markdown()
+    if limit and len(markdown) > limit:
+        markdown = markdown[:limit]
+    return Extraction(
+        fmt=fmt, markdown_chars=len(markdown), gated=False, chunks=[], markdown=markdown
+    )
+
+
 def extract(data: bytes, filename_hint: Optional[str] = None) -> Extraction:
     """Extract and chunk a document supplied as raw bytes.
 
@@ -467,7 +522,7 @@ def extract(data: bytes, filename_hint: Optional[str] = None) -> Extraction:
     are not something we index.
     """
     fmt = sniff_format(data, filename_hint)
-    if fmt is None:
+    if fmt is None or fmt in _UNCHUNKABLE:
         raise UnsupportedFormat(
             f"unsupported or excluded document format (hint={filename_hint!r})"
         )

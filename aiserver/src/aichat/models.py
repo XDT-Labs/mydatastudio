@@ -155,6 +155,22 @@ class ExtractTextRequest(BaseModel):
         None,
         description="Original filename, used only as a format hint (never to open a file)",
     )
+    chunk: bool = Field(
+        True,
+        description=(
+            "Chunk the document (the search path). False returns the markdown "
+            "itself and no chunks — how a description is sourced for formats "
+            "that are read but never chunked, such as spreadsheets (§18l)."
+        ),
+    )
+    max_chars: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Truncate returned markdown to this many characters; 0 means no "
+            "limit. Only meaningful with chunk=false."
+        ),
+    )
 
 
 class PstImportRequest(BaseModel):

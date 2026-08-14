@@ -275,6 +275,61 @@ void main() {
       expect(queued.map((f) => f.id).toList(), ['doc1']);
     });
 
+    test('a spreadsheet is described even though it is never chunked', () async {
+      // §18l's reason to exist. Excluding spreadsheets from chunking took away
+      // their only semantic route; if the description queue excluded them too,
+      // a spreadsheet would be reachable by filename alone and the exclusion
+      // would have quietly cost recall instead of saving vectors.
+      await open('repo_describe_spreadsheets_test.db');
+      await addFile('rows', ext: 'csv');
+      await addFile('book', ext: 'xls');
+      await addFile('memo', ext: 'rtf');
+
+      expect(
+        (await repo.getFilesWithMissingChunks(limit: 50)).map((f) => f.id),
+        ['memo'],
+        reason: 'neither spreadsheet is offered for chunking',
+      );
+
+      final describable = await repo.getFilesWithMissingDescriptions(limit: 50);
+
+      expect(
+        describable.map((f) => f.id),
+        containsAll(['rows', 'book', 'memo']),
+        reason: 'the two queues answer different questions, so a file may be '
+            'in one and not the other',
+      );
+    });
+
+    test('description text comes from the chunks already on disk', () async {
+      // Re-converting a document that was chunked minutes ago would spend
+      // seconds per file to produce text that is already stored. Ordered by
+      // chunk_index because a description is written from the opening of a
+      // document, which is where it says what it is.
+      await open('repo_description_source_test.db');
+      await addFile('doc1');
+      await repo.replaceFileChunks('doc1', const [
+        FileChunk(chunkIndex: 0, text: 'Invoice 0001'),
+        FileChunk(chunkIndex: 1, text: 'Amount due'),
+      ]);
+
+      expect(
+        await repo.getDescriptionSourceText('doc1'),
+        startsWith('Invoice 0001'),
+      );
+
+      expect(
+        (await repo.getDescriptionSourceText('doc1', maxChars: 7)).length,
+        7,
+        reason: 'the budget is a hard cap — the prompt reads the head of a '
+            'document, not all of a 3.4M-character export',
+      );
+
+      expect(await repo.getDescriptionSourceText('nosuchfile'), isEmpty,
+          reason: 'empty is the signal to read the file from its source '
+              'instead, which is how a spreadsheet gets described at all');
+    });
+
     Future<void> addWorkspaceFile(String id, String name, String kind) async {
       await db.rawDb.execute(
         'INSERT INTO files (id, collection_id, name, path, parent, '
@@ -316,12 +371,18 @@ void main() {
       await open('repo_queue_excluded_test.db');
       await addFile('page', ext: 'html');
       await addFile('deck', ext: 'ppt');
+      await addFile('rows', ext: 'csv');
+      await addFile('book', ext: 'xls');
+      await addFile('sheet', ext: 'xlsx');
       await addFile('memo', ext: 'rtf');
 
       final queued = await repo.getFilesWithMissingChunks(limit: 50);
 
       expect(queued.map((f) => f.id).toList(), ['memo'],
-          reason: 'html duplicates its own email; ppt yields slide titles only');
+          reason: 'html duplicates its own email; ppt yields slide titles '
+              'only; and no spreadsheet is chunked at all — a row is not a '
+              'passage, so its vectors sit nowhere near a question. §18l '
+              'describes them instead');
     });
   });
 }

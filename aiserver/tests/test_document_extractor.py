@@ -50,8 +50,41 @@ def test_plain_text_falls_back_to_the_extension_hint():
     """Text has no magic number, so the hint is all there is — but it may only
     select among text-ish formats, never among binary ones."""
     assert de.sniff_format(b"just some notes\n", "notes.txt") == "txt"
-    assert de.sniff_format(b"a,b,c\n1,2,3\n", "data.csv") == "csv"
     assert de.sniff_format(b"just some notes\n", "notes.doc") is None
+
+
+def test_a_spreadsheet_is_readable_but_never_chunked():
+    """"Can we read this" and "should we chunk this" are different questions,
+    and §18l is why they had to be separated.
+
+    Chunking a spreadsheet yields windows of delimited fields, and the
+    embedding of a window of fields sits nowhere near any question — there is
+    no sentence in it for the model to place. They also cost 14 chunks a file
+    against 4.7 for every other format. But they must still be *read*, because
+    a description is generated from their text, and prose is exactly what their
+    rows could never be. Refusing them at the sniffer would have taken the
+    description away with the chunks."""
+    assert de.sniff_format(b"a,b,c\n1,2,3\n", "data.csv") == "csv"
+    assert de.sniff_format(OLE2_MAGIC + b"\x00" * 64, "budget.xls") == "xls"
+
+    with pytest.raises(de.UnsupportedFormat):
+        de.extract(b"a,b,c\n1,2,3\n", "data.csv")
+
+
+def test_an_excluded_format_is_refused_before_its_magic_number_is_read():
+    """The exclusion list has to be consulted first, and this is the test that
+    says so.
+
+    `.ppt` carries the OLE2 signature. Checked after the magic table, it is
+    routed by its bytes and returned before the exclusion is ever reached —
+    which is what it actually did: excluded on paper since §18a-1 and extracted
+    in fact by any caller that sent one, because only the client's queue was
+    enforcing the policy. Sniffing is the layer that has to hold it, since it
+    is the one every route passes through."""
+    assert de.sniff_format(OLE2_MAGIC + b"\x00" * 64, "deck.ppt") is None
+    # The neighbouring format in the same container still routes normally —
+    # the exclusion is by format, not by container.
+    assert de.sniff_format(OLE2_MAGIC + b"\x00" * 64, "letter.doc") == "doc"
 
 
 # ── The size gate ────────────────────────────────────────────────────────────
@@ -249,6 +282,48 @@ def test_extract_refuses_an_unsupported_format_without_calling_docling(monkeypat
         de.extract(b"\x00\x01\x02\x03", "mystery.bin")
 
     assert called == []
+
+
+class _FakeDocument:
+    def __init__(self, markdown):
+        self._markdown = markdown
+
+    def export_to_markdown(self):
+        return self._markdown
+
+
+def test_extract_markdown_reads_a_spreadsheet_the_chunking_path_refuses(monkeypatch):
+    """The description path's whole reason to exist (§18l)."""
+    monkeypatch.setattr(de, "_convert", lambda *a, **k: _FakeDocument("| a | b |\n"))
+
+    result = de.extract_markdown(b"a,b\n1,2\n", "budget.csv")
+
+    assert result.fmt == "csv"
+    assert result.markdown == "| a | b |\n"
+    assert result.chunks == [], "reading is not chunking"
+
+
+def test_extract_markdown_truncates_to_the_requested_budget(monkeypatch):
+    """A description is written from the head of a document — the title, the
+    headers, the first rows. Carrying three megabytes of a stock export back
+    over HTTP to summarise its first page is waste with no upside, and the
+    model would discard the tail anyway."""
+    monkeypatch.setattr(de, "_convert", lambda *a, **k: _FakeDocument("x" * 5000))
+
+    result = de.extract_markdown(b"a,b\n", "big.csv", limit=100)
+
+    assert len(result.markdown) == 100
+    assert result.markdown_chars == 100, "the count must describe what was returned"
+
+
+def test_extract_markdown_still_refuses_what_policy_excludes(monkeypatch):
+    """Readable-but-unchunkable widened one door, not both: html and ppt are
+    excluded because indexing them is wrong, not because chunking them is."""
+    monkeypatch.setattr(de, "_convert", lambda *a, **k: _FakeDocument("hi"))
+
+    for hint in ("mail.html", "deck.ppt"):
+        with pytest.raises(de.UnsupportedFormat):
+            de.extract_markdown(OLE2_MAGIC + b"\x00" * 64, hint)
 
 
 # ── PDF runtime (search plan §18h-6) ─────────────────────────────────────────
