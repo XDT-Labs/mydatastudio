@@ -6,6 +6,7 @@ Google Gemini API models. It provides the core functionality for both
 chat and embedding models.
 """
 import os
+import sys
 import torch
 from PIL import Image
 import base64
@@ -127,6 +128,65 @@ def load_grok_model(model_id: str = "grok-3", api_key: Optional[str] = None) -> 
     )
 
 
+# ── mtmd logging ─────────────────────────────────────────────────────────────
+#
+# mtmd logs every text chunk it tokenizes, at INFO, with the chunk's full
+# contents — `add_text: <the entire prompt>`. One document description put 62k
+# characters into the log, and the description isolate runs over the whole
+# archive, so this is a log-size problem rather than noise.
+#
+# `verbose=False` does not reach it. The chat handler wraps its *init* calls in
+# `suppress_stdout_stderr` but not `mtmd_tokenize`, and mtmd keeps its own
+# logger instead of routing through `llama_log_set`. llama-cpp-python exposes
+# the setters and never calls them, so we do.
+#
+# ggml's own ordering (ggml.h): NONE, DEBUG, INFO, WARN, ERROR, CONT.
+_GGML_LOG_LEVEL_DEBUG = 1
+_GGML_LOG_LEVEL_INFO = 2
+_GGML_LOG_LEVEL_WARN = 3
+_GGML_LOG_LEVEL_ERROR = 4
+_GGML_LOG_LEVEL_CONT = 5
+
+# Held on the module, not in a local: ctypes builds a trampoline for the
+# callback, and if Python collects it while C still holds the pointer the next
+# generation segfaults rather than quietly logging nothing.
+_mtmd_log_sink = None
+
+
+def _forward_mtmd_log(level: int, text: bytes, user_data=None) -> None:
+    """Keep mtmd's diagnostics, drop its transcript of the prompt.
+
+    CONT is dropped with the rest: it continues whatever was logged last, so
+    forwarding it once its INFO parent is gone would print orphaned fragments
+    of the prompt — the same leak in a form that reads like corruption.
+    """
+    if level not in (_GGML_LOG_LEVEL_WARN, _GGML_LOG_LEVEL_ERROR) or not text:
+        return
+    sys.stderr.write(text.decode("utf-8", "replace"))
+    sys.stderr.flush()
+
+
+def _import_mtmd():
+    """Split out so the installer can be tested without the native library."""
+    import llama_cpp.mtmd_cpp as mtmd_cpp
+
+    return mtmd_cpp
+
+
+def _silence_mtmd_logging() -> None:
+    """Install [_forward_mtmd_log] on both mtmd loggers. Idempotent."""
+    global _mtmd_log_sink
+    if _mtmd_log_sink is not None:
+        return
+
+    import llama_cpp
+
+    mtmd_cpp = _import_mtmd()
+    _mtmd_log_sink = llama_cpp.llama_log_callback(_forward_mtmd_log)
+    mtmd_cpp.mtmd_log_set(_mtmd_log_sink, None)
+    mtmd_cpp.mtmd_helper_log_set(_mtmd_log_sink, None)
+
+
 def load_local_model(
     model_name: str,
     model_path: str,
@@ -156,6 +216,8 @@ def load_local_model(
             handler_cls = llama_chat_format.Gemma4ChatHandler
         print(f"[LOADER] Vision mode — {handler_cls_name} with mmproj: {clip_model_path}")
         chat_handler = handler_cls(clip_model_path=clip_model_path, verbose=False)
+        # Before the first generation, which is where the prompt echo happens.
+        _silence_mtmd_logging()
 
     return llama_cpp.Llama(
         model_path=model_path,
