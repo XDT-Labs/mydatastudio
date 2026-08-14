@@ -7,7 +7,7 @@ import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/modules/email/services/email_repository.dart';
 import 'package:mydatastudio/modules/email/widgets/email_detail/email_attachments_section.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:path/path.dart' as p;
 import 'package:webview_flutter/webview_flutter.dart';
 

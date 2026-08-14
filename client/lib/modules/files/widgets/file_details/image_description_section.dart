@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/section_widget.dart';
 
 /// Shows the AI-generated description for an image (`files.description`),

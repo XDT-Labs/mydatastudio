@@ -9,7 +9,7 @@ import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/app_constants.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 
 enum AccordionSection { localFiles, gdrive, dropbox, onedrive }

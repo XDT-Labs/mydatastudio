@@ -1,6 +1,6 @@
 import 'package:mydatastudio/app_router.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class FamilyDamApp extends StatelessWidget {

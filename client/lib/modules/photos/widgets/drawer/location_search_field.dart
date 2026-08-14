@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/models/tables/gazetteer_place.dart';
 import 'package:mydatastudio/modules/photos/models/photo_place_filter.dart';
 import 'package:mydatastudio/repositories/gazetteer_repository.dart';

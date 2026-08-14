@@ -28,7 +28,7 @@ import 'package:mydatastudio/services/get_user_service.dart';
 import 'package:mydatastudio/repositories/user_repository.dart';
 import 'package:mydatastudio/widgets/router/navigation_wrapper.dart';
 import 'package:mydatastudio/widgets/router/route_page.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 
 class AppRouter {

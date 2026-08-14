@@ -108,6 +108,9 @@ dependencies:
 
 
 
+  flutter_localizations: any
+  material_ui: any
+  package_info_plus: any
 dev_dependencies:
   flutter_test:
     sdk: flutter

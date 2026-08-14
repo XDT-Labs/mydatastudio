@@ -4,7 +4,7 @@ import 'package:mydatastudio/models/tables/app.dart' as m;
 import 'package:mydatastudio/services/get_apps_service.dart';
 import 'package:mydatastudio/services/get_user_service.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 
 class CollapsingDrawer extends StatefulWidget {

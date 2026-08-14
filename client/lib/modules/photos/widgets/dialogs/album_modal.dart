@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/models/tables/album.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:uuid/uuid.dart';

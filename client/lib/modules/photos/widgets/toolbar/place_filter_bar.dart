@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/modules/photos/models/photo_place_filter.dart';
 
 /// The strip under the toolbar showing which place the grid is filtered to,
