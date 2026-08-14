@@ -6,7 +6,6 @@ import 'package:uuid/uuid.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
-import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/repositories/user_repository.dart';

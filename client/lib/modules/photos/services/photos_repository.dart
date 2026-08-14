@@ -117,7 +117,6 @@ class PhotosRepository {
       case PhotoSortOrder.size:
         return " ORDER BY f.size DESC";
       case PhotoSortOrder.dateDesc:
-      default:
         return " ORDER BY f.date_created DESC";
     }
   }
