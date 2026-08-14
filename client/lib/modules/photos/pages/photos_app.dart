@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
@@ -8,6 +9,7 @@ import 'package:mydatastudio/modules/photos/widgets/dialogs/keyboard_shortcuts_m
 import 'package:mydatastudio/modules/photos/widgets/sidebar/animated_info_panel.dart';
 import 'package:mydatastudio/modules/photos/widgets/sidebar/info_sidebar.dart';
 import 'package:mydatastudio/modules/photos/widgets/toolbar/photos_toolbar.dart';
+import 'package:mydatastudio/modules/photos/widgets/toolbar/place_filter_bar.dart';
 import 'package:mydatastudio/modules/photos/widgets/viewer/fullscreen_viewer.dart';
 import 'package:mydatastudio/modules/photos/widgets/keyboard_shortcut_handler.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_grid.dart';
@@ -43,6 +45,7 @@ class _PhotosAppState extends State<PhotosApp> {
   bool _isInfoOpen = false;
   File? _lightboxMedia;
   Set<String> _selectedIds = {};
+  PhotoFilter _activeFilter = const PhotoFilter();
 
   @override
   void initState() {
@@ -54,6 +57,7 @@ class _PhotosAppState extends State<PhotosApp> {
     _isInfoOpen = ViewStateService.instance.isInfoOpen.value;
     _lightboxMedia = ViewStateService.instance.lightboxMedia.value;
     _selectedIds = SelectionService.instance.selectedIds.value;
+    _activeFilter = ViewStateService.instance.activeFilter.value;
 
     _viewModeSub = ViewStateService.instance.viewMode.listen((mode) {
       if (mounted) setState(() => _viewMode = mode);
@@ -76,6 +80,7 @@ class _PhotosAppState extends State<PhotosApp> {
     });
 
     _filterSub = ViewStateService.instance.activeFilter.listen((filter) {
+      if (mounted) setState(() => _activeFilter = filter);
       PhotosService.instance.invoke(PhotosServiceCommand(filter));
     });
 
@@ -114,6 +119,25 @@ class _PhotosAppState extends State<PhotosApp> {
           selectedIds: _selectedIds,
         );
     }
+  }
+
+  /// Applies a new radius, in miles, to the place already being filtered on.
+  void _setPlaceRadiusMiles(double miles) {
+    final place = _activeFilter.place;
+    if (place == null) return;
+    _applyFilter(
+      _activeFilter.copyWith(place: place.copyWith(radiusMiles: miles)),
+    );
+  }
+
+  void _clearPlace() {
+    ViewStateService.instance.setActiveNav('all');
+    _applyFilter(_activeFilter.copyWith(place: null, location: null));
+  }
+
+  void _applyFilter(PhotoFilter filter) {
+    ViewStateService.instance.updateFilter(filter);
+    PhotosService.instance.invoke(PhotosServiceCommand(filter));
   }
 
   Widget _buildInfoPanel() {
@@ -193,6 +217,17 @@ class _PhotosAppState extends State<PhotosApp> {
           Column(
             children: [
               const PhotosToolbar(),
+              // Shown for either kind of location filter — a searched place or
+              // a landmark picked from the drawer — so the grid never sits
+              // narrowed with nothing on screen explaining it.
+              if (_activeFilter.place != null || _activeFilter.location != null)
+                PlaceFilterBar(
+                  place: _activeFilter.place,
+                  landmark: _activeFilter.location,
+                  matchCount: _files.length,
+                  onRadiusChanged: _setPlaceRadiusMiles,
+                  onCleared: _clearPlace,
+                ),
               Expanded(
                 child: Row(
                   children: [
