@@ -4,6 +4,7 @@
 # Usage:
 #   make all            - Build everything (models, python, client)
 #   make models         - Download GGUF models from Hugging Face
+#   make pdfium         - Vendor the macOS pdfium library (needed for PDF text)
 #   make build-python   - Build and zip the Python aiserver service
 #   make build-client   - Build the Flutter Desktop client (macOS release)
 #   make notarize       - Notarize the macOS build (requires APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID env vars)
@@ -18,6 +19,17 @@ IMAGE_REPO = cloud-run-source-deploy
 
 # Python/AI Chat Config
 PYTHON_DIR = aiserver
+
+# pdfium — vendored, not downloaded at runtime. docling's own model downloader
+# ships a Linux x86-64 build on macOS and reports success, so PDFs fail with a
+# message describing the wrong problem (search plan §18d-1). 3.4 MB; the 2 GB
+# ONNX pack is deliberately NOT fetched, because a born-digital PDF's text
+# layer converts without it in no-OCR mode and this archive has no scanned
+# pages (§18b, §18h-6).
+PDFIUM_RELEASE = chromium/7999
+PDFIUM_ASSET = pdfium-mac-arm64.tgz
+PDFIUM_URL = https://github.com/bblanchon/pdfium-binaries/releases/download/$(PDFIUM_RELEASE)/$(PDFIUM_ASSET)
+PDFIUM_DIR = $(PYTHON_DIR)/vendor/pdfium
 APP_DIR = client/app
 APP_ZIP_NAME = aiserver-macos.zip
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
@@ -78,9 +90,29 @@ models:
 	
 
 
+# 1b. Vendor pdfium (PDF text extraction)
+.PHONY: pdfium
+pdfium:
+	@echo "--- 📄 Checking/Downloading pdfium ---"
+	@if [ -f $(PDFIUM_DIR)/lib/libpdfium.dylib ]; then \
+		echo "libpdfium.dylib already vendored, skipping download."; \
+	else \
+		mkdir -p $(PDFIUM_DIR); \
+		echo "Downloading $(PDFIUM_ASSET) ($(PDFIUM_RELEASE))..."; \
+		curl -sSL -o /tmp/$(PDFIUM_ASSET) $(PDFIUM_URL); \
+		tar xzf /tmp/$(PDFIUM_ASSET) -C $(PDFIUM_DIR) lib/libpdfium.dylib; \
+		rm -f /tmp/$(PDFIUM_ASSET); \
+	fi
+	@if ! file $(PDFIUM_DIR)/lib/libpdfium.dylib | grep -q Mach-O; then \
+		echo "ERROR: vendored pdfium is not a Mach-O object. PDF extraction would"; \
+		echo "       fail at runtime with a misleading \"not installed\" error."; \
+		exit 1; \
+	fi
+	@echo "pdfium ready: $$(file $(PDFIUM_DIR)/lib/libpdfium.dylib | cut -d: -f2-)"
+
 # 2. Build Python Service
 .PHONY: build-python
-build-python:
+build-python: pdfium
 	@echo "--- 🐍 Building Python aiserver service ---"
 	@cd $(PYTHON_DIR) && \
 		pdm install && \

@@ -249,3 +249,84 @@ def test_extract_refuses_an_unsupported_format_without_calling_docling(monkeypat
         de.extract(b"\x00\x01\x02\x03", "mystery.bin")
 
     assert called == []
+
+
+# ── PDF runtime (search plan §18h-6) ─────────────────────────────────────────
+
+class TestPdfRuntime:
+    """Guards on the vendored pdfium.
+
+    The failure these exist for already happened: docling's downloader wrote a
+    Linux ELF, reported success, and every PDF failed with "the pdfium library
+    is not installed" — a message describing the wrong problem entirely
+    (§18d-1). The point is that a wrong-platform binary must be *loud*.
+    """
+
+    def _reset(self):
+        de._pdf_ready = None
+        de._pdf_reason = "not configured"
+
+    def test_accepts_a_macho_object(self, tmp_path):
+        lib = tmp_path / "libpdfium.dylib"
+        lib.write_bytes(b"\xcf\xfa\xed\xfe" + b"\0" * 64)
+        assert de._is_macho(str(lib))
+
+    def test_rejects_a_linux_elf(self, tmp_path):
+        # Exactly what docling's own download_models() writes on macOS.
+        lib = tmp_path / "libpdfium.so"
+        lib.write_bytes(b"\x7fELF" + b"\0" * 64)
+        assert not de._is_macho(str(lib))
+
+    def test_rejects_a_missing_file(self, tmp_path):
+        assert not de._is_macho(str(tmp_path / "absent.dylib"))
+
+    def test_an_external_override_is_honoured(self, monkeypatch):
+        # A developer pointing at their own build should not have it silently
+        # replaced by whatever happens to be vendored.
+        self._reset()
+        monkeypatch.setenv("PDFIUM_DYNAMIC_LIB_PATH", "/somewhere/of/my/own")
+        try:
+            assert de.configure_pdf_runtime() is True
+        finally:
+            self._reset()
+
+    def test_a_pdf_without_pdfium_is_unavailable_not_unparseable(
+        self, monkeypatch
+    ):
+        # 503, never 422: a missing library says nothing about the document,
+        # and counting it would retire every PDF in the archive (§18h-4).
+        self._reset()
+        monkeypatch.delenv("PDFIUM_DYNAMIC_LIB_PATH", raising=False)
+        monkeypatch.setattr(
+            de, "_pdfium_search_roots", lambda: ["/nonexistent"]
+        )
+        try:
+            with pytest.raises(de.ExtractionUnavailable):
+                de._convert_raw(b"%PDF-1.4 ...", "pdf")
+        finally:
+            self._reset()
+
+
+class TestScannedTripwire:
+    """§18b turned OCR off on measurement; this is what notices if that was
+    wrong for some future corpus."""
+
+    class _Doc:
+        def __init__(self, pages):
+            self._pages = pages
+
+        def num_pages(self):
+            return self._pages
+
+    def test_warns_when_a_pdf_yields_almost_no_text(self, capsys):
+        de._warn_if_scanned(self._Doc(20), "a" * 100, "pdf")
+        assert "likely scanned images" in capsys.readouterr().out
+
+    def test_silent_on_a_normal_pdf(self, capsys):
+        de._warn_if_scanned(self._Doc(10), "a" * 50_000, "pdf")
+        assert capsys.readouterr().out == ""
+
+    def test_silent_on_formats_that_have_no_pages(self, capsys):
+        # A .doc has no pages at all, so chars-per-page is meaningless there.
+        de._warn_if_scanned(self._Doc(0), "", "doc")
+        assert capsys.readouterr().out == ""

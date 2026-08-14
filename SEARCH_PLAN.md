@@ -1927,6 +1927,13 @@ One cosmetic oddity worth not chasing: converted PDFs report
 The PDF pipeline demonstrably ran — 38 pages with bounding boxes — so this is
 a mislabel in the port, not a sign of a text fallback.
 
+> **Superseded by §18h-6 (2026-08-13): the pack is not needed at all.** With
+> `do_ocr=False` a born-digital PDF converts from its embedded text layer
+> using pdfium alone, and §18b measured no scanned pages here. The paragraph
+> below is kept because its *shipping order* argument still holds — text and
+> HTML first, PDF separately — but the download it plans around does not exist
+> in the built pipeline.
+
 **The ~700 MB model pack is a download, not a bundle.** Declarative formats
 (DOCX, XLSX, CSV, MD, and the legacy binaries) need no models at all; only the PDF and image
 pipeline does. The app already owns this problem — `ModelDownloadManager`,
@@ -2217,7 +2224,7 @@ not bother.
 | 2 | **Built.** `files_embeddings` PK widened to `(file_id, type, sequence)`, `file_chunks` + `file_chunks_fts` DDL (§18e); `DocumentChunkIsolate` registered as the fourth background isolate (§18j) and its queue (§18i). See §18h-2 |
 | 3 | **Built.** Retrieval: chunk vectors into `VectorRetriever` with argmax carried through dedup, `file_chunks_fts` into the lexical path collapsed per file *before* fusion, **Mode B over-fetch raised** (§18e-1, §18f). See §18h-3 |
 | 4 | **Built.** Footnotes in the result UI, and the parent-email link for attachments. See §18h-5 |
-| 5 | PDF pipeline behind the model download; scanned-page tripwire logging. **Prerequisite: vendor a macOS arm64 `libpdfium.dylib` (§18d-1)** — docling's own download ships a Linux binary and reports success |
+| 5 | **Built.** PDF pipeline and scanned-page tripwire, on a vendored macOS `libpdfium.dylib`. **The model download turned out to be unnecessary** — see §18h-6 |
 | 6 | **Measure the document similarity floor** (§18i) — files' 0.75 was measured on image vectors and does not transfer |
 
 An earlier draft ended with a further step for legacy `.doc`/`.xls`/`.ppt`/
@@ -2553,6 +2560,57 @@ list: the message usually did *not* match the query, so there is no index to
 select. `_openParentEmail` clears `_selectedIndex`, which is what makes the
 reader correctly offer no next/previous instead of stepping through results
 the message is not part of.
+
+#### 18h-6. Step 5 as built — and the 2 GB download that was never needed
+
+9 new tests; the aiserver suite is 152 green.
+
+**The headline is a deletion.** Every version of §18d treated docling's ONNX
+model pack as a prerequisite for PDFs, and planned a deliberate opt-in
+download around it — "PDF asks first", sized first at ~700 MB and then
+measured at **2.0 GB / 35 minutes** (§18d-1). Measured properly on
+2026-08-13, with `do_ocr=False` and an **empty** `artifacts_path`, both
+sampled archive PDFs converted completely and with full page provenance:
+`quickref.pdf` to 27 chunks citing pages 1–11, the invoice to 1 chunk citing
+pages 1–2.
+
+The pack buys OCR and layout/table analysis. §18b measured **zero** scanned
+pages in this archive, so all we read is a born-digital PDF's embedded text
+layer — and pdfium alone reads it. So step 5 ships **3.4 MB**, there is no
+download UX to build, no opt-in to design, and no "PDF asks first" state to
+carry through the UI.
+
+Worth being explicit that this was avoidable: docling's own error message says
+it — *"A digital PDF's embedded text layer converts without either in no-OCR
+mode"* — inside the same paragraph that sent me to download 2 GB. I read the
+first half of that sentence and acted on it, and the second half was the
+answer. The 35-minute download was not wasted only because it is what exposed
+the Linux pdfium.
+
+**What actually ships:**
+
+- `make pdfium` vendors `pdfium-mac-arm64.tgz` (bblanchon/pdfium-binaries,
+  `chromium/7999`) to `aiserver/vendor/pdfium/lib/`, **and fails the build if
+  the result is not Mach-O**. `build-python` depends on it. Gitignored — it is
+  fetched, not tracked.
+- `main.spec` bundles it; the Makefile's existing signing pass picks it up
+  with every other Mach-O file in `dist/`.
+- `configure_pdf_runtime()` resolves it (PyInstaller's `_MEIPASS` first, then
+  the source tree), **verifies the Mach-O header**, and sets
+  `PDFIUM_DYNAMIC_LIB_PATH`. An externally-set variable wins, so a developer
+  pointing at their own build is not silently overridden.
+- A PDF with no usable pdfium raises `ExtractionUnavailable` **before** the
+  docling call, so the message names the real problem instead of docling's
+  "the pdfium library is not installed" — which is what it says even when the
+  library is present and merely built for Linux.
+- `_warn_if_scanned` logs when a PDF yields under 40 chars/page. §18b turned
+  OCR off on measurement; this is what would notice if that were ever wrong
+  for a corpus we do not have yet.
+
+**`artifacts_path` is deliberately not configured.** Setting it would imply
+the pack matters, and the next person to see PDFs working would have no way to
+know it is unused. If OCR is ever wanted, that is the line to add — along with
+the download UX this step no longer needs.
 
 ### 18i. What gets extracted, when, and what happens when it fails
 

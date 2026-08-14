@@ -78,3 +78,6 @@ aiserver/aichat.egg-info/
 # so every run that opens a real AppDatabase drops a .db here.
 client/data/
 app support db.session.sql
+
+# Vendored by `make pdfium` — a 3.4 MB binary, fetched not tracked.
+aiserver/vendor/

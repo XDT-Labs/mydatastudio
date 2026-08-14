@@ -27,12 +27,20 @@ oracle, and the client keeps the job of resolving cloud files (§18i).
 **PDF is not wired up here.** Everything in this module works on PDFs already,
 but they additionally need docling's model pack *and* a macOS ``libpdfium``
 this project must vendor itself — docling's own downloader ships a Linux
-binary and reports success (§18d-1). Until §18h step 5 sets
-``PDFIUM_DYNAMIC_LIB_PATH`` and ``artifacts_path``, a PDF reaches ``_convert``
-and comes back as a **503** — ``ExtractionUnavailable``, deliberately not a
-422, so a PDF does not spend its retry budget waiting for a library. The
-formats that make up ~85% of the archive (.doc/.xls/.rtf/.txt/.csv) need
-neither.
+binary and reports success (§18d-1). We vendor a macOS arm64
+``libpdfium.dylib`` instead and point ``PDFIUM_DYNAMIC_LIB_PATH`` at it — see
+``configure_pdf_runtime`` below. Without it a PDF comes back as a **503**
+(``ExtractionUnavailable``), deliberately not a 422, so it does not spend its
+retry budget waiting for a library.
+
+**The 2 GB model pack is not required.** Measured 2026-08-13: with
+``do_ocr=False`` and an empty ``artifacts_path``, both sampled archive PDFs
+converted completely and with full page provenance. The ONNX pack buys OCR and
+layout/table analysis, and §18b measured **zero** scanned pages in this
+archive — so a born-digital PDF's embedded text layer is all we read, and
+pdfium alone reads it. That turns step 5 from "ship a 2 GB opt-in download"
+into "vendor 3.4 MB", and an earlier draft of §18d that treated the pack as a
+prerequisite is corrected in §18h-6.
 """
 from __future__ import annotations
 
@@ -102,6 +110,103 @@ class Extraction:
     markdown_chars: int
     gated: bool
     chunks: List[Chunk]
+
+
+# ── PDF runtime ──────────────────────────────────────────────────────────────
+
+# Where the vendored dylib lands: beside the frozen binary under PyInstaller,
+# and in the source tree during development. `make pdfium` populates the
+# latter; main.spec copies it into the former.
+_PDFIUM_SUBDIR = os.path.join("vendor", "pdfium", "lib")
+_PDFIUM_LIB = "libpdfium.dylib"
+
+# Set once, at import, and read by the Rust side on first PDF.
+_pdf_ready: Optional[bool] = None
+_pdf_reason: str = "not configured"
+
+
+def _pdfium_search_roots() -> List[str]:
+    """Directories that may hold the vendored pdfium, most specific first."""
+    roots = []
+    # PyInstaller one-file/one-dir: assets are unpacked beside the executable.
+    meipass = getattr(__import__("sys"), "_MEIPASS", None)
+    if meipass:
+        roots.append(os.path.join(meipass, _PDFIUM_SUBDIR))
+    # Running from source: aiserver/vendor/pdfium/lib
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    roots.append(os.path.join(here, _PDFIUM_SUBDIR))
+    return roots
+
+
+def _is_macho(path: str) -> bool:
+    """True if `path` is a Mach-O object.
+
+    Checked rather than assumed because the failure this guards against
+    already happened once: docling's own downloader wrote a **Linux ELF**
+    pdfium, reported success, and every PDF then failed with "the pdfium
+    library is not installed" — a message that describes the wrong problem and
+    cost an afternoon to see through (§18d-1). A four-byte read makes the next
+    occurrence say what is actually wrong.
+    """
+    try:
+        with open(path, "rb") as handle:
+            magic = handle.read(4)
+    except OSError:
+        return False
+    # 64-bit Mach-O, little- and big-endian, plus the universal-binary wrapper.
+    return magic in (
+        b"\xcf\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xcf",
+        b"\xca\xfe\xba\xbe",
+        b"\xbe\xba\xfe\xca",
+    )
+
+
+def configure_pdf_runtime() -> bool:
+    """Point docling at the vendored pdfium. Idempotent; returns readiness.
+
+    Deliberately does *not* configure `artifacts_path`. The ONNX pack is only
+    needed for OCR and layout analysis, and this archive has no scanned pages
+    (§18b) — see the module docstring.
+    """
+    global _pdf_ready, _pdf_reason
+    if _pdf_ready is not None:
+        return _pdf_ready
+
+    # An explicit override wins: a developer pointing at their own build should
+    # not have it silently replaced by whatever happens to be vendored.
+    if os.environ.get("PDFIUM_DYNAMIC_LIB_PATH"):
+        _pdf_ready, _pdf_reason = True, "PDFIUM_DYNAMIC_LIB_PATH set externally"
+        return True
+
+    for root in _pdfium_search_roots():
+        candidate = os.path.join(root, _PDFIUM_LIB)
+        if not os.path.exists(candidate):
+            continue
+        if not _is_macho(candidate):
+            _pdf_reason = (
+                f"{candidate} is not a Mach-O object — wrong platform build; "
+                "PDF extraction disabled"
+            )
+            print(f"[ERROR] extract-text: {_pdf_reason}", flush=True)
+            _pdf_ready = False
+            return False
+        os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = root
+        _pdf_ready, _pdf_reason = True, candidate
+        print(f"[INFO] extract-text: pdfium at {candidate}", flush=True)
+        return True
+
+    _pdf_reason = (
+        f"no {_PDFIUM_LIB} in {_pdfium_search_roots()} — run `make pdfium`"
+    )
+    print(f"[WARN] extract-text: {_pdf_reason}", flush=True)
+    _pdf_ready = False
+    return False
+
+
+def pdf_unavailable_reason() -> str:
+    """Why PDFs cannot be read, for the 503 body."""
+    return _pdf_reason
 
 
 # ── Sniffing ─────────────────────────────────────────────────────────────────
@@ -265,6 +370,14 @@ def _convert_raw(data: bytes, fmt: str):
     tested without a real missing library."""
     from docling_rs import DocumentConverter, DocumentStream
 
+    if fmt == "pdf" and not configure_pdf_runtime():
+        # Raised before the call so the message names the real problem. Left
+        # to docling, this surfaces as "the pdfium library is not installed"
+        # even when the library is present and simply built for Linux.
+        raise ExtractionUnavailable(
+            f"PDF extraction unavailable: {pdf_unavailable_reason()}"
+        )
+
     converter = DocumentConverter(do_ocr=False)
     # The synthesized name is the whole point: docling routes on this
     # extension, and it is the sniffed format rather than the caller's.
@@ -315,6 +428,38 @@ def _chunk(document) -> List[Any]:
     )
 
 
+# Below this many characters per page, a PDF is probably scanned images
+# rather than text. §18b measured 14–392 text-showing operators per page
+# across this archive's PDFs — all born-digital — so this fires on a corpus
+# that does not exist here yet, which is exactly what a tripwire is for.
+MIN_CHARS_PER_PAGE = 40
+
+
+def _warn_if_scanned(document: Any, markdown: str, fmt: str) -> None:
+    """Log when a PDF looks scanned, rather than turning OCR on for everyone.
+
+    OCR is the expensive path and §18b found nothing here that needs it. The
+    cost of being wrong is a PDF that indexes as near-empty — invisible unless
+    something says so, which is what this does.
+    """
+    if fmt != "pdf":
+        return
+    try:
+        pages = document.num_pages()
+    except Exception:
+        return
+    if not pages:
+        return
+    per_page = len(markdown) / pages
+    if per_page < MIN_CHARS_PER_PAGE:
+        print(
+            f"[WARN] extract-text: PDF yielded {per_page:.0f} chars/page over "
+            f"{pages} pages — likely scanned images. OCR is off (§18b); this "
+            "document will index as near-empty.",
+            flush=True,
+        )
+
+
 def extract(data: bytes, filename_hint: Optional[str] = None) -> Extraction:
     """Extract and chunk a document supplied as raw bytes.
 
@@ -329,6 +474,7 @@ def extract(data: bytes, filename_hint: Optional[str] = None) -> Extraction:
 
     document = _convert(data, fmt)
     markdown = document.export_to_markdown()
+    _warn_if_scanned(document, markdown, fmt)
 
     if should_gate(markdown):
         return Extraction(
