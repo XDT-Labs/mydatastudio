@@ -734,6 +734,7 @@ class AppDatabase {
     // `file_chunks` exists above, and after _backfillSearchIndexes because it
     // takes the next `user_version` from the one that sets it.
     await _unretirePdfsRetiredByMissingPdfium();
+    await _unretireDocsRetiredByAnIncompleteReader();
   }
 
   /// Creates the gazetteer table and the name indexes `near:` looks places up in.
@@ -831,9 +832,9 @@ class AppDatabase {
   ///
   /// Scoped to PDFs with no chunks rather than to all documents, because that
   /// is exactly the bug's blast radius — PDF is the only format needing
-  /// pdfium. A blanket reset would also un-retire the ~36 `.doc` files that
-  /// genuinely cannot be parsed, which would burn their budget again for
-  /// nothing.
+  /// pdfium. The `.doc` failures were left alone here on the belief that they
+  /// genuinely could not be parsed; §18m later showed that was the reader's
+  /// fault rather than the files', and they get their own pass below.
   ///
   /// Gated on `PRAGMA user_version`: this corrects a specific historical
   /// state, and re-running it would keep resurrecting files that later retire
@@ -858,6 +859,44 @@ class AppDatabase {
       );
     }
     await _db.execute('PRAGMA user_version = $pdfRecoveryVersion');
+  }
+
+  /// Un-retires legacy `.doc` files that a partial reader could not open.
+  ///
+  /// Same shape as [_unretirePdfsRetiredByMissingPdfium] and the same cause:
+  /// files retired for a defect in the extractor rather than for anything about
+  /// their contents. docling's Rust CFB reader parsed 142 of this archive's 229
+  /// `.doc` files and reported the other 87 as damaged — "no WordDocument
+  /// stream" on files whose OLE2 directory plainly lists one. §18m adds macOS's
+  /// own `textutil` as a fallback behind it, which recovered 85 of the 87.
+  ///
+  /// Without this pass the fallback would reach almost nothing it was built
+  /// for: `embedding_attempts` only resets on success, so the files that
+  /// motivated the work are exactly the ones already sitting at the cap.
+  ///
+  /// Scoped to `.doc` with no chunks — the fallback's blast radius. The two
+  /// files textutil also cannot read will simply retire again, which is the
+  /// correct outcome and costs ten attempts across the archive.
+  Future<void> _unretireDocsRetiredByAnIncompleteReader() async {
+    const docRecoveryVersion = 5;
+
+    final rows = await _db.select('PRAGMA user_version');
+    final current = rows.isEmpty ? 0 : (rows.first.values.first as int? ?? 0);
+    if (current >= docRecoveryVersion) return;
+
+    final result = await _db.execute('''
+      UPDATE files SET embedding_attempts = 0
+      WHERE embedding_attempts > 0
+        AND lower(name) LIKE '%.doc'
+        AND NOT EXISTS (SELECT 1 FROM file_chunks fc WHERE fc.file_id = files.id)
+    ''');
+    if (result.affectedRows > 0) {
+      logger.i(
+        'AppDatabase: cleared embedding_attempts on ${result.affectedRows} '
+        'legacy .doc files retired by an incomplete reader',
+      );
+    }
+    await _db.execute('PRAGMA user_version = $docRecoveryVersion');
   }
 
   /// Deletes cached thumbnails no `files` row references any more.

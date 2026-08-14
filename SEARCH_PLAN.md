@@ -3139,3 +3139,99 @@ The rule §18i arrived at holds here, and this path has the same three outcomes:
 that already paid for 2,762 image descriptions. Nothing here is a new
 dependency: the same Gemma model, the same embedding model, the same isolate.
 
+
+### 18m. The reader was incomplete, not the files damaged
+
+Once the backlog drained, the aiserver log filled with a format of error that
+looked like corruption:
+
+```
+[ERROR] Document extraction failed ('nondisclsr.doc'): parse error: doc: no WordDocument stream
+[ERROR] Document extraction failed ('Resumep.doc'):    parse error: doc: bad FIB magic
+[ERROR] Document extraction failed ('mike Resume2.doc'): parse error: doc: no 0Table stream
+```
+
+They are not corrupt. Reading the OLE2 directories by hand:
+
+```
+Defender PRD.doc  -> Root Entry, Data, 1Table, WordDocument, SummaryInformation, CompObj
+noncomp.doc       -> Root Entry, WordDocument, CompObj, SummaryInformation
+Resumep.doc       -> Root Entry, CompObj, WordDocument, ObjectPool, SummaryInformation
+```
+
+Every file names the stream its error says is missing. `Defender PRD.doc` is an
+ordinary Word 8.0 document carrying both `WordDocument` and `1Table`, and
+docling reports no `WordDocument` stream. Extracting from the full bytes on
+disk, outside the client, reproduces it — so this is not truncation on the way
+in, and not the file.
+
+**Measured 2026-08-14 against the live archive: 142 of 229 `.doc` files parse,
+87 do not.** A 62% reader — the same family as the 43% `.ppt` reader §18a-1
+already declined to use. `.doc` stayed because 62% looked like most of the
+corpus. It is not: the missing 38% includes the résumés and the 1998 Allaire
+PRDs, which is to say the documents someone would actually search for.
+
+#### The fallback is already installed
+
+macOS ships `textutil`, and this is a macOS-only app. Against all 87 failures:
+**85 recovered, 2 unreadable, 0 errors.** `.doc` coverage goes from 62% to 99%
+for no new dependency, no new download and no model.
+
+The app is not sandboxed — neither entitlements file declares
+`com.apple.security.app-sandbox`, only hardened runtime with library validation
+already disabled — so the aiserver can spawn it. The bytes go through a temp
+file because textutil takes a path and will not read stdin.
+
+#### The trap: exit code 0 on failure
+
+textutil does not fail on a file it cannot parse. It reads the bytes as plain
+text, **exits 0**, and returns the file's own OLE2 header re-encoded:
+
+```
+–œ‡°±·   ˛ˇ  G  D  ˛ˇˇˇ H Ä ˇˇˇˇˇˇˇˇˇˇˇˇ…
+```
+
+That is `d0cf11e0a1b1e1` — the CFB signature — rendered as text. Storing it
+would put a file's own header into `file_chunks_fts` as though it were the
+document's words. So the exit code proves nothing and the output has to be
+judged.
+
+A printable-ratio guard does it: the share of non-whitespace characters that
+are ASCII alphanumerics or common punctuation, thresholded at **0.85**. Over
+the 87 files, all 85 real recoveries scored **0.92 or better** and both
+unreadable files scored far below, so the threshold sits in a gap with room on
+either side rather than on a boundary.
+
+The guard is deliberately strict — a document in a non-Latin script would be
+judged unreadable and declined. That is the right way round for a *fallback*:
+docling has already failed by the time this runs, so a false reject costs the
+status quo, while a false accept writes binary into the search index.
+
+#### Recovery returns a document, not a string
+
+The recovered text is handed back through docling as `txt`. It would have been
+simpler to return the string, and wrong: everything downstream — the size gate,
+the chunker, provenance, the description path — expects a document. Re-reading
+as `txt` keeps one code path instead of a second hand-rolled one, and `txt` is
+a format docling does read.
+
+Scoped to `doc`, and only after a genuine parse failure. An `ExtractionUnavailable`
+never reaches it: a missing library must stay a 503, because a `.doc` quietly
+returning degraded text on a box whose extraction stack is broken is a failure
+nothing would ever report.
+
+#### The migration is the point
+
+`embedding_attempts` only resets on success, and 85 of the 87 were already at
+the cap. Without a pass to clear it, the fallback would reach almost nothing it
+was built for — the files that motivated the work are exactly the retired ones.
+
+`_unretireDocsRetiredByAnIncompleteReader` is the same shape as
+`_unretirePdfsRetiredByMissingPdfium` (§18i) and has the same cause: files
+retired for a defect in the extractor rather than anything about their
+contents. Scoped to `.doc` with no chunks. The two textutil also cannot read
+will retire again, which is correct and costs ten attempts across the archive.
+
+This supersedes the reasoning in the PDF pass's own docstring, which left
+`.doc` alone on the belief that those files genuinely could not be parsed.
+That belief was never measured; when it was, it was wrong.

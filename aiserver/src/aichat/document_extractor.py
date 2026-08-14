@@ -46,6 +46,9 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
+import sys
+import tempfile
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
@@ -388,6 +391,9 @@ def _convert(data: bytes, fmt: str):
         message = str(e).lower()
         if any(marker in message for marker in _UNAVAILABLE_MARKERS):
             raise ExtractionUnavailable(str(e)) from e
+        recovered = _recover_legacy(data, fmt)
+        if recovered is not None:
+            return recovered
         raise
 
 
@@ -409,6 +415,110 @@ def _convert_raw(data: bytes, fmt: str):
     # extension, and it is the sniffed format rather than the caller's.
     source = DocumentStream(name=f"document.{fmt}", stream=io.BytesIO(data))
     return converter.convert(source).document
+
+
+# ── Legacy Word recovery (§18m) ──────────────────────────────────────────────
+#
+# docling's Rust CFB reader is incomplete. Measured 2026-08-14 against the live
+# archive: 142 of 229 `.doc` files parse and 87 do not — and the 87 are not
+# corrupt. Reading their OLE2 directories by hand shows the stream the error
+# names is present in every one checked, including a plain Word 8.0 file
+# carrying both `WordDocument` and `1Table` that reports "no WordDocument
+# stream". It is a 62% reader, of the same family as the 43% `.ppt` reader
+# §18a-1 declined to use.
+#
+# macOS ships a complete one, in the base system, with no dependency to add:
+# `textutil` recovered 85 of those 87. It runs only after docling has failed,
+# so a working parse never pays for it.
+_TEXTUTIL_RECOVERABLE = {"doc"}
+
+_TEXTUTIL = "/usr/bin/textutil"
+_TEXTUTIL_TIMEOUT_SECONDS = 60
+
+# textutil does not fail on a file it cannot parse. It reads the bytes as plain
+# text and **exits 0**, returning the file's own OLE2 header as mojibake —
+# `noncomp.doc` in this archive does exactly that. So the exit code proves
+# nothing about the output and the text itself has to be judged.
+#
+# Measured over the 87 failures: all 85 real recoveries scored 0.92 or better
+# and both unreadable files scored far below, so 0.85 sits in the gap with room
+# on either side.
+_MIN_READABLE_RATIO = 0.85
+
+_READABLE_PUNCTUATION = frozenset(" .,;:'\"()-/&$%#@!?+=*[]{}<>_|\\~`^")
+
+
+def _is_readable(text: str) -> bool:
+    """Whether this looks like recovered prose rather than re-encoded binary.
+
+    Deliberately strict: it counts only ASCII alphanumerics and common
+    punctuation, so a document written in a non-Latin script would be judged
+    unreadable and declined. That is the right way round for a *fallback* —
+    docling has already failed by the time this runs, so a false reject costs
+    the status quo, while a false accept writes binary into the search index as
+    though it were the document's text.
+    """
+    body = "".join(ch for ch in text if not ch.isspace())
+    if not body:
+        return False
+    readable = sum(
+        1
+        for ch in body
+        if ch.isascii() and (ch.isalnum() or ch in _READABLE_PUNCTUATION)
+    )
+    return readable / len(body) >= _MIN_READABLE_RATIO
+
+
+def _run_textutil(data: bytes, fmt: str) -> Optional[str]:
+    """macOS's own Word reader, or None where it cannot be used.
+
+    The bytes go through a temp file because textutil takes a path and will not
+    read stdin. None covers every way this can decline — a non-macOS host, a
+    missing binary, a crash, a timeout, a non-zero exit — because the caller
+    treats them all the same way: leave docling's original error standing.
+    """
+    if sys.platform != "darwin":
+        return None
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=f".{fmt}") as handle:
+            handle.write(data)
+            handle.flush()
+            result = subprocess.run(
+                [_TEXTUTIL, "-convert", "txt", "-stdout", handle.name],
+                capture_output=True,
+                timeout=_TEXTUTIL_TIMEOUT_SECONDS,
+            )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    if result.returncode != 0:
+        return None
+    return result.stdout.decode("utf-8", "replace")
+
+
+def _recover_legacy(data: bytes, fmt: str):
+    """Retry a docling parse failure through macOS's Word reader.
+
+    Returns a *document*, not a string, so the size gate, the chunker and
+    provenance all behave exactly as they do on a first-pass parse — or None to
+    let the original error stand.
+    """
+    if fmt not in _TEXTUTIL_RECOVERABLE:
+        return None
+
+    text = _run_textutil(data, fmt)
+    if text is None or not _is_readable(text):
+        return None
+
+    print(
+        f"[INFO] extract-text: docling could not read a .{fmt}; recovered "
+        f"{len(text)} chars via textutil",
+        flush=True,
+    )
+    # Re-read as plain text: `txt` is a format docling does handle, and this
+    # keeps one code path for chunking instead of a second hand-rolled one.
+    return _convert_raw(text.encode("utf-8"), "txt")
 
 
 def _chunk(document) -> List[Any]:

@@ -405,3 +405,162 @@ class TestScannedTripwire:
         # A .doc has no pages at all, so chars-per-page is meaningless there.
         de._warn_if_scanned(self._Doc(0), "", "doc")
         assert capsys.readouterr().out == ""
+
+
+# ── Legacy Word recovery (§18m) ──────────────────────────────────────────────
+#
+# Measured 2026-08-14 against the live archive: 142 of 229 `.doc` files parse
+# through docling and 87 do not. The 87 are not corrupt. Reading their OLE2
+# directories by hand shows the stream the error names is present in every one
+# checked — "no WordDocument stream" on a file whose directory lists
+# `WordDocument`. It is an incomplete reader, the same family as the 43% `.ppt`
+# reader §18a-1 declined to use.
+#
+# macOS ships a complete one. `textutil` recovered 85 of the 87.
+
+# The first bytes of `noncomp.doc` as textutil actually returned them: the
+# file's own OLE2 header, decoded as text, exit code 0.
+TEXTUTIL_MOJIBAKE = "–œ‡°±·\x00\x00\x00\x00˛ˇ\t\x00\x00ˇˇˇˇˇˇˇˇˇˇˇˇÄ\x00\x00"
+
+
+class _RecordingConverter:
+    """docling that fails on the legacy format and succeeds on plain text."""
+
+    def __init__(self, failure):
+        self.calls = []
+        self._failure = failure
+
+    def __call__(self, data, fmt):
+        self.calls.append(fmt)
+        if fmt == "txt":
+            return _FakeDocument(data.decode("utf-8"))
+        raise self._failure
+
+
+class TestReadableGuard:
+    """textutil does not fail on a file it cannot parse — it exits 0 and hands
+    back the bytes re-encoded as text. The exit code proves nothing, so the
+    output is what has to be judged."""
+
+    def test_recovered_prose_is_readable(self):
+        assert de._is_readable("Michael NIMER\n4438 South Honeywood Lane\n(801) 969-5489")
+
+    def test_re_encoded_binary_is_not(self):
+        assert not de._is_readable(TEXTUTIL_MOJIBAKE)
+
+    def test_empty_output_is_not_readable(self):
+        """A file textutil emptied is a failure, not a document with no words."""
+        assert not de._is_readable("   \n\t  ")
+
+    def test_prose_with_typographic_characters_survives(self):
+        """The measured recoveries carry bullets and curly quotes; the guard
+        must not mistake ordinary word processing for binary."""
+        assert de._is_readable('Select “Technology” • revise the criteria — then save.')
+
+
+class TestLegacyRecovery:
+    def test_a_doc_docling_cannot_parse_is_recovered(self, monkeypatch):
+        converter = _RecordingConverter(RuntimeError("parse error: doc: no WordDocument stream"))
+        monkeypatch.setattr(de, "_convert_raw", converter)
+        monkeypatch.setattr(de, "_run_textutil", lambda data, fmt: "Michael NIMER, resume")
+
+        document = de._convert(OLE2_MAGIC + b"\x00" * 64, "doc")
+
+        assert document.export_to_markdown() == "Michael NIMER, resume"
+
+    def test_recovered_text_is_re_read_as_text_not_as_a_doc(self, monkeypatch):
+        """The recovery returns a *document*, not a string, so the size gate,
+        the chunker and provenance all behave exactly as on a first-pass parse.
+        Re-reading it as `doc` would fail the same way it just did."""
+        converter = _RecordingConverter(RuntimeError("parse error: doc: bad FIB magic"))
+        monkeypatch.setattr(de, "_convert_raw", converter)
+        monkeypatch.setattr(de, "_run_textutil", lambda data, fmt: "recovered prose here")
+
+        de._convert(OLE2_MAGIC, "doc")
+
+        assert converter.calls == ["doc", "txt"]
+
+    def test_output_that_is_still_binary_leaves_the_original_error_standing(
+        self, monkeypatch
+    ):
+        """The `noncomp.doc` case. Storing this would put the file's own header
+        into the search index as though it were the document's text."""
+        converter = _RecordingConverter(RuntimeError("parse error: doc: no WordDocument stream"))
+        monkeypatch.setattr(de, "_convert_raw", converter)
+        monkeypatch.setattr(de, "_run_textutil", lambda data, fmt: TEXTUTIL_MOJIBAKE)
+
+        with pytest.raises(RuntimeError, match="no WordDocument stream"):
+            de._convert(OLE2_MAGIC, "doc")
+
+        assert converter.calls == ["doc"]
+
+    def test_a_format_textutil_cannot_help_is_not_retried(self, monkeypatch):
+        """Recovery is scoped to what was measured. A failed PDF is a pdfium
+        problem, and running a Word converter over it would only turn one
+        honest error into two."""
+        converter = _RecordingConverter(RuntimeError("parse error: pdf: broken xref"))
+        monkeypatch.setattr(de, "_convert_raw", converter)
+        monkeypatch.setattr(
+            de, "_run_textutil", lambda data, fmt: pytest.fail("textutil consulted")
+        )
+
+        with pytest.raises(RuntimeError, match="broken xref"):
+            de._convert(b"%PDF-1.4", "pdf")
+
+    def test_an_environmental_failure_is_never_masked_by_recovery(self, monkeypatch):
+        """A missing library must stay a 503. If recovery could answer it, a
+        `.doc` would quietly return degraded text on a box whose extraction
+        stack is broken, and nothing would ever say so."""
+        monkeypatch.setattr(
+            de,
+            "_convert_raw",
+            lambda data, fmt: (_ for _ in ()).throw(
+                RuntimeError("the pdfium library is not installed")
+            ),
+        )
+        monkeypatch.setattr(
+            de, "_run_textutil", lambda data, fmt: pytest.fail("textutil consulted")
+        )
+
+        with pytest.raises(de.ExtractionUnavailable):
+            de._convert(OLE2_MAGIC, "doc")
+
+    def test_recovery_is_skipped_where_textutil_does_not_exist(self, monkeypatch):
+        """`_run_textutil` returning None is how every non-macOS host, and every
+        textutil crash, arrives here: the original error stands."""
+        converter = _RecordingConverter(RuntimeError("parse error: doc: bad FIB magic"))
+        monkeypatch.setattr(de, "_convert_raw", converter)
+        monkeypatch.setattr(de, "_run_textutil", lambda data, fmt: None)
+
+        with pytest.raises(RuntimeError, match="bad FIB magic"):
+            de._convert(OLE2_MAGIC, "doc")
+
+
+class TestTextutilRunner:
+    def test_returns_none_off_macos(self, monkeypatch):
+        monkeypatch.setattr(de.sys, "platform", "linux")
+        assert de._run_textutil(b"anything", "doc") is None
+
+    def test_a_nonzero_exit_is_not_a_recovery(self, monkeypatch):
+        monkeypatch.setattr(de.sys, "platform", "darwin")
+        monkeypatch.setattr(
+            de.subprocess, "run", lambda *a, **k: _CompletedProcess(1, b"")
+        )
+        assert de._run_textutil(b"anything", "doc") is None
+
+    def test_a_crash_or_timeout_is_not_a_recovery(self, monkeypatch):
+        """textutil is a subprocess on someone else's machine; it is allowed to
+        die without taking the extraction request with it."""
+        monkeypatch.setattr(de.sys, "platform", "darwin")
+
+        def _boom(*a, **k):
+            raise OSError("no such binary")
+
+        monkeypatch.setattr(de.subprocess, "run", _boom)
+        assert de._run_textutil(b"anything", "doc") is None
+
+
+class _CompletedProcess:
+    def __init__(self, returncode, stdout):
+        self.returncode = returncode
+        self.stdout = stdout

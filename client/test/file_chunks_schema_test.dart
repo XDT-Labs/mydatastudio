@@ -179,7 +179,13 @@ void main() {
       await reopened.close();
     });
 
-    test('leaves genuinely unparseable .doc files retired', () async {
+    test('re-offers a .doc the PDF pass deliberately left behind', () async {
+      // This test used to assert the opposite, on the belief that docling
+      // could not read these files at all. §18m measured that belief and found
+      // it wrong: the reader was partial, not the files damaged, and macOS's
+      // textutil reads 85 of the 87 it refused. So a second pass un-retires
+      // them — and this case is the one that runs *both* passes in a single
+      // open, from an archive predating either.
       final db = await freshDb('chunk_pdf_recovery_doc_test.db');
       await db.rawDb.execute(
         'INSERT INTO files (id, collection_id, name, path, parent, '
@@ -198,10 +204,11 @@ void main() {
         ['d1'],
       );
 
-      expect(rows.first['embedding_attempts'], 5,
+      expect(rows.first['embedding_attempts'], 0,
           reason:
-              'docling cannot read these at all; un-retiring them would burn '
-              'the budget again for nothing');
+              'the reader was incomplete, not the file damaged; leaving it '
+              'retired would put the fallback out of reach of every file it '
+              'was built for');
       await reopened.close();
     });
   });

@@ -637,6 +637,60 @@ void main() {
       if (dbFile.existsSync()) dbFile.deleteSync();
     });
 
+    test('legacy .doc files retired by a partial reader are re-offered', () async {
+      // §18m: docling reported 87 of this archive's 229 .doc files as damaged
+      // when the files were fine — their OLE2 directories list the very stream
+      // the error said was missing. A textutil fallback now reads 85 of them,
+      // but `embedding_attempts` only resets on success, so without this pass
+      // the fix would reach almost nothing it was built for: the files that
+      // motivated it are precisely the ones already sitting at the cap.
+      final supportDir = await getApplicationSupportDirectory();
+      const dbName = 'doc_unretire_test.db';
+      final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+      if (dbFile.existsSync()) dbFile.deleteSync();
+
+      var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+      Future<void> insert(String id, String name, int attempts) =>
+          appDb.rawDb.execute(
+            'INSERT INTO files (id, name, path, parent, date_created, '
+            'date_last_modified, collection_id, content_type, size, '
+            'is_deleted, embedding_attempts) '
+            "VALUES (?, ?, ?, '/tmp', 0, 0, 'c1', 'application/msword', 1, 0, ?)",
+            [id, name, '/tmp/$name', attempts],
+          );
+
+      await insert('retired', 'nondisclsr.doc', 5);
+      await insert('chunked', 'readable.doc', 5);
+      await insert('other', 'sheet.xls', 5);
+      // A .doc that already produced text was never the reader's victim, so
+      // re-offering it would spend a fresh budget re-deriving what is on disk.
+      await appDb.rawDb.execute(
+        "INSERT INTO file_chunks (file_id, chunk_index, text) "
+        "VALUES ('chunked', 0, 'already extracted')",
+      );
+      await appDb.rawDb.execute('PRAGMA user_version = 4');
+      await appDb.close();
+
+      // Reopening is what an upgraded install does.
+      appDb = await AppDatabase.create(null, supportDir.path, dbName);
+      Future<int> attemptsOf(String id) async {
+        final rows = await appDb.rawDb.select(
+          'SELECT embedding_attempts FROM files WHERE id = ?',
+          [id],
+        );
+        return rows.first.values.first as int;
+      }
+
+      expect(await attemptsOf('retired'), 0);
+      expect(await attemptsOf('chunked'), 5);
+      // The fallback only covers .doc; nothing else may have its budget spent
+      // again on the strength of a fix that cannot reach it.
+      expect(await attemptsOf('other'), 5);
+
+      await appDb.close();
+      if (dbFile.existsSync()) dbFile.deleteSync();
+    });
+
     test('renaming contacts to emails_contacts keeps the indexed rows', () async {
       // The rename runs before _createSearchIndexes for a reason: that method
       // creates emails_contacts with IF NOT EXISTS, so an install still holding
