@@ -240,9 +240,9 @@ class _ConversationTileState extends State<_ConversationTile> {
                       widget.conversation.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: widget.isActive ? _textPrimary : const Color(0xFFE5E5EA),
-                        fontSize: 13,
+                        fontSize: 13.5,
                         fontWeight: widget.isActive ? FontWeight.w500 : FontWeight.w400,
                       ),
                     ),
