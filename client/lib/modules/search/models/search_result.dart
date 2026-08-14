@@ -9,6 +9,49 @@ enum SearchResultType { email, file }
 /// Deliberately not a `File` or an `Email`: results from different sources are
 /// interleaved by rank in a single list, so they have to share a shape. Callers
 /// that need the full record load it by [id] once the user picks a result.
+/// Where in a document a hit came from, for the footnote under a result.
+///
+/// Both anchors are nullable and which one exists is decided by the format,
+/// not by chance: PDFs carry pages and no headings, while `.doc`, `.xls` and
+/// `.ppt` carry headings and no pages at all — a Word file has no pages until
+/// something lays it out (search plan §18f). So this renders whichever
+/// arrived, and a document that yielded neither still cites nothing rather
+/// than citing "page null".
+class ChunkCitation {
+  /// Position in the document's chunk set — `file_chunks.chunk_index`.
+  final int chunkIndex;
+
+  /// 1-based page, for paginated formats only.
+  final int? page;
+
+  /// The heading trail the passage sits under, e.g. `Report > Findings`.
+  final String? headingPath;
+
+  const ChunkCitation({
+    required this.chunkIndex,
+    this.page,
+    this.headingPath,
+  });
+
+  /// True when there is something worth showing a reader.
+  bool get hasAnchor => page != null || (headingPath?.isNotEmpty ?? false);
+
+  /// The footnote text, without the file name the caller already displays.
+  ///
+  /// Reads as "page 13" or "Report > Findings", and joins both when a format
+  /// supplies both rather than silently preferring one.
+  String? get label {
+    final parts = [
+      if (page != null) 'page $page',
+      if (headingPath != null && headingPath!.isNotEmpty) headingPath!,
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
+  @override
+  String toString() => 'ChunkCitation($chunkIndex, ${label ?? "no anchor"})';
+}
+
 class SearchResult {
   final String id;
   final SearchResultType type;
@@ -49,6 +92,20 @@ class SearchResult {
   /// it in) are columns rather than anything recoverable later.
   final SourceTier tier;
 
+  /// Which passage of a document matched, when one did.
+  ///
+  /// Null for photos, mail, and any file matched on its name rather than its
+  /// contents. Present only when the hit actually came from a chunk, which is
+  /// what keeps a footnote from appearing under a result it does not describe.
+  final ChunkCitation? citation;
+
+  /// The email this file arrived as an attachment of, if it did.
+  ///
+  /// 91% of this archive's documents are attachments (§18a), so a chunk hit
+  /// that cannot point back at the message it came with is a dead end in the
+  /// common case rather than the rare one.
+  final String? parentEmailId;
+
   const SearchResult({
     required this.id,
     required this.type,
@@ -61,6 +118,8 @@ class SearchResult {
     this.contentType,
     this.thumbnail,
     this.tier = SourceTier.correspondence,
+    this.citation,
+    this.parentEmailId,
   });
 
   bool get isEmail => type == SearchResultType.email;
@@ -104,6 +163,29 @@ class SearchResult {
       contentType: contentType,
       thumbnail: thumbnail,
       tier: tier,
+      citation: citation,
+      parentEmailId: parentEmailId,
+    );
+  }
+
+  /// This result with [citation] attached — used when the vector pass, not the
+  /// lexical one, is what identified the winning passage.
+  SearchResult withCitation(ChunkCitation? newCitation) {
+    if (newCitation == null) return this;
+    return SearchResult(
+      id: id,
+      type: type,
+      title: title,
+      score: score,
+      subtitle: subtitle,
+      snippet: snippet,
+      date: date,
+      collectionId: collectionId,
+      contentType: contentType,
+      thumbnail: thumbnail,
+      tier: tier,
+      citation: newCitation,
+      parentEmailId: parentEmailId,
     );
   }
 

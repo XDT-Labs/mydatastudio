@@ -8,22 +8,85 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 
+/// The outcome of a byte load, which is not the same question as "did I get
+/// bytes".
+///
+/// A caller has to know *why* a read failed, because the two reasons call for
+/// opposite responses. A file on an unmounted NAS or behind an expired token
+/// will read fine later, so the right move is to back the whole source off and
+/// keep the file's retry budget intact. A file that can never be read as bytes
+/// — a Google Doc, which is not stored as a file at all — will fail exactly
+/// the same way on every future pass, and treating it as an outage stalls
+/// every *other* file in that collection behind it.
+///
+/// [FileBytesLoader.load] flattens this to a nullable list for the callers
+/// that only need the bytes.
+class FileBytes {
+  final List<int>? bytes;
+
+  /// True when no future attempt can succeed.
+  final bool permanent;
+
+  const FileBytes.ok(List<int> this.bytes) : permanent = false;
+  const FileBytes.transient() : bytes = null, permanent = false;
+  const FileBytes.permanent() : bytes = null, permanent = true;
+
+  bool get ok => bytes != null;
+}
+
 /// Loads the raw bytes of [file] from local disk or Google Drive.
 ///
 /// Shared by the embedding and description isolates so both read a file's
 /// contents the same way instead of duplicating GDrive token-refresh and
 /// download logic.
 class FileBytesLoader {
+  /// The bytes, or null on any failure.
+  ///
+  /// Kept for callers that handle images, where every failure is effectively
+  /// transient — an unreadable photo is a broken file, not a format that has
+  /// no bytes. Use [loadDetailed] where the difference matters.
   static Future<List<int>?> load(
     File file,
     DatabaseRepository repo,
     AppLogger logger,
-  ) {
-    if (file.path.startsWith('gdrive://')) {
-      return _loadFromGDrive(file, repo, logger);
+  ) async => (await loadDetailed(file, repo, logger)).bytes;
+
+  static Future<FileBytes> loadDetailed(
+    File file,
+    DatabaseRepository repo,
+    AppLogger logger,
+  ) async {
+    // Checked before any network call, because this is a property of the
+    // format rather than of the request. Google Docs, Sheets and Slides are
+    // not stored as files; Drive's media endpoint refuses them by design with
+    // "Only files with binary content can be downloaded", and it will refuse
+    // them identically forever. They need `files.export` with a target
+    // format, which is not implemented (search plan §18k).
+    if (isGoogleNativeFormat(file.contentType)) {
+      logger.d(
+        'Google Workspace file has no downloadable bytes: ${file.name} '
+        '(${file.contentType}) — needs export, see §18k',
+      );
+      return const FileBytes.permanent();
     }
-    return _loadFromDisk(file, logger);
+    if (file.path.startsWith('gdrive://')) {
+      final bytes = await _loadFromGDrive(file, repo, logger);
+      return bytes == null ? const FileBytes.transient() : FileBytes.ok(bytes);
+    }
+    final bytes = await _loadFromDisk(file, logger);
+    return bytes == null ? const FileBytes.transient() : FileBytes.ok(bytes);
   }
+
+  /// Google Workspace formats, which have no byte representation to download.
+  ///
+  /// Deliberately narrow. Other 403s from Drive — `userRateLimitExceeded`
+  /// most of all — are transient, so classifying by *status code* would retire
+  /// files during a rate limit. The content type is structural and cannot be
+  /// mistaken for a temporary condition.
+  static bool isGoogleNativeFormat(String? mimeType) =>
+      mimeType != null &&
+      mimeType.startsWith('application/vnd.google-apps.') &&
+      mimeType != 'application/vnd.google-apps.folder';
 
   static Future<List<int>?> _loadFromDisk(File file, AppLogger logger) async {
     final ioFile = io.File(file.path);

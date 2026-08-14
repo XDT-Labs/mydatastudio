@@ -23,6 +23,7 @@ class SearchResultTile extends StatefulWidget {
     this.onTap,
     this.onDoubleTap,
     this.onExpand,
+    this.onOpenParentEmail,
     this.isSelected = false,
   });
 
@@ -38,6 +39,13 @@ class SearchResultTile extends StatefulWidget {
   /// Same as [onDoubleTap], wired to the explicit button so the gesture is
   /// discoverable without having to guess at it.
   final VoidCallback? onExpand;
+
+  /// Opens the message a document arrived attached to.
+  ///
+  /// Null leaves the footnote as plain text rather than hiding it: knowing a
+  /// document came from an email is worth showing even where there is nowhere
+  /// to jump to yet.
+  final void Function(String emailId)? onOpenParentEmail;
 
   final bool isSelected;
 
@@ -140,6 +148,10 @@ class _SearchResultTileState extends State<SearchResultTile> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
+                    _Footnote(
+                      result: result,
+                      onOpenParentEmail: widget.onOpenParentEmail,
+                    ),
                   ],
                 ),
               ),
@@ -276,6 +288,113 @@ class _Leading extends StatelessWidget {
       color: colorScheme.surfaceContainerHigh,
       child: Center(
         child: Icon(_icon, color: colorScheme.onSurfaceVariant, size: 36),
+      ),
+    );
+  }
+}
+
+/// The line under a result saying *where in the document* it matched.
+///
+/// Renders nothing at all unless there is something true to say, which is the
+/// whole design constraint. A photo has no passage, a `.doc` has no page
+/// numbers, and a document matched on its filename has no passage either — so
+/// an always-present footnote would be blank or, worse, invented, on most of
+/// the archive.
+class _Footnote extends StatelessWidget {
+  const _Footnote({required this.result, this.onOpenParentEmail});
+
+  final SearchResult result;
+  final void Function(String emailId)? onOpenParentEmail;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final label = result.citation?.label;
+    final parentEmailId = result.parentEmailId;
+    if (label == null && parentEmailId == null) return const SizedBox.shrink();
+
+    final style = theme.textTheme.bodySmall?.copyWith(
+      color: colorScheme.onSurfaceVariant,
+      fontSize: 11,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          if (label != null) ...[
+            Icon(
+              Icons.format_quote_outlined,
+              size: 13,
+              color: colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                label,
+                style: style,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+          if (label != null && parentEmailId != null)
+            Text('  ·  ', style: style),
+          if (parentEmailId != null)
+            _ParentEmailLink(
+              emailId: parentEmailId,
+              onOpen: onOpenParentEmail,
+              style: style,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "in email", clickable when the caller gave it somewhere to go.
+class _ParentEmailLink extends StatelessWidget {
+  const _ParentEmailLink({
+    required this.emailId,
+    required this.onOpen,
+    required this.style,
+  });
+
+  final String emailId;
+  final void Function(String emailId)? onOpen;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final content = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.attachment_outlined,
+          size: 13,
+          color: onOpen == null ? colorScheme.onSurfaceVariant : colorScheme.primary,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          'in email',
+          style: style?.copyWith(
+            color: onOpen == null ? null : colorScheme.primary,
+            decoration: onOpen == null ? null : TextDecoration.underline,
+          ),
+        ),
+      ],
+    );
+    if (onOpen == null) return content;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        // The tile's own onTap selects the row, so this has to stop the event
+        // rather than let both fire — a click meant for the message would
+        // otherwise also re-select the attachment behind it.
+        onTap: () => onOpen!(emailId),
+        child: content,
       ),
     );
   }

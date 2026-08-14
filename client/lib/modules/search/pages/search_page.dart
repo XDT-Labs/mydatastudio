@@ -584,6 +584,7 @@ class _SearchPageState extends State<SearchPage> {
           onTap: () => _selectIndex(index),
           onDoubleTap: () => _openAt(index),
           onExpand: () => _openAt(index),
+          onOpenParentEmail: _openParentEmail,
         );
       },
     );
@@ -595,6 +596,35 @@ class _SearchPageState extends State<SearchPage> {
   /// sidebar is already making — opening a viewer against a half-loaded
   /// selection would show the previous result's contents. The token re-check
   /// after the await is what makes a third click during the wait win.
+  /// Opens the message an attachment arrived with.
+  ///
+  /// Deliberately independent of the result list. The parent email usually did
+  /// *not* match the query — the attachment did — so there is no index to
+  /// select, and the reader is driven straight from the loaded record instead.
+  /// Clearing [_selectedIndex] is what makes that safe: both [_positionLabel]
+  /// and [_siblingIndices] key off it, so the reader correctly offers no
+  /// next/previous rather than stepping through results the message is not
+  /// part of.
+  Future<void> _openParentEmail(String emailId) async {
+    final token = ++_detailToken;
+    Email? email;
+    try {
+      email = await _detailLoader.emailById(emailId);
+    } catch (_) {
+      // Same posture as _loadDetail: a message deleted since indexing should
+      // not take the page down.
+    }
+    if (!mounted || token != _detailToken || email == null) return;
+    setState(() {
+      _selectedIndex = null;
+      _selectedFile = null;
+      _selectedEmail = email;
+      _selectedCollection = null;
+      _detailLoading = false;
+    });
+    _openFullscreen();
+  }
+
   Future<void> _openAt(int index) async {
     if (_selectedIndex != index) {
       _selectIndex(index);

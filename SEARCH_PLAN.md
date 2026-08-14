@@ -2216,7 +2216,7 @@ not bother.
 | 1 | **Built.** `POST /util/extract-text` returning chunks with provenance. Every non-PDF format — including legacy `.doc`/`.xls`/`.ppt`/`.rtf` — needs no model download, so this step already covers most of the archive's documents. Route by sniffing bytes (§18a), resolve cloud paths (§18i). See §18h-1 |
 | 2 | **Built.** `files_embeddings` PK widened to `(file_id, type, sequence)`, `file_chunks` + `file_chunks_fts` DDL (§18e); `DocumentChunkIsolate` registered as the fourth background isolate (§18j) and its queue (§18i). See §18h-2 |
 | 3 | **Built.** Retrieval: chunk vectors into `VectorRetriever` with argmax carried through dedup, `file_chunks_fts` into the lexical path collapsed per file *before* fusion, **Mode B over-fetch raised** (§18e-1, §18f). See §18h-3 |
-| 4 | Footnotes in the result UI, and the parent-email link for attachments |
+| 4 | **Built.** Footnotes in the result UI, and the parent-email link for attachments. See §18h-5 |
 | 5 | PDF pipeline behind the model download; scanned-page tripwire logging. **Prerequisite: vendor a macOS arm64 `libpdfium.dylib` (§18d-1)** — docling's own download ships a Linux binary and reports success |
 | 6 | **Measure the document similarity floor** (§18i) — files' 0.75 was measured on image vectors and does not transfer |
 
@@ -2511,6 +2511,49 @@ Two changes:
   would also un-retire the ~36 `.doc` files that genuinely cannot be parsed
   and burn their budget again for nothing.
 
+#### 18h-5. Step 4 as built
+
+Provenance reaches the screen. 4 new tests; the client suite is 1,010 green
+with the same one pre-existing failure.
+
+**The lexical path cites itself for free, and the reason is a SQLite
+guarantee rather than luck.** `_searchFiles` already grouped by `f.id` taking
+`MIN(score)`; adding `chunk_index`, `page` and `heading_path` as bare columns
+means SQLite fills them from *the row that produced the minimum* — documented
+behaviour for an aggregate query using a single `min()` or `max()`. So the
+footnote describes the best-scoring passage, not an arbitrary one. There is a
+test pinning exactly this, because a rewrite that split the aggregate would
+break it silently and still return plausible-looking pages.
+
+**The vector path needs a second read**, since it knows the winning chunk only
+as an index (`files_embeddings.sequence`) and the page behind it lives in
+`file_chunks`. `loadCitations` batches that into one query over all the
+vector-only hits rather than one per result.
+
+**Where the two disagree, the first one wins.** A document that matched both
+ways arrives from the lexical pass already carrying a citation, and fusion
+does not overwrite it with the vector pass's pick. The passes can legitimately
+choose different passages of the same document, and overwriting would make the
+footnote describe a passage other than the one that explains the result's
+rank.
+
+**A citation is omitted far more often than it is shown, and that is the
+design.** Photos have no passage; a document matched on its *filename* has no
+passage either. Rendering "passage 0" there would cite text nobody searched
+for — so `citationFromRow` returns null on a name match rather than defaulting
+the index, and `_Footnote` renders nothing when there is nothing true to say.
+The label composes whichever anchors exist (`page 13`, `Policy > Publishing`,
+or both joined), which is what §18f's format split requires: PDFs carry pages
+and no headings, `.doc`/`.xls`/`.ppt` the reverse.
+
+**The parent-email link needed no derivation.** `files.email_id` already
+exists and is populated — measured at 105 of 105 chunked documents resolvable
+to a live `emails` row. Opening it is deliberately independent of the result
+list: the message usually did *not* match the query, so there is no index to
+select. `_openParentEmail` clears `_selectedIndex`, which is what makes the
+reader correctly offer no next/previous instead of stepping through results
+the message is not part of.
+
 ### 18i. What gets extracted, when, and what happens when it fails
 
 §18h step 2 names a `DocumentChunkIsolate` without saying what it pulls from.
@@ -2701,3 +2744,77 @@ for can actually be obtained.
 **What it polls** is §18i's eligibility query. The isolate opens its own
 `AppDatabase` connection for that read, exactly as the other three do, and
 writes nothing through it.
+
+### 18k. Google Workspace files are catalogued but never fetched
+
+**Status: the two bugs below are fixed; the export itself is still open.**
+
+Found 2026-08-13 from a running chunk pass:
+
+```
+[DocumentChunkIsolate] Error downloading GDrive file: DetailedApiRequestError(
+  status: 403, message: Only files with binary content can be downloaded.
+  Use Export with Docs Editors files.)
+```
+
+**Google Docs, Sheets and Slides have no bytes to download.** They are not
+stored as files; `files.get?alt=media` refuses them by design, and the caller
+is expected to use `files.export` with a target MIME type instead.
+
+**The export has never been implemented**, and the reason this took until now
+to surface is worth recording: the codebase carries the *shape* of the
+solution everywhere except the part that does the work.
+`GoogleDriveProvider.downloadFile` throws `UnsupportedError` with the comment
+*"those must be exported instead"*; `isGoogleNativeFormat()` is defined twice;
+and the scanner filters these files out of its download queue
+([google_file_scanner.dart:510](client/lib/modules/files/services/scanners/google_file_scanner.dart:510)).
+Every piece reads as though export were handled elsewhere. `grep` for
+`.export(` across `lib/` returns nothing. So these files are catalogued with a
+null `local_path`, nothing ever fetched them, and `DocumentChunkIsolate` is
+simply the first code to try.
+
+**Two bugs, of different severity.**
+
+1. **The isolate misclassifies the failure, and this one is ours.**
+   `FileBytesLoader.load` returns null for both "this file cannot be
+   downloaded, ever" and "Drive is unreachable right now", so
+   `_processDocument` calls `unreachable.recordFailure(collectionId)` and
+   **defers the whole Google Drive collection** on a doubling backoff to 30
+   minutes. A 403 on a Docs-Editors file is permanent for that file and says
+   nothing about the collection. Same error as §18h-4's pdfium bug in mirror
+   image: there a permanent classification was applied to a transient
+   condition, here a transient one to a permanent condition. The loader needs
+   to distinguish them — a nullable result cannot.
+
+2. **The queue trusts the extension over the content type.** The file that
+   triggered this is named `Civic_Voice_Launch_Plan.md` and is a Google Doc,
+   not markdown, so it matched `%.md` in [documentExtensions](client/lib/repositories/database_repository.dart).
+   §18a's "extension is not format" lesson was applied to the *extractor*,
+   which sniffs bytes, and not to the *queue*, which cannot — it has no bytes
+   yet. The queue should exclude `application/vnd.google-apps.*` by content
+   type until export exists.
+
+**Scale is small and nothing is being destroyed**: 4 files (2 Docs, 2
+Sheets), and `embedding_attempts` is 0 on all of them — the transient
+classification, wrong as it is, at least spends no retry budget.
+
+**Fixed 2026-08-13.** (1) `FileBytesLoader` gained `loadDetailed`, returning a
+`FileBytes` that says *why* a read failed; `load` still returns the nullable
+list, so the image and description isolates are untouched. The permanent case
+is decided by **content type before any network call**, not by status code —
+deliberately, because Drive's other 403 is `userRateLimitExceeded`, and
+retiring files during a rate limit would be a worse bug than the one being
+fixed. `DocumentChunkIsolate` now spends an attempt on a permanent failure and
+defers the collection only on a transient one. (2) The queue excludes
+`application/vnd.google-apps.%` by content type.
+
+**Still open: the export.** When it is built the target format is an easy call
+rather than a trade-off: export Docs as **DOCX** and Sheets as **XLSX**.
+`docling-rs` reads both natively with no model download (§18a), so a Workspace
+document would chunk through exactly the same path as any other — heading
+paths for the footnote included. Exporting to PDF would be worse in every
+respect: it needs the 2.0 GB model pack and a vendored pdfium (§18d-1), and it
+discards the structure the chunker uses.
+
+Sequenced after §18h step 4 — 4 files against a UI feature that affects every
+result.

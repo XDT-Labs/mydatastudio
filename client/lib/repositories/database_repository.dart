@@ -332,6 +332,12 @@ class DatabaseRepository {
   /// archive holds RTF files named `.doc` (search plan §18a). All this list
   /// does is keep the queue from handing over photos and video.
   ///
+  /// The queue cannot sniff — it has no bytes yet — which is why it also
+  /// excludes `application/vnd.google-apps.*` by content type. A Google Doc
+  /// named `Plan.md` matches `%.md` and is not markdown; it has no
+  /// downloadable bytes at all (§18k). Extension is not format here either,
+  /// and `content_type` is the only signal available before a read.
+  ///
   /// `htm`/`html` are excluded by policy — most are the HTML part of a mail
   /// whose body is already indexed, so indexing them creates a document that
   /// competes with its own email on identical text (§18i). `ppt` is excluded
@@ -380,6 +386,7 @@ class DatabaseRepository {
       WHERE f.is_deleted = 0
         AND f.is_inline = 0
         AND ($extensionFilter)
+        AND f.content_type NOT LIKE 'application/vnd.google-apps.%'
         AND f.embedding_attempts < ?
         AND NOT EXISTS (
               SELECT 1 FROM file_chunks fc

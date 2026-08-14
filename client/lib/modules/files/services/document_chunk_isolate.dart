@@ -264,14 +264,25 @@ class DocumentChunkIsolate {
     UnreachableCollections unreachable,
     AppLogger logger,
   ) async {
-    final bytes = await FileBytesLoader.load(file, repo, logger);
-    if (bytes == null) {
+    final loaded = await FileBytesLoader.loadDetailed(file, repo, logger);
+    if (!loaded.ok) {
+      if (loaded.permanent) {
+        // This file has no bytes and never will — a Google Doc, say (§18k).
+        // Deferring the collection for it would stall every *other* document
+        // in that source behind a condition that has nothing to do with the
+        // source being reachable. Spend an attempt instead, so it retires on
+        // its own schedule and stops being offered.
+        logger.w('Permanently unreadable, retiring: ${file.name}');
+        replyTo.send({'type': 'embeddingFailed', 'id': file.id});
+        return;
+      }
       // Unread, not unreadable: an unmounted volume or an expired token. The
       // file keeps its full retry budget and the whole collection backs off,
       // so a laptop away from its NAS does not retire an archive.
       unreachable.recordFailure(file.collectionId);
       return;
     }
+    final bytes = loaded.bytes!;
     unreachable.recordSuccess(file.collectionId);
 
     final extraction = await _extract(

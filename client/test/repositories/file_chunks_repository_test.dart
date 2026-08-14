@@ -232,6 +232,25 @@ void main() {
       expect(queued.map((f) => f.id).toList(), ['doc1']);
     });
 
+    test('skips Google Workspace files, whatever they are named', () async {
+      await open('repo_queue_workspace_test.db');
+      // A Google Doc named like markdown: it matches the extension hint and
+      // has no downloadable bytes at all (§18k). The queue cannot sniff
+      // content the way the extractor does, so content_type is the only
+      // signal available before a read.
+      await db.rawDb.execute(
+        'INSERT INTO files (id, collection_id, name, path, parent, '
+        'content_type, size, date_created, date_last_modified) '
+        "VALUES ('gdoc', 'col-1', 'Plan.md', 'gdrive://abc', '/', "
+        "'application/vnd.google-apps.document', 100, 0, 0)",
+      );
+      await addFile('real', ext: 'md');
+
+      final queued = await repo.getFilesWithMissingChunks(limit: 50);
+
+      expect(queued.map((f) => f.id).toList(), ['real']);
+    });
+
     test('skips formats excluded by policy and by measurement', () async {
       await open('repo_queue_excluded_test.db');
       await addFile('page', ext: 'html');

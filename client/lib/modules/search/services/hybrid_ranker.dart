@@ -60,6 +60,32 @@ class HybridRanker {
       );
     }
 
+    // Attach the passage the *vector* pass picked, for results that do not
+    // already name one.
+    //
+    // Only where there is none. A file that matched lexically arrived with a
+    // citation describing the chunk BM25 scored best, and overwriting it with
+    // the chunk cosine scored best would make the footnote disagree with the
+    // reason the result is ranked where it is — the two passes can legitimately
+    // pick different passages of the same document. Whichever retriever
+    // surfaced the result first is the one that explains it.
+    final winningChunks = <String, int>{};
+    for (final hit in vector) {
+      if (hit.type != SearchResultType.file) continue;
+      if (hit.chunkSequence == null) continue;
+      final existing = byKey['${hit.type.name}:${hit.id}'];
+      if (existing == null || existing.citation != null) continue;
+      winningChunks[hit.id] = hit.chunkSequence!;
+    }
+    if (winningChunks.isNotEmpty) {
+      final citations = await loader.loadCitations(winningChunks);
+      for (final entry in citations.entries) {
+        final key = '${SearchResultType.file.name}:${entry.key}';
+        final result = byKey[key];
+        if (result != null) byKey[key] = result.withCitation(entry.value);
+      }
+    }
+
     // Mail and photos get their own vector lists rather than one merged one.
     //
     // A text query against an email body is a *same-modal* comparison; against

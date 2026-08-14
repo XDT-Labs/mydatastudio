@@ -208,7 +208,8 @@ class Bm25Retriever {
         match != null
             ? await db.select(
               '''
-            SELECT $_fileColumns, MIN(m.score) AS score
+            SELECT $_fileColumns, MIN(m.score) AS score,
+                   m.chunk_index, m.chunk_page, m.chunk_heading
             FROM ($_fileMatchUnion) m
             JOIN files f ON f.id = m.file_id
             LEFT JOIN collections c ON c.id = f.collection_id
@@ -283,6 +284,38 @@ class Bm25Retriever {
   /// as a semantic addition would overstate the result count by however many
   /// the two retrievers agreed on — and a count the user cannot reach by
   /// scrolling is the bug they notice.
+  /// Provenance for specific `(file, chunk)` pairs the vector pass picked.
+  ///
+  /// The lexical path gets citations for free, because the chunk it matched is
+  /// a row it already read. The vector path does not: it knows *which* chunk
+  /// won by index, from `files_embeddings.sequence`, and the page and heading
+  /// behind that index live in `file_chunks`. One batched read rather than one
+  /// per result.
+  Future<Map<String, ChunkCitation>> loadCitations(
+    Map<String, int> winningChunkByFileId,
+  ) async {
+    if (winningChunkByFileId.isEmpty) return const {};
+
+    final pairs = winningChunkByFileId.entries.toList();
+    final clause = pairs
+        .map((_) => '(file_id = ? AND chunk_index = ?)')
+        .join(' OR ');
+    final rows = await db.select(
+      'SELECT file_id, chunk_index, page, heading_path FROM file_chunks '
+      'WHERE $clause',
+      [for (final pair in pairs) ...[pair.key, pair.value]],
+    );
+
+    return {
+      for (final row in rows)
+        row['file_id'] as String: ChunkCitation(
+          chunkIndex: (row['chunk_index'] as num).toInt(),
+          page: (row['page'] as num?)?.toInt(),
+          headingPath: row['heading_path'] as String?,
+        ),
+    };
+  }
+
   Future<Set<String>> matchingIds(
     ParsedQuery query,
     SearchResultType type,
@@ -345,13 +378,20 @@ class Bm25Retriever {
   /// description. There is nothing to weight *between* here — one column — and
   /// no evidence yet on how a body hit should trade against a filename hit.
   /// Left deliberately plain rather than guessed at.
+  /// Each branch also carries the provenance of *its* match, so the winning
+  /// row can cite itself. A name match has none — nulls, not zeroes, because
+  /// "matched on the filename" is the absence of a passage rather than
+  /// passage 0.
   static const _fileMatchUnion = '''
-      SELECT f2.id AS file_id, bm25(files_fts, $_fileWeights) AS score
+      SELECT f2.id AS file_id, bm25(files_fts, $_fileWeights) AS score,
+             NULL AS chunk_index, NULL AS chunk_page, NULL AS chunk_heading
       FROM files_fts
       JOIN files f2 ON f2.rowid = files_fts.rowid
       WHERE files_fts MATCH ?
       UNION ALL
-      SELECT fc.file_id AS file_id, bm25(file_chunks_fts) AS score
+      SELECT fc.file_id AS file_id, bm25(file_chunks_fts) AS score,
+             fc.chunk_index AS chunk_index, fc.page AS chunk_page,
+             fc.heading_path AS chunk_heading
       FROM file_chunks_fts
       JOIN file_chunks fc ON fc.rowid = file_chunks_fts.rowid
       WHERE file_chunks_fts MATCH ?
@@ -359,7 +399,7 @@ class Bm25Retriever {
 
   static const _fileColumns =
       'f.id, f.name, f.path, f.description, f.content_type, f.date_created, '
-      'f.thumbnail, f.collection_id, f.is_favorite, c.scanner, '
+      'f.thumbnail, f.collection_id, f.is_favorite, f.email_id, c.scanner, '
       'EXISTS(SELECT 1 FROM album_files af WHERE af.file_id = f.id) AS in_album';
 
   static const _emailColumns =
@@ -379,6 +419,26 @@ class Bm25Retriever {
       contentType: row['content_type'] as String?,
       thumbnail: row['thumbnail'] as String?,
       tier: _fileTier(row),
+      citation: citationFromRow(row),
+      parentEmailId: row['email_id'] as String?,
+    );
+  }
+
+  /// The winning passage's provenance, or null when the file matched on its
+  /// name rather than its contents.
+  ///
+  /// Reads `chunk_index` from a `GROUP BY` that selected `MIN(score)`, which
+  /// is safe on purpose rather than by luck: SQLite documents that when an
+  /// aggregate query uses a single `min()` or `max()`, bare columns take their
+  /// values from the row that produced it. So these three columns describe the
+  /// *best-scoring* passage, not an arbitrary one.
+  static ChunkCitation? citationFromRow(Map<String, Object?> row) {
+    final index = (row['chunk_index'] as num?)?.toInt();
+    if (index == null) return null;
+    return ChunkCitation(
+      chunkIndex: index,
+      page: (row['chunk_page'] as num?)?.toInt(),
+      headingPath: row['chunk_heading'] as String?,
     );
   }
 

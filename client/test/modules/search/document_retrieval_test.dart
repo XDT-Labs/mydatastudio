@@ -143,6 +143,67 @@ void main() {
     });
   });
 
+  group('footnote provenance', () {
+    test('cites the best-scoring passage, not an arbitrary one', () async {
+      await open('doc_footnote_best_test.db');
+      await addFile('f1', 'report.pdf');
+      // Only chunk 2 mentions the query term, so it must be the one cited —
+      // this is the SQLite bare-column-with-MIN() behaviour the query relies
+      // on, pinned so an innocuous rewrite cannot silently break it.
+      await addChunk('f1', 0, 'introduction and preamble', page: 1);
+      await addChunk('f1', 1, 'background material', page: 7);
+      await addChunk('f1', 2, 'the depreciation schedule', page: 13);
+
+      final results = await Bm25Retriever(db).search(parse('depreciation'));
+
+      expect(results.results.single.citation?.chunkIndex, 2);
+      expect(results.results.single.citation?.page, 13);
+      expect(results.results.single.citation?.label, 'page 13');
+    });
+
+    test('falls back to the heading path when a format has no pages', () async {
+      await open('doc_footnote_heading_test.db');
+      await addFile('f1', 'policy.doc');
+      await db.rawDb.execute(
+        'INSERT INTO file_chunks (file_id, chunk_index, page, heading_path, '
+        'text, model_version) VALUES (?, ?, NULL, ?, ?, ?)',
+        ['f1', 0, 'Policy > Publishing', 'external publishing rules', 'm'],
+      );
+
+      final results = await Bm25Retriever(db).search(parse('publishing'));
+
+      expect(results.results.single.citation?.page, isNull);
+      expect(results.results.single.citation?.label, 'Policy > Publishing');
+    });
+
+    test('a filename match cites nothing', () async {
+      await open('doc_footnote_namematch_test.db');
+      await addFile('f1', 'depreciation.pdf');
+      await addChunk('f1', 0, 'unrelated contents', page: 4);
+
+      final results = await Bm25Retriever(db).search(parse('depreciation'));
+
+      expect(results.results.single.citation, isNull,
+          reason: 'matching on the name is the absence of a passage, not '
+              'passage 0 — a footnote here would cite text nobody searched');
+    });
+
+    test('carries the parent email of an attachment', () async {
+      await open('doc_footnote_parent_test.db');
+      await db.rawDb.execute(
+        'INSERT INTO emails (id, collection_id, date, "from", "to", subject) '
+        "VALUES ('m1', 'col-1', 0, 'a\@b.com', 'me\@x.com', 'Q3 numbers')",
+      );
+      await addFile('f1', 'attachment.pdf');
+      await db.rawDb.execute("UPDATE files SET email_id='m1' WHERE id='f1'");
+      await addChunk('f1', 0, 'quarterly figures', page: 2);
+
+      final results = await Bm25Retriever(db).search(parse('quarterly'));
+
+      expect(results.results.single.parentEmailId, 'm1');
+    });
+  });
+
   group('VectorHit chunk provenance', () {
     test('a photo hit carries no chunk sequence', () {
       // emb_sequence is NOT NULL DEFAULT 0, so every image row reads 0.
