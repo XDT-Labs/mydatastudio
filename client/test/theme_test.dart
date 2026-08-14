@@ -22,6 +22,16 @@ void main() {
     expect(theme.colorScheme.surface, equals(const Color(0xFF141317)));
     expect(theme.colorScheme.onSurface, equals(const Color(0xFFE6E1E8)));
 
+    // Verify font family and fallback stack
+    expect(theme.textTheme.bodyMedium?.fontFamily, equals('.AppleSystemUIFont'));
+    expect(
+      theme.textTheme.bodyMedium?.fontFamilyFallback,
+      equals(['Inter', 'Segoe UI', 'sans-serif']),
+    );
+    expect(theme.textTheme.bodyMedium?.fontSize, equals(13.5));
+    expect(theme.textTheme.bodyMedium?.letterSpacing, equals(-0.1));
+    expect(theme.textTheme.labelLarge?.fontSize, equals(13.5));
+
     // Reset the size after the test
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
