@@ -7,6 +7,7 @@ import 'package:mydatastudio/models/tables/album.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/models/photo_section.dart';
+import 'package:mydatastudio/modules/photos/models/photo_source.dart';
 
 import 'package:intl/intl.dart';
 
@@ -79,6 +80,23 @@ class PhotosRepository {
       q +=
           " AND f.id IN (SELECT file_id FROM file_landmarks WHERE landmark = ?)";
       params.add(filter.location);
+    }
+
+    final place = filter.place;
+    if (place != null) {
+      final box = place.boundingBox;
+      q += " AND f.latitude BETWEEN ? AND ?";
+      params.addAll([box.minLat, box.maxLat]);
+
+      if (box.wrapsAntimeridian) {
+        // The box straddles ±180, so its longitudes are no longer a single
+        // range — east of minLng *or* west of maxLng.
+        q += " AND (f.longitude >= ? OR f.longitude <= ?)";
+        params.addAll([box.normalizedMinLng, box.normalizedMaxLng]);
+      } else {
+        q += " AND f.longitude BETWEEN ? AND ?";
+        params.addAll([box.minLng, box.maxLng]);
+      }
     }
 
     if (filter.onlyFavorites) {
@@ -546,6 +564,58 @@ class PhotosRepository {
     final rows = await db.select("SELECT * FROM files WHERE id = ?", [fileId]);
     if (rows.isEmpty) return null;
     return _fileWithAbsolutePath(rows.first);
+  }
+
+  /// The `<collection>/<folder>/<leaf>` trail [file] came from.
+  ///
+  /// The Photos grid mixes pictures scanned off disk with attachments pulled
+  /// out of mailboxes, and once they are side by side in the same grid a photo
+  /// gives no clue which it is. An attachment resolves to the message that
+  /// carried it so the sidebar can link back to it; a file resolves to its own
+  /// name. Returns null only when the database is unavailable.
+  Future<PhotoSource?> sourceFor(File file) async {
+    AppDatabase? db = DatabaseManager.instance.database;
+    if (db == null) return null;
+
+    final emailId = file.emailId;
+    if (emailId != null && emailId.isNotEmpty) {
+      final rows = await db.select(
+        '''
+        SELECT c.name AS collection_name,
+               e.subject AS subject,
+               ef.name AS folder_name
+        FROM emails e
+        JOIN collections c ON c.id = e.collection_id
+        LEFT JOIN email_folders ef
+          ON ef.id = e.folder_id AND ef.collection_id = e.collection_id
+        WHERE e.id = ?
+        ''',
+        [emailId],
+      );
+      if (rows.isNotEmpty) {
+        final row = rows.first;
+        final subject = (row['subject'] as String?)?.trim() ?? '';
+        return PhotoSource(
+          collectionName: (row['collection_name'] as String?) ?? '',
+          folder: row['folder_name'] as String?,
+          leaf: subject.isEmpty ? '(no subject)' : subject,
+          emailId: emailId,
+        );
+      }
+      // The message was deleted but its attachment row outlived it — fall
+      // through and describe the file, minus a link that would go nowhere.
+    }
+
+    final rows = await db.select("SELECT name FROM collections WHERE id = ?", [
+      file.collectionId,
+    ]);
+    return PhotoSource(
+      collectionName: rows.isEmpty
+          ? ''
+          : ((rows.first['name'] as String?) ?? ''),
+      folder: file.parent,
+      leaf: file.name,
+    );
   }
 
   Future<File?> updateFileName(String fileId, String newName) async {

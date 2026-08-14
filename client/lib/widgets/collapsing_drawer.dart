@@ -14,13 +14,47 @@ class CollapsingDrawer extends StatefulWidget {
   State<CollapsingDrawer> createState() => _CollapsingDrawerState();
 }
 
+/// A rail entry paired with the route it navigates to — null for the
+/// non-selectable dividers, which occupy an index all the same.
+typedef _RailEntry = ({NavigationRailDestination destination, String? route});
+
+/// Which rail entry [location] belongs to, or null when it belongs to none.
+///
+/// Derived from the route on every build rather than remembered from the last
+/// tap, because the rail is not the only thing that navigates: the Photos
+/// sidebar links an attachment to its email, logout returns Home, and a sub
+/// route like `/files/add` never touches the rail at all. Storing the
+/// selection meant the highlight stayed on whichever module the user last
+/// *clicked*, pointing at a module they were no longer in.
+int? selectedRailIndexFor(String location, List<String?> routes) {
+  int? best;
+  var bestLength = -1;
+
+  for (var i = 0; i < routes.length; i++) {
+    final route = routes[i];
+    if (route == null) continue;
+
+    // Home would otherwise prefix-match every route in the app.
+    final matches = route == '/'
+        ? location == '/'
+        : location == route || location.startsWith('$route/');
+
+    // Longest wins, so a hypothetical `/files/photos` picks the deeper entry
+    // rather than whichever of the two was registered first.
+    if (matches && route.length > bestLength) {
+      best = i;
+      bestLength = route.length;
+    }
+  }
+  return best;
+}
+
 class _CollapsingDrawerState extends State<CollapsingDrawer> {
   bool isLoading = true;
   GetAppsService? _getAppsService;
   StreamSubscription? _appsSub;
   StreamSubscription? _loadingSub;
   List<m.App> apps = [];
-  int selectedIndex = 0;
 
   @override
   void initState() {
@@ -70,77 +104,57 @@ class _CollapsingDrawerState extends State<CollapsingDrawer> {
       );
     }
 
-    final destinations = <NavigationRailDestination>[
-      const NavigationRailDestination(
-        icon: Icon(Icons.home),
-        label: Text('Home'),
+    _RailEntry appEntry(m.App app) {
+      return (
+        destination: NavigationRailDestination(
+          // ignore: non_const_argument_for_const_parameter
+          icon: Icon(IconData(app.icon ?? 0xe08f, fontFamily: 'MaterialIcons')),
+          label: Text(app.name),
+        ),
+        route: app.route,
+      );
+    }
+
+    const divider = (
+      destination: NavigationRailDestination(
+        icon: Divider(indent: 8, endIndent: 8),
+        label: Text(''),
+        disabled: true,
       ),
-      if (appApps.isNotEmpty || collectionApps.isNotEmpty)
-        const NavigationRailDestination(
-          icon: Divider(indent: 8, endIndent: 8),
-          label: Text(''),
-          disabled: true,
+      route: null,
+    );
+
+    // Entries carry their own route rather than the rail recomputing one from
+    // an index. The arithmetic that used to do that had to re-derive where
+    // each divider sat, and got it wrong whenever a group was empty.
+    final entries = <_RailEntry>[
+      (
+        destination: const NavigationRailDestination(
+          icon: Icon(Icons.home),
+          label: Text('Home'),
         ),
-      ...appApps.map((app) {
-        return NavigationRailDestination(
-          // ignore: non_const_argument_for_const_parameter
-          icon: Icon(IconData(app.icon ?? 0xe08f, fontFamily: 'MaterialIcons')),
-          label: Text(app.name),
-        );
-      }),
-      if (appApps.isNotEmpty && collectionApps.isNotEmpty)
-        const NavigationRailDestination(
-          icon: Divider(indent: 8, endIndent: 8),
-          label: Text(''),
-          disabled: true,
-        ),
-      ...collectionApps.map((app) {
-        return NavigationRailDestination(
-          // ignore: non_const_argument_for_const_parameter
-          icon: Icon(IconData(app.icon ?? 0xe08f, fontFamily: 'MaterialIcons')),
-          label: Text(app.name),
-        );
-      }),
+        route: '/',
+      ),
+      if (appApps.isNotEmpty || collectionApps.isNotEmpty) divider,
+      ...appApps.map(appEntry),
+      if (appApps.isNotEmpty && collectionApps.isNotEmpty) divider,
+      ...collectionApps.map(appEntry),
     ];
 
     return NavigationRail(
-      selectedIndex: selectedIndex,
+      selectedIndex: selectedRailIndexFor(
+        GoRouterState.of(context).uri.path,
+        entries.map((e) => e.route).toList(),
+      ),
       onDestinationSelected: (int index) async {
-        if (destinations[index].disabled) return;
-
-        setState(() {
-          selectedIndex = index;
-        });
-
-        if (index == 0) {
-          GoRouter.of(context).go("/");
-          return;
-        }
-
-        int currentIndex = 1; // Start after Home
-        if (appApps.isNotEmpty || collectionApps.isNotEmpty) {
-          currentIndex++; // Skip first divider
-        }
-
-        if (index < currentIndex + appApps.length) {
-          GoRouter.of(context).go(appApps[index - currentIndex].route);
-          return;
-        }
-        currentIndex += appApps.length;
-
-        if (appApps.isNotEmpty && collectionApps.isNotEmpty) {
-          currentIndex++; // Skip second divider
-        }
-
-        if (index < currentIndex + collectionApps.length) {
-          GoRouter.of(context).go(collectionApps[index - currentIndex].route);
-          return;
-        }
+        final route = entries[index].route;
+        if (entries[index].destination.disabled || route == null) return;
+        GoRouter.of(context).go(route);
       },
       labelType: NavigationRailLabelType.none,
       extended: false,
       backgroundColor: theme.scaffoldBackgroundColor,
-      destinations: destinations,
+      destinations: entries.map((e) => e.destination).toList(),
       trailing: Expanded(
         child: Align(
           alignment: Alignment.bottomCenter,

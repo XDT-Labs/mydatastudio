@@ -41,6 +41,16 @@ class RxFilesPage extends StatefulWidget {
 
   static PublishSubject selectedCollection = PublishSubject();
   static PublishSubject selectedPath = PublishSubject();
+
+  /// A file another module wants opened here — the Photos info sidebar links
+  /// a photo back to its folder this way.
+  ///
+  /// Behaviour-backed, unlike [selectedCollection] above: the caller pushes
+  /// the file and *then* routes to `/files`, so the value has to still be
+  /// there when this page mounts and subscribes. The page clears it once
+  /// consumed.
+  static BehaviorSubject<FileAsset?> openFileRequest =
+      BehaviorSubject<FileAsset?>.seeded(null);
   static BehaviorSubject<String> sortColumn = BehaviorSubject.seeded("name");
   static BehaviorSubject<bool> sortDirection = BehaviorSubject.seeded(true);
 
@@ -64,6 +74,7 @@ class _RxFilesPage extends State<RxFilesPage> {
   StreamSubscription<List<FileAsset>>? _fileServiceSub;
   StreamSubscription<List<Collection>>? _collectionsServiceSub;
   StreamSubscription? _selectedCollectionSub;
+  StreamSubscription? _openFileSub;
 
   List<FileAsset> filesAndFolders = [];
   List<Collection> collections = [];
@@ -87,6 +98,11 @@ class _RxFilesPage extends State<RxFilesPage> {
   List<FileAsset> selectedItems = [];
   FileAsset? selectedAsset;
   FileAsset? _lastSelectedAsset;
+
+  /// A file requested via [RxFilesPage.openFileRequest] that is still
+  /// resolving its collection. Held so the default-collection auto-select
+  /// cannot land on top of it mid-flight.
+  FileAsset? _pendingFile;
   bool _showLightbox = false;
   final FocusNode _keyboardFocusNode = FocusNode(
     debugLabel: 'RxFilesPage keyboard shortcuts',
@@ -94,6 +110,13 @@ class _RxFilesPage extends State<RxFilesPage> {
 
   @override
   void initState() {
+    // Read before anything is subscribed below. GetCollectionsService replays
+    // its last value the moment it is listened to, and that listener is
+    // attached first — so the default-collection select would otherwise fire
+    // before the openFileRequest listener even exists, and land on top of the
+    // file the user asked for.
+    _pendingFile = RxFilesPage.openFileRequest.valueOrNull;
+
     _collectionService = GetCollectionsService.instance;
     _attachScrollListener();
 
@@ -101,7 +124,12 @@ class _RxFilesPage extends State<RxFilesPage> {
       setState(() {
         collections = value;
       });
-      if (value.isNotEmpty) {
+      // `collection == null` keeps a later emission — adding a collection
+      // re-runs this — from throwing the user back to the default one.
+      // `_pendingFile` covers the window where a deep-link is still resolving
+      // its own collection and has not set `collection` yet; without it the
+      // default lands afterwards and closes the file the user asked for.
+      if (value.isNotEmpty && collection == null && _pendingFile == null) {
         // Find first local file collection to select by default, or fallback to first collection
         final defaultCollection = value.firstWhere(
           (c) => c.type == 'file' && c.scanner == AppConstants.scannerFileLocal,
@@ -112,29 +140,16 @@ class _RxFilesPage extends State<RxFilesPage> {
     });
 
     _selectedCollectionSub = RxFilesPage.selectedCollection.listen((value) {
-      if (value != null && collection != value) {
-        //create new sub for objects in this collection
-        _filesAndFoldersService = GetFileAndFoldersService.instance;
-        //close old subscription
-        if (_fileServiceSub != null) _fileServiceSub?.cancel();
-        //listen for changes while visible
-        _fileServiceSub = _filesAndFoldersService!.sink.listen((value) {
-          setState(() {
-            filesAndFolders = _mergeAndSortRowData(value, sortColumn, sortAsc);
-          });
-        });
+      // _navigateToFile pushes here purely so the drawer highlights the right
+      // collection; it has already put the page on that collection's folder
+      // with the file open, and the reset below would undo all of it.
+      if (_pendingFile != null && value?.id == _pendingFile!.collectionId) {
+        _pendingFile = null;
+        return;
+      }
 
-        _listenToScannerStatus(value);
-        _serviceLoadingSub?.cancel();
-        _serviceLoadingSub = _filesAndFoldersService!.isLoading.listen((
-          loading,
-        ) {
-          if (mounted) {
-            setState(() {
-              _isServiceLoading = loading;
-            });
-          }
-        });
+      if (value != null && collection != value) {
+        _attachCollectionServices(value);
 
         // Reset pagination on collection change, then load first page.
         _fileOffset = 0;
@@ -155,6 +170,15 @@ class _RxFilesPage extends State<RxFilesPage> {
       });
     });
 
+    _openFileSub = RxFilesPage.openFileRequest.listen((file) {
+      if (file == null) return;
+      // One-shot: left on the subject it would re-open every time this page
+      // is revisited.
+      RxFilesPage.openFileRequest.add(null);
+      _pendingFile = file;
+      _navigateToFile(file);
+    });
+
     // Deferred to post-frame to prevent the BehaviorSubject sink from
     // replaying its last value synchronously inside initState(), which would
     // cascade setState() calls before the first frame renders.
@@ -170,10 +194,91 @@ class _RxFilesPage extends State<RxFilesPage> {
     _fileServiceSub?.cancel();
     _collectionsServiceSub?.cancel();
     _selectedCollectionSub?.cancel();
+    _openFileSub?.cancel();
     _scannerSub?.cancel();
     _serviceLoadingSub?.cancel();
     _keyboardFocusNode.dispose();
     super.dispose();
+  }
+
+  /// Wires this page up to the files/folders service for [c] — the row stream,
+  /// the loading flag, and the scanner status.
+  ///
+  /// Shared by the collection picker and [_navigateToFile], which otherwise
+  /// arrives at a collection the page has never subscribed to and renders an
+  /// empty list.
+  void _attachCollectionServices(Collection c) {
+    //create new sub for objects in this collection
+    _filesAndFoldersService = GetFileAndFoldersService.instance;
+    //close old subscription
+    if (_fileServiceSub != null) _fileServiceSub?.cancel();
+    //listen for changes while visible
+    _fileServiceSub = _filesAndFoldersService!.sink.listen((value) {
+      setState(() {
+        filesAndFolders = _mergeAndSortRowData(value, sortColumn, sortAsc);
+      });
+    });
+
+    _listenToScannerStatus(c);
+    _serviceLoadingSub?.cancel();
+    _serviceLoadingSub = _filesAndFoldersService!.isLoading.listen((loading) {
+      if (mounted) {
+        setState(() {
+          _isServiceLoading = loading;
+        });
+      }
+    });
+  }
+
+  /// Opens [file] — switching collection and folder to reach it, and leaving
+  /// its details drawer up.
+  ///
+  /// Serves both the Similar-images tab, which searches every collection, and
+  /// [RxFilesPage.openFileRequest] from the Photos sidebar; neither can assume
+  /// the file lives in the collection currently on screen.
+  Future<void> _navigateToFile(FileAsset file) async {
+    var targetCollection = collection;
+    if (targetCollection == null || file.collectionId != targetCollection.id) {
+      final found = await DatabaseManager.instance.repository?.getCollection(
+        file.collectionId,
+      );
+      if (!mounted) return;
+      if (found == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not find collection for this file'),
+          ),
+        );
+        return;
+      }
+      targetCollection = found;
+    }
+
+    // Arriving from another module — or from a Similar match in a collection
+    // this page has never shown — there is no subscription to its rows yet.
+    if (_filesAndFoldersService == null || collection?.id != targetCollection.id) {
+      _attachCollectionServices(targetCollection);
+    }
+
+    setState(() {
+      collection = targetCollection;
+      path = file.parent;
+      selectedAsset = file;
+      _lastSelectedAsset = file;
+      _showLightbox = false;
+      _breadcrumbTrail = _trailFromFolderPath(file.parent);
+    });
+    _fileOffset = 0;
+    _hasMoreFiles = true;
+    _filesAndFoldersService!.invoke(
+      GetFileAndFoldersServiceCommand(targetCollection, file.parent),
+    );
+
+    // Tells the left drawer which collection to highlight. Everything above
+    // already applied, so the listener recognises this as a deep-link and
+    // skips the reset it would otherwise perform — see _selectedCollectionSub.
+    _pendingFile = file;
+    RxFilesPage.selectedCollection.add(targetCollection);
   }
 
   void _listenToScannerStatus(Collection? c) {
@@ -621,46 +726,7 @@ class _RxFilesPage extends State<RxFilesPage> {
                             selectedAsset = null;
                             _showLightbox = false;
                           }),
-                      onNavigateToFile: (file) async {
-                        // Resolve the target collection — may differ from the
-                        // current one since findSimilarImages searches all
-                        // collections.
-                        var targetCollection = collection!;
-                        if (file.collectionId != collection!.id) {
-                          final found = await DatabaseManager
-                              .instance
-                              .repository
-                              ?.getCollection(file.collectionId);
-                          if (!mounted) return;
-                          if (found == null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Could not find collection for this file',
-                                ),
-                              ),
-                            );
-                            return;
-                          }
-                          targetCollection = found;
-                        }
-                        setState(() {
-                          collection = targetCollection;
-                          path = file.parent;
-                          selectedAsset = file;
-                          _lastSelectedAsset = file;
-                          _showLightbox = false;
-                          _breadcrumbTrail = _trailFromFolderPath(file.parent);
-                        });
-                        _fileOffset = 0;
-                        _hasMoreFiles = true;
-                        _filesAndFoldersService!.invoke(
-                          GetFileAndFoldersServiceCommand(
-                            targetCollection,
-                            file.parent,
-                          ),
-                        );
-                      },
+                      onNavigateToFile: _navigateToFile,
                       onDeleteFile: (file) {
                         if (selectedAsset?.id == file.id) {
                           setState(() {

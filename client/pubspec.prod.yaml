@@ -148,7 +148,11 @@ flutter:
     - assets/
     - app/aiserver-macos.zip
     - assets/images/google-drive.png
-    - assets/gazetteer/
+    # Two embedded place lists, read by different features — see
+    # assets/gazetteer/README.md for the sources and CC BY 4.0 attribution.
+    # Listed by file rather than by directory so the README is not bundled.
+    - assets/gazetteer/cities.tsv.gz       # Photos location search
+    - assets/gazetteer/cities5000.tsv.gz   # `near:` in unified search
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware

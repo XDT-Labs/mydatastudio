@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
+import 'package:mydatastudio/modules/photos/models/photo_place_filter.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/photo_drawer.dart';
@@ -266,6 +267,61 @@ void main() {
       expect(find.text('Clear Filters'), findsNothing);
       expect(ViewStateService.instance.activeNav.value, equals('all'));
       expect(ViewStateService.instance.activeFilter.value.onlyFavorites, isFalse);
+    });
+
+    testWidgets('choosing another filter drops the location filter', (
+      tester,
+    ) async {
+      // A location narrows what is on screen, but it is not cumulative with
+      // picking a different view: leaving it applied meant the album the user
+      // just clicked was silently also restricted to a city they had searched
+      // earlier.
+      ViewStateService.instance.updateFilter(
+        const PhotoFilter(
+          place: PhotoPlaceFilter(
+            label: 'Chicago, Illinois, United States',
+            latitude: 41.85003,
+            longitude: -87.65005,
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(createTestApp(const PhotoDrawer()));
+      await tester.pumpAndSettle();
+      expect(ViewStateService.instance.activeFilter.value.place, isNotNull);
+
+      await tester.tap(find.text('Favorites'));
+      await tester.pumpAndSettle();
+
+      expect(ViewStateService.instance.activeFilter.value.place, isNull);
+    });
+
+    testWidgets('the location search box is emptied by another filter', (
+      tester,
+    ) async {
+      // The typed text and its suggestions live inside the search field, so
+      // nothing about changing the filter cleared them on its own. They sat
+      // there afterwards, reading as a location filter that would not clear.
+      await tester.pumpWidget(createTestApp(const PhotoDrawer()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Locations'));
+      await tester.pumpAndSettle();
+
+      final searchField = find.widgetWithText(TextField, 'Search a city...');
+      expect(searchField, findsOneWidget);
+      await tester.enterText(searchField, 'Chicago');
+      await tester.pumpAndSettle();
+      expect(find.text('Chicago'), findsOneWidget);
+
+      await tester.tap(find.text('Favorites'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Chicago'),
+        findsNothing,
+        reason: 'a stale query reads as a filter that is still applied',
+      );
     });
   });
 }

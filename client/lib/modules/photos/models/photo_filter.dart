@@ -1,3 +1,5 @@
+import 'package:mydatastudio/modules/photos/models/photo_place_filter.dart';
+
 enum PhotoSortOrder { dateDesc, dateAsc, title, size }
 
 const Object _sentinel = Object();
@@ -10,6 +12,12 @@ class PhotoFilter {
   final String? albumId;
   final String? tag;
   final String? location;
+
+  /// A gazetteer place to search around, filtering on the GPS coordinates
+  /// EXIF gave the photos. Independent of [location], which matches
+  /// AI-detected landmark names.
+  final PhotoPlaceFilter? place;
+
   final bool onlyFavorites;
   final PhotoSortOrder sortBy;
 
@@ -21,6 +29,7 @@ class PhotoFilter {
     this.albumId,
     this.tag,
     this.location,
+    this.place,
     this.onlyFavorites = false,
     this.sortBy = PhotoSortOrder.dateDesc,
   });
@@ -33,6 +42,7 @@ class PhotoFilter {
     Object? albumId = _sentinel,
     Object? tag = _sentinel,
     Object? location = _sentinel,
+    Object? place = _sentinel,
     bool? onlyFavorites,
     PhotoSortOrder? sortBy,
   }) {
@@ -50,6 +60,7 @@ class PhotoFilter {
       albumId: albumId == _sentinel ? this.albumId : albumId as String?,
       tag: tag == _sentinel ? this.tag : tag as String?,
       location: location == _sentinel ? this.location : location as String?,
+      place: place == _sentinel ? this.place : place as PhotoPlaceFilter?,
       onlyFavorites: onlyFavorites ?? this.onlyFavorites,
       sortBy: sortBy ?? this.sortBy,
     );
