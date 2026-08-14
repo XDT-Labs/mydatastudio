@@ -163,7 +163,13 @@ class _SkillTile extends StatelessWidget {
           label: Text(
             skill.trigger,
             style: theme.textTheme.labelMedium?.copyWith(
-              fontFamily: 'monospace',
+              fontFamily: 'SF Mono',
+              fontFamilyFallback: const [
+                'SF Mono',
+                'Menlo',
+                'Consolas',
+                'monospace',
+              ],
             ),
           ),
           visualDensity: VisualDensity.compact,
@@ -318,7 +324,15 @@ class _SkillEditorDialogState extends State<_SkillEditorDialog> {
                           hintText: '/command',
                           border: OutlineInputBorder(),
                         ),
-                        style: const TextStyle(fontFamily: 'monospace'),
+                        style: const TextStyle(
+                          fontFamily: 'SF Mono',
+                          fontFamilyFallback: [
+                            'SF Mono',
+                            'Menlo',
+                            'Consolas',
+                            'monospace',
+                          ],
+                        ),
                         validator: (v) {
                           if (v == null || v.trim().isEmpty) return 'Required';
                           if (!v.trim().startsWith('/')) return 'Must start with /';

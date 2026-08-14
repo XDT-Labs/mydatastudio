@@ -155,7 +155,16 @@ class _SetupStep3State extends State<SetupStep3> {
           ),
           child: SelectableText(
             value,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            style: const TextStyle(
+              fontFamily: 'SF Mono',
+              fontFamilyFallback: [
+                'SF Mono',
+                'Menlo',
+                'Consolas',
+                'monospace',
+              ],
+              fontSize: 12,
+            ),
           ),
         ),
       ],

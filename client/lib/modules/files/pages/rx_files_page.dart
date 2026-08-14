@@ -1253,7 +1253,14 @@ class _RxFilesPage extends State<RxFilesPage> {
                 return Text(
                   snapshot.data!,
                   style: const TextStyle(
-                    fontFamily: 'Courier',
+                    fontFamily: 'SF Mono',
+                    fontFamilyFallback: [
+                      'SF Mono',
+                      'Menlo',
+                      'Consolas',
+                      'DejaVu Sans Mono',
+                      'monospace',
+                    ],
                     fontSize: 13,
                     color: Colors.white70,
                   ),

@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
@@ -128,8 +127,7 @@ class _PhotoListViewState extends State<PhotoListView> {
       );
     }
 
-    final headerStyle = GoogleFonts.inter(
-      textStyle: theme.textTheme.labelSmall,
+    final headerStyle = theme.textTheme.labelSmall?.copyWith(
       fontWeight: FontWeight.w600,
       color: colorScheme.onSurfaceVariant,
     );

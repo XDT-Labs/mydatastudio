@@ -366,7 +366,13 @@ class MainAppState extends State<MainApp>
                               SelectableText(
                                 "Configured Location:\n${DatabaseManager.instance.storagePath ?? 'Unknown'}",
                                 style: const TextStyle(
-                                  fontFamily: 'monospace',
+                                  fontFamily: 'SF Mono',
+                                  fontFamilyFallback: [
+                                    'SF Mono',
+                                    'Menlo',
+                                    'Consolas',
+                                    'monospace',
+                                  ],
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -374,7 +380,13 @@ class MainAppState extends State<MainApp>
                               SelectableText(
                                 "Error Details:\n$_dbErrorPath",
                                 style: const TextStyle(
-                                  fontFamily: 'monospace',
+                                  fontFamily: 'SF Mono',
+                                  fontFamilyFallback: [
+                                    'SF Mono',
+                                    'Menlo',
+                                    'Consolas',
+                                    'monospace',
+                                  ],
                                   color: Colors.red,
                                 ),
                               ),
@@ -518,7 +530,13 @@ class MainAppState extends State<MainApp>
                               SelectableText(
                                 "Error Details:\n$_pythonErrorMsg",
                                 style: const TextStyle(
-                                  fontFamily: 'monospace',
+                                  fontFamily: 'SF Mono',
+                                  fontFamilyFallback: [
+                                    'SF Mono',
+                                    'Menlo',
+                                    'Consolas',
+                                    'monospace',
+                                  ],
                                   color: Colors.red,
                                 ),
                               ),
