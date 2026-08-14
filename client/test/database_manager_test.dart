@@ -234,7 +234,11 @@ void main() {
       if (dbFile.existsSync()) dbFile.deleteSync();
 
       var appDb = await AppDatabase.create(null, supportDir.path, dbName);
-      // Back to the pre-migration shape, so reopening runs the migration.
+      // Back to the pre-migration shape, so reopening runs the migration. The
+      // index goes first and is not incidental: an archive old enough to lack
+      // `is_inline` also predates the photo-timeline index over it, and SQLite
+      // refuses to drop a column an index still names.
+      await appDb.rawDb.execute('DROP INDEX IF EXISTS idx_files_active_date');
       await appDb.rawDb.execute('ALTER TABLE files DROP COLUMN is_inline');
 
       await appDb.rawDb.execute(
@@ -308,6 +312,81 @@ void main() {
         'SELECT file_id FROM files_embeddings ORDER BY file_id',
       );
       expect(remaining.map((r) => r['file_id']), ['f3']);
+
+      // And the index is back. It was declared only in schemaDDL, which runs
+      // just once when the database is created — so every archive that
+      // predates it never got it, and the photo timeline paged by full-scanning
+      // `files`. Verified against a real upgraded install: `files` carried
+      // every other index and not this one. The assertion belongs here because
+      // this fixture *is* an upgraded install; on a fresh one it cannot fail.
+      final indexes = await appDb.rawDb.select(
+        "SELECT name FROM sqlite_master WHERE type = 'index' "
+        "AND tbl_name = 'files'",
+      );
+      expect(
+        indexes.map((r) => r['name']),
+        contains('idx_files_active_date'),
+        reason: 'an index only a fresh install has is an index most users '
+            'do not have',
+      );
+
+      await appDb.close();
+      if (dbFile.existsSync()) dbFile.deleteSync();
+    });
+
+    test('an archive carrying duplicate indexes sheds them on open', () async {
+      // `idx_files_geo` and `files_latlng_idx` were the same index over the
+      // same two columns of `files`, and `idx_file_tags_tag` the same as
+      // `file_tags_tag_idx`. Both pairs existed together on a real install.
+      // A duplicate index is not merely untidy: the planner can only use one,
+      // so the other is a second B-tree written on every insert into the two
+      // tables the scanners write to most, for no read anyone can benefit from.
+      final supportDir = await getApplicationSupportDirectory();
+      const dbName = 'duplicate_index_test.db';
+      final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+      if (dbFile.existsSync()) dbFile.deleteSync();
+
+      var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+      // Put the legacy names back, which is the shape every existing archive
+      // is in — they were created once and nothing has ever removed them.
+      await appDb.rawDb.execute(
+        'CREATE INDEX IF NOT EXISTS idx_files_geo ON files (latitude, longitude);',
+      );
+      await appDb.rawDb.execute(
+        'CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags (tag);',
+      );
+      await appDb.close();
+
+      appDb = await AppDatabase.create(null, supportDir.path, dbName);
+
+      Future<List<String>> indexesOn(String table) async {
+        final rows = await appDb.rawDb.select(
+          "SELECT name FROM sqlite_master WHERE type = 'index' "
+          "AND tbl_name = ? AND name NOT LIKE 'sqlite_autoindex%' "
+          "ORDER BY name",
+          [table],
+        );
+        return rows.map((r) => r['name'] as String).toList();
+      }
+
+      expect(
+        await indexesOn('files'),
+        isNot(contains('idx_files_geo')),
+        reason: 'the duplicate is dropped, not just no longer created — an '
+            'archive that already has it never runs the create again',
+      );
+      expect(
+        await indexesOn('files'),
+        contains('files_latlng_idx'),
+        reason: 'the surviving name still covers the bounding-box query',
+      );
+      expect(await indexesOn('file_tags'), ['file_tags_tag_idx']);
+
+      // Idempotent: the second open has nothing left to drop and must not
+      // throw on the missing index.
+      await appDb.close();
+      appDb = await AppDatabase.create(null, supportDir.path, dbName);
+      expect(await indexesOn('file_tags'), ['file_tags_tag_idx']);
 
       await appDb.close();
       if (dbFile.existsSync()) dbFile.deleteSync();

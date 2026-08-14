@@ -619,6 +619,11 @@ class AppDatabase {
     await _db.execute(
       'CREATE INDEX IF NOT EXISTS file_tags_tag_idx ON file_tags (tag);',
     );
+    // The same index under an older name. Both were being created, so every
+    // tag write maintained two identical B-trees while the planner could only
+    // ever use one. Dropping runs on every open because the archives that
+    // already carry it will not create it again to notice.
+    await _db.execute('DROP INDEX IF EXISTS idx_file_tags_tag;');
     await _db.execute('''
       CREATE TABLE IF NOT EXISTS album_files (
         album_id TEXT NOT NULL,
@@ -680,6 +685,11 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS files_latlng_idx '
       'ON files (latitude, longitude);',
     );
+    // `idx_files_geo` was the same index over the same two columns, created
+    // separately alongside the gazetteer. `files` is the most-written table in
+    // the archive, so the duplicate cost every scanner insert a second B-tree
+    // update and bought nothing back.
+    await _db.execute('DROP INDEX IF EXISTS idx_files_geo;');
     await _migrateFilesEmbeddingsKey();
     await _migrateEmailEmbeddingsToChunks();
     final added = await _addMissingColumns();
@@ -689,6 +699,18 @@ class AppDatabase {
     if (added.contains('files.is_inline')) {
       await _backfillInlineAttachments();
     }
+
+    // The photo timeline's paging index. It lives here rather than in
+    // schemaDDL because schemaDDL runs only when the database is created —
+    // so an index declared there alone reaches fresh installs and no others,
+    // and every archive that predates it keeps full-scanning `files` forever.
+    // Strictly after _addMissingColumns: on an install old enough to lack
+    // `is_inline`, indexing that column before the ALTER adds it throws and
+    // takes the whole open down with it.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_files_active_date '
+      'ON files (is_deleted, is_inline, date_created);',
+    );
 
     await _reapOrphanedArtifacts();
 
@@ -714,11 +736,13 @@ class AppDatabase {
     await _unretirePdfsRetiredByMissingPdfium();
   }
 
-  /// Creates the gazetteer table and the coordinate index `near:` scans.
+  /// Creates the gazetteer table and the name indexes `near:` looks places up in.
   ///
   /// Separate from [_createSearchIndexes] because nothing here is a text index:
   /// `near:banff` is answered by turning one place name into a centre point and
-  /// running a radius against coordinates already on `files`.
+  /// running a radius against coordinates already on `files`. The index over
+  /// those coordinates is `files_latlng_idx`, created with the rest of the
+  /// `files` schema — this method used to declare a second, identical copy.
   ///
   /// The rows are loaded separately — see [GazetteerImporter]. Reading a bundled
   /// asset needs the Flutter binding, and scanner isolates open their own
@@ -751,10 +775,6 @@ class AppDatabase {
     await _db.execute(
       'CREATE INDEX IF NOT EXISTS places_name_idx '
       'ON places (name COLLATE NOCASE);',
-    );
-    await _db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_files_geo '
-      'ON files (latitude, longitude);',
     );
   }
 
@@ -1943,10 +1963,6 @@ class AppDatabase {
       description TEXT
     );
     ''',
-    '''
-    CREATE INDEX IF NOT EXISTS idx_files_active_date
-      ON files (is_deleted, is_inline, date_created);
-    ''',
     // folders
     '''
     CREATE TABLE IF NOT EXISTS folders (
@@ -1980,9 +1996,6 @@ class AppDatabase {
       PRIMARY KEY (file_id, tag),
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
-    ''',
-    '''
-    CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag);
     ''',
     // album_files
     '''
