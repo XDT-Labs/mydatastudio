@@ -221,6 +221,49 @@ void main() {
           reason: 'a model upgrade must re-chunk without a separate migration');
     });
 
+    test('a document with nothing to index leaves the queue', () async {
+      // Extraction can succeed and produce no chunks at all: a two-byte mail
+      // attachment, or a Word file that is entirely images. Both are ordinary
+      // — the five documents at the head of this archive's real queue were
+      // every one of them this case.
+      //
+      // The queue cannot tell "extracted to nothing" from "never extracted",
+      // because both look like a file with no chunk rows. So the caller has to
+      // record the outcome, and the only record available is an attempt. If it
+      // records nothing, the same five files are selected on every pass and
+      // fill the batch forever, which is what happened: 10,585 identical
+      // batches in eight hours and no document behind them ever read.
+      await open('repo_queue_empty_extraction_test.db');
+      await addFile('empty');
+      await addFile('behind');
+
+      expect(
+        (await repo.getFilesWithMissingChunks(limit: 2)).map((f) => f.id),
+        containsAll(['empty', 'behind']),
+      );
+
+      // Writing no chunks is not a record of anything — the trap this test
+      // exists to pin.
+      await repo.replaceFileChunks('empty', const []);
+      expect(
+        (await repo.getFilesWithMissingChunks(limit: 2)).map((f) => f.id),
+        contains('empty'),
+        reason: 'storing an empty chunk set leaves the file indistinguishable '
+            'from one that was never tried',
+      );
+
+      for (var i = 0; i < DatabaseRepository.maxEmbeddingAttempts; i++) {
+        await repo.incrementEmbeddingAttempts('empty');
+      }
+
+      expect(
+        (await repo.getFilesWithMissingChunks(limit: 2)).map((f) => f.id),
+        ['behind'],
+        reason: 'the file stops being offered, and the document queued behind '
+            'it finally gets a turn',
+      );
+    });
+
     test('skips images, and files retired after repeated failures', () async {
       await open('repo_queue_filters_test.db');
       await addFile('doc1');

@@ -2431,6 +2431,45 @@ inflate the row budget, so a document-heavy filtered set would spend the whole
 4,000-row cap on a few hundred files. `modeAFileChunkCap` doubles it, matching
 the ceiling mail already accepted, and `capMessage` reports if it binds.
 
+##### The re-derivation, closed: the multiplier is not derivable on this archive
+
+§18e-1 asked for a number from a real chunk count, and §18h-3 deferred it until
+chunks existed. They exist now, and the answer is that **the question cannot be
+answered here — not because too few documents are chunked, but because the
+corpus is nowhere near the size at which the multiplier binds.** Measured:
+
+| Vectors in `files_embeddings` | Count |
+|---|---|
+| `file` (image) | 2,802 |
+| `description` | 2,762 |
+| `chunk` | 634 |
+| **total file corpus** | **6,198** |
+
+Mode B fetches `candidateLimit × modeBFileOverFetch` = `2000 × 8` = **16,000**,
+which is 2.6× the entire table. The scan is exhaustive, dedup has nothing to
+starve, and every multiplier from 4× up produces byte-identical results. There
+is no measurement to take: the quantity being estimated has no effect at this
+size. `overFetchMessage` stays silent until the corpus passes 32,000 — five
+times what it holds today.
+
+**Finishing the backlog does not change this.** The archive holds 369 documents
+in total. 134 are chunked, at 4.7 chunks each; the remaining ~187 project to
+roughly 880 more, taking the corpus to ~7,100. Still a fifth of where the
+multiplier starts to matter.
+
+Worth recording because it moves a number this plan leaned on twice: §18a-2
+projected ~5,000 document chunks and a ~10,600-vector corpus. **The real figure
+is about 1,500 chunks** — the estimate was ~3× high, because it was built from
+document *count* before the measured chunks-per-document was known. The 8×
+multiplier was justified against the inflated figure and is, if anything, more
+exhaustive than its own reasoning claimed.
+
+So this item is **closed rather than done**, and deliberately: the instrument is
+the derivation. `overFetchMessage` fires exactly when the fetch drops under half
+the corpus, which is the first moment the constant has any effect on a result.
+Re-deriving it before then would be fitting a constant to a regime the app is
+not in — the same guess §18e-1 objected to, dressed as a measurement.
+
 **One trap in carrying the argmax.** `files_embeddings.sequence` is `NOT NULL
 DEFAULT 0`, so *every* image and description row reads sequence 0. Reading the
 column directly would have attached "chunk 0" to every photo in the archive
@@ -2776,6 +2815,30 @@ discovering it from a quiet log. Worth logging the parse-error text
 specifically: if a future `docling-rs` release fixes the MS-DOC reader, the
 recovery is to clear `embedding_attempts` for exactly those files, and that is
 only possible if the reason was recorded.
+
+**A third outcome exists, and missing it stopped the queue dead.** The pair
+above — unprocessable content, unavailable service — is not exhaustive.
+Extraction can *succeed* and return no chunks at all. Measured on the live
+archive: the five documents at the head of the queue were every one of them
+this case, four mail attachments of 2–6 bytes and a 4.4 MB `.doc` that is
+entirely images. All five return `200` with `chunks: []`.
+
+The client returned silently on that, which reads as a skip and behaves as a
+loop. A file with no chunk rows is indistinguishable from one never tried, so
+the next pass selects the same five, and `LIMIT 5` means those five *are* the
+batch. The log records **10,585 identical batches over eight hours** with no
+document behind them ever read — no error, no warning, nothing but a repeating
+"Extracting 5 documents". It presents as slow chunking, which is what makes it
+worth writing down: the instinct it provoked was to parallelise, and
+parallelising a spin only spins faster.
+
+The fix is to make the outcome terminal, the same way the unparseable branch
+does — log it, spend an attempt. The general rule the three outcomes now share:
+**every path out of `_processDocument` must either write chunks or record an
+attempt.** A path that does neither is a loop, not a skip. Both the empty-set
+case and the trap behind it (writing an *empty* chunk set records nothing, so
+it cannot serve as the marker) are pinned in
+`file_chunks_repository_test.dart`.
 
 **Cloud files have no filesystem path.** `path` may be a `gdrive://<id>` URI;
 the row also carries `local_path` and `download_url`. Resolution order is

@@ -308,7 +308,26 @@ class DocumentChunkIsolate {
     }
 
     final chunks = extraction.chunks;
-    if (chunks.isEmpty) return;
+    if (chunks.isEmpty) {
+      // Extraction succeeded and there was nothing in the document to index:
+      // a two-byte mail attachment, or a Word file that is entirely images.
+      // Measured on this archive, every one of the five documents at the head
+      // of the queue was this case.
+      //
+      // Returning silently was the bug it looks like: the file gets no chunk
+      // rows, so it still has none at the current model version, so the very
+      // next pass selects it again. Five such files fill the batch and hold it
+      // forever — 10,585 identical batches in eight hours, and the 182
+      // documents behind them were never once read. An outcome that is never
+      // recorded is not a skip, it is a loop.
+      //
+      // Spending an attempt is the same terminal record the unparseable branch
+      // above makes, and for the same reason: nothing about this file will be
+      // different next time.
+      logger.w('No extractable text in ${file.name}; nothing to index');
+      replyTo.send({'type': 'embeddingFailed', 'id': file.id});
+      return;
+    }
 
     // Vectors are optional, and their absence is not an error. A gated
     // document (§18a-2) is deliberately un-embedded, and a missing embedding
