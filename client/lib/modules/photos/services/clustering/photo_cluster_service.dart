@@ -10,14 +10,39 @@ import 'package:mydatastudio/modules/photos/services/clustering/clustering_isola
 import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_repository.dart';
 import 'package:rxdart/rxdart.dart';
 
+/// Ceiling on how many groups a run can be cut into — the slider's upper bound.
+///
+/// Built up front rather than grown on demand. Clustering cost is linear in
+/// photo count but only logarithmic in group count: on a 2,808-photo library,
+/// 16 groups took 2.4s and 96 took 3.6s, so reaching 100 costs a few hundred
+/// milliseconds once and makes every slider position instant. Growing the tree
+/// when the user drags past its end would trade that for a multi-second stall
+/// mid-gesture, and would invalidate every label each time it rebuilt.
+///
+/// A run tops out below this when the data runs out of meaningful splits —
+/// identical or near-identical photos cannot be divided further — and the
+/// slider then matches whatever the tree actually produced.
+const int kClusterMaxGroups = 100;
+
 /// One group as the grid renders it: the stored node plus the photos in it.
 class ClusterGroupView {
-  const ClusterGroupView(this.group, this.photos);
+  const ClusterGroupView(this.group, this.photos, this.position);
 
   final ClusterGroup group;
   final List<File> photos;
 
-  String get label => group.displayLabel;
+  /// 1-based position among the groups currently shown.
+  final int position;
+
+  /// The header text.
+  ///
+  /// The placeholder counts by position, not by `nodeId`. Node ids index the
+  /// whole split tree — 95 nodes for a 48-group run — so numbering by them put
+  /// a header reading "Group 80" in a view containing 48 groups, which reads as
+  /// a count and is wrong. Position always matches what is on screen.
+  String get label => group.label?.isNotEmpty == true
+      ? group.label!
+      : 'Group $position';
 
   /// Whether this group is mixed enough that a single label misrepresents it.
   /// The threshold is a judgement call from the prototype: groups below roughly
@@ -52,6 +77,25 @@ class ClusterViewState {
 
   bool get hasRun => tree != null;
   int get maxGroups => tree?.maxGroups ?? 1;
+
+  /// Upper bound the slider offers.
+  ///
+  /// Normally the tree's real capacity, so there is never a dead stretch at the
+  /// end of the track. But a run built under an older, lower ceiling can be
+  /// rebuilt deeper, and refusing to offer that would strand the user on a
+  /// coarseness they cannot escape without knowing to press Regroup. In that
+  /// case the slider offers the current ceiling and dragging past capacity
+  /// rebuilds — see [PhotoClusterService.commitGroupCount].
+  int get sliderMax {
+    final run = tree?.run;
+    if (run == null) return 1;
+    return run.maxGroups < kClusterMaxGroups
+        ? kClusterMaxGroups
+        : tree!.maxGroups;
+  }
+
+  /// Whether [groupCount] is finer than this tree can actually cut.
+  bool get needsDeeperTree => tree != null && groupCount > tree!.maxGroups;
 
   ClusterViewState copyWith({
     ClusterScope? scope,
@@ -104,7 +148,7 @@ class PhotoClusterService {
   Future<void> load(
     ClusterScope scope, {
     bool forceRebuild = false,
-    int maxGroups = 48,
+    int maxGroups = kClusterMaxGroups,
   }) async {
     final db = DatabaseManager.instance.database;
     if (db == null) {
@@ -134,10 +178,29 @@ class PhotoClusterService {
 
   /// Moves the slider. Pure in-memory re-cut — no query, no clustering — so
   /// this is safe to call on every drag frame.
+  ///
+  /// Accepts a k beyond the tree's capacity so the thumb tracks the finger
+  /// rather than sticking; the grid keeps showing the finest cut available
+  /// until [commitGroupCount] rebuilds on release.
   void setGroupCount(int k) {
-    final tree = _current.tree;
-    if (tree == null) return;
-    state.add(_current.copyWith(groupCount: k.clamp(1, tree.maxGroups)));
+    final st = _current;
+    if (st.tree == null) return;
+    state.add(st.copyWith(groupCount: k.clamp(1, st.sliderMax)));
+  }
+
+  /// Called when the user lets go of the slider.
+  ///
+  /// Rebuilds only when they asked for a finer cut than this tree can produce,
+  /// and only on release — rebuilding mid-drag would fire a clustering pass per
+  /// frame. A no-op in the common case, which is why the drag itself stays free.
+  Future<void> commitGroupCount() async {
+    final st = _current;
+    if (!st.needsDeeperTree || st.isBuilding) return;
+    logger.i(
+      'PhotoClusterService: ${st.groupCount} groups requested, tree holds '
+      '${st.maxGroups} — rebuilding deeper',
+    );
+    await load(st.scope, forceRebuild: true);
   }
 
   /// Buckets [photos] into the groups at the current slider position, largest
@@ -162,11 +225,13 @@ class PhotoClusterService {
       buckets[groupId]?.add(photo);
     }
 
-    return [
-      for (final g in groups)
-        if (buckets[g.nodeId]!.isNotEmpty)
-          ClusterGroupView(g, buckets[g.nodeId]!),
-    ];
+    final views = <ClusterGroupView>[];
+    for (final g in groups) {
+      final photos = buckets[g.nodeId]!;
+      if (photos.isEmpty) continue;
+      views.add(ClusterGroupView(g, photos, views.length + 1));
+    }
+    return views;
   }
 
   /// How many of [photos] this run has no place for — photos added since it was

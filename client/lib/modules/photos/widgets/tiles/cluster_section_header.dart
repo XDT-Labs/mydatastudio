@@ -19,7 +19,9 @@ class ClusterSectionHeader extends StatelessWidget {
     this.isSelected = false,
     this.isMixed = false,
     this.isLabelPending = false,
+    this.isCollapsed = false,
     this.onSelectAll,
+    this.onToggleCollapsed,
   });
 
   final String label;
@@ -27,7 +29,9 @@ class ClusterSectionHeader extends StatelessWidget {
   final bool isSelected;
   final bool isMixed;
   final bool isLabelPending;
+  final bool isCollapsed;
   final ValueChanged<bool>? onSelectAll;
+  final VoidCallback? onToggleCollapsed;
 
   @override
   Widget build(BuildContext context) {
@@ -96,6 +100,24 @@ class ClusterSectionHeader extends StatelessWidget {
               color: colorScheme.onSurfaceVariant,
             ),
           ),
+          if (onToggleCollapsed != null) ...[
+            const SizedBox(width: 4),
+            IconButton(
+              // Points down when open and right when closed, the direction the
+              // content is in — the disclosure convention users already read
+              // without thinking about it.
+              icon: Icon(
+                isCollapsed ? Icons.chevron_right : Icons.expand_more,
+              ),
+              iconSize: 20,
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              tooltip: isCollapsed ? 'Show photos' : 'Hide photos',
+              color: colorScheme.onSurfaceVariant,
+              onPressed: onToggleCollapsed,
+            ),
+          ],
         ],
       ),
     );

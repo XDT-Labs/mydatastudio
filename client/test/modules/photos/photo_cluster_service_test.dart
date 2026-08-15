@@ -13,7 +13,11 @@ import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_se
 ///        └─ 2
 ///
 /// Split order is [0, 1], so k=1 is {0}, k=2 is {1, 2}, k=3 is {3, 4, 2}.
-PhotoClusterTree _tree({Map<int, String>? labels, Map<int, double>? coherence}) {
+PhotoClusterTree _tree({
+  Map<int, String>? labels,
+  Map<int, double>? coherence,
+  int runMaxGroups = 3,
+}) {
   ClusterGroup node(int id, int? parent, int? rank, int count) => ClusterGroup(
         runId: 'run-1',
         nodeId: id,
@@ -34,7 +38,7 @@ PhotoClusterTree _tree({Map<int, String>? labels, Map<int, double>? coherence}) 
       scope: const ClusterScope.all(),
       createdAt: DateTime(2026, 1, 1),
       photoCount: 6,
-      maxGroups: 3,
+      maxGroups: runMaxGroups,
       seed: 1,
       status: ClusterRunStatus.ready,
     ),
@@ -168,10 +172,12 @@ void main() {
   });
 
   group('group presentation', () {
-    test('falls back to a stable placeholder until a label arrives', () {
+    test('falls back to a placeholder until a label arrives', () {
       seedState(membership: {'a': 3}, groupCount: 3);
       final view = service.groupPhotos([_photo('a')]).single;
-      expect(view.label, 'Group 3');
+      // Position, not node id — this photo sits in node 3, but it is the only
+      // group on screen, so it is "Group 1". See the group numbering tests.
+      expect(view.label, 'Group 1');
       expect(view.group.labelStatus, ClusterLabelStatus.pending);
     });
 
@@ -200,11 +206,85 @@ void main() {
     });
   });
 
+  group('group numbering', () {
+    // The bug this replaced: the placeholder counted by nodeId, which indexes
+    // the whole split tree (95 nodes for a 48-group run). A view of 48 groups
+    // showed headers reading "Group 80" and "Group 94", which read as a count
+    // and told the user there were more groups than existed.
+    test('placeholder numbers by position, never by node id', () {
+      seedState(membership: {'a': 3, 'b': 4, 'c': 2}, groupCount: 3);
+      final groups = service.groupPhotos(
+        [_photo('a'), _photo('b'), _photo('c')],
+      );
+
+      expect(groups.map((g) => g.label), ['Group 1', 'Group 2', 'Group 3']);
+      // Node ids are 2, 3 and 4 here — none of them leak into the labels.
+      expect(groups.map((g) => g.position), [1, 2, 3]);
+    });
+
+    test('positions stay contiguous when a group is filtered out', () {
+      seedState(membership: {'a': 3, 'b': 2}, groupCount: 3);
+      // Only two of the three groups have a surviving photo.
+      final groups = service.groupPhotos([_photo('a'), _photo('b')]);
+      expect(groups.map((g) => g.label), ['Group 1', 'Group 2']);
+    });
+
+    test('a real label always wins over the placeholder', () {
+      seedState(
+        tree: _tree(labels: {3: 'Lighthouses'}),
+        membership: {'a': 3, 'b': 2},
+        groupCount: 3,
+      );
+      final groups = service.groupPhotos([_photo('a'), _photo('b')]);
+      expect(groups.first.label, 'Lighthouses');
+      expect(groups.last.label, 'Group 2');
+    });
+  });
+
+  group('slider range', () {
+    // A run built under an older, lower ceiling can be rebuilt deeper, so the
+    // slider offers the current ceiling rather than stranding the user on a
+    // coarseness they cannot escape without knowing to press Regroup.
+    test('offers the ceiling when the run could be rebuilt deeper', () {
+      seedState(groupCount: 3);
+      expect(service.state.value.tree!.run.maxGroups, lessThan(kClusterMaxGroups));
+      expect(service.state.value.sliderMax, kClusterMaxGroups);
+    });
+
+    test('offers real capacity once the run is built at the ceiling', () {
+      seedState(tree: _tree(runMaxGroups: kClusterMaxGroups), groupCount: 3);
+      // This fixture's tree only holds 3 groups, so that is what is offered —
+      // no dead stretch at the end of the track.
+      expect(service.state.value.sliderMax, 3);
+    });
+
+    test('flags when the requested cut is finer than the tree holds', () {
+      seedState(groupCount: 3);
+      expect(service.state.value.needsDeeperTree, isFalse);
+
+      service.setGroupCount(40);
+      expect(service.state.value.groupCount, 40);
+      expect(service.state.value.needsDeeperTree, isTrue,
+          reason: 'tree holds 3 groups, 40 was asked for');
+    });
+
+    test('grouping still uses the finest cut available while over-asked', () {
+      seedState(membership: {'a': 3, 'b': 4, 'c': 2}, groupCount: 3);
+      service.setGroupCount(40);
+
+      // The grid keeps showing the tree's real cut rather than emptying out.
+      final groups = service.groupPhotos(
+        [_photo('a'), _photo('b'), _photo('c')],
+      );
+      expect(groups, hasLength(3));
+    });
+  });
+
   group('setGroupCount', () {
-    test('clamps to the tree and ignores calls with no run', () {
+    test('clamps to the slider range and ignores calls with no run', () {
       seedState(membership: const {}, groupCount: 2);
-      service.setGroupCount(99);
-      expect(service.state.value.groupCount, 3);
+      service.setGroupCount(9999);
+      expect(service.state.value.groupCount, kClusterMaxGroups);
       service.setGroupCount(0);
       expect(service.state.value.groupCount, 1);
 

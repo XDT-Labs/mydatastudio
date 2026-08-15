@@ -54,6 +54,14 @@ class _PhotoClusterViewState extends State<PhotoClusterView> {
   ClusterViewState _state = const ClusterViewState();
   double _gridItemSize = 160.0;
 
+  /// Node ids the user has collapsed.
+  ///
+  /// Keyed by node rather than by position so a group stays collapsed when the
+  /// slider moves and it keeps its identity. Splitting a collapsed group drops
+  /// the collapse — its children are different groups the user has not made a
+  /// decision about — which falls out of keying on node id.
+  final Set<int> _collapsed = {};
+
   @override
   void initState() {
     super.initState();
@@ -124,6 +132,7 @@ class _PhotoClusterViewState extends State<PhotoClusterView> {
           final photos = group.photos;
           final allSelected =
               photos.every((f) => widget.selectedIds.contains(f.id));
+          final isCollapsed = _collapsed.contains(group.group.nodeId);
 
           slivers.add(
             SliverToBoxAdapter(
@@ -132,8 +141,14 @@ class _PhotoClusterViewState extends State<PhotoClusterView> {
                 itemCount: photos.length,
                 isSelected: allSelected,
                 isMixed: group.isMixed,
+                isCollapsed: isCollapsed,
                 isLabelPending:
                     group.group.labelStatus == ClusterLabelStatus.pending,
+                onToggleCollapsed: () => setState(() {
+                  if (!_collapsed.remove(group.group.nodeId)) {
+                    _collapsed.add(group.group.nodeId);
+                  }
+                }),
                 onSelectAll: (val) {
                   if (val) {
                     SelectionService.instance
@@ -146,6 +161,11 @@ class _PhotoClusterViewState extends State<PhotoClusterView> {
               ),
             ),
           );
+
+          // Collapsed: header only. The photos are dropped from the sliver
+          // list rather than hidden with zero height, so a collapsed group
+          // costs nothing to scroll past.
+          if (isCollapsed) continue;
 
           slivers.add(
             SliverPadding(

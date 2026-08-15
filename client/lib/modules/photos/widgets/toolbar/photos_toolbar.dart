@@ -404,7 +404,8 @@ class _GroupCountSliderState extends State<_GroupCountSlider> {
 
     // Nothing to cut until a run exists, and a one-group tree has no choice to
     // offer — showing a dead control in either case just invites confusion.
-    if (!_state.hasRun || _state.maxGroups < 2) return const SizedBox.shrink();
+    if (!_state.hasRun || _state.sliderMax < 2) return const SizedBox.shrink();
+    final max = _state.sliderMax;
 
     return Tooltip(
       message: 'Number of groups',
@@ -422,26 +423,33 @@ class _GroupCountSliderState extends State<_GroupCountSlider> {
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
               ),
               child: Slider(
-                value: _state.groupCount
-                    .clamp(1, _state.maxGroups)
-                    .toDouble(),
+                value: _state.groupCount.clamp(1, max).toDouble(),
                 min: 1,
-                max: _state.maxGroups.toDouble(),
-                divisions: _state.maxGroups - 1,
+                max: max.toDouble(),
+                divisions: max - 1,
                 label: '${_state.groupCount}',
                 onChanged: (val) =>
                     PhotoClusterService.instance.setGroupCount(val.round()),
+                // Only on release: past the tree's capacity this rebuilds, and
+                // doing that per drag frame would fire a clustering pass a
+                // frame.
+                onChangeEnd: (_) =>
+                    PhotoClusterService.instance.commitGroupCount(),
               ),
             ),
           ),
           SizedBox(
-            width: 24,
+            width: 30,
             child: Text(
               '${_state.groupCount}',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: colorScheme.onSurfaceVariant),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    // Dimmed while the grid is still showing a coarser cut than
+                    // was asked for, so the number does not claim to describe
+                    // what is on screen until the rebuild lands.
+                    color: _state.needsDeeperTree
+                        ? colorScheme.onSurfaceVariant.withValues(alpha: 0.5)
+                        : colorScheme.onSurfaceVariant,
+                  ),
             ),
           ),
         ],
