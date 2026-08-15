@@ -151,8 +151,9 @@ class PhotoClusterRepository {
       final building = run.copyWith(status: ClusterRunStatus.building).toMap();
       await tx.execute(
         'INSERT INTO photo_cluster_runs '
-        '(id, collection_scope, created_at, photo_count, max_groups, seed, status) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        '(id, collection_scope, created_at, photo_count, max_groups, seed, '
+        ' status, last_group_count) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [
           building['id'],
           building['collection_scope'],
@@ -161,6 +162,7 @@ class PhotoClusterRepository {
           building['max_groups'],
           building['seed'],
           building['status'],
+          building['last_group_count'],
         ],
       );
 
@@ -308,6 +310,18 @@ class PhotoClusterRepository {
       'UPDATE photo_cluster_nodes SET label = ?, label_status = ? '
       'WHERE run_id = ? AND node_id = ?',
       [label, status.name, runId, nodeId],
+    );
+  }
+
+  /// Remembers where the user left the group slider for [runId].
+  ///
+  /// Written on slider release rather than on change: the slider re-cuts the
+  /// tree on every drag frame, and a database write per frame would be absurd
+  /// for a value only read at load.
+  Future<void> saveGroupCount(String runId, int groupCount) async {
+    await db.execute(
+      'UPDATE photo_cluster_runs SET last_group_count = ? WHERE id = ?',
+      [groupCount, runId],
     );
   }
 

@@ -430,6 +430,56 @@ void main() {
       expect(members.first['c'], 0);
     });
 
+    // Labelling a run is minutes of vision calls, so reopening at a different
+    // cut than the one those labels were watched onto throws the wait away.
+    test('the group slider position is remembered per run', () async {
+      final (_, stored, _) = await clusterAndSave();
+      expect(stored.run.lastGroupCount, isNull,
+          reason: 'nothing remembered until the user moves the slider');
+
+      await repo.saveGroupCount(stored.run.id, 82);
+
+      final reloaded = await repo.loadTree(stored.run.id);
+      expect(reloaded!.run.lastGroupCount, 82);
+
+      // And through the path the view actually loads by.
+      final found = await repo.latestReadyRun(const ClusterScope.all());
+      expect(found!.lastGroupCount, 82);
+    });
+
+    test('each scope remembers its own position', () async {
+      final seeded = await seedPhotos(4, name: 'Gmail');
+      final scoped = ClusterScope([seeded.$1]);
+
+      final (_, allRun, _) = await clusterAndSave();
+      await repo.saveGroupCount(allRun.run.id, 82);
+
+      final run = ClusterRun(
+        id: const Uuid().v4(),
+        scope: scoped,
+        createdAt: DateTime.now(),
+        photoCount: 4,
+        maxGroups: 4,
+        seed: 1,
+        status: ClusterRunStatus.ready,
+      );
+      await repo.saveRun(run, [
+        ClusterGroup(
+          runId: run.id,
+          nodeId: 0,
+          parentId: null,
+          splitRank: null,
+          memberCount: 4,
+          coherence: 1.0,
+          centroid: _centroid(1),
+        ),
+      ], const {});
+      await repo.saveGroupCount(run.id, 6);
+
+      expect((await repo.latestReadyRun(const ClusterScope.all()))!.lastGroupCount, 82);
+      expect((await repo.latestReadyRun(scoped))!.lastGroupCount, 6);
+    });
+
     test('labels persist per node and survive reload', () async {
       final (_, stored, _) = await clusterAndSave();
       final target = stored.groupsAt(3).first;

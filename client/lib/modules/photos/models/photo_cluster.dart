@@ -78,6 +78,7 @@ class ClusterRun {
     required this.maxGroups,
     required this.seed,
     required this.status,
+    this.lastGroupCount,
   });
 
   final String id;
@@ -87,6 +88,10 @@ class ClusterRun {
   final int maxGroups;
   final int seed;
   final ClusterRunStatus status;
+
+  /// Where the user last left the group slider for this run's scope, or null if
+  /// they have never moved it.
+  final int? lastGroupCount;
 
   factory ClusterRun.fromMap(Map<String, Object?> map) => ClusterRun(
         id: map['id'] as String,
@@ -101,6 +106,7 @@ class ClusterRun {
           (s) => s.name == map['status'],
           orElse: () => ClusterRunStatus.ready,
         ),
+        lastGroupCount: map['last_group_count'] as int?,
       );
 
   Map<String, Object?> toMap() => {
@@ -111,9 +117,11 @@ class ClusterRun {
         'max_groups': maxGroups,
         'seed': seed,
         'status': status.name,
+        'last_group_count': lastGroupCount,
       };
 
-  ClusterRun copyWith({ClusterRunStatus? status}) => ClusterRun(
+  ClusterRun copyWith({ClusterRunStatus? status, int? lastGroupCount}) =>
+      ClusterRun(
         id: id,
         scope: scope,
         createdAt: createdAt,
@@ -121,6 +129,7 @@ class ClusterRun {
         maxGroups: maxGroups,
         seed: seed,
         status: status ?? this.status,
+        lastGroupCount: lastGroupCount ?? this.lastGroupCount,
       );
 }
 

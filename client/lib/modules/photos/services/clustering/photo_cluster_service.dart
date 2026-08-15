@@ -215,14 +215,31 @@ class PhotoClusterService {
     if (!forceRebuild) {
       final existing = await repo.latestReadyRun(scope);
       if (existing != null) {
-        await _adopt(repo, existing.id,
-            applyDefaultGroupCount: !_userPickedGroupCount);
+        await _adopt(
+          repo,
+          existing.id,
+          preferredGroupCount: _userPickedGroupCount
+              ? null
+              : existing.lastGroupCount ??
+                  defaultGroupCountFor(existing.photoCount),
+        );
         return;
       }
     }
 
     final photoCount = await repo.countPhotosInScope(scope);
-    await _build(repo, db, scope, maxGroups ?? maxGroupsFor(photoCount));
+    // A rebuild is a new run with a new id, so the setting has to be carried
+    // across explicitly or Regroup would quietly forget it.
+    final carried = _userPickedGroupCount
+        ? _current.groupCount
+        : (await repo.latestReadyRun(scope))?.lastGroupCount;
+    await _build(
+      repo,
+      db,
+      scope,
+      maxGroups ?? maxGroupsFor(photoCount),
+      carried,
+    );
   }
 
   /// Moves the slider. Pure in-memory re-cut — no query, no clustering — so
@@ -245,6 +262,11 @@ class PhotoClusterService {
   /// frame. A no-op in the common case, which is why the drag itself stays free.
   Future<void> commitGroupCount() async {
     final st = _current;
+    final runId = st.tree?.run.id;
+    final db = DatabaseManager.instance.database;
+    if (runId != null && db != null) {
+      await PhotoClusterRepository(db).saveGroupCount(runId, st.groupCount);
+    }
     if (!st.needsDeeperTree || st.isBuilding) return;
     logger.i(
       'PhotoClusterService: ${st.groupCount} groups requested, tree holds '
@@ -297,7 +319,7 @@ class PhotoClusterService {
     PhotoClusterRepository repo,
     String runId, {
     bool startLabelling = true,
-    bool applyDefaultGroupCount = false,
+    int? preferredGroupCount,
   }) async {
     final tree = await repo.loadTree(runId);
     if (tree == null) {
@@ -306,12 +328,9 @@ class PhotoClusterService {
     }
     final membership = await repo.loadMembership(runId);
 
-    // Only when the run is first shown. _adopt also runs after every label
-    // lands, and recomputing there would yank the slider out from under a user
-    // mid-drag.
-    final groupCount = applyDefaultGroupCount
-        ? defaultGroupCountFor(tree.run.photoCount)
-        : _current.groupCount;
+    // Null on the label-refresh path, which runs after every label lands —
+    // recomputing there would yank the slider out from under a user mid-drag.
+    final groupCount = preferredGroupCount ?? _current.groupCount;
 
     state.add(_current.copyWith(
       tree: tree,
@@ -359,6 +378,7 @@ class PhotoClusterService {
     AppDatabase db,
     ClusterScope scope,
     int maxGroups,
+    int? carriedGroupCount,
   ) async {
     final storagePath = db.path;
     final dbName = db.name;
@@ -380,8 +400,12 @@ class PhotoClusterService {
         maxGroups: maxGroups,
         onProgress: (p) => state.add(_current.copyWith(progress: p)),
       );
-      await _adopt(repo, run.id,
-          applyDefaultGroupCount: !_userPickedGroupCount);
+      final preferred =
+          carriedGroupCount ?? defaultGroupCountFor(run.photoCount);
+      await _adopt(repo, run.id, preferredGroupCount: preferred);
+      // Persist immediately so a carried setting survives even if the user
+      // never touches the slider again on this run.
+      await repo.saveGroupCount(run.id, _current.groupCount);
     } on ClusteringFailure catch (e) {
       logger.w('PhotoClusterService: clustering failed — ${e.message}');
       state.add(_current.copyWith(isBuilding: false, error: e.message));

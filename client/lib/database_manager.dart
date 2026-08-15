@@ -580,7 +580,8 @@ class AppDatabase {
         photo_count INTEGER NOT NULL,
         max_groups INTEGER NOT NULL,
         seed INTEGER NOT NULL,
-        status TEXT NOT NULL
+        status TEXT NOT NULL,
+        last_group_count INTEGER
       );
     ''');
     // `split_rank` is the node's position in the run's split sequence, or NULL
@@ -820,6 +821,13 @@ class AppDatabase {
       'albums': {
         'description': 'TEXT',
         'cover_file_id': 'TEXT',
+      },
+      'photo_cluster_runs': {
+        // Where the user left the group slider for this scope. Persisted
+        // because labelling a run is minutes of vision calls, so reopening at
+        // a different cut than the one those labels were watched onto throws
+        // the wait away.
+        'last_group_count': 'INTEGER',
       },
       'photo_cluster_nodes': {
         // File ids of the members nearest this node's centroid, comma
