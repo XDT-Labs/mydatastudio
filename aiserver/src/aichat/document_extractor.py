@@ -412,18 +412,35 @@ def _convert(data: bytes, fmt: str):
 _TRANSCODABLE = frozenset(_TEXTUAL.values())
 
 
+# Detection reads this much and no more. charset_normalizer's docstring says
+# it samples "5 blocks of 512o", but measured 2026-08-14 the whole call is
+# O(n): 1.9s and a 210MB peak on a 50MB file, against 36ms and 157MB reading a
+# preview and decoding directly — same encoding and byte-identical text at
+# 1MB, 10MB and 50MB. Extraction runs in a threadpool rather than on the event
+# loop, so this was never a liveness bug; it was a worker held for a second of
+# CPU that bought nothing.
+#
+# 64kB is far more than a codepage guess needs and still bounds the cost.
+_DETECT_PREVIEW_BYTES = 64 * 1024
+
+
 def _detect_text(data: bytes) -> Optional[str]:
     """Best guess at what this byte string says, or None if there is none.
 
     charset_normalizer ships with `requests`, so this adds nothing to the
-    bundle. It is a *guess*: for the CSV above it picks cp1250, which is
+    bundle. It is a *guess*: for the CSV in §18n it picks cp1250, which is
     coherent and may still be the wrong codepage for one accented character in
     one name. That trade is deliberate — the alternative on offer is not a
     perfect reading, it is no reading at all.
+
+    The decode is lenient for the same reason. Detection now sees only the
+    head of the file, so a rare byte further in can be one the chosen codepage
+    has no mapping for; that byte becomes a replacement character rather than
+    an exception that discards everything around it.
     """
     from charset_normalizer import from_bytes
 
-    best = from_bytes(data).best()
+    best = from_bytes(data[:_DETECT_PREVIEW_BYTES]).best()
     if best is None:
         return None
     print(
@@ -431,7 +448,12 @@ def _detect_text(data: bytes) -> Optional[str]:
         f"(coherence {best.coherence:.2f})",
         flush=True,
     )
-    return str(best)
+    try:
+        return data.decode(best.encoding, errors="replace")
+    except LookupError:
+        # A codec name Python does not know. Nothing to offer but the original
+        # bytes, and docling's own error with them.
+        return None
 
 
 def _as_utf8(data: bytes, fmt: str) -> bytes:

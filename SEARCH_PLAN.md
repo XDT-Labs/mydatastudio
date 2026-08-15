@@ -3291,3 +3291,29 @@ document.
 cp1250), 0 undecodable.** A small blast radius today. The value is mostly that
 it stops being a class of failure — the next archive imported from a 1990s mail
 store will not lose files to it.
+
+#### Detection reads a preview, because it is O(n)
+
+charset_normalizer's docstring says it "will extract 5 blocks of 512o each",
+which reads as constant-time and is not. Measured:
+
+| input | detect whole file | detect 64kB preview | peak, whole | peak, preview |
+|---|---|---|---|---|
+| 1 MB | 549 ms | 328 ms | 33 MB | 3 MB |
+| 10 MB | 356 ms | 20 ms | 42 MB | 32 MB |
+| 50 MB | 1911 ms | 36 ms | 210 MB | 157 MB |
+
+Same encoding chosen and byte-identical output at every size, so the whole-file
+scan bought nothing. End to end on 50 MB the transcode went from 1911 ms to
+**63 ms**.
+
+This was never a liveness bug — `extract_text` already runs conversion through
+`run_in_threadpool`, so the event loop was never holding it. It was a worker
+held for a second of CPU and four times the file in peak memory, for a codepage
+guess that 64kB answers just as well.
+
+The decode is lenient (`errors="replace"`) as a direct consequence: detection
+now sees only the head of the file, so a rare byte further in may be one the
+chosen codepage has no mapping for. Under a strict decode that byte would raise
+and discard the document — which is the exact failure §18n exists to stop,
+reintroduced one layer down.

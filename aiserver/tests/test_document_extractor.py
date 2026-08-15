@@ -629,3 +629,65 @@ class TestEncodingRecovery:
         de._convert(LEGACY_CSV, "csv")
 
         seen[0].decode("utf-8")  # no exception
+
+
+class TestDetectionCost:
+    """Detection is O(n) despite charset_normalizer's docstring claiming it
+    samples "5 blocks of 512o". Measured 2026-08-14: 1.9s and a 210MB peak on
+    a 50MB file, against 36ms and 157MB when detection reads a preview and the
+    decode is done directly. Same encoding, byte-identical text, at 1MB, 10MB
+    and 50MB.
+    """
+
+    def test_detection_reads_only_a_preview(self, monkeypatch):
+        """The fix. Extraction runs in a threadpool rather than on the event
+        loop, so this was never a liveness bug — but a second of CPU and four
+        times the file in peak memory is a worker held for no reason."""
+        import charset_normalizer
+
+        seen = {}
+        real = charset_normalizer.from_bytes
+
+        def _spy(payload, *args, **kwargs):
+            seen["size"] = len(payload)
+            return real(payload, *args, **kwargs)
+
+        monkeypatch.setattr(charset_normalizer, "from_bytes", _spy)
+
+        big = LEGACY_CSV * 20_000
+        assert len(big) > de._DETECT_PREVIEW_BYTES
+        de._detect_text(big)
+
+        assert seen["size"] == de._DETECT_PREVIEW_BYTES
+
+    def test_the_whole_file_is_still_decoded_not_just_the_preview(self):
+        """Detecting on a preview must not truncate the document to it."""
+        big = LEGACY_CSV * 20_000
+        text = de._detect_text(big)
+
+        assert text is not None
+        assert len(text) >= len(big) - 1  # one byte per row is a 1-char codepoint
+
+    def test_a_byte_the_detected_codepage_cannot_read_does_not_cost_the_file(
+        self, monkeypatch
+    ):
+        """Detection now sees a preview, so a rare byte later in the file can
+        be one the chosen codepage has no mapping for. §18n's trade says the
+        ASCII either side of it is still worth having, so that byte becomes a
+        replacement character rather than an exception that discards 14kB."""
+        import charset_normalizer
+
+        class _Match:
+            encoding = "ascii"
+            coherence = 0.9
+
+        class _Result:
+            def best(self):
+                return _Match()
+
+        monkeypatch.setattr(charset_normalizer, "from_bytes", lambda *a, **k: _Result())
+
+        text = de._detect_text(b"login,id\r\nmats,R\x86de\r\n")
+
+        assert text is not None
+        assert "login,id" in text and "mats,R" in text
