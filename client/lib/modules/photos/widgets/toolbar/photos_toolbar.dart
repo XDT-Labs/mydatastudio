@@ -448,14 +448,10 @@ class _GroupCountSliderState extends State<_GroupCountSlider> {
             width: 30,
             child: Text(
               '${_state.groupCount}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    // Dimmed while the grid is still showing a coarser cut than
-                    // was asked for, so the number does not claim to describe
-                    // what is on screen until the rebuild lands.
-                    color: _state.needsDeeperTree
-                        ? colorScheme.onSurfaceVariant.withValues(alpha: 0.5)
-                        : colorScheme.onSurfaceVariant,
-                  ),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: colorScheme.onSurfaceVariant),
             ),
           ),
         ],

@@ -242,49 +242,40 @@ void main() {
   });
 
   group('slider range', () {
-    // A run built under an older, lower ceiling can be rebuilt deeper, so the
-    // slider offers the current ceiling rather than stranding the user on a
-    // coarseness they cannot escape without knowing to press Regroup.
-    test('offers the ceiling when the run could be rebuilt deeper', () {
+    // The track is exactly the loaded tree's capacity, whatever ceiling the run
+    // was built under. A run built shallower offers less until Regroup rebuilds
+    // it — no dead stretch, and no drag that quietly starts a clustering pass.
+    test('offers exactly what the loaded tree can cut', () {
       seedState(groupCount: 3);
       expect(service.state.value.tree!.run.maxGroups, lessThan(kClusterMinCeiling));
-      expect(service.state.value.sliderMax, kClusterMinCeiling);
-    });
+      expect(service.state.value.sliderMax, 3);
 
-    test('offers real capacity once the run is built at the ceiling', () {
       seedState(tree: _tree(runMaxGroups: kClusterMinCeiling), groupCount: 3);
-      // This fixture's tree only holds 3 groups, so that is what is offered —
-      // no dead stretch at the end of the track.
       expect(service.state.value.sliderMax, 3);
     });
 
-    test('flags when the requested cut is finer than the tree holds', () {
+    // Letting go of the slider must never start a clustering pass: it costs
+    // seconds and discards every generated label. So the track offers only
+    // positions the loaded tree can actually serve, and going finer is an
+    // explicit Regroup.
+    test('never offers a position the tree cannot serve', () {
       seedState(groupCount: 3);
-      expect(service.state.value.needsDeeperTree, isFalse);
+      expect(service.state.value.sliderMax, 3);
 
       service.setGroupCount(40);
-      expect(service.state.value.groupCount, 40);
-      expect(service.state.value.needsDeeperTree, isTrue,
-          reason: 'tree holds 3 groups, 40 was asked for');
-    });
-
-    test('grouping still uses the finest cut available while over-asked', () {
-      seedState(membership: {'a': 3, 'b': 4, 'c': 2}, groupCount: 3);
-      service.setGroupCount(40);
-
-      // The grid keeps showing the tree's real cut rather than emptying out.
-      final groups = service.groupPhotos(
-        [_photo('a'), _photo('b'), _photo('c')],
-      );
-      expect(groups, hasLength(3));
+      expect(service.state.value.groupCount, 3,
+          reason: 'clamped to what the tree holds, not left over-asking');
     });
   });
 
   group('setGroupCount', () {
-    test('clamps to the slider range and ignores calls with no run', () {
+    test('clamps to the loaded tree and ignores calls with no run', () {
       seedState(membership: const {}, groupCount: 2);
+      // The tree in this fixture holds 3 groups, and that is the whole track —
+      // a position beyond it would be one the view cannot render without
+      // re-clustering, which only Regroup does.
       service.setGroupCount(9999);
-      expect(service.state.value.groupCount, kClusterMinCeiling);
+      expect(service.state.value.groupCount, 3);
       service.setGroupCount(0);
       expect(service.state.value.groupCount, 1);
 
@@ -345,20 +336,16 @@ void main() {
           reason: 'a regroup must keep the number the user chose');
     });
 
-    // The worse case behind the same bug. Dragging past the tree's capacity
-    // triggers a rebuild precisely so the finer cut becomes reachable; resetting
-    // to the default there would put it permanently out of reach.
-    test('over-asking then rebuilding keeps the requested count', () {
+    // A rebuilt tree is deeper, and the position the user set has to survive
+    // arriving at it.
+    test('a chosen count survives a deeper tree arriving', () {
       seedState(groupCount: 3);
-      service.setGroupCount(40);
-      expect(service.state.value.groupCount, 40);
-      expect(service.state.value.needsDeeperTree, isTrue);
+      service.setGroupCount(2);
 
-      // A deeper tree arrives; the request must still stand.
       service.state.add(service.state.value.copyWith(
         tree: _tree(runMaxGroups: kClusterMinCeiling),
       ));
-      expect(service.state.value.groupCount, 40);
+      expect(service.state.value.groupCount, 2);
     });
   });
 

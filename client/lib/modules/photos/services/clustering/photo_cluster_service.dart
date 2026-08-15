@@ -112,23 +112,17 @@ class ClusterViewState {
   bool get hasRun => tree != null;
   int get maxGroups => tree?.maxGroups ?? 1;
 
-  /// Upper bound the slider offers.
+  /// Upper bound the slider offers: exactly what the loaded tree can cut.
   ///
-  /// Normally the tree's real capacity, so there is never a dead stretch at the
-  /// end of the track. But a run built under an older, lower ceiling can be
-  /// rebuilt deeper, and refusing to offer that would strand the user on a
-  /// coarseness they cannot escape without knowing to press Regroup. In that
-  /// case the slider offers the current ceiling and dragging past capacity
-  /// rebuilds — see [PhotoClusterService.commitGroupCount].
-  int get sliderMax {
-    final run = tree?.run;
-    if (run == null) return 1;
-    final ceiling = maxGroupsFor(run.photoCount);
-    return run.maxGroups < ceiling ? ceiling : tree!.maxGroups;
-  }
-
-  /// Whether [groupCount] is finer than this tree can actually cut.
-  bool get needsDeeperTree => tree != null && groupCount > tree!.maxGroups;
+  /// Never more. Offering positions the tree cannot serve would mean either a
+  /// dead stretch at the end of the track or a clustering pass fired by letting
+  /// go of the slider — and re-clustering is an explicit action, reached
+  /// through Regroup, not something a drag should set off.
+  ///
+  /// A run built under an older, lower ceiling therefore offers less than the
+  /// library now warrants until it is rebuilt. Regroup rebuilds at the current
+  /// ceiling and the range grows with it.
+  int get sliderMax => tree?.maxGroups ?? 1;
 
   ClusterViewState copyWith({
     ClusterScope? scope,
@@ -257,22 +251,19 @@ class PhotoClusterService {
 
   /// Called when the user lets go of the slider.
   ///
-  /// Rebuilds only when they asked for a finer cut than this tree can produce,
-  /// and only on release — rebuilding mid-drag would fire a clustering pass per
-  /// frame. A no-op in the common case, which is why the drag itself stays free.
+  /// Records where they left it and nothing else. Re-clustering happens only
+  /// through Regroup: it costs seconds and discards every generated label, so
+  /// it is not something letting go of a slider should set off.
+  ///
+  /// On release rather than on change because the slider re-cuts the tree every
+  /// drag frame, and a database write per frame would be absurd for a value
+  /// only read at load.
   Future<void> commitGroupCount() async {
     final st = _current;
     final runId = st.tree?.run.id;
     final db = DatabaseManager.instance.database;
-    if (runId != null && db != null) {
-      await PhotoClusterRepository(db).saveGroupCount(runId, st.groupCount);
-    }
-    if (!st.needsDeeperTree || st.isBuilding) return;
-    logger.i(
-      'PhotoClusterService: ${st.groupCount} groups requested, tree holds '
-      '${st.maxGroups} — rebuilding deeper',
-    );
-    await load(st.scope, forceRebuild: true);
+    if (runId == null || db == null) return;
+    await PhotoClusterRepository(db).saveGroupCount(runId, st.groupCount);
   }
 
   /// Buckets [photos] into the groups at the current slider position, largest
