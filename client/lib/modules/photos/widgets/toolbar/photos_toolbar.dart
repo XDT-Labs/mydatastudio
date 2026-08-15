@@ -244,14 +244,14 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
                   tooltip: 'List View',
                 ),
                 ButtonSegment<PhotoViewMode>(
-                  value: PhotoViewMode.map,
-                  icon: Icon(Icons.map, size: 18),
-                  tooltip: 'Map View',
-                ),
-                ButtonSegment<PhotoViewMode>(
                   value: PhotoViewMode.clusters,
                   icon: Icon(Icons.workspaces_outline, size: 18),
                   tooltip: 'Group by Similarity',
+                ),
+                ButtonSegment<PhotoViewMode>(
+                  value: PhotoViewMode.map,
+                  icon: Icon(Icons.map, size: 18),
+                  tooltip: 'Map View',
                 ),
               ],
               selected: {_currentViewMode},
