@@ -220,10 +220,12 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
               ],
             ],
 
-            if (_currentViewMode == PhotoViewMode.clusters &&
-                constraints.maxWidth >= 650) ...[
-              const SizedBox(width: 8),
-              const _GroupCountSlider(),
+            if (_currentViewMode == PhotoViewMode.clusters) ...[
+              if (constraints.maxWidth >= 650) ...[
+                const SizedBox(width: 8),
+                const _GroupCountSlider(),
+              ],
+              const _RegroupButton(),
             ],
 
             const Spacer(),
@@ -444,6 +446,59 @@ class _GroupCountSliderState extends State<_GroupCountSlider> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Rebuilds the groups for the current source from scratch.
+///
+/// Needed for two things that are otherwise dead ends. Photos scanned since the
+/// run was built have no group and are reported as uncovered rather than
+/// guessed at; and a group whose name could not be generated is not retried, so
+/// a run labelled while the aiserver was down stays a wall of "Group N".
+/// Rebuilding produces a fresh tree whose groups are all unnamed again, which
+/// the labeller then works through.
+class _RegroupButton extends StatefulWidget {
+  const _RegroupButton();
+
+  @override
+  State<_RegroupButton> createState() => _RegroupButtonState();
+}
+
+class _RegroupButtonState extends State<_RegroupButton> {
+  StreamSubscription<ClusterViewState>? _sub;
+  ClusterViewState _state = const ClusterViewState();
+
+  @override
+  void initState() {
+    super.initState();
+    _state = PhotoClusterService.instance.state.value;
+    _sub = PhotoClusterService.instance.state.listen((s) {
+      if (mounted) setState(() => _state = s);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Disabled mid-build rather than hidden: a control that vanishes while the
+    // thing it controls is working reads as a glitch.
+    final busy = _state.isBuilding;
+    return IconButton(
+      icon: const Icon(Icons.refresh),
+      iconSize: 18,
+      tooltip: busy ? 'Grouping photos…' : 'Regroup photos',
+      onPressed: busy
+          ? null
+          : () => PhotoClusterService.instance.load(
+                _state.scope,
+                forceRebuild: true,
+              ),
     );
   }
 }

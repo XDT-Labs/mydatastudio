@@ -26,6 +26,15 @@ const Map<String, Object> _kLabelSchema = {
   'required': ['label'],
 };
 
+/// What came back from one labelling request.
+///
+/// The distinction that matters is permanent versus transient. A model that
+/// answers unusably will answer unusably again, so that group is done being
+/// tried; a server that cannot be reached says nothing about the group at all,
+/// and marking it failed would turn a restartable outage into permanently
+/// unnamed groups.
+enum LabelOutcome { ok, unusable, unreachable }
+
 /// Generates a name for each cluster group by showing a vision model the
 /// group's most central photos.
 ///
@@ -105,23 +114,38 @@ class ClusterLabelService {
           continue;
         }
 
-        final label = await _askForLabel(
+        final result = await _askForLabel(
           images,
           serviceUrl,
           MainApp.llmServiceToken.valueOrNull,
           httpClient,
         );
 
-        if (label == null || label.isEmpty) {
-          // A refusal, a timeout, or an unparseable answer. Marked failed
-          // rather than left pending so one awkward group cannot stall the
-          // queue on every subsequent pass; the header falls back to
-          // "Group N", which is honest about not knowing.
-          await repo.updateLabel(
-            runId, group.nodeId, null, ClusterLabelStatus.failed);
-        } else {
-          await repo.updateLabel(
-            runId, group.nodeId, label, ClusterLabelStatus.ready);
+        switch (result.outcome) {
+          case LabelOutcome.ok:
+            await repo.updateLabel(
+              runId, group.nodeId, result.label, ClusterLabelStatus.ready);
+
+          case LabelOutcome.unusable:
+            // The model answered, and the answer is not a name — a refusal, or
+            // prose too long for a header. Permanent: asking again gets the
+            // same thing. Marked failed so one awkward group cannot be retried
+            // ahead of every other group on every later pass, and the header
+            // falls back to "Group N", which is honest about not knowing.
+            await repo.updateLabel(
+              runId, group.nodeId, null, ClusterLabelStatus.failed);
+
+          case LabelOutcome.unreachable:
+            // The aiserver is down, still starting, or wedged. Nothing is wrong
+            // with this group, so its status is left alone and the whole pass
+            // stops: the next 94 requests would fail identically, and burning
+            // through them would mark the entire run failed over an outage
+            // that resolves itself when the server comes back.
+            logger.w(
+              'ClusterLabelService: aiserver unreachable, stopping after '
+              '${group.nodeId} — groups stay pending for the next pass',
+            );
+            return;
         }
         _labelled.add(runId);
       }
@@ -179,7 +203,7 @@ class ClusterLabelService {
     return images;
   }
 
-  Future<String?> _askForLabel(
+  Future<({LabelOutcome outcome, String? label})> _askForLabel(
     List<String> base64Images,
     String serviceUrl,
     String? serviceToken,
@@ -224,20 +248,44 @@ class ClusterLabelService {
 
       if (response.statusCode != 200) {
         logger.w('ClusterLabelService: aiserver ${response.statusCode}');
-        return null;
+        // 5xx is the server failing at something it should manage — a model
+        // still loading, an out-of-memory decode — and is worth retrying. 4xx
+        // means this request is wrong (too many images for the context, a bad
+        // payload) and will be just as wrong next time.
+        return (
+          outcome: response.statusCode >= 500
+              ? LabelOutcome.unreachable
+              : LabelOutcome.unusable,
+          label: null,
+        );
       }
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final choices = data['choices'] as List?;
-      if (choices == null || choices.isEmpty) return null;
-      final message = (choices.first as Map<String, dynamic>)['message'];
+      final message = choices == null || choices.isEmpty
+          ? null
+          : (choices.first as Map<String, dynamic>)['message'];
       final content = message is Map ? message['content'] as String? : null;
-      if (content == null || content.isEmpty) return null;
+      final label = content == null ? null : normalizeLabel(content);
 
-      return normalizeLabel(content);
+      return label == null || label.isEmpty
+          ? (outcome: LabelOutcome.unusable, label: null)
+          : (outcome: LabelOutcome.ok, label: label);
+    } on http.ClientException catch (e) {
+      // Connection refused: the aiserver is not up. The embedding and
+      // description isolates treat this as "wait and try again", and so must
+      // this — a dead server is not a statement about any group's photos.
+      logger.w('ClusterLabelService: aiserver unreachable: $e');
+      return (outcome: LabelOutcome.unreachable, label: null);
+    } on io.SocketException catch (e) {
+      logger.w('ClusterLabelService: aiserver unreachable: $e');
+      return (outcome: LabelOutcome.unreachable, label: null);
+    } on TimeoutException catch (e) {
+      logger.w('ClusterLabelService: label request timed out: $e');
+      return (outcome: LabelOutcome.unreachable, label: null);
     } catch (e) {
       logger.w('ClusterLabelService: label request failed: $e');
-      return null;
+      return (outcome: LabelOutcome.unusable, label: null);
     }
   }
 

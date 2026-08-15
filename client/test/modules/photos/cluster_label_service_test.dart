@@ -325,20 +325,81 @@ void _labellingPipelineTests() {
       expect(byId[0]!.label, 'Already named');
     });
 
-    test('a server error leaves the group retryable next pass', () async {
+    // The regression that shipped: an aiserver that is simply not running made
+    // every group permanently unnamed. Connection refused says nothing about a
+    // group's photos, so the status must survive the outage and the pass must
+    // stop rather than burning the whole run on a server that is down.
+    test('an unreachable server leaves every group pending and stops the pass',
+        () async {
+      await seedRun();
+      var calls = 0;
+      final client = MockClient((_) async {
+        calls++;
+        throw http.ClientException('Connection refused');
+      });
+
+      await ClusterLabelService.instance.labelRun(repo, runId, client: client);
+
+      expect(calls, 1, reason: 'stops after the first unreachable response');
+      for (final g in (await repo.loadTree(runId))!.allGroups) {
+        expect(g.labelStatus, ClusterLabelStatus.pending,
+            reason: 'node ${g.nodeId} must stay retryable');
+      }
+    });
+
+    test('a 5xx is transient and leaves groups pending', () async {
       await seedRun();
       final client = MockClient((_) async => http.Response('boom', 500));
+
+      await ClusterLabelService.instance.labelRun(repo, runId, client: client);
+
+      for (final g in (await repo.loadTree(runId))!.allGroups) {
+        expect(g.labelStatus, ClusterLabelStatus.pending);
+      }
+    });
+
+    // A 4xx is this request being wrong — too many images for the context, a
+    // malformed payload. Retrying sends the identical request, so it is not
+    // worth keeping the group in the queue.
+    test('a 4xx is permanent and marks the group failed', () async {
+      await seedRun();
+      final client = MockClient((_) async => http.Response('bad request', 400));
 
       await ClusterLabelService.instance.labelRun(repo, runId, client: client);
 
       final byId = {
         for (final g in (await repo.loadTree(runId))!.allGroups) g.nodeId: g
       };
-      // Failed rather than pending: a transient outage is indistinguishable
-      // from a refusal here, and leaving nodes pending would make every later
-      // pass re-attempt a group that may never succeed.
       expect(byId[0]!.labelStatus, ClusterLabelStatus.failed);
       expect(byId[0]!.displayLabel, 'Group 0');
+    });
+
+    test('labels that already landed survive a later outage', () async {
+      await seedRun();
+      var calls = 0;
+      final client = MockClient((_) async {
+        calls++;
+        if (calls == 1) {
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {'message': {'content': '{"label": "Colosseum"}'}}
+              ]
+            }),
+            200,
+          );
+        }
+        throw http.ClientException('Connection refused');
+      });
+
+      await ClusterLabelService.instance.labelRun(repo, runId, client: client);
+
+      final byId = {
+        for (final g in (await repo.loadTree(runId))!.allGroups) g.nodeId: g
+      };
+      expect(byId[0]!.label, 'Colosseum');
+      expect(byId[1]!.labelStatus, ClusterLabelStatus.pending);
+      expect(byId[2]!.labelStatus, ClusterLabelStatus.pending);
     });
 
     test('skips a group whose thumbnails are missing from disk', () async {

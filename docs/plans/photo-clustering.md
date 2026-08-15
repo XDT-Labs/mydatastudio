@@ -166,7 +166,11 @@ Throughput is the constraint: `state.generation_lock` serialises generation, so 
 
 Cache on `(run_id, node_id)`. Nodes are immutable within a run, so a label is computed at most once. Groups are labeled largest-first, since size is the best proxy for how likely the user is to be looking at one: a large group is a leaf at more slider positions and dominates the screen wherever it appears.
 
-A group that refuses, times out, or answers unusably is marked `failed`, not left `pending` — one awkward group must not be retried ahead of every other group on every later pass. A group with no readable thumbnails is marked `skipped`. Both fall back to "Group N".
+Failure has to be split into permanent and transient, and getting this wrong is not subtle. A model that answers unusably — a refusal, prose too long for a header — will answer the same way next time, so that group is marked `failed` and stops being retried; one awkward group must not be reattempted ahead of every other group on every later pass. But a server that cannot be reached says nothing about any group's photos, so an unreachable aiserver (connection refused, timeout, 5xx) leaves every group `pending` and **stops the pass entirely** rather than working through the queue. A 4xx is treated as permanent: the request itself is wrong and resending it changes nothing.
+
+The first build of this got that distinction wrong and marked everything `failed` on connection-refused. Running against a dev aiserver that happened to be down turned a restartable outage into 95 permanently unnamed groups — recoverable only by rebuilding the run. The regression test drives an unreachable client and asserts both that statuses survive and that the pass stops after the first failure.
+
+A group with no readable thumbnails is marked `skipped`. `failed` and `skipped` both fall back to "Group N".
 
 Runs on the main isolate rather than in a worker, unlike the embedding and description isolates. Those grind through an unbounded backlog decoding full-size originals; this walks a bounded node set reading kilobyte thumbnails, so the only main-thread cost is base64-encoding them and the long part is async HTTP.
 
@@ -215,6 +219,8 @@ ALTER TABLE files ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0;
 **Open question for the UI:** deleting a whole group from the cluster view is a large, mostly-irreversible-feeling action. The confirm dialog should say how many photos and from which sources, and there should be a way back — either an "undo" snackbar or a Hidden/Trash view that lists `is_hidden = 1` rows and can restore them. A cleanup tool with no undo is one misclick from losing photos the user cared about.
 
 ### 4.6 Keeping it current
+
+A **Regroup** button in the cluster toolbar rebuilds the current scope's run from scratch. It covers the two dead ends a run can reach: photos scanned since it was built have no group and are reported as uncovered rather than guessed at, and groups whose labels are `failed` are never retried. Rebuilding produces a fresh tree with every group unnamed again, which the labeller then works through.
 
 Scanners add photos continuously; a run is a snapshot. Assign new photos to the nearest existing centroid — one dot product per centroid, negligible — and mark the run `stale` past a threshold of newly-assigned photos, with an explicit "regroup" affordance. Do not attempt live re-clustering: it would invalidate every cached label on every scan.
 
