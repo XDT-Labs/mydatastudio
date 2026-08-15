@@ -1,69 +1,157 @@
 import 'package:flutter/material.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_source_group.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
 
-/// Confirmation shown before hiding selected photos from the gallery.
+/// What the user chose in [showRemovePhotosDialog].
+enum RemovePhotosChoice {
+  /// Out of the gallery only. The file stays on disk and in its source.
+  hide,
+
+  /// Out of the app, and out of the source where the app can reach it —
+  /// local originals to the Trash, Drive files to Drive's trash.
+  delete,
+}
+
+/// Asks what should happen to the selected photos.
 ///
-/// Reused by both the batch-selection toolbar's button and the Delete/Backspace
-/// shortcut so the two paths cannot drift apart.
+/// Two actions rather than one because they are genuinely different promises,
+/// and a single "Delete" button that only set a flag was the dishonesty this
+/// dialog was written to remove. Hiding leaves everything where it is; deleting
+/// reaches into the source.
 ///
-/// The copy says "hide", not "delete", because hiding is what actually happens:
-/// `is_hidden` is set, and the file stays on disk and in its source. The button
-/// this replaced promised to "move selected photos to trash", which was never
-/// true of any code path in the app.
-///
-/// Sources are summarised because hiding a whole cluster group will be a common
-/// action, and the user needs to see what is about to disappear before it does.
-Future<bool?> showHidePhotosConfirmDialog(
+/// The copy is built from the actual selection, because what "delete" can do
+/// depends on where a photo came from and the user cannot be expected to know
+/// that. A local original goes to the Trash and is recoverable. A Drive file
+/// goes to Drive's trash. An email attachment cannot be removed from the
+/// message at all, so it leaves the app and stays in the mailbox — saying so is
+/// the difference between an informed choice and a nasty surprise.
+Future<RemovePhotosChoice?> showRemovePhotosDialog(
   BuildContext context,
   List<File> selectedFiles,
 ) {
   final collections = GetCollectionsService.instance.sink.valueOrNull ?? [];
-  final scannerByCollectionId = {for (final c in collections) c.id: c.scanner};
+  final byId = {for (final c in collections) c.id: c};
 
-  // Grouped the same way the drawer's Sources list groups them — the user has
-  // just been picking photos out of those buckets, so the summary has to name
-  // the same things.
   final countByGroup = <PhotoSourceGroup, int>{};
+  var trashable = 0; // local originals — recoverable from the Trash
+  var driveTrashable = 0; // Drive files — recoverable from Drive's trash
+  var sourceKeeps = 0; // email attachments — the message keeps its copy
+
   for (final f in selectedFiles) {
-    final group = photoSourceGroupFor(scannerByCollectionId[f.collectionId]);
+    final collection = byId[f.collectionId];
+    final group = photoSourceGroupFor(collection?.scanner);
     countByGroup[group] = (countByGroup[group] ?? 0) + 1;
+    switch (group) {
+      case PhotoSourceGroup.local:
+        trashable++;
+      case PhotoSourceGroup.gdrive:
+        driveTrashable++;
+      case PhotoSourceGroup.gmail:
+      case PhotoSourceGroup.yahoo:
+      case PhotoSourceGroup.outlook:
+      case PhotoSourceGroup.other:
+        sourceKeeps++;
+    }
   }
+
+  final count = selectedFiles.length;
+  final noun = count == 1 ? 'photo' : 'photos';
   final sourceSummary = [
     for (final group in kPhotoSourceGroupOrder)
       if (countByGroup[group] != null)
         '${countByGroup[group]} from ${photoSourceGroupLabel(group)}',
   ].join(', ');
 
-  final count = selectedFiles.length;
-  final noun = count == 1 ? 'photo' : 'photos';
+  final deleteLines = <String>[
+    if (trashable > 0)
+      '$trashable ${trashable == 1 ? 'file' : 'files'} will be moved to the '
+          'Trash, where you can still recover ${trashable == 1 ? 'it' : 'them'}.',
+    if (driveTrashable > 0)
+      '$driveTrashable Google Drive ${driveTrashable == 1 ? 'file' : 'files'} '
+          'will be moved to the trash in Google Drive.',
+    if (sourceKeeps > 0)
+      '$sourceKeeps email ${sourceKeeps == 1 ? 'attachment' : 'attachments'} '
+          'will be removed from Photos and Files. The '
+          '${sourceKeeps == 1 ? 'email keeps its copy' : 'emails keep their copies'}.',
+  ];
 
-  return showDialog<bool>(
+  return showDialog<RemovePhotosChoice>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      backgroundColor: Theme.of(ctx).colorScheme.surfaceContainer,
-      title: Text('Hide $count $noun?'),
-      content: Text(
-        'This hides $count $noun'
-        '${sourceSummary.isNotEmpty ? ' ($sourceSummary)' : ''} from the '
-        'gallery. The original files are not deleted from disk or from '
-        'their source — you can still find them in the Files or Email '
-        'module.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(ctx).pop(false),
-          child: const Text('Cancel'),
+    builder: (ctx) {
+      final theme = Theme.of(ctx);
+      return AlertDialog(
+        backgroundColor: theme.colorScheme.surfaceContainer,
+        title: Text('Remove $count $noun?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (sourceSummary.isNotEmpty) ...[
+              Text(
+                'Selected: $sourceSummary.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            Text('Hide in gallery', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 4),
+            Text(
+              'Removes $noun from the photo gallery only. The files stay on '
+              'disk and in their source, and you can un-hide them later.',
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 16),
+            Text('Delete file', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 4),
+            for (final line in deleteLines) ...[
+              Text('• $line', style: theme.textTheme.bodySmall),
+              const SizedBox(height: 2),
+            ],
+          ],
         ),
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: Theme.of(ctx).colorScheme.error,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
           ),
-          onPressed: () => Navigator.of(ctx).pop(true),
-          child: const Text('Hide'),
-        ),
-      ],
-    ),
+          TextButton(
+            onPressed: () =>
+                Navigator.of(ctx).pop(RemovePhotosChoice.hide),
+            child: const Text('Hide in gallery'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: theme.colorScheme.error,
+            ),
+            onPressed: () =>
+                Navigator.of(ctx).pop(RemovePhotosChoice.delete),
+            child: const Text('Delete file'),
+          ),
+        ],
+      );
+    },
   );
+}
+
+/// Kept so existing callers that only offer hiding keep compiling.
+@Deprecated('Use showRemovePhotosDialog, which offers hide and delete')
+Future<bool?> showHidePhotosConfirmDialog(
+  BuildContext context,
+  List<File> selectedFiles,
+) async {
+  final choice = await showRemovePhotosDialog(context, selectedFiles);
+  return choice == RemovePhotosChoice.hide;
+}
+
+/// Exposed for tests: the collection lookup the dialog copy is built from.
+Collection? collectionForFile(File file) {
+  final collections = GetCollectionsService.instance.sink.valueOrNull ?? [];
+  for (final c in collections) {
+    if (c.id == file.collectionId) return c;
+  }
+  return null;
 }

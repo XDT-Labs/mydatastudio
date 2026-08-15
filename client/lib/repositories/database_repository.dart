@@ -206,6 +206,7 @@ class DatabaseRepository {
         ?
       ) AS v ON e.rowid = v.rowid
       WHERE f.is_deleted = 0
+        AND f.is_user_deleted = 0
         AND e.type = 'file'
         $excludeClause
       ORDER BY v.distance ASC
@@ -245,6 +246,7 @@ class DatabaseRepository {
       WHERE (fe.file_id IS NULL OR fe.qwen3_vl_embedding IS NULL)
         AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
         AND f.is_deleted = 0
+        AND f.is_user_deleted = 0
         AND f.is_inline = 0
         AND f.embedding_attempts < ?
       LIMIT ?
@@ -274,6 +276,7 @@ class DatabaseRepository {
       WHERE f.description IS NULL
         AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
         AND f.is_deleted = 0
+        AND f.is_user_deleted = 0
         AND f.is_inline = 0
         AND f.description_attempts < ?
       LIMIT ?

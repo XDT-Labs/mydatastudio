@@ -1,4 +1,11 @@
 import 'dart:io' as io;
+import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/file_sources/file_source_file.dart';
+import 'package:mydatastudio/file_sources/file_source_provider.dart';
+import 'package:mydatastudio/file_sources/google_drive/google_drive_provider.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/files/services/utilities/system_trash.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -14,6 +21,7 @@ class BatchActionService {
   BatchActionService._();
   
   final PhotosRepository _repo = PhotosRepository();
+  final AppLogger _logger = AppLogger(null);
 
   Future<void> downloadSingle(File file) async {
     final savePath = await FilePicker.platform.saveFile(
@@ -72,6 +80,83 @@ class BatchActionService {
   /// `is_deleted`, which scanners own and clear on every rescan. The
   /// original files stay on disk and in their source (Drive, Gmail, PST,
   /// etc.); they simply stop showing up in the Photos module.
+  /// Hides the selected photos from the gallery. Nothing is removed from disk
+  /// or from the source — see [deleteSelectedFiles] for that.
+  Future<void> hideSelected(Set<String> fileIds) => deleteSelected(fileIds);
+
+  /// Removes the selected photos from the app, and from the source wherever the
+  /// app can reach it.
+  ///
+  /// Order matters. The database row is marked first, so a failure part way
+  /// through leaves photos out of the app rather than leaving the user staring
+  /// at photos they just deleted. `is_user_deleted` is what makes that stick:
+  /// `is_deleted` is scanner-owned and a manual Sync runs with `force: true`,
+  /// which bypasses the "already imported" skip and would re-create every
+  /// attachment.
+  ///
+  /// What "delete" reaches depends on the source, which is why the dialog says
+  /// so before this runs:
+  ///  - local originals go to the system Trash, recoverable
+  ///  - Drive files are marked trashed through the Drive API, recoverable
+  ///  - email attachments cannot be removed from the message, so only the app's
+  ///    extracted copy goes
+  ///
+  /// A file that cannot be trashed is left on disk on purpose. It has already
+  /// left the app, and quietly hard-deleting something the user was told would
+  /// be recoverable is the worse failure.
+  Future<void> deleteSelectedFiles(
+    Set<String> fileIds, {
+    SystemTrash? trash,
+    FileSourceProvider Function(Collection)? providerFor,
+  }) async {
+    if (fileIds.isEmpty) return;
+    final db = DatabaseManager.instance.database;
+    if (db == null) return;
+
+    final systemTrash = trash ?? SystemTrash();
+    final files = await _repo.filesByIds(fileIds);
+
+    await db.executeBatch(
+      "UPDATE files SET is_user_deleted = 1 WHERE id = ?",
+      fileIds.map((id) => [id]).toList(),
+    );
+
+    for (final file in files) {
+      final collection = await _repo.collectionFor(file.collectionId);
+      final scanner = collection?.scanner ?? '';
+
+      if (scanner == AppConstants.scannerFileGDrive && collection != null) {
+        final provider = providerFor?.call(collection) ?? GoogleDriveProvider();
+        try {
+          // Drive's own id, not ours — it lives in the path as
+          // `gdrive://<id>`, the same way rx_files_page reads it.
+          await provider.deleteFile(
+            collection,
+            FileSourceFile(
+              id: file.path.replaceFirst('gdrive://', ''),
+              name: file.name,
+              mimeType: file.contentType,
+              isFolder: false,
+            ),
+          );
+        } catch (e) {
+          _logger.w('Could not trash Drive file ${file.name}: $e');
+        }
+        continue;
+      }
+
+      // Local originals, and the app's extracted copy of an email attachment.
+      // Both are real files on disk that the app is allowed to move.
+      final path = file.localPath?.isNotEmpty == true ? file.localPath! : file.path;
+      if (path.isNotEmpty && !path.startsWith('gdrive://')) {
+        await systemTrash.moveToTrash(path);
+      }
+    }
+
+    await PhotosService.instance.refresh();
+    SelectionService.instance.deselectAll();
+  }
+
   Future<void> deleteSelected(Set<String> fileIds) async {
     if (fileIds.isEmpty) return;
     final db = DatabaseManager.instance.database;

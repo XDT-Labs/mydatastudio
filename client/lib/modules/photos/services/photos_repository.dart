@@ -14,7 +14,8 @@ class PhotosRepository {
   AppLogger logger = AppLogger(null);
 
   static const String _excludeInline = " AND f.is_inline = 0";
-  static const String _excludeDeleted = " AND f.is_deleted = 0";
+  static const String _excludeDeleted =
+      " AND f.is_deleted = 0 AND f.is_user_deleted = 0";
   static const String _excludeHidden = " AND f.is_hidden = 0";
 
   static const String _isImage =
@@ -99,6 +100,38 @@ class PhotosRepository {
       default:
         return " ORDER BY f.date_created DESC";
     }
+  }
+
+  /// The files behind [fileIds], with paths resolved.
+  ///
+  /// Deliberately does not filter on `is_user_deleted`: the delete path marks
+  /// the rows first and then needs them back to reach their sources, so this
+  /// has to see rows the gallery no longer shows.
+  Future<List<File>> filesByIds(Set<String> fileIds) async {
+    AppDatabase? db = DatabaseManager.instance.database;
+    if (db == null || fileIds.isEmpty) return [];
+
+    final placeholders = List.filled(fileIds.length, '?').join(',');
+    final rows = await db.select(
+      "SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner"
+      " FROM files f"
+      " JOIN collections c ON f.collection_id = c.id"
+      " WHERE f.id IN ($placeholders)",
+      fileIds.toList(),
+    );
+    return rows.map((r) => _fileWithAbsolutePath(r)).toList();
+  }
+
+  /// The collection a file belongs to, or null if it has gone.
+  Future<Collection?> collectionFor(String collectionId) async {
+    AppDatabase? db = DatabaseManager.instance.database;
+    if (db == null) return null;
+    final rows = await db.select(
+      "SELECT * FROM collections WHERE id = ? LIMIT 1",
+      [collectionId],
+    );
+    if (rows.isEmpty) return null;
+    return Collection.fromDbMap(rows.first);
   }
 
   Future<List<File>> photos({PhotoFilter? filter}) async {

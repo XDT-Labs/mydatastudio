@@ -50,6 +50,7 @@ class PhotoClusterRepository {
       WHERE e.type = 'file'
         AND e.qwen3_vl_embedding IS NOT NULL
         AND f.is_deleted = 0
+        AND f.is_user_deleted = 0
         AND f.is_hidden = 0
         AND f.is_inline = 0
         AND (f.content_type = 'application/image'

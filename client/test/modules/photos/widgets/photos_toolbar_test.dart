@@ -86,7 +86,7 @@ void main() {
     });
 
     testWidgets(
-        'delete button shows an honest, source-aware confirmation dialog',
+        'delete button offers hide and delete, with source-aware copy',
         (tester) async {
       GetCollectionsService.instance.sink.add([
         Collection(
@@ -144,13 +144,15 @@ void main() {
       await tester.tap(find.byIcon(Icons.delete_outline));
       await tester.pumpAndSettle();
 
-      // Honest about what happens: hidden from the gallery, not deleted. The
-      // old dialog said "move selected photos to trash", which no code path in
-      // the app has ever done.
-      expect(find.text('Hide 2 photos?'), findsOneWidget);
-      expect(find.textContaining('hides 2 photos'), findsOneWidget);
-      expect(find.textContaining('are not deleted from disk'), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, 'Hide'), findsOneWidget);
+      // Two distinct promises, offered separately, because a single "Delete"
+      // that only set a flag was the dishonesty this dialog exists to remove.
+      expect(find.text('Remove 2 photos?'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Hide in gallery'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Delete file'), findsOneWidget);
+      expect(
+        find.textContaining('stay on disk and in their source'),
+        findsOneWidget,
+      );
 
       // Sources are named the way the drawer's Sources list names them — the
       // user just picked these photos out of those buckets. A PST import shows
@@ -159,10 +161,18 @@ void main() {
       expect(find.textContaining('Outlook PST'), findsNothing);
       expect(find.textContaining('1 from Google Drive'), findsOneWidget);
 
-      // Cancel closes the dialog without invoking deleteSelected.
+      // And delete says what it can actually reach per source: Drive has its
+      // own trash, an email keeps its attachment whatever the app does.
+      expect(
+        find.textContaining('trash in Google Drive'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('email keeps its copy'), findsOneWidget);
+
+      // Cancel closes without invoking either action.
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
-      expect(find.text('Hide 2 photos?'), findsNothing);
+      expect(find.text('Remove 2 photos?'), findsNothing);
     });
 
     testWidgets('search input has debounce', (tester) async {

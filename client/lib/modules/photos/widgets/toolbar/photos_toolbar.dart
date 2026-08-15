@@ -328,10 +328,16 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
           onPressed: () async {
             final selectedFiles =
                 _files.where((f) => _selectedIds.contains(f.id)).toList();
-            final confirm =
-                await showHidePhotosConfirmDialog(context, selectedFiles);
-            if (confirm == true) {
-              await BatchActionService.instance.deleteSelected(_selectedIds);
+            final choice =
+                await showRemovePhotosDialog(context, selectedFiles);
+            switch (choice) {
+              case RemovePhotosChoice.hide:
+                await BatchActionService.instance.hideSelected(_selectedIds);
+              case RemovePhotosChoice.delete:
+                await BatchActionService.instance
+                    .deleteSelectedFiles(_selectedIds);
+              case null:
+                break;
             }
           },
         ),

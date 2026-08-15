@@ -140,10 +140,15 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
     final selectedFiles =
         files.where((f) => selectedIds.contains(f.id)).toList();
 
-    final confirm = await showHidePhotosConfirmDialog(context, selectedFiles);
+    final choice = await showRemovePhotosDialog(context, selectedFiles);
 
-    if (confirm == true) {
-      await BatchActionService.instance.deleteSelected(selectedIds);
+    switch (choice) {
+      case RemovePhotosChoice.hide:
+        await BatchActionService.instance.hideSelected(selectedIds);
+      case RemovePhotosChoice.delete:
+        await BatchActionService.instance.deleteSelectedFiles(selectedIds);
+      case null:
+        break;
     }
   }
 

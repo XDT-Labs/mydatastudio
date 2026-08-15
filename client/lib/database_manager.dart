@@ -807,6 +807,15 @@ class AppDatabase {
         // succeed on every pass, so a couple of bad attachments produce an
         // endless stream of identical parse errors in the log.
         'embedding_attempts': 'INTEGER NOT NULL DEFAULT 0',
+        // The user deleted this file from the app. Distinct from both
+        // `is_deleted`, which the scanner owns and resets to 0 whenever the
+        // source still has the file, and `is_hidden`, which only takes a photo
+        // out of the gallery. This one means "gone everywhere", and no scanner
+        // writes it — a manual Sync runs with force: true, which bypasses the
+        // "already seen this message" skip and re-imports attachments, so
+        // without a flag the scanner owns nothing and one Sync click would undo
+        // every delete the user made.
+        'is_user_deleted': 'INTEGER NOT NULL DEFAULT 0',
       },
       'albums': {
         'description': 'TEXT',
