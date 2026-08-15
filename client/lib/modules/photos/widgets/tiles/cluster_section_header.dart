@@ -57,46 +57,59 @@ class ClusterSectionHeader extends StatelessWidget {
             ),
             const SizedBox(width: 8),
           ],
-          Flexible(
-            child: Text(
-              label,
-              style: textTheme.titleSmall?.copyWith(
-                color: isLabelPending
-                    ? colorScheme.onSurfaceVariant
-                    : colorScheme.onSurface,
-                fontWeight: FontWeight.w600,
-                fontStyle: isLabelPending ? FontStyle.italic : FontStyle.normal,
-              ),
-              overflow: TextOverflow.ellipsis,
+          // Label and its markers share one expanding cell, so the markers
+          // stay beside the text they describe while everything after this is
+          // pushed to the trailing edge.
+          //
+          // The markers cannot simply follow a Flexible label: Flexible and
+          // Spacer both default to flex 1, so they split the free space and the
+          // trailing group lands mid-row, drifting with the label's length.
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    label,
+                    style: textTheme.titleSmall?.copyWith(
+                      color: isLabelPending
+                          ? colorScheme.onSurfaceVariant
+                          : colorScheme.onSurface,
+                      fontWeight: FontWeight.w600,
+                      fontStyle:
+                          isLabelPending ? FontStyle.italic : FontStyle.normal,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (isLabelPending) ...[
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    height: 12,
+                    width: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                if (isMixed) ...[
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: 'These photos are less alike than the other '
+                        'groups — the name may not fit all of them.',
+                    child: Icon(
+                      Icons.blur_on,
+                      size: 16,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-          if (isLabelPending) ...[
-            const SizedBox(width: 8),
-            SizedBox(
-              height: 12,
-              width: 12,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-          if (isMixed) ...[
-            const SizedBox(width: 8),
-            Tooltip(
-              message: 'These photos are less alike than the other groups — '
-                  'the name may not fit all of them.',
-              child: Icon(
-                Icons.blur_on,
-                size: 16,
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
           // Count and disclosure control sit together at the trailing edge, so
           // they land in the same place on every row however long a generated
           // label turns out to be.
-          const Spacer(),
           const SizedBox(width: 8),
           Text(
             '$itemCount ${itemCount == 1 ? 'item' : 'items'}',

@@ -171,6 +171,14 @@ class PhotoClusterService {
   ClusteringIsolate? _isolate;
   StreamSubscription<String>? _labelSub;
 
+  /// Whether the user has moved the slider for the scope now loaded.
+  ///
+  /// Once they have, their number is the answer and nothing recomputes it —
+  /// not a regroup, and above all not the rebuild that dragging past the tree's
+  /// capacity triggers, where resetting to the default would put the finer cut
+  /// permanently out of reach.
+  bool _userPickedGroupCount = false;
+
   ClusterViewState get _current => state.value;
 
   /// Shows the run for [scope], building one if there isn't a usable one yet.
@@ -191,6 +199,10 @@ class PhotoClusterService {
       return;
     }
 
+    // A different source is a different library, so its starting position is
+    // derived again. Staying on the same scope keeps whatever the user chose.
+    if (scope != _current.scope) _userPickedGroupCount = false;
+
     state.add(_current.copyWith(
       scope: scope,
       clearError: true,
@@ -203,7 +215,8 @@ class PhotoClusterService {
     if (!forceRebuild) {
       final existing = await repo.latestReadyRun(scope);
       if (existing != null) {
-        await _adopt(repo, existing.id, applyDefaultGroupCount: true);
+        await _adopt(repo, existing.id,
+            applyDefaultGroupCount: !_userPickedGroupCount);
         return;
       }
     }
@@ -221,6 +234,7 @@ class PhotoClusterService {
   void setGroupCount(int k) {
     final st = _current;
     if (st.tree == null) return;
+    _userPickedGroupCount = true;
     state.add(st.copyWith(groupCount: k.clamp(1, st.sliderMax)));
   }
 
@@ -366,7 +380,8 @@ class PhotoClusterService {
         maxGroups: maxGroups,
         onProgress: (p) => state.add(_current.copyWith(progress: p)),
       );
-      await _adopt(repo, run.id, applyDefaultGroupCount: true);
+      await _adopt(repo, run.id,
+          applyDefaultGroupCount: !_userPickedGroupCount);
     } on ClusteringFailure catch (e) {
       logger.w('PhotoClusterService: clustering failed — ${e.message}');
       state.add(_current.copyWith(isBuilding: false, error: e.message));

@@ -330,6 +330,38 @@ void main() {
     });
   });
 
+  group('the slider position survives a rebuild', () {
+    // Reported from the app: slider moved to 82, Regroup pressed, view came
+    // back at 35 — the derived starting position, recomputed over the top of a
+    // deliberate choice.
+    test('a user-set count is not recomputed on reload', () {
+      seedState(groupCount: 3);
+      service.setGroupCount(2);
+      expect(service.state.value.groupCount, 2);
+
+      // What _adopt does on a reload that is not a first show.
+      service.state.add(service.state.value.copyWith(tree: _tree()));
+      expect(service.state.value.groupCount, 2,
+          reason: 'a regroup must keep the number the user chose');
+    });
+
+    // The worse case behind the same bug. Dragging past the tree's capacity
+    // triggers a rebuild precisely so the finer cut becomes reachable; resetting
+    // to the default there would put it permanently out of reach.
+    test('over-asking then rebuilding keeps the requested count', () {
+      seedState(groupCount: 3);
+      service.setGroupCount(40);
+      expect(service.state.value.groupCount, 40);
+      expect(service.state.value.needsDeeperTree, isTrue);
+
+      // A deeper tree arrives; the request must still stand.
+      service.state.add(service.state.value.copyWith(
+        tree: _tree(runMaxGroups: kClusterMinCeiling),
+      ));
+      expect(service.state.value.groupCount, 40);
+    });
+  });
+
   group('ClusterScope.fromFilter', () {
     test('All Photos when no collection is selected', () {
       expect(ClusterScope.fromFilter(const PhotoFilter()).isAll, isTrue);
