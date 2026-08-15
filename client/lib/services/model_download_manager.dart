@@ -1,3 +1,4 @@
+import 'package:mydatastudio/app_constants.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -66,7 +67,7 @@ class ModelDownloadManager {
 
   static final ValueNotifier<List<ModelDownloadItem>> items = ValueNotifier([
     ModelDownloadItem(
-      alias: 'gemma4:12b',
+      alias: AppConstants.defaultChatModelAlias,
       label: 'Gemma 4 12B (chat model)',
       hfRepo: 'ggml-org/gemma-4-12B-it-GGUF',
       filename: 'gemma-4-12B-it-Q4_0.gguf',

@@ -3,6 +3,21 @@ class AppConstants {
   static const String configFileName = "config.json";
   static const String dbName = "mydata.db"; //sqlite
 
+  /// Alias of the model the client downloads at startup and uses for every
+  /// on-device generation task: chat, file descriptions, and photo group
+  /// labels.
+  ///
+  /// One constant because the alias was previously repeated at every call site,
+  /// which meant upgrading the bundled model quietly left some features on the
+  /// old one. Anything generating from the user's own data should name this
+  /// rather than a literal, so a model upgrade is a single edit here.
+  ///
+  /// Note this is only the alias. The Hugging Face repo and GGUF filenames that
+  /// go with it still live in `ModelDownloadManager.items` and the
+  /// `aichat_models` seed in `database_manager.dart`, so a model upgrade means
+  /// changing those too.
+  static const String defaultChatModelAlias = 'gemma4:12b';
+
   //DB Constants
   static const int schemaVersion = 2;
   static const bool shouldDeleteIfMigrationNeeded = true;

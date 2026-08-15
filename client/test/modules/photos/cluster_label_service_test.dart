@@ -8,7 +8,9 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/services/model_download_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -96,6 +98,7 @@ void main() {
   });
 
   _labellingPipelineTests();
+  _modelPinningTests();
 }
 
 void _labellingPipelineTests() {
@@ -211,14 +214,60 @@ void _labellingPipelineTests() {
       }
     });
 
+    /// Points the registry's vision model at a cloud provider.
+    Future<void> makeLabelModelCloud(String group) async {
+      await db.execute('UPDATE aichat_models SET "group" = ? WHERE alias = ?',
+          [group, kLabelModelAlias]);
+    }
+
+    // The user's photos must never leave the machine for the sake of a caption.
+    // If the configured vision model has been repointed at a cloud provider,
+    // labelling stops rather than uploading a personal library.
+    test('refuses to label through a cloud provider', () async {
+      await seedRun();
+      await makeLabelModelCloud('gemini');
+
+      var calls = 0;
+      final client = MockClient((_) async {
+        calls++;
+        return http.Response('{}', 200);
+      });
+
+      await ClusterLabelService.instance.labelRun(repo, runId, client: client);
+
+      expect(calls, 0, reason: 'no request may be sent to a cloud model');
+      for (final g in (await repo.loadTree(runId))!.allGroups) {
+        expect(g.labelStatus, ClusterLabelStatus.pending,
+            reason: 'nothing is marked failed — this is a config issue');
+      }
+    });
+
+    test('refuses when the vision model is missing from the registry',
+        () async {
+      await seedRun();
+      await db.execute('DELETE FROM aichat_models WHERE alias = ?',
+          [kLabelModelAlias]);
+
+      var calls = 0;
+      final client = MockClient((_) async {
+        calls++;
+        return http.Response('{}', 200);
+      });
+
+      await ClusterLabelService.instance.labelRun(repo, runId, client: client);
+      expect(calls, 0, reason: 'cannot verify locality, so send nothing');
+    });
+
     test('labels every group, largest first, and persists as it goes',
         () async {
       await seedRun();
       final labelled = <String>[];
       final sentImageCounts = <int>[];
+      final sentModels = <String?>[];
 
       final client = MockClient((request) async {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
+        sentModels.add(body['model'] as String?);
         final content =
             (body['messages'] as List).first['content'] as List;
         sentImageCounts
@@ -247,6 +296,11 @@ void _labellingPipelineTests() {
       expect(byId[1]!.labelStatus, ClusterLabelStatus.ready);
       expect(byId[2]!.labelStatus, ClusterLabelStatus.ready);
       expect(sentImageCounts, [3, 2, 1]);
+
+      // The model is named by this caller, not inherited from the server's
+      // default — otherwise where these photos go depends on a setting this
+      // code does not control.
+      expect(sentModels, everyElement(kLabelModelAlias));
 
       // Biggest group first: node 0 (3 members), then 1 (2), then 2 (1).
       expect(byId[0]!.label, 'Group 1');
@@ -421,6 +475,24 @@ void _labellingPipelineTests() {
         for (final g in (await repo.loadTree(runId))!.allGroups) g.nodeId: g
       };
       expect(byId[0]!.labelStatus, ClusterLabelStatus.skipped);
+    });
+  });
+}
+
+void _modelPinningTests() {
+  // The alias used to be repeated at every call site, so upgrading the bundled
+  // model left some features pinned to a version nobody downloads any more.
+  // Labelling must follow whatever the client actually ships.
+  group('label model follows the client default', () {
+    test('is the app-wide default alias, not a local literal', () {
+      expect(kLabelModelAlias, AppConstants.defaultChatModelAlias);
+    });
+
+    test('is the alias the startup downloader fetches', () {
+      final downloaded =
+          ModelDownloadManager.items.value.map((i) => i.alias).toList();
+      expect(downloaded, contains(kLabelModelAlias),
+          reason: 'labelling would name a model the client never downloads');
     });
   });
 }

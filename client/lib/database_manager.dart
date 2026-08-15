@@ -950,7 +950,7 @@ class AppDatabase {
       // enables this row once the download completes.
       {
         'id': const Uuid().v4(),
-        'alias': 'gemma4:12b',
+        'alias': AppConstants.defaultChatModelAlias,
         'group': 'local',
         'name': 'Gemma 4 12B',
         'type': 'gguf',

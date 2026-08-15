@@ -1,3 +1,4 @@
+import 'package:mydatastudio/app_constants.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
@@ -19,7 +20,7 @@ import 'package:path/path.dart' as p;
 /// Matches `DEFAULT_MODEL_ALIAS` in aiserver/src/aichat/config.py — omitting
 /// `model` from the chat completion request already gets this, but the
 /// model-status readiness check needs the alias to look up its hf_repo/file.
-const _kDefaultChatModelAlias = 'gemma4:12b';
+const _kDefaultChatModelAlias = AppConstants.defaultChatModelAlias;
 
 const _kDescriptionPrompt =
     'Look at this image and respond with JSON only, matching the given '

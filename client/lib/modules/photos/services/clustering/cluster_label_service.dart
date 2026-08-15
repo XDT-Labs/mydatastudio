@@ -3,11 +3,27 @@ import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:http/http.dart' as http;
+import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/modules/photos/models/photo_cluster.dart';
 import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_repository.dart';
+
+/// The model group labelling will talk to. Anything else is a cloud provider.
+const String _kLocalModelGroup = 'local';
+
+/// Alias of the vision model used for group labels.
+///
+/// Follows the client's own default model rather than naming one here, so
+/// upgrading the bundled model moves labelling with it instead of leaving this
+/// feature quietly pinned to a version nobody downloads any more.
+///
+/// Still sent explicitly on every request rather than letting the server fall
+/// back to its own default: labelling ships the user's personal photos to
+/// whatever answers, so which model that is has to be stated by the caller.
+const String kLabelModelAlias = AppConstants.defaultChatModelAlias;
 
 const String _kLabelPrompt = '''
 These images all belong to one group in a personal photo library.
@@ -88,6 +104,19 @@ class ClusterLabelService {
     final httpClient = client ?? http.Client();
 
     try {
+      // Refuse to label through a cloud provider. This app is local-first and
+      // these are the user's photos: if the configured vision model has been
+      // pointed at Gemini/Claude/OpenAI/Grok, labelling stops rather than
+      // uploading a personal library to a third party for the sake of a
+      // caption. Groups stay "Group N", which costs the user nothing.
+      if (!await _labelModelIsLocal()) {
+        logger.w(
+          'ClusterLabelService: $kLabelModelAlias is not a local model — '
+          'skipping labelling rather than sending photos off-device',
+        );
+        return;
+      }
+
       final tree = await repo.loadTree(runId);
       if (tree == null) return;
 
@@ -158,6 +187,26 @@ class ClusterLabelService {
     }
   }
 
+  /// Whether [kLabelModelAlias] resolves to a locally-run model.
+  ///
+  /// Absent or unreadable registry counts as not local: the safe answer when
+  /// we cannot tell is the one that does not send photos anywhere.
+  Future<bool> _labelModelIsLocal() async {
+    final db = DatabaseManager.instance.database;
+    if (db == null) return false;
+    try {
+      final rows = await db.select(
+        'SELECT "group" FROM aichat_models WHERE alias = ? LIMIT 1',
+        [kLabelModelAlias],
+      );
+      if (rows.isEmpty) return false;
+      return rows.first['group'] == _kLocalModelGroup;
+    } catch (e) {
+      logger.w('ClusterLabelService: could not verify label model: $e');
+      return false;
+    }
+  }
+
   /// Stops after the in-flight label. Called when the user switches to a
   /// different run, whose labels matter more than finishing this one.
   void cancel() => _cancelled = true;
@@ -218,9 +267,10 @@ class ClusterLabelService {
               ...aiServerAuthHeaders(serviceToken),
             },
             body: jsonEncode({
-              // No 'model': the server defaults to the vision-capable model
-              // configured as DEFAULT_MODEL_ALIAS, same as the description
-              // isolate relies on.
+              // Named explicitly. Omitting it would inherit the server's
+              // DEFAULT_MODEL_ALIAS, which makes where these photos go depend
+              // on a default this code does not control.
+              'model': kLabelModelAlias,
               'messages': [
                 {
                   'role': 'user',
