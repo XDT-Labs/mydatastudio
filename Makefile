@@ -99,7 +99,7 @@ pdfium:
 	else \
 		mkdir -p $(PDFIUM_DIR); \
 		echo "Downloading $(PDFIUM_ASSET) ($(PDFIUM_RELEASE))..."; \
-		curl -sSL -o /tmp/$(PDFIUM_ASSET) $(PDFIUM_URL); \
+		curl -sSLf -o /tmp/$(PDFIUM_ASSET) $(PDFIUM_URL) && \
 		tar xzf /tmp/$(PDFIUM_ASSET) -C $(PDFIUM_DIR) lib/libpdfium.dylib; \
 		rm -f /tmp/$(PDFIUM_ASSET); \
 	fi
