@@ -799,6 +799,14 @@ class AppDatabase {
         // this" and "the user doesn't want to see this", so hiding gets its
         // own column that no scanner writes.
         'is_hidden': 'INTEGER NOT NULL DEFAULT 0',
+        // How many times EmbeddingIsolate has tried and failed to embed this
+        // file for reasons the file itself causes — a truncated JPEG, bytes
+        // that are not an image at all, a path that no longer exists. Mirrors
+        // `description_attempts`, and for the same reason: without it
+        // getFilesWithMissingEmbeddings re-selects a file that can never
+        // succeed on every pass, so a couple of bad attachments produce an
+        // endless stream of identical parse errors in the log.
+        'embedding_attempts': 'INTEGER NOT NULL DEFAULT 0',
       },
       'albums': {
         'description': 'TEXT',

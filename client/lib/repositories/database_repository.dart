@@ -228,6 +228,12 @@ class DatabaseRepository {
   /// per image and buys nothing: they are only ever looked at inside the email
   /// they decorate, and an HTML newsletter carries a dozen apiece. Worse, they
   /// then pollute similarity search. See `InlineAttachment`.
+  /// Give up on a file after this many failures caused by the file itself.
+  ///
+  /// Only permanent failures count — see [incrementEmbeddingAttempts] — so this
+  /// is a guard against unreadable files, not against an aiserver outage.
+  static const maxEmbeddingAttempts = 5;
+
   Future<List<File>> getFilesWithMissingEmbeddings({int limit = 10}) async {
     final rows = await db.select(
       '''
@@ -240,9 +246,10 @@ class DatabaseRepository {
         AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
         AND f.is_deleted = 0
         AND f.is_inline = 0
+        AND f.embedding_attempts < ?
       LIMIT ?
       ''',
-      [limit],
+      [maxEmbeddingAttempts, limit],
     );
     return _filesWithResolvedPaths(rows);
   }
@@ -274,6 +281,23 @@ class DatabaseRepository {
       [maxDescriptionAttempts, limit],
     );
     return _filesWithResolvedPaths(rows);
+  }
+
+  /// Records a failed embedding attempt for [fileId] so
+  /// [getFilesWithMissingEmbeddings] eventually stops re-selecting a file that
+  /// can never succeed.
+  ///
+  /// Only for failures the file itself causes — an unreadable or non-image
+  /// payload, a path that has gone. A failure that says nothing about the file,
+  /// such as the aiserver being down, must not count: it would spend the budget
+  /// on every photo in the library during a single outage and permanently
+  /// exclude them all.
+  Future<void> incrementEmbeddingAttempts(String fileId) async {
+    await db.execute(
+      'UPDATE files SET embedding_attempts = embedding_attempts + 1 '
+      'WHERE id = ?',
+      [fileId],
+    );
   }
 
   /// Records a failed description-generation attempt for [fileId] so

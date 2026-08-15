@@ -13,6 +13,14 @@ import 'package:mydatastudio/services/embedding_message_handler.dart';
 import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 
+/// Why an embedding attempt did not produce a vector.
+///
+/// The distinction decides whether the file's attempt counter moves. A file the
+/// server cannot parse will fail identically forever and should eventually be
+/// dropped; a server that is down says nothing about the file, and counting
+/// that would spend every photo's budget during one outage.
+enum EmbeddingOutcome { ok, unusable, unreachable }
+
 class EmbeddingIsolate {
   Isolate? _isolate;
   ReceivePort? _receivePort;
@@ -104,6 +112,15 @@ class EmbeddingIsolate {
               return;
             }
             await handleEmbeddingMessage(repo, data, logger);
+          });
+        } else if (type == 'embeddingFailed') {
+          // Records a failed attempt so a file that can never be parsed
+          // eventually drops out of getFilesWithMissingEmbeddings instead of
+          // being retried on every pass — see maxEmbeddingAttempts.
+          _writeQueue.add(() async {
+            final repo = DatabaseManager.instance.repository;
+            if (repo == null) return;
+            await repo.incrementEmbeddingAttempts(data['id'] as String);
           });
         }
       }
@@ -250,16 +267,18 @@ class EmbeddingIsolate {
           try {
             final start = DateTime.now();
             final bytes = await FileBytesLoader.load(file, repo, logger);
-            final embedding =
-                bytes == null
-                    ? null
-                    : await _generateEmbedding(
-                      bytes,
-                      file.name,
-                      serviceUrl!,
-                      serviceToken,
-                      logger,
-                    );
+            // No bytes means the file is gone or unreadable — about the file,
+            // not the service, so it counts against the attempt budget.
+            final result = bytes == null
+                ? (outcome: EmbeddingOutcome.unusable, embedding: null)
+                : await _generateEmbedding(
+                    bytes,
+                    file.name,
+                    serviceUrl!,
+                    serviceToken,
+                    logger,
+                  );
+            final embedding = result.embedding;
             final duration = DateTime.now().difference(start);
             logger.d("Processed file ${file.path} in $duration");
 
@@ -283,6 +302,14 @@ class EmbeddingIsolate {
                 'embedding': embedding,
               });
               logger.d("Sent embedding for file: ${file.path}");
+            } else if (result.outcome == EmbeddingOutcome.unusable) {
+              // The server read the request and rejected this image — a
+              // truncated JPEG, or bytes that are not an image at all. It will
+              // fail the same way every pass, so count it; after
+              // maxEmbeddingAttempts the file stops being re-selected and stops
+              // filling the log with the identical parse error.
+              replyTo.send({'type': 'embeddingFailed', 'id': file.id});
+              logger.w("Unreadable image, counted attempt: ${file.path}");
             } else {
               logger.w("Skipped unprocessable file: ${file.path}");
             }
@@ -340,7 +367,8 @@ class EmbeddingIsolate {
     }
   }
 
-  static Future<List<double>?> _generateEmbedding(
+  static Future<({EmbeddingOutcome outcome, List<double>? embedding})>
+      _generateEmbedding(
     List<int> bytes,
     String filename,
     String serviceUrl,
@@ -366,16 +394,26 @@ class EmbeddingIsolate {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final List<dynamic> embData = data['embedding'];
-        return embData.cast<double>();
-      } else {
-        logger.e(
-          "Python service error: ${response.statusCode} ${response.body}",
-        );
-        return null;
+        return (outcome: EmbeddingOutcome.ok, embedding: embData.cast<double>());
       }
+
+      logger.e(
+        "Python service error: ${response.statusCode} ${response.body}",
+      );
+      // 400 is the endpoint's answer for an image it could not decode — it
+      // maps the parse ValueError to a 400 — so that is a verdict on this
+      // file. 503 (model still downloading) and 5xx are about the service.
+      return (
+        outcome: response.statusCode == 400
+            ? EmbeddingOutcome.unusable
+            : EmbeddingOutcome.unreachable,
+        embedding: null,
+      );
     } catch (e) {
+      // Connection refused, timeout, malformed response — all about the
+      // service, none about the file.
       logger.e("Error calling Python embedding service: $e");
-      return null;
+      return (outcome: EmbeddingOutcome.unreachable, embedding: null);
     }
   }
 
