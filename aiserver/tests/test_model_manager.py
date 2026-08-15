@@ -352,3 +352,55 @@ class TestMtmdLogFilter:
 
         log_filter.should_emit(GGML_LOG_LEVEL_WARN)
         assert not log_filter.should_emit(GGML_LOG_LEVEL_CONT)
+
+
+class TestQuietMtmdLoggingCallback:
+    """The callback native code calls into, once libmtmd's loggers are ours."""
+
+    @staticmethod
+    def _install():
+        """Run quiet_mtmd_logging with the native setters stubbed, and return
+        the callback it handed them."""
+        import aichat.model_manager as mm
+
+        captured = []
+        mm._mtmd_log_callback = None
+        try:
+            with patch('llama_cpp.mtmd_cpp.mtmd_log_set') as log_set, \
+                 patch('llama_cpp.mtmd_cpp.mtmd_helper_log_set') as helper_set:
+                mm.quiet_mtmd_logging()
+                captured.append(log_set.call_args[0][0])
+                # Both of libmtmd's loggers have to be claimed: clip's output
+                # goes through one and mtmd-helper's per-image progress through
+                # the other, and missing either leaves half the noise.
+                assert helper_set.called
+        finally:
+            mm._mtmd_log_callback = None
+        return captured[0]
+
+    def test_a_broken_stderr_does_not_escape_into_native_code(self):
+        """CPython answers an exception here by dumping a traceback to stderr
+        for every line — worse than the output being suppressed, and the pipe
+        to Flutter dying is exactly how it would start happening."""
+        forward = self._install()
+
+        with patch('sys.stderr') as fake_stderr:
+            fake_stderr.write.side_effect = BrokenPipeError("client is gone")
+            forward(GGML_LOG_LEVEL_ERROR, b"vision encode failed\n", None)
+
+    def test_a_null_message_does_not_escape_either(self):
+        """ctypes hands a NULL char* over as None, which has no .decode."""
+        forward = self._install()
+
+        forward(GGML_LOG_LEVEL_ERROR, None, None)
+
+    def test_errors_still_reach_stderr(self):
+        """The guard must not turn into a blanket mute — this is the one level
+        that survives the filter, so it has to actually come out."""
+        forward = self._install()
+
+        with patch('sys.stderr') as fake_stderr:
+            forward(GGML_LOG_LEVEL_ERROR, b"vision encode failed\n", None)
+            forward(GGML_LOG_LEVEL_WARN, b"image slice encoded in 173 ms\n", None)
+
+        fake_stderr.write.assert_called_once_with("vision encode failed\n")

@@ -95,9 +95,21 @@ def quiet_mtmd_logging() -> None:
 
         @llama_cpp.llama_log_callback
         def forward(level: int, text: bytes, user_data):
-            if log_filter.should_emit(level):
-                sys.stderr.write(text.decode("utf-8", "replace"))
-                sys.stderr.flush()
+            # Nothing may escape. Native code calls straight into here, and
+            # CPython answers an exception at that boundary by writing an
+            # "Exception ignored on calling ctypes callback function"
+            # traceback to stderr — several lines per image, which is worse
+            # than the output this exists to suppress. stderr is the likely
+            # culprit too: it is a pipe to Flutter, so a client that has gone
+            # away turns every write into a BrokenPipeError, and the traceback
+            # would go down the same dead pipe. A dropped log line is the
+            # cheapest possible failure here.
+            try:
+                if log_filter.should_emit(level) and text:
+                    sys.stderr.write(text.decode("utf-8", "replace"))
+                    sys.stderr.flush()
+            except Exception:
+                pass
 
         _mtmd_log_callback = forward
         mtmd_cpp.mtmd_log_set(forward, ctypes.c_void_p(0))
