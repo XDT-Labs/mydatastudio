@@ -3,7 +3,7 @@ import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:rxdart/rxdart.dart';
 
-enum PhotoViewMode { grid, list, map }
+enum PhotoViewMode { grid, list, map, clusters }
 
 class ViewStateService {
   static final ViewStateService _instance = ViewStateService._();

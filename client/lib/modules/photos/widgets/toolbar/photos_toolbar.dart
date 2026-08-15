@@ -4,6 +4,7 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/services/batch_action_service.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
+import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/dialogs/album_modal.dart';
@@ -219,6 +220,12 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
               ],
             ],
 
+            if (_currentViewMode == PhotoViewMode.clusters &&
+                constraints.maxWidth >= 650) ...[
+              const SizedBox(width: 8),
+              const _GroupCountSlider(),
+            ],
+
             const Spacer(),
 
             // View Mode SegmentedButton
@@ -238,6 +245,11 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
                   value: PhotoViewMode.map,
                   icon: Icon(Icons.map, size: 18),
                   tooltip: 'Map View',
+                ),
+                ButtonSegment<PhotoViewMode>(
+                  value: PhotoViewMode.clusters,
+                  icon: Icon(Icons.workspaces_outline, size: 18),
+                  tooltip: 'Group by Similarity',
                 ),
               ],
               selected: {_currentViewMode},
@@ -347,6 +359,91 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
       child: isBatchMode
           ? _buildBatchToolbar(context)
           : _buildNormalToolbar(context),
+    );
+  }
+}
+
+/// Slider controlling how many groups the cluster view shows.
+///
+/// Changing it re-cuts the stored split tree in memory — no query, no
+/// re-clustering — so it updates live on drag rather than waiting for release.
+/// That is the whole reason the clustering is bisecting rather than flat: with
+/// flat k-means each notch would be an independent solve, and photos would
+/// scatter across the grid as the user dragged.
+class _GroupCountSlider extends StatefulWidget {
+  const _GroupCountSlider();
+
+  @override
+  State<_GroupCountSlider> createState() => _GroupCountSliderState();
+}
+
+class _GroupCountSliderState extends State<_GroupCountSlider> {
+  StreamSubscription<ClusterViewState>? _sub;
+  ClusterViewState _state = const ClusterViewState();
+
+  @override
+  void initState() {
+    super.initState();
+    _state = PhotoClusterService.instance.state.value;
+    _sub = PhotoClusterService.instance.state.listen((s) {
+      if (mounted) setState(() => _state = s);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    // Nothing to cut until a run exists, and a one-group tree has no choice to
+    // offer — showing a dead control in either case just invites confusion.
+    if (!_state.hasRun || _state.maxGroups < 2) return const SizedBox.shrink();
+
+    return Tooltip(
+      message: 'Number of groups',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.workspaces_outline,
+              size: 16, color: colorScheme.onSurfaceVariant),
+          const SizedBox(width: 4),
+          SizedBox(
+            width: 120,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              ),
+              child: Slider(
+                value: _state.groupCount
+                    .clamp(1, _state.maxGroups)
+                    .toDouble(),
+                min: 1,
+                max: _state.maxGroups.toDouble(),
+                divisions: _state.maxGroups - 1,
+                label: '${_state.groupCount}',
+                onChanged: (val) =>
+                    PhotoClusterService.instance.setGroupCount(val.round()),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 24,
+            child: Text(
+              '${_state.groupCount}',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: colorScheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

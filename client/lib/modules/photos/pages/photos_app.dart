@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/photos/models/photo_cluster.dart';
+import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_service.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
@@ -10,6 +12,7 @@ import 'package:mydatastudio/modules/photos/widgets/sidebar/info_sidebar.dart';
 import 'package:mydatastudio/modules/photos/widgets/toolbar/photos_toolbar.dart';
 import 'package:mydatastudio/modules/photos/widgets/viewer/fullscreen_viewer.dart';
 import 'package:mydatastudio/modules/photos/widgets/keyboard_shortcut_handler.dart';
+import 'package:mydatastudio/modules/photos/widgets/views/photo_cluster_view.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_grid.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_list_view.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_map_view.dart';
@@ -57,6 +60,7 @@ class _PhotosAppState extends State<PhotosApp> {
 
     _viewModeSub = ViewStateService.instance.viewMode.listen((mode) {
       if (mounted) setState(() => _viewMode = mode);
+      if (mode == PhotoViewMode.clusters) _syncClusterScope();
     });
 
     _photosSub = PhotosService.instance.sink.listen((files) {
@@ -77,11 +81,17 @@ class _PhotosAppState extends State<PhotosApp> {
 
     _filterSub = ViewStateService.instance.activeFilter.listen((filter) {
       PhotosService.instance.invoke(PhotosServiceCommand(filter));
+      if (_viewMode == PhotoViewMode.clusters) _syncClusterScope();
     });
 
     _selectionSub = SelectionService.instance.selectedIds.listen((ids) {
       if (mounted) setState(() => _selectedIds = ids);
     });
+
+    // The view-mode subscription only fires on change, so a session that opens
+    // straight into the cluster view would otherwise sit on "No groups yet"
+    // until the user touched the filter.
+    if (_viewMode == PhotoViewMode.clusters) _syncClusterScope();
   }
 
   @override
@@ -94,6 +104,22 @@ class _PhotosAppState extends State<PhotosApp> {
     _filterSub?.cancel();
     _selectionSub?.cancel();
     super.dispose();
+  }
+
+  /// Points the cluster view at the run for whatever source is selected.
+  ///
+  /// The cluster view is a view, not a separate library: All Photos groups
+  /// every source together, and picking one source groups only that source.
+  /// A run already built for a scope is reused, so switching back to a source
+  /// visited earlier is instant rather than a re-clustering pass.
+  void _syncClusterScope() {
+    final filter = ViewStateService.instance.activeFilter.value;
+    final scope = ClusterScope.fromFilter(filter);
+    if (PhotoClusterService.instance.state.value.scope == scope &&
+        PhotoClusterService.instance.state.value.hasRun) {
+      return;
+    }
+    PhotoClusterService.instance.load(scope);
   }
 
   Widget _buildActiveView() {
@@ -111,6 +137,11 @@ class _PhotosAppState extends State<PhotosApp> {
       case PhotoViewMode.map:
         return PhotoMapView(
           files: _geoFiles,
+          selectedIds: _selectedIds,
+        );
+      case PhotoViewMode.clusters:
+        return PhotoClusterView(
+          files: _files,
           selectedIds: _selectedIds,
         );
     }

@@ -12,6 +12,8 @@ library;
 
 import 'dart:typed_data';
 
+import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
+
 /// How a run's photo set was scoped — the drawer's source filter at the time.
 ///
 /// `null` collection ids mean All Photos. Anything else is the selected
@@ -36,6 +38,24 @@ class ClusterScope {
   static ClusterScope fromKey(String? key) {
     if (key == null || key.isEmpty) return const ClusterScope.all();
     return ClusterScope(key.split(','));
+  }
+
+  /// The scope implied by the drawer's current source filter.
+  ///
+  /// Only the collection selection is carried over. Narrowing by album, tag,
+  /// location, favourites or search does not start a new run: those pick a
+  /// subset of photos out of a source, and re-clustering per search term would
+  /// mean a fresh tree — and a fresh set of AI labels — on every keystroke.
+  /// The run stays scoped to the source; the view shows whichever of its
+  /// photos survive the rest of the filter.
+  factory ClusterScope.fromFilter(PhotoFilter filter) {
+    if (filter.collectionIds != null && filter.collectionIds!.isNotEmpty) {
+      return ClusterScope(filter.collectionIds!);
+    }
+    if (filter.collectionId != null) {
+      return ClusterScope([filter.collectionId!]);
+    }
+    return const ClusterScope.all();
   }
 
   @override
