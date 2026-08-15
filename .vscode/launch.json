@@ -40,30 +40,24 @@
             "name": "aichat server (python)",
             "type": "debugpy",
             "request": "launch",
+            "preLaunchTask": "Ensure aiserver venv",
             "program": "${workspaceFolder}/aiserver/main.py",
-            "console": "internalConsole",
+            "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/aiserver",
             "justMyCode": true,
             "python": "${workspaceFolder}/aiserver/.venv/bin/python",
-            "pythonPath": "${workspaceFolder}/aiserver/.venv/bin/python",
             "env": {
+                "PYTHONPATH": "${workspaceFolder}/aiserver/src",
                 "AICHAT_PORT": "8000",
-                "APP_SUPPORT_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev"
-            }
-        },
-        {
-            "name": "aichat server (python type)",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/aiserver/main.py",
-            "console": "internalConsole",
-            "cwd": "${workspaceFolder}/aiserver",
-            "justMyCode": true,
-            "python": "${workspaceFolder}/aiserver/.venv/bin/python",
-            "pythonPath": "${workspaceFolder}/aiserver/.venv/bin/python",
-            "env": {
-                "AICHAT_PORT": "8000",
-                "APP_SUPPORT_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev"
+                "APP_SUPPORT_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev",
+                // Must match PythonManager.modelsDirFor, which the packaged app
+                // passes as AICHAT_MODELS_DIR. Without it the server falls back
+                // to the legacy <support>/aichat/models, which on this machine
+                // still holds a 362 MB truncated gemma-4-12B download — so the
+                // dev server starts, fails to load the model, and every chat,
+                // description, and cluster-label request fails against a server
+                // that looks healthy.
+                "AICHAT_MODELS_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev/models"
             }
         },
         {
