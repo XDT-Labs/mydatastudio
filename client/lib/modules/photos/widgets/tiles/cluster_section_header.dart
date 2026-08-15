@@ -93,6 +93,10 @@ class ClusterSectionHeader extends StatelessWidget {
               ),
             ),
           ],
+          // Count and disclosure control sit together at the trailing edge, so
+          // they land in the same place on every row however long a generated
+          // label turns out to be.
+          const Spacer(),
           const SizedBox(width: 8),
           Text(
             '$itemCount ${itemCount == 1 ? 'item' : 'items'}',
@@ -101,7 +105,6 @@ class ClusterSectionHeader extends StatelessWidget {
             ),
           ),
           if (onToggleCollapsed != null) ...[
-            const SizedBox(width: 4),
             IconButton(
               // Points down when open and right when closed, the direction the
               // content is in — the disclosure convention users already read

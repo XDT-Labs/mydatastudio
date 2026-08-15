@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/app_logger.dart';
@@ -10,19 +11,52 @@ import 'package:mydatastudio/modules/photos/services/clustering/clustering_isola
 import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_repository.dart';
 import 'package:rxdart/rxdart.dart';
 
-/// Ceiling on how many groups a run can be cut into — the slider's upper bound.
+/// Smallest ceiling the slider ever offers.
 ///
-/// Built up front rather than grown on demand. Clustering cost is linear in
-/// photo count but only logarithmic in group count: on a 2,808-photo library,
-/// 16 groups took 2.4s and 96 took 3.6s, so reaching 100 costs a few hundred
-/// milliseconds once and makes every slider position instant. Growing the tree
-/// when the user drags past its end would trade that for a multi-second stall
-/// mid-gesture, and would invalidate every label each time it rebuilt.
+/// Trees are built to their ceiling up front rather than grown on demand.
+/// Clustering cost is linear in photo count but only logarithmic in group
+/// count: on a 2,808-photo library, 16 groups took 2.4s and 96 took 3.6s, so
+/// reaching 100 costs a few hundred milliseconds once and makes every slider
+/// position instant. Growing the tree when the user drags past its end would
+/// trade that for a multi-second stall mid-gesture and invalidate every label.
 ///
 /// A run tops out below this when the data runs out of meaningful splits —
 /// identical or near-identical photos cannot be divided further — and the
 /// slider then matches whatever the tree actually produced.
-const int kClusterMaxGroups = 100;
+const int kClusterMinCeiling = 100;
+
+/// Where the slider starts for a library of [photoCount] photos.
+///
+/// `sqrt(n/2)` rather than a fixed number, because a fixed number is wrong at
+/// both ends: 20 groups over 200 photos is coarse to the point of useless,
+/// and over 50,000 it is meaningless. The square root keeps average group size
+/// growing slowly with the library instead of exploding — 200 photos opens at
+/// 10 groups of ~20, 2,800 at 37 groups of ~76, 50,000 at 158 groups of ~316.
+///
+/// This is a starting position, not a claim about the right answer. The whole
+/// point of the slider is that the right number is a matter of what the user is
+/// looking for, so this only has to be somewhere reasonable to start dragging
+/// from.
+int defaultGroupCountFor(int photoCount) {
+  if (photoCount <= 2) return 1;
+  return math.max(1, math.sqrt(photoCount / 2).round());
+}
+
+/// The ceiling for a library of [photoCount] photos.
+///
+/// Never below [kClusterMinCeiling], and above it once the starting position
+/// alone would crowd the top of the track — a slider that opens at its own
+/// maximum offers movement in one direction only. Headroom is 20% over the
+/// default, rounded up to the next hundred so the number on the end of the
+/// track is a round one.
+///
+/// Note the cost this drives is labelling, not clustering. A ceiling of 300 is
+/// a 599-node tree, and a full labelling pass is one vision call per node.
+int maxGroupsFor(int photoCount) {
+  final withHeadroom = (defaultGroupCountFor(photoCount) * 1.2).ceil();
+  final rounded = ((withHeadroom + 99) ~/ 100) * 100;
+  return math.max(kClusterMinCeiling, rounded);
+}
 
 /// One group as the grid renders it: the stored node plus the photos in it.
 class ClusterGroupView {
@@ -89,9 +123,8 @@ class ClusterViewState {
   int get sliderMax {
     final run = tree?.run;
     if (run == null) return 1;
-    return run.maxGroups < kClusterMaxGroups
-        ? kClusterMaxGroups
-        : tree!.maxGroups;
+    final ceiling = maxGroupsFor(run.photoCount);
+    return run.maxGroups < ceiling ? ceiling : tree!.maxGroups;
   }
 
   /// Whether [groupCount] is finer than this tree can actually cut.
@@ -145,10 +178,12 @@ class PhotoClusterService {
   /// Set [forceRebuild] for the explicit "regroup" action — otherwise an
   /// existing ready run is reused, which is what makes switching back to a
   /// previously visited source instant.
+  /// [maxGroups] overrides the ceiling derived from the library's size; leave
+  /// it null outside tests.
   Future<void> load(
     ClusterScope scope, {
     bool forceRebuild = false,
-    int maxGroups = kClusterMaxGroups,
+    int? maxGroups,
   }) async {
     final db = DatabaseManager.instance.database;
     if (db == null) {
@@ -168,12 +203,13 @@ class PhotoClusterService {
     if (!forceRebuild) {
       final existing = await repo.latestReadyRun(scope);
       if (existing != null) {
-        await _adopt(repo, existing.id);
+        await _adopt(repo, existing.id, applyDefaultGroupCount: true);
         return;
       }
     }
 
-    await _build(repo, db, scope, maxGroups);
+    final photoCount = await repo.countPhotosInScope(scope);
+    await _build(repo, db, scope, maxGroups ?? maxGroupsFor(photoCount));
   }
 
   /// Moves the slider. Pure in-memory re-cut — no query, no clustering — so
@@ -247,6 +283,7 @@ class PhotoClusterService {
     PhotoClusterRepository repo,
     String runId, {
     bool startLabelling = true,
+    bool applyDefaultGroupCount = false,
   }) async {
     final tree = await repo.loadTree(runId);
     if (tree == null) {
@@ -254,10 +291,18 @@ class PhotoClusterService {
       return;
     }
     final membership = await repo.loadMembership(runId);
+
+    // Only when the run is first shown. _adopt also runs after every label
+    // lands, and recomputing there would yank the slider out from under a user
+    // mid-drag.
+    final groupCount = applyDefaultGroupCount
+        ? defaultGroupCountFor(tree.run.photoCount)
+        : _current.groupCount;
+
     state.add(_current.copyWith(
       tree: tree,
       membership: membership,
-      groupCount: _current.groupCount.clamp(1, tree.maxGroups),
+      groupCount: groupCount.clamp(1, tree.maxGroups),
       isBuilding: false,
       clearError: true,
     ));
@@ -321,7 +366,7 @@ class PhotoClusterService {
         maxGroups: maxGroups,
         onProgress: (p) => state.add(_current.copyWith(progress: p)),
       );
-      await _adopt(repo, run.id);
+      await _adopt(repo, run.id, applyDefaultGroupCount: true);
     } on ClusteringFailure catch (e) {
       logger.w('PhotoClusterService: clustering failed — ${e.message}');
       state.add(_current.copyWith(isBuilding: false, error: e.message));

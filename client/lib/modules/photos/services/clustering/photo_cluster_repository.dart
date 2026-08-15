@@ -95,6 +95,39 @@ class PhotoClusterRepository {
     );
   }
 
+  /// How many photos a run over [scope] would cover.
+  ///
+  /// Needed before clustering, because the tree's ceiling is derived from the
+  /// library's size and the tree has to be built to that ceiling in one pass.
+  /// Deliberately mirrors [loadEmbeddingsForScope]'s filters — a count that
+  /// disagreed with what actually gets clustered would size the slider for a
+  /// library that isn't there.
+  Future<int> countPhotosInScope(ClusterScope scope) async {
+    final ids = scope.isAll ? const <String>[] : scope.collectionIds!;
+    final scopeClause = ids.isEmpty
+        ? ''
+        : 'AND f.collection_id IN (${List.filled(ids.length, '?').join(',')})';
+
+    final rows = await db.select(
+      '''
+      SELECT count(*) AS c
+      FROM files_embeddings e
+      JOIN files f ON f.id = e.file_id
+      WHERE e.type = 'file'
+        AND e.qwen3_vl_embedding IS NOT NULL
+        AND f.is_deleted = 0
+        AND f.is_user_deleted = 0
+        AND f.is_hidden = 0
+        AND f.is_inline = 0
+        AND (f.content_type = 'application/image'
+             OR f.content_type LIKE 'image/%')
+        $scopeClause
+      ''',
+      [...ids],
+    );
+    return rows.isEmpty ? 0 : (rows.first['c'] as int? ?? 0);
+  }
+
   /// Persists a completed run: the run row, its tree, and one membership row
   /// per photo against its deepest leaf.
   ///

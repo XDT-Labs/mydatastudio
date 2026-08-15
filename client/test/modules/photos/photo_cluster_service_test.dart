@@ -247,12 +247,12 @@ void main() {
     // coarseness they cannot escape without knowing to press Regroup.
     test('offers the ceiling when the run could be rebuilt deeper', () {
       seedState(groupCount: 3);
-      expect(service.state.value.tree!.run.maxGroups, lessThan(kClusterMaxGroups));
-      expect(service.state.value.sliderMax, kClusterMaxGroups);
+      expect(service.state.value.tree!.run.maxGroups, lessThan(kClusterMinCeiling));
+      expect(service.state.value.sliderMax, kClusterMinCeiling);
     });
 
     test('offers real capacity once the run is built at the ceiling', () {
-      seedState(tree: _tree(runMaxGroups: kClusterMaxGroups), groupCount: 3);
+      seedState(tree: _tree(runMaxGroups: kClusterMinCeiling), groupCount: 3);
       // This fixture's tree only holds 3 groups, so that is what is offered —
       // no dead stretch at the end of the track.
       expect(service.state.value.sliderMax, 3);
@@ -284,13 +284,49 @@ void main() {
     test('clamps to the slider range and ignores calls with no run', () {
       seedState(membership: const {}, groupCount: 2);
       service.setGroupCount(9999);
-      expect(service.state.value.groupCount, kClusterMaxGroups);
+      expect(service.state.value.groupCount, kClusterMinCeiling);
       service.setGroupCount(0);
       expect(service.state.value.groupCount, 1);
 
       service.state.add(const ClusterViewState(groupCount: 7));
       service.setGroupCount(2);
       expect(service.state.value.groupCount, 7, reason: 'no tree to cut');
+    });
+  });
+
+  group('starting position and ceiling', () {
+    // A fixed starting number is wrong at both ends — 20 groups over 200 photos
+    // is uselessly coarse, and over 50,000 it is meaningless.
+    test('opens somewhere sensible for the size of the library', () {
+      expect(defaultGroupCountFor(200), 10);
+      expect(defaultGroupCountFor(2800), 37);
+      expect(defaultGroupCountFor(50000), 158);
+    });
+
+    test('degenerate libraries still produce a usable number', () {
+      expect(defaultGroupCountFor(0), 1);
+      expect(defaultGroupCountFor(1), 1);
+      expect(defaultGroupCountFor(2), 1);
+      expect(defaultGroupCountFor(8), 2);
+    });
+
+    // Below 20k the flat ceiling is plenty. Above it the starting position
+    // would otherwise sit at or past the end of the track, leaving the slider
+    // able to move in one direction only.
+    test('the ceiling only grows once the default would crowd it', () {
+      expect(maxGroupsFor(2800), kClusterMinCeiling);
+      expect(maxGroupsFor(10000), kClusterMinCeiling);
+      expect(maxGroupsFor(50000), 200);
+      expect(maxGroupsFor(100000), 300);
+      expect(maxGroupsFor(250000), 500);
+    });
+
+    test('the ceiling always leaves room above the starting position', () {
+      for (final n in [0, 50, 200, 2800, 20000, 50000, 100000, 250000]) {
+        expect(maxGroupsFor(n), greaterThan(defaultGroupCountFor(n)),
+            reason: 'a slider that opens at its own maximum only moves one way');
+        expect(maxGroupsFor(n) % 100, 0, reason: 'ceilings are round numbers');
+      }
     });
   });
 
