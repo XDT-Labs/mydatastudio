@@ -10,6 +10,7 @@ import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/modules/aichat/services/local_llm_content_generator.dart';
 import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/services/model_download_manager.dart';
+import 'package:mydatastudio/models/tables/aichat_message.dart';
 import 'package:mydatastudio/models/tables/aichat_model.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 import 'package:mydatastudio/repositories/aichat_repository.dart';
@@ -53,6 +54,36 @@ class TextMessageItem extends ChatItem {
 class GenUiSurfaceItem extends ChatItem {
   final String surfaceId;
   GenUiSurfaceItem({required this.surfaceId});
+}
+
+/// What a persisted conversation becomes when it is reopened: the turns to
+/// put on screen, and the history to hand the model.
+///
+/// The two are not the same list, and that difference is the whole reason this
+/// is a function rather than a loop inside the page. A `system` message is
+/// context, not a turn — the search handoff seeds one holding up to 60,000
+/// characters of source material behind a summary. The model must read it to
+/// answer "what was the technical question, and what was the answer"; showing
+/// it would bury the summary under material nobody asked to read.
+({List<TextMessageItem> transcript, List<Map<String, dynamic>> history})
+splitConversation(List<AichatMessage> messages) {
+  final transcript = <TextMessageItem>[];
+  final history = <Map<String, dynamic>>[];
+
+  for (final m in messages) {
+    final usage =
+        (m.tokenCount != null && m.tokenCount! > 0)
+            ? {'total_tokens': m.tokenCount!}
+            : null;
+    if (m.role != 'system') {
+      transcript.add(
+        TextMessageItem(role: m.role, text: m.content, usage: usage),
+      );
+    }
+    history.add({'role': m.role, 'content': m.content});
+  }
+
+  return (transcript: transcript, history: history);
 }
 
 class _AichatPage extends State<AichatPage> with RouteAware {
@@ -342,20 +373,8 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     if (!mounted) return;
 
     // Rebuild display list and LLM history from persisted messages
-    final chatItems = <TextMessageItem>[];
-    final llmHistory = <Map<String, dynamic>>[];
+    final (:transcript, :history) = splitConversation(messages);
     String conversationName = '';
-
-    for (final m in messages) {
-      final usage =
-          (m.tokenCount != null && m.tokenCount! > 0)
-              ? {'total_tokens': m.tokenCount!}
-              : null;
-      chatItems.add(
-        TextMessageItem(role: m.role, text: m.content, usage: usage),
-      );
-      llmHistory.add({'role': m.role, 'content': m.content});
-    }
 
     // Fetch the conversation name
     final rows = await DatabaseManager.instance.database?.select(
@@ -370,13 +389,13 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       }
     }
 
-    _contentGenerator.loadHistory(llmHistory);
+    _contentGenerator.loadHistory(history);
 
     setState(() {
       _conversationId = id;
       _chatItems
         ..clear()
-        ..addAll(chatItems);
+        ..addAll(transcript);
       _streamingText = null;
       _titleController.text = conversationName;
     });

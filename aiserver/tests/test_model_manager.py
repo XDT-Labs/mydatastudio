@@ -270,3 +270,70 @@ class TestModelManager:
             with pytest.raises(ValueError) as exc_info:
                 decode_base64_image(valid_b64)
             assert "Unable to locate Ghostscript" in str(exc_info.value)
+
+class TestMtmdLogSilencing:
+    """mtmd echoes every text chunk it tokenizes, at INFO, with the chunk's
+    full contents — so one document description put 62k characters of prompt
+    into the log. `verbose=False` does not reach it: the chat handler wraps its
+    *init* calls in `suppress_stdout_stderr` but not `mtmd_tokenize`, and mtmd
+    keeps its own logger rather than routing through `llama_log_set`.
+    """
+
+    def test_an_info_line_is_dropped(self, capsys):
+        """The whole point: this is where the prompt echo arrives."""
+        from aichat.model_manager import _forward_mtmd_log, _GGML_LOG_LEVEL_INFO
+
+        _forward_mtmd_log(_GGML_LOG_LEVEL_INFO, b"add_text: <the entire prompt>")
+
+        assert capsys.readouterr().err == ""
+
+    def test_a_warning_still_reaches_the_log(self, capsys):
+        """Silencing the echo must not silence the diagnostics. A model that
+        warns about its own state is the thing worth keeping."""
+        from aichat.model_manager import _forward_mtmd_log, _GGML_LOG_LEVEL_WARN
+
+        _forward_mtmd_log(_GGML_LOG_LEVEL_WARN, b"clip: image too large\n")
+
+        assert "clip: image too large" in capsys.readouterr().err
+
+    def test_an_error_still_reaches_the_log(self, capsys):
+        from aichat.model_manager import _forward_mtmd_log, _GGML_LOG_LEVEL_ERROR
+
+        _forward_mtmd_log(_GGML_LOG_LEVEL_ERROR, b"failed to encode image\n")
+
+        assert "failed to encode image" in capsys.readouterr().err
+
+    def test_a_continuation_of_a_dropped_line_is_dropped_too(self, capsys):
+        """CONT continues whatever was logged last. Forwarding it after its
+        INFO parent was dropped would print orphaned fragments of the prompt —
+        the same leak in a form that reads like corruption."""
+        from aichat.model_manager import _forward_mtmd_log, _GGML_LOG_LEVEL_CONT
+
+        _forward_mtmd_log(_GGML_LOG_LEVEL_CONT, b"...rest of the prompt")
+
+        assert capsys.readouterr().err == ""
+
+    def test_the_callback_is_held_against_collection(self, monkeypatch):
+        """A ctypes trampoline that Python collects while C still holds the
+        pointer is a segfault during generation, not a quiet no-op — so the
+        installer must keep a reference and must not install twice."""
+        import aichat.model_manager as mm
+
+        installed = []
+
+        class _FakeMtmd:
+            def mtmd_log_set(self, cb, user_data):
+                installed.append(cb)
+
+            def mtmd_helper_log_set(self, cb, user_data):
+                installed.append(cb)
+
+        monkeypatch.setattr(mm, "_mtmd_log_sink", None)
+        monkeypatch.setattr(mm, "_import_mtmd", lambda: _FakeMtmd())
+
+        mm._silence_mtmd_logging()
+        mm._silence_mtmd_logging()
+
+        assert len(installed) == 2, "installed once, on both mtmd loggers"
+        assert mm._mtmd_log_sink is not None
+        assert all(cb is mm._mtmd_log_sink for cb in installed)

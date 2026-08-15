@@ -10,7 +10,6 @@ import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_grid.dart';
 import 'package:mydatastudio/app_logger.dart';
 
-
 /// Page for viewing details and files belonging to a specific Album.
 class AlbumDetailPage extends StatefulWidget {
   final String albumId;
@@ -82,7 +81,9 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     if (_album == null) return;
 
     final nameController = TextEditingController(text: _album!.name);
-    final descController = TextEditingController(text: _album!.description ?? '');
+    final descController = TextEditingController(
+      text: _album!.description ?? '',
+    );
 
     final result = await showDialog<bool>(
       context: context,
@@ -96,17 +97,13 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
               TextField(
                 controller: nameController,
                 autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Album Title',
-                ),
+                decoration: const InputDecoration(labelText: 'Album Title'),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: descController,
                 maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                ),
+                decoration: const InputDecoration(labelText: 'Description'),
               ),
             ],
           ),
@@ -183,9 +180,9 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     File? coverFile;
     if (_album?.coverFileId != null) {
       coverFile = _files.cast<File?>().firstWhere(
-            (f) => f?.id == _album!.coverFileId,
-            orElse: () => null,
-          );
+        (f) => f?.id == _album!.coverFileId,
+        orElse: () => null,
+      );
     }
     coverFile ??= _files.isNotEmpty ? _files.first : null;
 
@@ -194,10 +191,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerLow,
         border: Border(
-          bottom: BorderSide(
-            color: colorScheme.outlineVariant,
-            width: 1.0,
-          ),
+          bottom: BorderSide(color: colorScheme.outlineVariant, width: 1.0),
         ),
       ),
       child: Column(
@@ -245,30 +239,32 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                 borderRadius: BorderRadius.circular(12.0),
                 child: Builder(
                   builder: (context) {
-                    final coverProvider = coverFile != null
-                        ? ThumbnailResolver.providerFor(coverFile.thumbnail)
-                        : null;
+                    final coverProvider =
+                        coverFile != null
+                            ? ThumbnailResolver.providerFor(coverFile.thumbnail)
+                            : null;
                     return Container(
                       width: 96,
                       height: 96,
                       color: colorScheme.surfaceContainerHigh,
-                      child: coverProvider != null
-                          ? Image(
-                              image: coverProvider,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Icon(
-                                  Icons.collections_bookmark_outlined,
-                                  size: 48,
-                                  color: colorScheme.onSurfaceVariant,
-                                );
-                              },
-                            )
-                          : Icon(
-                              Icons.collections_bookmark_outlined,
-                              size: 48,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
+                      child:
+                          coverProvider != null
+                              ? Image(
+                                image: coverProvider,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Icon(
+                                    Icons.collections_bookmark_outlined,
+                                    size: 48,
+                                    color: colorScheme.onSurfaceVariant,
+                                  );
+                                },
+                              )
+                              : Icon(
+                                Icons.collections_bookmark_outlined,
+                                size: 48,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
                     );
                   },
                 ),
@@ -347,19 +343,17 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         children: [
           _buildHeader(context),
           Expanded(
-            child: _files.isEmpty
-                ? Center(
-                    child: Text(
-                      'No photos in this album yet',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                    ),
-                  )
-                : PhotoGrid(
-                    files: _files,
-                    selectedIds: _selectedIds,
-                  ),
+            child:
+                _files.isEmpty
+                    ? Center(
+                      child: Text(
+                        'No photos in this album yet',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                    : PhotoGrid(files: _files, selectedIds: _selectedIds),
           ),
         ],
       ),

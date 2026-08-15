@@ -56,8 +56,12 @@ class PhotosRepository {
     if (filter.collectionId != null) {
       q += " AND f.collection_id = ?";
       params.add(filter.collectionId);
-    } else if (filter.collectionIds != null && filter.collectionIds!.isNotEmpty) {
-      final placeholders = List.filled(filter.collectionIds!.length, '?').join(',');
+    } else if (filter.collectionIds != null &&
+        filter.collectionIds!.isNotEmpty) {
+      final placeholders = List.filled(
+        filter.collectionIds!.length,
+        '?',
+      ).join(',');
       q += " AND f.collection_id IN ($placeholders)";
       params.addAll(filter.collectionIds!);
     }
@@ -113,7 +117,6 @@ class PhotosRepository {
       case PhotoSortOrder.size:
         return " ORDER BY f.size DESC";
       case PhotoSortOrder.dateDesc:
-      default:
         return " ORDER BY f.date_created DESC";
     }
   }

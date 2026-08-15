@@ -71,10 +71,7 @@ class _TagsAndLandmarksSectionState extends State<TagsAndLandmarksSection> {
   Future<void> _addTag(String tag) async {
     if (mounted) setState(() => _tags = [..._tags, tag]..sort());
     try {
-      await DatabaseManager.instance.repository?.addFileTag(
-        widget.fileId,
-        tag,
-      );
+      await DatabaseManager.instance.repository?.addFileTag(widget.fileId, tag);
     } catch (_) {
       if (mounted) {
         setState(() => _tags = _tags.where((t) => t != tag).toList());

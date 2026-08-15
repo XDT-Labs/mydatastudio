@@ -136,10 +136,9 @@ class _FileDetailsDrawerState extends State<FileDetailsDrawer> {
         listener = ImageStreamListener(
           (ImageInfo info, bool _) {
             if (!completer.isCompleted) {
-              completer.complete(Size(
-                info.image.width.toDouble(),
-                info.image.height.toDouble(),
-              ));
+              completer.complete(
+                Size(info.image.width.toDouble(), info.image.height.toDouble()),
+              );
             }
           },
           onError: (exception, stackTrace) {

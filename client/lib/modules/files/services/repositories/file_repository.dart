@@ -160,9 +160,7 @@ class FileDesktopRepository {
     if (local != null && local.isNotEmpty) paths.add(local);
 
     final resolved =
-        collection != null
-            ? FilePathResolver.absolute(f, collection)
-            : f.path;
+        collection != null ? FilePathResolver.absolute(f, collection) : f.path;
     if (resolved.startsWith('gdrive://')) return paths;
     if (p.isAbsolute(resolved)) {
       paths.add(resolved);

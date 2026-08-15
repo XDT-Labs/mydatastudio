@@ -26,8 +26,11 @@ class ScannerPathHelper {
   ///
   /// If the result happens to be "." (i.e. absPath == collectionRoot), the
   /// method returns the basename of [absPath] for files, or '' for folders.
-  static String relativePath(String absPath, String collectionRoot,
-      {bool isFolder = false}) {
+  static String relativePath(
+    String absPath,
+    String collectionRoot, {
+    bool isFolder = false,
+  }) {
     absPath = normalisePath(absPath);
     collectionRoot = normalisePath(collectionRoot);
 

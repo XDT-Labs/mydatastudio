@@ -44,11 +44,25 @@
             "console": "internalConsole",
             "cwd": "${workspaceFolder}/aiserver",
             "justMyCode": true,
-            "python": "${workspaceFolder}/aiserver/.venv/bin/python",
-            "pythonPath": "${workspaceFolder}/aiserver/.venv/bin/python",
+            // No "python"/"pythonPath" override on purpose. Pinning the
+            // interpreter to ${workspaceFolder} breaks in a git worktree: pdm
+            // keeps one shared .venv in the main checkout, and the Python
+            // extension resolves a launch interpreter only against environments
+            // its discovery found — which skips hidden directories, so anything
+            // under .claude/worktrees/ is invisible to it. It then builds an
+            // empty command and the session dies as "Debug Stopped". Falling
+            // through to python.defaultInterpreterPath lets each window point at
+            // the one real venv. main.py adds its own directory to sys.path, so
+            // the worktree's source is what runs regardless of interpreter.
             "env": {
                 "AICHAT_PORT": "8000",
-                "APP_SUPPORT_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev"
+                "APP_SUPPORT_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev",
+                // Must match PythonManager.modelsDirFor — a sibling of aiserver/,
+                // not a child. Without this the service falls back to
+                // APP_SUPPORT_DIR/aichat/models, so a debug-launched server
+                // downloads its own second copy of every multi-GB model and
+                // then disagrees with the bundled app about what is installed.
+                "AICHAT_MODELS_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev/models"
             }
         },
         {
@@ -59,11 +73,20 @@
             "console": "internalConsole",
             "cwd": "${workspaceFolder}/aiserver",
             "justMyCode": true,
-            "python": "${workspaceFolder}/aiserver/.venv/bin/python",
-            "pythonPath": "${workspaceFolder}/aiserver/.venv/bin/python",
+            // No "python"/"pythonPath" override on purpose. Pinning the
+            // interpreter to ${workspaceFolder} breaks in a git worktree: pdm
+            // keeps one shared .venv in the main checkout, and the Python
+            // extension resolves a launch interpreter only against environments
+            // its discovery found — which skips hidden directories, so anything
+            // under .claude/worktrees/ is invisible to it. It then builds an
+            // empty command and the session dies as "Debug Stopped". Falling
+            // through to python.defaultInterpreterPath lets each window point at
+            // the one real venv. main.py adds its own directory to sys.path, so
+            // the worktree's source is what runs regardless of interpreter.
             "env": {
                 "AICHAT_PORT": "8000",
-                "APP_SUPPORT_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev"
+                "APP_SUPPORT_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev",
+                "AICHAT_MODELS_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev/models"
             }
         },
         {

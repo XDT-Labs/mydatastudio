@@ -48,7 +48,8 @@ class KeyboardShortcutHandler extends StatefulWidget {
   });
 
   @override
-  State<KeyboardShortcutHandler> createState() => _KeyboardShortcutHandlerState();
+  State<KeyboardShortcutHandler> createState() =>
+      _KeyboardShortcutHandlerState();
 }
 
 class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
@@ -89,9 +90,9 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
     final selectedIds = SelectionService.instance.selectedIds.value;
     if (selectedIds.isNotEmpty) {
       final selectedFile = files.cast<File?>().firstWhere(
-            (f) => f != null && selectedIds.contains(f.id),
-            orElse: () => null,
-          );
+        (f) => f != null && selectedIds.contains(f.id),
+        orElse: () => null,
+      );
       if (selectedFile != null) {
         ViewStateService.instance.openLightbox(selectedFile);
         return;
@@ -99,7 +100,9 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
     }
 
     if (ViewStateService.instance.infoMedia.value != null) {
-      ViewStateService.instance.openLightbox(ViewStateService.instance.infoMedia.value!);
+      ViewStateService.instance.openLightbox(
+        ViewStateService.instance.infoMedia.value!,
+      );
       return;
     }
 
@@ -138,24 +141,27 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
     final count = selectedIds.length;
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).colorScheme.surfaceContainer,
-        title: Text('Delete $count item(s)?'),
-        content: const Text('Are you sure you want to move selected photos to trash?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(ctx).colorScheme.error,
+      builder:
+          (ctx) => AlertDialog(
+            backgroundColor: Theme.of(ctx).colorScheme.surfaceContainer,
+            title: Text('Delete $count item(s)?'),
+            content: const Text(
+              'Are you sure you want to move selected photos to trash?',
             ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(ctx).colorScheme.error,
+                ),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Delete'),
+              ),
+            ],
           ),
-        ],
-      ),
     );
 
     if (confirm == true) {
@@ -187,7 +193,8 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
         LogicalKeySet(LogicalKeyboardKey.escape): const EscapeIntent(),
         LogicalKeySet(LogicalKeyboardKey.keyF): const ToggleFavoriteIntent(),
         LogicalKeySet(LogicalKeyboardKey.delete): const DeleteSelectedIntent(),
-        LogicalKeySet(LogicalKeyboardKey.backspace): const DeleteSelectedIntent(),
+        LogicalKeySet(LogicalKeyboardKey.backspace):
+            const DeleteSelectedIntent(),
         LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyA):
             const SelectAllIntent(),
         LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyA):

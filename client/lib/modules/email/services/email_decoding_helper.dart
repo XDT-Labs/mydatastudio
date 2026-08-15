@@ -18,7 +18,7 @@ class EmailDecodingHelper {
 
     while (i < length) {
       final char = input.codeUnitAt(i);
-      if (char == 61 /* '=' */) {
+      if (char == 61 /* '=' */ ) {
         if (i + 2 < length && input[i + 1] == '\r' && input[i + 2] == '\n') {
           // Soft line break =\r\n
           i += 3;

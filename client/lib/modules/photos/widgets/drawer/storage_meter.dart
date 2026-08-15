@@ -20,9 +20,8 @@ class StorageMeter extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     final textTheme = theme.textTheme;
 
-    final progress = totalBytes > 0
-        ? (usedBytes / totalBytes).clamp(0.0, 1.0)
-        : 0.0;
+    final progress =
+        totalBytes > 0 ? (usedBytes / totalBytes).clamp(0.0, 1.0) : 0.0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

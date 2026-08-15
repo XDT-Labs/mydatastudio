@@ -45,9 +45,7 @@ class BatchFileUpsertService
       sink.add(command.files);
       return command.files;
     } catch (err) {
-      _logger.e(
-        'Batch upsert failed for ${command.files.length} files: $err',
-      );
+      _logger.e('Batch upsert failed for ${command.files.length} files: $err');
       rethrow;
     } finally {
       isLoading.add(false);

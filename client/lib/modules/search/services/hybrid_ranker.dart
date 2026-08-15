@@ -1,0 +1,139 @@
+import 'package:mydatastudio/modules/search/models/search_query.dart';
+import 'package:mydatastudio/modules/search/models/search_result.dart';
+import 'package:mydatastudio/modules/search/services/rank_fusion.dart';
+import 'package:mydatastudio/modules/search/services/result_ranking.dart';
+import 'package:mydatastudio/modules/search/services/retrievers/bm25_retriever.dart';
+import 'package:mydatastudio/modules/search/services/retrievers/vector_retriever.dart';
+
+/// Merges the lexical and semantic passes into one ranking.
+///
+/// The two retrievers answer different questions — "which rows contain these
+/// words" and "which rows mean roughly this" — and their scores are not on
+/// comparable scales and never will be. RRF consumes only rank positions, so
+/// there is nothing to normalise and nothing to re-tune as the archive grows.
+///
+/// Tier and recency are applied *after* fusion, as multipliers. That ordering
+/// matters: a favourited photo should be able to beat a marginally better
+/// textual match, which is the point of the tier boost, and it can only do that
+/// if it multiplies a fused score rather than one retriever's raw one.
+class HybridRanker {
+  /// Deliberately flat. Weighting one retriever up before there is real usage
+  /// data would just encode a guess; flat weights make it obvious from the
+  /// results which retriever is misbehaving.
+  static const retrieverWeights = {
+    'bm25': 1.0,
+    'vector_file': 1.0,
+    'vector_email': 1.0,
+  };
+
+  /// Ranks the union of [lexical] and [vector], loading any vector-only hit
+  /// that the lexical pass never returned.
+  ///
+  /// [now] is injectable so recency does not make the ranking depend on when
+  /// the test ran.
+  static Future<List<SearchResult>> fuse({
+    required List<SearchResult> lexical,
+    required List<VectorHit> vector,
+    required Bm25Retriever loader,
+    ParsedQuery? query,
+    DateTime? now,
+  }) async {
+    final byKey = {for (final r in lexical) r.key: r};
+
+    // Everything the vector pass found that the words never would have. This
+    // is the half of the search that "find my graduation speech" depends on
+    // when the file is called IMG_4471.
+    final missingFiles = <String>[];
+    final missingEmails = <String>[];
+    for (final hit in vector) {
+      final key = '${hit.type.name}:${hit.id}';
+      if (byKey.containsKey(key)) continue;
+      if (hit.type == SearchResultType.file) {
+        missingFiles.add(hit.id);
+      } else {
+        missingEmails.add(hit.id);
+      }
+    }
+    if (missingFiles.isNotEmpty || missingEmails.isNotEmpty) {
+      byKey.addAll(
+        await loader.loadByIds(fileIds: missingFiles, emailIds: missingEmails),
+      );
+    }
+
+    // Attach the passage the *vector* pass picked, for results that do not
+    // already name one.
+    //
+    // Only where there is none. A file that matched lexically arrived with a
+    // citation describing the chunk BM25 scored best, and overwriting it with
+    // the chunk cosine scored best would make the footnote disagree with the
+    // reason the result is ranked where it is — the two passes can legitimately
+    // pick different passages of the same document. Whichever retriever
+    // surfaced the result first is the one that explains it.
+    final winningChunks = <String, int>{};
+    for (final hit in vector) {
+      if (hit.type != SearchResultType.file) continue;
+      if (hit.chunkSequence == null) continue;
+      final existing = byKey['${hit.type.name}:${hit.id}'];
+      if (existing == null || existing.citation != null) continue;
+      winningChunks[hit.id] = hit.chunkSequence!;
+    }
+    if (winningChunks.isNotEmpty) {
+      final citations = await loader.loadCitations(winningChunks);
+      for (final entry in citations.entries) {
+        final key = '${SearchResultType.file.name}:${entry.key}';
+        final result = byKey[key];
+        if (result != null) byKey[key] = result.withCitation(entry.value);
+      }
+    }
+
+    // Mail and photos get their own vector lists rather than one merged one.
+    //
+    // A text query against an email body is a *same-modal* comparison; against
+    // a photo it is cross-modal, and cross-modal similarities are structurally
+    // lower — measured on this archive, the same query tops out around 0.36
+    // against image vectors and 0.41–0.51 against text. Ranked in one list by
+    // raw similarity, mail therefore displaces photos regardless of which
+    // actually answers the query, and a search for family pictures fills up
+    // with marketing email.
+    //
+    // Splitting them means only a hit's rank *within its own modality* counts,
+    // which is precisely what RRF exists to exploit: the best photo and the
+    // best email arrive at fusion as equals, and the tier multipliers — not an
+    // artifact of which encoder produced the vector — decide between them.
+    final fused = RankFusion.fuse({
+      'bm25': [for (final r in lexical) r.key],
+      'vector_file': [
+        for (final h in vector)
+          if (h.type == SearchResultType.file) '${h.type.name}:${h.id}',
+      ],
+      'vector_email': [
+        for (final h in vector)
+          if (h.type == SearchResultType.email) '${h.type.name}:${h.id}',
+      ],
+    }, weights: retrieverWeights);
+
+    final ranked = <SearchResult>[];
+    for (final entry in fused) {
+      // A vector hit whose row has since been deleted simply drops out. The
+      // embedding table can outlive its file between a scan and a reap.
+      final result = byKey[entry.id];
+      if (result == null) continue;
+      ranked.add(
+        result.withScore(
+          ResultRanking.adjust(
+            entry.score,
+            tier: result.tier,
+            date: result.date,
+            now: now,
+            matchesPreferredType: query?.prefers(result.modality),
+          ),
+        ),
+      );
+    }
+
+    // Re-sorted because the multipliers can and should reorder the fused list —
+    // that is what applying them is for.
+    ranked.sort((a, b) => b.score.compareTo(a.score));
+    return ranked;
+  }
+}

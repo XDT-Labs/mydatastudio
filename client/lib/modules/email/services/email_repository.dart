@@ -6,6 +6,7 @@ import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/modules/email/services/searchable_body.dart';
 
 /// Selects a folder id and every folder beneath it. Takes two parameters, in
 /// order: the folder id to start from, and the collection id.
@@ -151,9 +152,9 @@ class EmailRepository {
       for (final e in emails) {
         await tx.execute(
           "INSERT INTO emails (id, collection_id, date, [from], [to], cc, subject, snippet, "
-          "html_body, plain_body, labels, headers, folder_id, message_id, thread_id, uid, "
+          "html_body, plain_body, body_text, labels, headers, folder_id, message_id, thread_id, uid, "
           "is_read, has_attachments, is_deleted) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
           "ON CONFLICT(id) DO UPDATE SET "
           "collection_id = excluded.collection_id, "
           "date = excluded.date, "
@@ -164,6 +165,7 @@ class EmailRepository {
           "snippet = excluded.snippet, "
           "html_body = excluded.html_body, "
           "plain_body = excluded.plain_body, "
+          "body_text = excluded.body_text, "
           "labels = excluded.labels, "
           "headers = excluded.headers, "
           "folder_id = excluded.folder_id, "
@@ -184,6 +186,7 @@ class EmailRepository {
             e.snippet,
             e.htmlBody,
             e.plainBody,
+            searchableBodyText(e),
             (e.labels ?? []).join(','),
             e.headers,
             e.folderId,

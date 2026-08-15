@@ -348,11 +348,12 @@ class _InfoSidebarState extends State<InfoSidebar> {
                               fit: BoxFit.cover,
                               width: double.infinity,
                               height: double.infinity,
-                              errorBuilder: (ctx, err, stack) => Icon(
-                                isVideo ? Icons.videocam : Icons.image,
-                                size: 48,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
+                              errorBuilder:
+                                  (ctx, err, stack) => Icon(
+                                    isVideo ? Icons.videocam : Icons.image,
+                                    size: 48,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
                             )
                           else
                             Icon(
@@ -499,13 +500,14 @@ class _InfoSidebarState extends State<InfoSidebar> {
                 Wrap(
                   spacing: 6.0,
                   runSpacing: 6.0,
-                  children: _tags.map((tag) {
-                    return TagChip(
-                      tag: tag,
-                      onTap: () {},
-                      onRemove: () => _removeTag(tag),
-                    );
-                  }).toList(),
+                  children:
+                      _tags.map((tag) {
+                        return TagChip(
+                          tag: tag,
+                          onTap: () {},
+                          onRemove: () => _removeTag(tag),
+                        );
+                      }).toList(),
                 ),
               const SizedBox(height: 8),
               Row(
@@ -553,22 +555,24 @@ class _InfoSidebarState extends State<InfoSidebar> {
                 )
               else
                 Column(
-                  children: _allAlbums.map((album) {
-                    final isMember = _fileAlbumIds.contains(album.id);
-                    return CheckboxListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        album.name,
-                        style: textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurface,
-                        ),
-                      ),
-                      value: isMember,
-                      onChanged: (checked) =>
-                          _toggleAlbum(album, checked ?? false),
-                    );
-                  }).toList(),
+                  children:
+                      _allAlbums.map((album) {
+                        final isMember = _fileAlbumIds.contains(album.id);
+                        return CheckboxListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            album.name,
+                            style: textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
+                          value: isMember,
+                          onChanged:
+                              (checked) =>
+                                  _toggleAlbum(album, checked ?? false),
+                        );
+                      }).toList(),
                 ),
               const Divider(height: 24),
 

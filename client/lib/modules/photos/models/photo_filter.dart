@@ -49,12 +49,14 @@ class PhotoFilter {
     return PhotoFilter(
       searchQuery: searchQuery ?? this.searchQuery,
       mediaType: mediaType == _sentinel ? this.mediaType : mediaType as String?,
-      collectionId: collectionId == _sentinel
-          ? this.collectionId
-          : collectionId as String?,
-      collectionIds: collectionIds == _sentinel
-          ? this.collectionIds
-          : collectionIds as List<String>?,
+      collectionId:
+          collectionId == _sentinel
+              ? this.collectionId
+              : collectionId as String?,
+      collectionIds:
+          collectionIds == _sentinel
+              ? this.collectionIds
+              : collectionIds as List<String>?,
       albumId: albumId == _sentinel ? this.albumId : albumId as String?,
       tag: tag == _sentinel ? this.tag : tag as String?,
       location: location == _sentinel ? this.location : location as String?,

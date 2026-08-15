@@ -26,7 +26,11 @@ class GoogleDriveErrorView extends StatelessWidget {
               color: Color(0xFFDB4437),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.error_outline, color: Colors.white, size: 36),
+            child: const Icon(
+              Icons.error_outline,
+              color: Colors.white,
+              size: 36,
+            ),
           ),
         ),
         const SizedBox(height: 20),

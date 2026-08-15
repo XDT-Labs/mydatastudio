@@ -11,6 +11,7 @@ import 'package:mydatastudio/modules/files/widgets/file_drawer.dart';
 import 'package:mydatastudio/modules/photos/pages/album_detail_page.dart';
 import 'package:mydatastudio/modules/photos/pages/photos_app.dart';
 import 'package:mydatastudio/modules/photos/widgets/photo_drawer.dart';
+import 'package:mydatastudio/modules/search/pages/search_page.dart';
 import 'package:mydatastudio/modules/social/pages/facebook_page.dart';
 import 'package:mydatastudio/modules/social/pages/instagram_page.dart';
 import 'package:mydatastudio/modules/social/pages/new_social_page.dart';
@@ -145,6 +146,25 @@ class AppRouter {
             path: '/',
             pageBuilder: (context, state) {
               return const RoutePage(body: NavigationWrapper(body: HomePage()));
+            },
+          ),
+
+          /// Global Search
+          ///
+          /// Deliberately not a module route with its own drawer: search reads
+          /// across every collection, so scoping it under one module's
+          /// navigation would misrepresent what it covers.
+          GoRoute(
+            path: '/search',
+            pageBuilder: (context, state) {
+              return RoutePage(
+                key: ValueKey(state.uri.queryParameters['q'] ?? ''),
+                body: NavigationWrapper(
+                  body: SearchPage(
+                    initialQuery: state.uri.queryParameters['q'] ?? '',
+                  ),
+                ),
+              );
             },
           ),
 

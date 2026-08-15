@@ -18,17 +18,14 @@ class FileUpsertService extends RxService<FileUpsertServiceCommand, File> {
 
     File? file;
     try {
-      file = await retryOnLock(
-        () async {
-          File? existing = await repo.getByPath(command.file);
-          if (existing == null) {
-            return await repo.create(command.file);
-          } else {
-            return await repo.update(command.file);
-          }
-        },
-        label: 'FileUpsertService',
-      );
+      file = await retryOnLock(() async {
+        File? existing = await repo.getByPath(command.file);
+        if (existing == null) {
+          return await repo.create(command.file);
+        } else {
+          return await repo.update(command.file);
+        }
+      }, label: 'FileUpsertService');
       if (file != null) {
         sink.add(file);
       }
