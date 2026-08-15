@@ -6,6 +6,7 @@ import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
+import 'package:mydatastudio/modules/photos/widgets/dialogs/hide_photos_confirm_dialog.dart';
 import 'package:mydatastudio/modules/photos/widgets/dialogs/keyboard_shortcuts_modal.dart';
 
 class OpenLightboxIntent extends Intent {
@@ -135,28 +136,11 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
     final selectedIds = SelectionService.instance.selectedIds.value;
     if (selectedIds.isEmpty) return;
 
-    final count = selectedIds.length;
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).colorScheme.surfaceContainer,
-        title: Text('Delete $count item(s)?'),
-        content: const Text('Are you sure you want to move selected photos to trash?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(ctx).colorScheme.error,
-            ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
+    final files = PhotosService.instance.sink.valueOrNull ?? [];
+    final selectedFiles =
+        files.where((f) => selectedIds.contains(f.id)).toList();
+
+    final confirm = await showHidePhotosConfirmDialog(context, selectedFiles);
 
     if (confirm == true) {
       await BatchActionService.instance.deleteSelected(selectedIds);

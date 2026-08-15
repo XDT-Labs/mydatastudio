@@ -396,4 +396,118 @@ void main() {
       expect(names, {'b.jpg', 'c.jpg'});
     });
   });
+
+  group('PhotosRepository hidden photos', () {
+    // `is_hidden` is a user-owned "hide from gallery" flag, deliberately
+    // separate from the scanner-owned `is_deleted` column. Every rescan's
+    // upsert clears `is_deleted` on every row it sees (see
+    // FileDesktopRepository.upsertAll's "is_deleted = 0" clause) — that used
+    // to be the whole bug: a soft-deleted photo silently reappeared on the
+    // next sync because deletion and "the source still has this file" were
+    // the same column. This group is the regression test for that fix.
+    late io.Directory tempDir;
+    late DatabaseManager databaseManager;
+    late AppDatabase db;
+    late PhotosRepository photos;
+
+    setUp(() async {
+      tempDir = await io.Directory.systemTemp.createTemp(
+        'mydatastudio_photos_hidden_',
+      );
+
+      const MethodChannel channel = MethodChannel(
+        'plugins.flutter.io/path_provider',
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+            return tempDir.path;
+          });
+
+      databaseManager = DatabaseManager.instance;
+      await databaseManager.initializeDatabase();
+      db = databaseManager.database!;
+      photos = PhotosRepository();
+
+      await CollectionRepository(db).addCollection(
+        Collection(
+          id: 'col-1',
+          name: 'Test',
+          path: tempDir.path,
+          type: 'local',
+          scanner: 'file.local',
+          scanStatus: 'idle',
+          needsReAuth: false,
+          localCopyPath: tempDir.path,
+        ),
+      );
+    });
+
+    tearDown(() async {
+      databaseManager.dispose();
+      if (tempDir.existsSync()) {
+        try {
+          tempDir.deleteSync(recursive: true);
+        } catch (_) {}
+      }
+    });
+
+    File makeFile(String name, {DateTime? dateCreated}) {
+      return File(
+        id: 'col-1:$name',
+        name: name,
+        path: name,
+        parent: '',
+        dateCreated: dateCreated ?? DateTime.now(),
+        dateLastModified: dateCreated ?? DateTime.now(),
+        collectionId: 'col-1',
+        contentType: FilesConstants.mimeTypeImage,
+        size: 3,
+        isDeleted: false,
+        isInline: false,
+      );
+    }
+
+    test('excludes photos with is_hidden = 1 from the gallery', () async {
+      await FileDesktopRepository(db).create(makeFile('hidden.jpg'));
+      await FileDesktopRepository(db).create(makeFile('visible.jpg'));
+      await db.execute(
+        "UPDATE files SET is_hidden = 1 WHERE id = ?",
+        ['col-1:hidden.jpg'],
+      );
+
+      final names = (await photos.photos()).map((f) => f.name).toSet();
+
+      expect(names, {'visible.jpg'});
+    });
+
+    test('a hidden photo stays hidden across a rescan', () async {
+      await FileDesktopRepository(db).create(makeFile('hidden.jpg'));
+      await FileDesktopRepository(db).create(makeFile('visible.jpg'));
+
+      // User hides one photo from the gallery (what BatchActionService.
+      // deleteSelected / PhotosRepository.deleteFile now do).
+      await db.execute(
+        "UPDATE files SET is_hidden = 1 WHERE id = ?",
+        ['col-1:hidden.jpg'],
+      );
+
+      // Simulate the collection being rescanned: the scanner still sees the
+      // file on disk and hands it back to the same upsert every scanner
+      // uses, which unconditionally sets is_deleted = 0 on conflict.
+      await FileDesktopRepository(db).upsertAll([
+        makeFile('hidden.jpg'),
+        makeFile('visible.jpg'),
+      ]);
+
+      final rows = await db.select(
+        "SELECT is_deleted, is_hidden FROM files WHERE id = ?",
+        ['col-1:hidden.jpg'],
+      );
+      expect(rows.first['is_deleted'], 0);
+      expect(rows.first['is_hidden'], 1);
+
+      final names = (await photos.photos()).map((f) => f.name).toSet();
+      expect(names, {'visible.jpg'});
+    });
+  });
 }

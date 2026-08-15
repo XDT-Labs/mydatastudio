@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
-import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/models/tables/album.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
+import 'package:mydatastudio/modules/photos/models/photo_source_group.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
@@ -17,46 +17,6 @@ import 'package:mydatastudio/modules/photos/widgets/drawer/source_group_header.d
 import 'package:mydatastudio/modules/photos/widgets/drawer/storage_meter.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/tag_chip.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
-
-/// Groups a photo-bearing [Collection] by which scanner produced it, so the
-/// Sources list can show one collapsible header per source type (Local,
-/// Google Drive, Gmail, ...) instead of one row per raw `c.type`.
-enum PhotoSourceGroup { local, gdrive, gmail, yahoo, outlook, other }
-
-PhotoSourceGroup _sourceGroupFor(String scanner) {
-  switch (scanner) {
-    case AppConstants.scannerFileLocal:
-      return PhotoSourceGroup.local;
-    case AppConstants.scannerFileGDrive:
-      return PhotoSourceGroup.gdrive;
-    case AppConstants.scannerEmailGmail:
-      return PhotoSourceGroup.gmail;
-    case AppConstants.scannerEmailYahoo:
-      return PhotoSourceGroup.yahoo;
-    case AppConstants.scannerEmailOutlook:
-    case AppConstants.scannerEmailOutlookPst:
-      return PhotoSourceGroup.outlook;
-    default:
-      return PhotoSourceGroup.other;
-  }
-}
-
-String _sourceGroupLabel(PhotoSourceGroup group) {
-  switch (group) {
-    case PhotoSourceGroup.local:
-      return 'Local Folders';
-    case PhotoSourceGroup.gdrive:
-      return 'Google Drive';
-    case PhotoSourceGroup.gmail:
-      return 'Gmail';
-    case PhotoSourceGroup.yahoo:
-      return 'Yahoo Mail';
-    case PhotoSourceGroup.outlook:
-      return 'Outlook';
-    case PhotoSourceGroup.other:
-      return 'Other';
-  }
-}
 
 IconData _sourceGroupIcon(PhotoSourceGroup group) {
   switch (group) {
@@ -264,17 +224,10 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
   List<Widget> _buildSourceGroups(ThemeData theme, ColorScheme colorScheme) {
     final Map<PhotoSourceGroup, List<Collection>> grouped = {};
     for (final c in _sourceCollections) {
-      grouped.putIfAbsent(_sourceGroupFor(c.scanner), () => []).add(c);
+      grouped.putIfAbsent(photoSourceGroupFor(c.scanner), () => []).add(c);
     }
 
-    const order = [
-      PhotoSourceGroup.local,
-      PhotoSourceGroup.gdrive,
-      PhotoSourceGroup.gmail,
-      PhotoSourceGroup.yahoo,
-      PhotoSourceGroup.outlook,
-      PhotoSourceGroup.other,
-    ];
+    const order = kPhotoSourceGroupOrder;
 
     final widgets = <Widget>[];
     for (final group in order) {
@@ -293,7 +246,7 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
 
       widgets.add(
         SourceGroupHeader(
-          label: _sourceGroupLabel(group),
+          label: photoSourceGroupLabel(group),
           icon: _sourceGroupIcon(group),
           count: groupCount > 0 ? groupCount : null,
           isActive: isGroupActive,

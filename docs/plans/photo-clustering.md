@@ -231,7 +231,7 @@ Scanners add photos continuously; a run is a snapshot. Assign new photos to the 
 | Phase | Scope | Exit criteria |
 |---|---|---|
 | 1 ✅ | Clustering core + prototype harness | Semantic groups verified on a real library; tests pass |
-| 2 | Schema + clustering isolate + persistence | A run completes end-to-end and survives restart |
+| 2 ◐ | Schema + clustering isolate + persistence | A run completes end-to-end and survives restart |
 | 3 | Cluster view + slider, unlabeled groups, scoped by source filter | Slider is smooth at ≥40 groups; All Photos and a single-source selection each cluster correctly; coverage shown honestly |
 | 4 | Vision labeling with progressive fill-in | Labels land for every node; refusals degrade gracefully |
 | 5 | Incremental assignment + stale/regroup | New photos land in a group without a full rebuild |
@@ -241,8 +241,34 @@ Scanners add photos continuously; a run is a snapshot. Assign new photos to the 
 
 | Step | Scope | Exit criteria |
 |---|---|---|
-| C1 | `is_hidden` column; `deleteSelected` writes it; photos queries filter on it | A hidden photo stays hidden across a full rescan of its collection |
-| C2 | Restore Delete icon to the batch-selection toolbar | Selecting photos and confirming hides them; count and sources shown in the dialog |
+| C1 ✅ | `is_hidden` column; `deleteSelected` writes it; photos queries filter on it | A hidden photo stays hidden across a full rescan of its collection |
+| C2 ✅ | Restore Delete icon to the batch-selection toolbar | Selecting photos and confirming hides them; count and sources shown in the dialog |
 | C3 | Undo affordance or a Hidden view with restore | A deleted group can be brought back without touching the database by hand |
 
 C1 should land before C2. Shipping the button first gives the user a cleanup action that silently reverts on the next email sync, which is worse than not having the button.
+
+### Build status
+
+**Phase 2 is ◐, not ✅.** Everything is written and unit-tested, but the isolate
+spawn path has never actually run:
+
+- ✅ Schema — three cluster tables plus `files.is_hidden`, created on open.
+- ✅ `PhotoClusterRepository` — scoped embedding load, run persistence, tree and
+  membership reload, subtree resolution, label writes, run pruning.
+- ✅ `ClusteringIsolate` — reads through its own connection, relays the finished
+  tree to the main isolate to write, per the isolate write rule.
+- ✅ `PhotoClusterService` — reuses a ready run for a scope or builds one, holds
+  the slider position, buckets photos into groups.
+- ❌ **Not yet exercised**: no caller spawns the isolate, so the spawn →
+  cluster → relay → persist round trip has only been verified in pieces. The
+  arithmetic, the SQL, and the persistence each have tests; the seam between
+  them does not. Phase 3 wiring is what will exercise it, and it should be
+  treated as the first thing to verify there rather than assumed working.
+
+The invariant worth protecting is covered: a test asserts that the tree
+rehydrated from the database reproduces the algorithm's grouping at every k. If
+that ever breaks, the view silently shows a different grouping than the one that
+was computed and labeled.
+
+C1's regression test is the one that matters — it hides a photo, runs the real
+scanner upsert path over that row, and asserts it stays hidden.

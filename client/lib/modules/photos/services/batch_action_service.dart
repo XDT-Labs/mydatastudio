@@ -67,12 +67,17 @@ class BatchActionService {
     }
   }
 
+  /// Hides the selected photos from the gallery by setting `is_hidden`.
+  /// This is a gallery-only, user-owned flag — it never touches
+  /// `is_deleted`, which scanners own and clear on every rescan. The
+  /// original files stay on disk and in their source (Drive, Gmail, PST,
+  /// etc.); they simply stop showing up in the Photos module.
   Future<void> deleteSelected(Set<String> fileIds) async {
     if (fileIds.isEmpty) return;
     final db = DatabaseManager.instance.database;
     if (db != null) {
       final paramSets = fileIds.map((id) => [id]).toList();
-      await db.executeBatch("UPDATE files SET is_deleted = 1 WHERE id = ?", paramSets);
+      await db.executeBatch("UPDATE files SET is_hidden = 1 WHERE id = ?", paramSets);
       await PhotosService.instance.refresh();
     }
     SelectionService.instance.deselectAll();
