@@ -181,6 +181,7 @@ class ClusteringIsolate {
           memberCount: node['memberCount'] as int,
           coherence: (node['coherence'] as num).toDouble(),
           centroid: node['centroid'] as Float32List,
+          representatives: (node['representatives'] as List).cast<String>(),
         ),
     ];
   }
@@ -286,6 +287,14 @@ class ClusteringIsolate {
               'memberCount': node.size,
               'coherence': node.coherence,
               'centroid': node.centroid,
+              // Picked here, where the vectors are still in memory. Doing it
+              // later would mean re-reading every member's embedding just to
+              // rank it against a centroid already stored alongside it.
+              'representatives': [
+                for (final index
+                    in tree.representatives(node, loaded.vectors, count: 9))
+                  loaded.fileIds[index],
+              ],
             },
         ],
         'membership': membership,

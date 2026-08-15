@@ -597,6 +597,7 @@ class AppDatabase {
         member_count INTEGER NOT NULL,
         coherence REAL NOT NULL,
         centroid BLOB NOT NULL,
+        representatives TEXT,
         label TEXT,
         label_status TEXT NOT NULL DEFAULT 'pending',
         PRIMARY KEY (run_id, node_id),
@@ -802,6 +803,14 @@ class AppDatabase {
       'albums': {
         'description': 'TEXT',
         'cover_file_id': 'TEXT',
+      },
+      'photo_cluster_nodes': {
+        // File ids of the members nearest this node's centroid, comma
+        // separated — the photos a vision model is shown when asked to name
+        // the group. Computed during clustering, where the vectors are already
+        // in memory; recovering it later would mean re-reading every member's
+        // embedding just to rank it against a centroid we already stored.
+        'representatives': 'TEXT',
       },
     };
 

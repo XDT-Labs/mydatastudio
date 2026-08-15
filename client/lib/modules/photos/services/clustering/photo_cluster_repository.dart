@@ -135,8 +135,8 @@ class PhotoClusterRepository {
         await tx.execute(
           'INSERT INTO photo_cluster_nodes '
           '(run_id, node_id, parent_id, split_rank, member_count, coherence, '
-          ' centroid, label, label_status) '
-          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          ' centroid, representatives, label, label_status) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             map['run_id'],
             map['node_id'],
@@ -145,6 +145,7 @@ class PhotoClusterRepository {
             map['member_count'],
             map['coherence'],
             map['centroid'],
+            map['representatives'],
             map['label'],
             map['label_status'],
           ],
@@ -242,6 +243,25 @@ class PhotoClusterRepository {
       [nodeId, runId, runId],
     );
     return [for (final row in rows) row['file_id'] as String];
+  }
+
+  /// `files.thumbnail` for [fileIds], keyed by file id.
+  ///
+  /// Only rows that still exist come back, so a photo deleted since the run was
+  /// built is simply absent rather than an error — the caller is picking images
+  /// to show a model and can do without any one of them.
+  Future<Map<String, String>> thumbnailKeysFor(List<String> fileIds) async {
+    if (fileIds.isEmpty) return const {};
+    final placeholders = List.filled(fileIds.length, '?').join(',');
+    final rows = await db.select(
+      'SELECT id, thumbnail FROM files '
+      'WHERE id IN ($placeholders) AND thumbnail IS NOT NULL',
+      fileIds,
+    );
+    return {
+      for (final row in rows)
+        row['id'] as String: row['thumbnail'] as String,
+    };
   }
 
   Future<void> updateLabel(

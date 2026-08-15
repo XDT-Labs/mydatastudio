@@ -5,6 +5,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_cluster.dart';
+import 'package:mydatastudio/modules/photos/services/clustering/cluster_label_service.dart';
 import 'package:mydatastudio/modules/photos/services/clustering/clustering_isolate.dart';
 import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_repository.dart';
 import 'package:rxdart/rxdart.dart';
@@ -91,6 +92,7 @@ class PhotoClusterService {
       BehaviorSubject<ClusterViewState>.seeded(const ClusterViewState());
 
   ClusteringIsolate? _isolate;
+  StreamSubscription<String>? _labelSub;
 
   ClusterViewState get _current => state.value;
 
@@ -176,7 +178,11 @@ class PhotoClusterService {
     return photos.where((p) => !membership.containsKey(p.id)).length;
   }
 
-  Future<void> _adopt(PhotoClusterRepository repo, String runId) async {
+  Future<void> _adopt(
+    PhotoClusterRepository repo,
+    String runId, {
+    bool startLabelling = true,
+  }) async {
     final tree = await repo.loadTree(runId);
     if (tree == null) {
       state.add(_current.copyWith(error: 'Could not load groups'));
@@ -190,6 +196,38 @@ class PhotoClusterService {
       isBuilding: false,
       clearError: true,
     ));
+
+    if (startLabelling) _startLabelling(repo, runId);
+  }
+
+  /// Names the run's groups in the background, refreshing the tree as each
+  /// label lands.
+  ///
+  /// Not awaited: the grid is usable immediately with "Group N" headers, and
+  /// labelling a whole run is minutes of serialised vision calls. Blocking the
+  /// view on it would be the difference between a slow feature and a broken
+  /// one.
+  void _startLabelling(PhotoClusterRepository repo, String runId) {
+    // A run whose groups are all named already needs no pass, and re-entering
+    // would just reload the tree for nothing.
+    final tree = _current.tree;
+    if (tree != null &&
+        tree.allGroups.every(
+          (g) => g.labelStatus != ClusterLabelStatus.pending,
+        )) {
+      return;
+    }
+
+    _labelSub?.cancel();
+    _labelSub = ClusterLabelService.instance.onLabelled.listen((labelledRun) {
+      // Ignore late arrivals from a run the user has already navigated away
+      // from — adopting them would swap the visible tree out from under them.
+      if (labelledRun != _current.tree?.run.id) return;
+      _adopt(repo, labelledRun, startLabelling: false);
+    });
+
+    ClusterLabelService.instance.cancel();
+    unawaited(ClusterLabelService.instance.labelRun(repo, runId));
   }
 
   Future<void> _build(
@@ -236,5 +274,8 @@ class PhotoClusterService {
   Future<void> dispose() async {
     await _isolate?.stop();
     _isolate = null;
+    ClusterLabelService.instance.cancel();
+    await _labelSub?.cancel();
+    _labelSub = null;
   }
 }

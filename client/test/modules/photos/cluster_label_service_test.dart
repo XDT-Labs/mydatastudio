@@ -1,0 +1,365 @@
+import 'dart:convert';
+import 'dart:io' as io;
+import 'dart:typed_data';
+
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:uuid/uuid.dart';
+
+import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
+import 'package:mydatastudio/modules/photos/models/photo_cluster.dart';
+import 'package:mydatastudio/modules/photos/services/clustering/cluster_label_service.dart';
+import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_repository.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('ClusterLabelService.normalizeLabel', () {
+    test('reads the label out of the schema-constrained JSON', () {
+      expect(
+        ClusterLabelService.normalizeLabel('{"label": "Colosseum"}'),
+        'Colosseum',
+      );
+    });
+
+    // Some models wrap JSON in a markdown fence despite the grammar. Throwing
+    // that away would cost a perfectly good label and leave the group as
+    // "Group N" forever, since a failed node is not retried.
+    test('unwraps a markdown code fence', () {
+      expect(
+        ClusterLabelService.normalizeLabel('```json\n{"label": "Swans"}\n```'),
+        'Swans',
+      );
+      expect(
+        ClusterLabelService.normalizeLabel('```\n{"label": "Youth baseball"}\n```'),
+        'Youth baseball',
+      );
+    });
+
+    test('accepts bare prose when the model ignores the schema', () {
+      expect(
+        ClusterLabelService.normalizeLabel('Mountain village'),
+        'Mountain village',
+      );
+      expect(
+        ClusterLabelService.normalizeLabel('  "Beach days."  '),
+        'Beach days',
+      );
+    });
+
+    test('collapses whitespace and newlines into one header line', () {
+      expect(
+        ClusterLabelService.normalizeLabel('{"label": "Cathedral\\n  interiors"}'),
+        'Cathedral interiors',
+      );
+    });
+
+    // A refusal or an explanation is not a name. Rejecting it lets the header
+    // fall back to "Group N", which is honest, rather than printing a sentence
+    // of model commentary as a title.
+    test('rejects an answer too long to be a name', () {
+      final rambling = 'I am unable to provide a label for these images '
+          'because they appear to contain sensitive content that I should '
+          'not describe in detail.';
+      expect(ClusterLabelService.normalizeLabel(rambling), isNull);
+      expect(
+        ClusterLabelService.normalizeLabel('{"label": "$rambling"}'),
+        isNull,
+      );
+    });
+
+    test('rejects empty answers', () {
+      expect(ClusterLabelService.normalizeLabel(''), isNull);
+      expect(ClusterLabelService.normalizeLabel('   '), isNull);
+      expect(ClusterLabelService.normalizeLabel('{"label": ""}'), isNull);
+      expect(ClusterLabelService.normalizeLabel('{"label": "  "}'), isNull);
+    });
+
+    test('strips surrounding quotes without eating internal punctuation', () {
+      expect(
+        ClusterLabelService.normalizeLabel('"Schönbrunn Palace"'),
+        'Schönbrunn Palace',
+      );
+      expect(
+        ClusterLabelService.normalizeLabel('{"label": "Rome, Italy"}'),
+        'Rome, Italy',
+      );
+    });
+  });
+
+  _labellingPipelineTests();
+}
+
+void _labellingPipelineTests() {
+  group('ClusterLabelService.labelRun', () {
+    late io.Directory tempDir;
+    late DatabaseManager databaseManager;
+    late AppDatabase db;
+    late PhotoClusterRepository repo;
+    late String runId;
+
+    /// Writes a run whose groups are sized so the labelling order is
+    /// unambiguous: node 1 has the most members, then node 2, then node 3.
+    Future<List<String>> seedRun() async {
+      final collectionId = const Uuid().v4();
+      await CollectionRepository(db).addCollection(
+        Collection(
+          id: collectionId,
+          name: 'Photos',
+          path: '/photos',
+          type: 'file',
+          scanner: 'local',
+          needsReAuth: false,
+          scanStatus: 'idle',
+        ),
+      );
+
+      final fileRepo = FileDesktopRepository(db);
+      final cache = ThumbnailCache(tempDir.path);
+      final fileIds = <String>[];
+
+      for (var i = 0; i < 3; i++) {
+        final id = 'photo-$i';
+        final key = cache.keyFor(collectionId, id);
+        await fileRepo.create(
+          File(
+            id: id,
+            name: 'IMG_$i.jpg',
+            path: '/photos/IMG_$i.jpg',
+            parent: '/photos',
+            dateCreated: DateTime(2026, 1, 1),
+            dateLastModified: DateTime(2026, 1, 1),
+            collectionId: collectionId,
+            contentType: 'image/jpeg',
+            size: 1,
+            isDeleted: false,
+            thumbnail: key,
+          ),
+        );
+        // Real bytes on disk: the service skips photos whose thumbnail is
+        // missing, so a fixture without one would silently test nothing.
+        await cache.writeBytes(key, [0xFF, 0xD8, 0xFF, i]);
+        fileIds.add(id);
+      }
+
+      runId = const Uuid().v4();
+      final run = ClusterRun(
+        id: runId,
+        scope: const ClusterScope.all(),
+        createdAt: DateTime(2026, 1, 1),
+        photoCount: 3,
+        maxGroups: 3,
+        seed: 1,
+        status: ClusterRunStatus.ready,
+      );
+
+      ClusterGroup node(int id, int? parent, int? rank, int count,
+              List<String> reps) =>
+          ClusterGroup(
+            runId: runId,
+            nodeId: id,
+            parentId: parent,
+            splitRank: rank,
+            memberCount: count,
+            coherence: 0.8,
+            centroid: Float32List(4),
+            representatives: reps,
+          );
+
+      await repo.saveRun(
+        run,
+        [
+          node(0, null, 0, 3, fileIds),
+          node(1, 0, null, 2, [fileIds[0], fileIds[1]]),
+          node(2, 0, null, 1, [fileIds[2]]),
+        ],
+        {fileIds[0]: 1, fileIds[1]: 1, fileIds[2]: 2},
+      );
+      return fileIds;
+    }
+
+    setUp(() async {
+      tempDir = await io.Directory.systemTemp.createTemp('mds_label_test_');
+      const channel = MethodChannel('plugins.flutter.io/path_provider');
+      // ignore: deprecated_member_use
+      channel.setMockMethodCallHandler((MethodCall call) async => tempDir.path);
+
+      databaseManager = DatabaseManager.instance;
+      await databaseManager.initializeDatabase();
+      db = databaseManager.database!;
+      repo = PhotoClusterRepository(db);
+
+      MainApp.appDataDirectory.add(tempDir.path);
+      MainApp.llmServiceUrl.add('http://127.0.0.1:9999');
+      MainApp.llmServiceToken.add('test-token');
+    });
+
+    tearDown(() async {
+      databaseManager.dispose();
+      if (tempDir.existsSync()) {
+        try {
+          tempDir.deleteSync(recursive: true);
+        } catch (_) {}
+      }
+    });
+
+    test('labels every group, largest first, and persists as it goes',
+        () async {
+      await seedRun();
+      final labelled = <String>[];
+      final sentImageCounts = <int>[];
+
+      final client = MockClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        final content =
+            (body['messages'] as List).first['content'] as List;
+        sentImageCounts
+            .add(content.where((p) => p['type'] == 'image_url').length);
+        labelled.add('call');
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': '{"label": "Group ${labelled.length}"}'}
+              }
+            ]
+          }),
+          200,
+        );
+      });
+
+      await ClusterLabelService.instance.labelRun(repo, runId, client: client);
+
+      final tree = await repo.loadTree(runId);
+      final byId = {for (final g in tree!.allGroups) g.nodeId: g};
+
+      // Every node got a label, and each carried its own representatives —
+      // three for the root, two and one for the children.
+      expect(byId[0]!.labelStatus, ClusterLabelStatus.ready);
+      expect(byId[1]!.labelStatus, ClusterLabelStatus.ready);
+      expect(byId[2]!.labelStatus, ClusterLabelStatus.ready);
+      expect(sentImageCounts, [3, 2, 1]);
+
+      // Biggest group first: node 0 (3 members), then 1 (2), then 2 (1).
+      expect(byId[0]!.label, 'Group 1');
+      expect(byId[1]!.label, 'Group 2');
+      expect(byId[2]!.label, 'Group 3');
+    });
+
+    // A group the model refuses or garbles must not be retried forever, and
+    // must not block the groups behind it in the queue.
+    test('marks an unusable answer failed and keeps going', () async {
+      await seedRun();
+      var call = 0;
+
+      final client = MockClient((request) async {
+        call++;
+        if (call == 1) {
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {
+                  'message': {
+                    'content': 'I am unable to describe these images because '
+                        'they appear to contain sensitive material.'
+                  }
+                }
+              ]
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {'message': {'content': '{"label": "Swans"}'}}
+            ]
+          }),
+          200,
+        );
+      });
+
+      await ClusterLabelService.instance.labelRun(repo, runId, client: client);
+
+      final byId = {
+        for (final g in (await repo.loadTree(runId))!.allGroups) g.nodeId: g
+      };
+      expect(byId[0]!.labelStatus, ClusterLabelStatus.failed);
+      expect(byId[0]!.label, isNull);
+      expect(byId[0]!.displayLabel, 'Group 0', reason: 'falls back honestly');
+      expect(byId[1]!.label, 'Swans');
+      expect(byId[2]!.label, 'Swans');
+    });
+
+    test('a second pass only retries what is still pending', () async {
+      await seedRun();
+      await repo.updateLabel(runId, 0, 'Already named', ClusterLabelStatus.ready);
+
+      var calls = 0;
+      final client = MockClient((_) async {
+        calls++;
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {'message': {'content': '{"label": "Named"}'}}
+            ]
+          }),
+          200,
+        );
+      });
+
+      await ClusterLabelService.instance.labelRun(repo, runId, client: client);
+
+      expect(calls, 2, reason: 'the already-named group was skipped');
+      final byId = {
+        for (final g in (await repo.loadTree(runId))!.allGroups) g.nodeId: g
+      };
+      expect(byId[0]!.label, 'Already named');
+    });
+
+    test('a server error leaves the group retryable next pass', () async {
+      await seedRun();
+      final client = MockClient((_) async => http.Response('boom', 500));
+
+      await ClusterLabelService.instance.labelRun(repo, runId, client: client);
+
+      final byId = {
+        for (final g in (await repo.loadTree(runId))!.allGroups) g.nodeId: g
+      };
+      // Failed rather than pending: a transient outage is indistinguishable
+      // from a refusal here, and leaving nodes pending would make every later
+      // pass re-attempt a group that may never succeed.
+      expect(byId[0]!.labelStatus, ClusterLabelStatus.failed);
+      expect(byId[0]!.displayLabel, 'Group 0');
+    });
+
+    test('skips a group whose thumbnails are missing from disk', () async {
+      await seedRun();
+      // Wipe the cache: nothing to show the model.
+      io.Directory(ThumbnailCache(tempDir.path).rootDir)
+          .deleteSync(recursive: true);
+
+      var calls = 0;
+      final client = MockClient((_) async {
+        calls++;
+        return http.Response('{}', 200);
+      });
+
+      await ClusterLabelService.instance.labelRun(repo, runId, client: client);
+
+      expect(calls, 0, reason: 'no request without images to send');
+      final byId = {
+        for (final g in (await repo.loadTree(runId))!.allGroups) g.nodeId: g
+      };
+      expect(byId[0]!.labelStatus, ClusterLabelStatus.skipped);
+    });
+  });
+}

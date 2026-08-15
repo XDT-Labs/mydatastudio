@@ -136,6 +136,7 @@ class ClusterGroup {
     required this.memberCount,
     required this.coherence,
     required this.centroid,
+    this.representatives = const [],
     this.label,
     this.labelStatus = ClusterLabelStatus.pending,
   });
@@ -156,6 +157,15 @@ class ClusterGroup {
   final double coherence;
 
   final Float32List centroid;
+
+  /// Members nearest the centroid — the photos shown to the vision model when
+  /// naming this group. Most-central first.
+  ///
+  /// Chosen rather than sampled at random because a label is only as good as
+  /// the images behind it: centroid-adjacent members are what the group is
+  /// actually about, where an outlier in a loose group would drag the name
+  /// off-topic.
+  final List<String> representatives;
 
   final String? label;
   final ClusterLabelStatus labelStatus;
@@ -179,6 +189,10 @@ class ClusterGroup {
       centroid: Float32List.sublistView(
         Uint8List.fromList(blob),
       ),
+      representatives: switch (map['representatives']) {
+        final String csv when csv.isNotEmpty => csv.split(','),
+        _ => const <String>[],
+      },
       label: map['label'] as String?,
       labelStatus: ClusterLabelStatus.values.firstWhere(
         (s) => s.name == map['label_status'],
@@ -198,6 +212,7 @@ class ClusterGroup {
           centroid.offsetInBytes,
           centroid.lengthInBytes,
         ),
+        'representatives': representatives.join(','),
         'label': label,
         'label_status': labelStatus.name,
       };

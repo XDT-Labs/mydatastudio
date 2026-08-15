@@ -1,0 +1,279 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io' as io;
+
+import 'package:http/http.dart' as http;
+import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
+import 'package:mydatastudio/modules/photos/models/photo_cluster.dart';
+import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_repository.dart';
+
+const String _kLabelPrompt = '''
+These images all belong to one group in a personal photo library.
+Give the group a short name — 2 to 4 words — describing what the images have
+in common: the subject, place, or kind of image. Prefer the specific over the
+generic when the images support it ("Colosseum", "Youth baseball") and stay
+general when they do not ("Beach days", "Screenshots"). Do not mention the
+number of photos, the word "group", or the word "photos".
+''';
+
+const Map<String, Object> _kLabelSchema = {
+  'type': 'object',
+  'properties': {
+    'label': {'type': 'string'},
+  },
+  'required': ['label'],
+};
+
+/// Generates a name for each cluster group by showing a vision model the
+/// group's most central photos.
+///
+/// Runs on the main isolate rather than in a worker, unlike the embedding and
+/// description isolates. Those grind through an unbounded backlog, decoding
+/// full-size originals; this walks a bounded set of nodes and reads
+/// already-generated thumbnails a few kilobytes each, so the only main-thread
+/// cost is base64-encoding them. The long part is the HTTP wait, which is
+/// async I/O and blocks nothing.
+///
+/// Labels arrive one at a time and are written as they land. `generation_lock`
+/// in the aiserver serialises decoding anyway, so there is nothing to gain by
+/// firing these in parallel — and a whole-run wait would leave every header
+/// reading "Group N" for minutes with no sign of progress.
+class ClusterLabelService {
+  static final ClusterLabelService _instance = ClusterLabelService._();
+  static ClusterLabelService get instance => _instance;
+
+  ClusterLabelService._();
+
+  final AppLogger logger = AppLogger(null);
+
+  /// Fires after each label lands so the view can refresh that header.
+  final StreamController<String> _labelled = StreamController<String>.broadcast();
+  Stream<String> get onLabelled => _labelled.stream;
+
+  bool _running = false;
+  bool _cancelled = false;
+
+  bool get isRunning => _running;
+
+  /// Names every unlabelled group in [runId], largest group first.
+  ///
+  /// Biggest-first because group size is the best available proxy for how
+  /// likely the user is to be looking at it: a large group is a leaf at more
+  /// slider positions than a small one, and it dominates the screen at every
+  /// position where it appears.
+  ///
+  /// Safe to call repeatedly — nodes already resolved are skipped, so a second
+  /// pass only picks up what previously failed or was interrupted.
+  Future<void> labelRun(
+    PhotoClusterRepository repo,
+    String runId, {
+    http.Client? client,
+  }) async {
+    if (_running) return;
+    _running = true;
+    _cancelled = false;
+
+    final owned = client == null;
+    final httpClient = client ?? http.Client();
+
+    try {
+      final tree = await repo.loadTree(runId);
+      if (tree == null) return;
+
+      final pending = tree.allGroups
+          .where((g) => g.labelStatus == ClusterLabelStatus.pending)
+          .toList()
+        ..sort((a, b) => b.memberCount.compareTo(a.memberCount));
+
+      for (final group in pending) {
+        if (_cancelled) break;
+
+        final serviceUrl = MainApp.llmServiceUrl.valueOrNull;
+        if (serviceUrl == null) {
+          logger.d('ClusterLabelService: no aiserver yet, stopping');
+          break;
+        }
+
+        final images = await _loadRepresentativeImages(repo, runId, group);
+        if (images.isEmpty) {
+          // No readable thumbnails — nothing to look at, and retrying next
+          // pass would fail identically until the thumbnails are generated.
+          await repo.updateLabel(
+            runId, group.nodeId, null, ClusterLabelStatus.skipped);
+          continue;
+        }
+
+        final label = await _askForLabel(
+          images,
+          serviceUrl,
+          MainApp.llmServiceToken.valueOrNull,
+          httpClient,
+        );
+
+        if (label == null || label.isEmpty) {
+          // A refusal, a timeout, or an unparseable answer. Marked failed
+          // rather than left pending so one awkward group cannot stall the
+          // queue on every subsequent pass; the header falls back to
+          // "Group N", which is honest about not knowing.
+          await repo.updateLabel(
+            runId, group.nodeId, null, ClusterLabelStatus.failed);
+        } else {
+          await repo.updateLabel(
+            runId, group.nodeId, label, ClusterLabelStatus.ready);
+        }
+        _labelled.add(runId);
+      }
+    } catch (e, stack) {
+      logger.e('ClusterLabelService: labelling failed',
+          error: e, stackTrace: stack);
+    } finally {
+      if (owned) httpClient.close();
+      _running = false;
+    }
+  }
+
+  /// Stops after the in-flight label. Called when the user switches to a
+  /// different run, whose labels matter more than finishing this one.
+  void cancel() => _cancelled = true;
+
+  /// Base64 JPEGs for a group's representatives.
+  ///
+  /// Reads the on-disk thumbnail cache rather than the originals: the bytes are
+  /// already small and already JPEG, so there is no decode of a 5 MB HEIC and
+  /// no `/util/thumbnail` round trip. Photos whose thumbnail is a remote Drive
+  /// URL or simply missing are skipped — a group has far more members than the
+  /// handful needed, so losing a few costs nothing.
+  Future<List<String>> _loadRepresentativeImages(
+    PhotoClusterRepository repo,
+    String runId,
+    ClusterGroup group,
+  ) async {
+    var ids = group.representatives;
+    if (ids.isEmpty) {
+      // Runs built before representatives were stored, or a node whose
+      // representatives were pruned with their files.
+      ids = (await repo.fileIdsUnder(runId, group.nodeId)).take(9).toList();
+    }
+    if (ids.isEmpty) return const [];
+
+    final root = MainApp.appDataDirectory.valueOrNull;
+    if (root == null) return const [];
+    final cache = ThumbnailCache(root);
+
+    final thumbnails = await repo.thumbnailKeysFor(ids);
+    final images = <String>[];
+
+    for (final id in ids) {
+      final key = thumbnails[id];
+      if (key == null || !ThumbnailCache.isCacheKey(key)) continue;
+      final file = cache.fileForKey(key);
+      if (!file.existsSync()) continue;
+      try {
+        images.add(base64Encode(await file.readAsBytes()));
+      } on io.IOException catch (e) {
+        logger.w('ClusterLabelService: unreadable thumbnail for $id: $e');
+      }
+    }
+    return images;
+  }
+
+  Future<String?> _askForLabel(
+    List<String> base64Images,
+    String serviceUrl,
+    String? serviceToken,
+    http.Client client,
+  ) async {
+    try {
+      final response = await client
+          .post(
+            Uri.parse('$serviceUrl/v1/chat/completions'),
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(serviceToken),
+            },
+            body: jsonEncode({
+              // No 'model': the server defaults to the vision-capable model
+              // configured as DEFAULT_MODEL_ALIAS, same as the description
+              // isolate relies on.
+              'messages': [
+                {
+                  'role': 'user',
+                  'content': [
+                    for (final image in base64Images)
+                      {
+                        'type': 'image_url',
+                        'image_url': {'url': 'data:image/jpeg;base64,$image'},
+                      },
+                    {'type': 'text', 'text': _kLabelPrompt},
+                  ],
+                },
+              ],
+              'stream': false,
+              'response_format': {
+                'type': 'json_object',
+                'schema': _kLabelSchema,
+              },
+            }),
+          )
+          // Several images in one request on a local model is genuinely slow.
+          // Generous headroom, not a normal-case bound — but an unresponsive
+          // aiserver must not stall the whole queue forever.
+          .timeout(const Duration(minutes: 5));
+
+      if (response.statusCode != 200) {
+        logger.w('ClusterLabelService: aiserver ${response.statusCode}');
+        return null;
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final choices = data['choices'] as List?;
+      if (choices == null || choices.isEmpty) return null;
+      final message = (choices.first as Map<String, dynamic>)['message'];
+      final content = message is Map ? message['content'] as String? : null;
+      if (content == null || content.isEmpty) return null;
+
+      return normalizeLabel(content);
+    } catch (e) {
+      logger.w('ClusterLabelService: label request failed: $e');
+      return null;
+    }
+  }
+
+  /// Pulls a usable label out of the model's answer.
+  ///
+  /// The schema constrains generation to JSON, but a refusal or a model that
+  /// ignores the grammar can still come back as bare prose, so plain text is
+  /// accepted as a fallback rather than thrown away. Length is capped because
+  /// a header has one line: anything longer is the model explaining itself,
+  /// which is not a name.
+  static String? normalizeLabel(String content) {
+    var text = content.trim();
+
+    // ```json … ``` fences, which some models add despite the schema.
+    if (text.startsWith('```')) {
+      final firstBreak = text.indexOf('\n');
+      if (firstBreak != -1) text = text.substring(firstBreak + 1);
+      if (text.endsWith('```')) {
+        text = text.substring(0, text.length - 3);
+      }
+      text = text.trim();
+    }
+
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map && decoded['label'] is String) {
+        text = (decoded['label'] as String).trim();
+      }
+    } on FormatException {
+      // Not JSON — fall through and treat the text itself as the label.
+    }
+
+    text = text.replaceAll('\n', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    text = text.replaceAll(RegExp(r'^["“”]+|["“”.]+$'), '').trim();
+
+    if (text.isEmpty || text.length > 60) return null;
+    return text;
+  }
+}
