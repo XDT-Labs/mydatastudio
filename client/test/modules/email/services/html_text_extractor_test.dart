@@ -82,6 +82,43 @@ void main() {
       expect(result, 'weird &zzz; entity');
     });
 
+    test('a numeric entity beyond Unicode does not take the mail with it', () {
+      // `#\d+` puts no ceiling on the digits it matches, and Dart's
+      // String.fromCharCode throws RangeError outside 0..0x10FFFF. This text
+      // reaches the FTS backfill, the insert path, the embedding isolate and
+      // the result summarizer, so one malformed entity in one 1998 message
+      // could abort indexing for the whole archive — and the backfill logs
+      // its failure rather than crashing, which is how it would have gone
+      // unnoticed.
+      final result = HtmlTextExtractor.toPlainText(
+        'before &#1111111111111111; after',
+      );
+      expect(result, 'before &#1111111111111111; after');
+    });
+
+    test('a hex entity beyond Unicode is left as written too', () {
+      final result = HtmlTextExtractor.toPlainText('x &#xFFFFFFFF; y');
+      expect(result, 'x &#xFFFFFFFF; y');
+    });
+
+    test('hex entities decode in either case', () {
+      // The decoder always branched on '#X', but the pattern only admitted
+      // '#x', so the uppercase form could never reach it. HTML permits both,
+      // and a word left as `&#X41;` is a word the index cannot match.
+      expect(HtmlTextExtractor.toPlainText('&#x41;&#X42;'), 'AB');
+    });
+
+    test('the range guard covers the uppercase form as well', () {
+      expect(HtmlTextExtractor.toPlainText('x &#XFFFFFFFF; y'),
+          'x &#XFFFFFFFF; y');
+    });
+
+    test('the last legal code point still decodes', () {
+      // The guard must reject what is out of range without moving the range.
+      final result = HtmlTextExtractor.toPlainText('edge &#1114111; case');
+      expect(result, 'edge ${String.fromCharCode(0x10FFFF)} case');
+    });
+
     test(
       'entity-encoded markup stays literal text, is not re-parsed as a tag',
       () {

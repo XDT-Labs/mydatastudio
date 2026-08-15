@@ -26,7 +26,10 @@ class HtmlTextExtractor {
 
   static final RegExp _anyTag = RegExp(r'<[^>]*>');
 
-  static final RegExp _entity = RegExp(r'&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);');
+  // `[xX]` because HTML allows either, and the decoder below has always
+  // branched on both — but the pattern only ever admitted the lowercase form,
+  // so `&#X41;` never reached it and survived as literal text.
+  static final RegExp _entity = RegExp(r'&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z]+);');
 
   static final RegExp _whitespace = RegExp(r'\s+');
 
@@ -46,16 +49,29 @@ class HtmlTextExtractor {
     return text.replaceAll(_whitespace, ' ').trim();
   }
 
+  /// The character [code] denotes, or null if it denotes none.
+  ///
+  /// `String.fromCharCode` throws a `RangeError` outside 0..0x10FFFF, and
+  /// [_entity] puts no ceiling on the digits it matches — `&#1111111111111111;`
+  /// parses to a perfectly good `int` and then throws. That would not be a
+  /// mangled character; it would take down whatever was indexing the mail,
+  /// and this text reaches the search backfill, the insert path, the embedding
+  /// isolate and the result summarizer alike.
+  static String? _charFor(int? code) {
+    if (code == null || code < 0 || code > 0x10FFFF) return null;
+    return String.fromCharCode(code);
+  }
+
   static String _decodeEntities(String text) {
     return text.replaceAllMapped(_entity, (match) {
       final body = match.group(1)!;
       if (body.startsWith('#x') || body.startsWith('#X')) {
         final code = int.tryParse(body.substring(2), radix: 16);
-        return code == null ? match.group(0)! : String.fromCharCode(code);
+        return _charFor(code) ?? match.group(0)!;
       }
       if (body.startsWith('#')) {
         final code = int.tryParse(body.substring(1));
-        return code == null ? match.group(0)! : String.fromCharCode(code);
+        return _charFor(code) ?? match.group(0)!;
       }
       switch (body.toLowerCase()) {
         case 'amp':
