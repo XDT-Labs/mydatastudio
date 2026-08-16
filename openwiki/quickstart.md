@@ -38,7 +38,8 @@ For a detailed technical overview, see [**Architecture Overview**](./architectur
 
 The app is organized into feature modules. See the module guides for deep dives:
 
-- **[Files & Photos](./modules/files-and-photos.md)** — File browser (local + Google Drive), gallery views (timeline, grid, list, map), album management
+- **[Files & Photos](./modules/files-and-photos.md)** — File browser (local + Google Drive), gallery views (timeline, grid, list, map, cluster), album management
+- **[Search](./modules/search.md)** — Unified cross-source search (BM25 + vector + geo), query parsing, person resolution, result summarization
 - **[Email](./modules/email.md)** — Multi-provider email archive (Gmail, Outlook, Yahoo), message search, attachment handling
 - **[AI Chat](./modules/aichat.md)** — Semantic search & chat across all data, local GGUF models, optional cloud passthrough
 
@@ -117,7 +118,7 @@ make notarize
 ```
 /client/                    # Flutter macOS desktop app
   lib/
-    modules/                # Feature modules (files, email, photos, aichat, social)
+    modules/                # Feature modules (files, photos, email, search, aichat, social)
     repositories/           # Data access layer (SQLite queries)
     services/               # Business logic (RxService base class, model download, auth, etc.)
     scanners/               # Scanner lifecycle management & registration
