@@ -645,6 +645,71 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS file_landmarks_landmark_idx '
       'ON file_landmarks (landmark);',
     );
+    // Photo clustering. A "run" is one bisecting spherical k-means pass over a
+    // scoped set of image embeddings; its nodes form a binary split tree, and
+    // the group-count slider is a cut through that tree rather than a re-run.
+    //
+    // `collection_scope` is NULL for All Photos, otherwise a comma-separated
+    // list of collection ids. The cluster view shows exactly what the drawer's
+    // source filter shows, so each distinct scope needs its own run: a tree
+    // built over the whole library and then filtered down to one source would
+    // leave groups that are mostly empty and labels describing photos that are
+    // no longer on screen.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS photo_cluster_runs (
+        id TEXT PRIMARY KEY,
+        collection_scope TEXT,
+        created_at INTEGER NOT NULL,
+        photo_count INTEGER NOT NULL,
+        max_groups INTEGER NOT NULL,
+        seed INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        last_group_count INTEGER
+      );
+    ''');
+    // `split_rank` is the node's position in the run's split sequence, or NULL
+    // if it was never split. Replaying splits 0..k-2 yields the k groups the
+    // slider asks for, which is what makes changing k a query instead of a
+    // re-clustering pass. Interior nodes keep their members and their label for
+    // the same reason: a label stays valid at every k where that node is a leaf.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS photo_cluster_nodes (
+        run_id TEXT NOT NULL,
+        node_id INTEGER NOT NULL,
+        parent_id INTEGER,
+        split_rank INTEGER,
+        member_count INTEGER NOT NULL,
+        coherence REAL NOT NULL,
+        centroid BLOB NOT NULL,
+        representatives TEXT,
+        label TEXT,
+        label_status TEXT NOT NULL DEFAULT 'pending',
+        PRIMARY KEY (run_id, node_id),
+        FOREIGN KEY (run_id) REFERENCES photo_cluster_runs(id) ON DELETE CASCADE
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS photo_cluster_nodes_split_idx '
+      'ON photo_cluster_nodes (run_id, split_rank);',
+    );
+    // Membership is recorded once per photo against its deepest leaf. The
+    // groups at any k are that leaf's ancestors, so a photo is stored once
+    // rather than once per level.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS photo_cluster_members (
+        run_id TEXT NOT NULL,
+        node_id INTEGER NOT NULL,
+        file_id TEXT NOT NULL,
+        PRIMARY KEY (run_id, file_id),
+        FOREIGN KEY (run_id) REFERENCES photo_cluster_runs(id) ON DELETE CASCADE,
+        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS photo_cluster_members_node_idx '
+      'ON photo_cluster_members (run_id, node_id);',
+    );
+
     // The embedded gazetteer (assets/gazetteer/cities.tsv.gz). Seeded lazily
     // by GazetteerRepository the first time a location search runs, not here:
     // this method also executes on the scanner and embedding isolates, which
@@ -1403,11 +1468,36 @@ class AppDatabase {
         // a file that can never succeed gets re-selected and retried by
         // getFilesWithMissingDescriptions forever.
         'description_attempts': 'INTEGER NOT NULL DEFAULT 0',
-        // The same guard for embeddings. Counts only attempts where the bytes
-        // were read and the model rejected them — see
-        // DatabaseRepository.maxEmbeddingAttempts, and note that an unreadable
-        // file must never land here.
+        // The user hid this file from the gallery. Distinct from `is_deleted`,
+        // which the scanner owns: `FileDesktopRepository`'s upsert ends with
+        // `is_deleted = 0`, so anything the user removed reappears the next
+        // time its collection is scanned. That is right for `is_deleted` —
+        // the file really is back — but it made hiding useless for live
+        // sources, where a cleaned-out batch of email attachments returned on
+        // the next sync. One column can't mean both "the source no longer has
+        // this" and "the user doesn't want to see this", so hiding gets its
+        // own column that no scanner writes.
+        'is_hidden': 'INTEGER NOT NULL DEFAULT 0',
+        // How many times EmbeddingIsolate has tried and failed to embed this
+        // file for reasons the file itself causes — a truncated JPEG, bytes
+        // that are not an image at all, a path that no longer exists. Mirrors
+        // `description_attempts`, and for the same reason: without it
+        // getFilesWithMissingEmbeddings re-selects a file that can never
+        // succeed on every pass, so a couple of bad attachments produce an
+        // endless stream of identical parse errors in the log. Only
+        // rejected-bytes failures count — see
+        // DatabaseRepository.maxEmbeddingAttempts — because an unreadable
+        // file says nothing about whether the model could embed it.
         'embedding_attempts': 'INTEGER NOT NULL DEFAULT 0',
+        // The user deleted this file from the app. Distinct from both
+        // `is_deleted`, which the scanner owns and resets to 0 whenever the
+        // source still has the file, and `is_hidden`, which only takes a photo
+        // out of the gallery. This one means "gone everywhere", and no scanner
+        // writes it — a manual Sync runs with force: true, which bypasses the
+        // "already seen this message" skip and re-imports attachments, so
+        // without a flag the scanner owns nothing and one Sync click would undo
+        // every delete the user made.
+        'is_user_deleted': 'INTEGER NOT NULL DEFAULT 0',
       },
       'albums': {'description': 'TEXT', 'cover_file_id': 'TEXT'},
       // Which embedding pipeline produced the vector in this row. See
@@ -1434,6 +1524,21 @@ class AppDatabase {
         // not to rebuilt ones, leaving the index quietly inconsistent with
         // itself.
         'body_text': 'TEXT',
+      },
+      'photo_cluster_runs': {
+        // Where the user left the group slider for this scope. Persisted
+        // because labelling a run is minutes of vision calls, so reopening at
+        // a different cut than the one those labels were watched onto throws
+        // the wait away.
+        'last_group_count': 'INTEGER',
+      },
+      'photo_cluster_nodes': {
+        // File ids of the members nearest this node's centroid, comma
+        // separated — the photos a vision model is shown when asked to name
+        // the group. Computed during clustering, where the vectors are already
+        // in memory; recovering it later would mean re-reading every member's
+        // embedding just to rank it against a centroid we already stored.
+        'representatives': 'TEXT',
       },
     };
 
@@ -1573,7 +1678,7 @@ class AppDatabase {
       // enables this row once the download completes.
       {
         'id': const Uuid().v4(),
-        'alias': 'gemma4:12b',
+        'alias': AppConstants.defaultChatModelAlias,
         'group': 'local',
         'name': 'Gemma 4 12B',
         'type': 'gguf',

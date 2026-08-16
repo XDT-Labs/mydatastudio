@@ -135,7 +135,7 @@ class GetFileAndFoldersService
 
       final fileStream = db
           .stream(
-            "SELECT * FROM files WHERE collection_id = ? AND parent = ? AND is_deleted = 0 ORDER BY name LIMIT ?",
+            "SELECT * FROM files WHERE collection_id = ? AND parent = ? AND is_deleted = 0 AND is_user_deleted = 0 ORDER BY name LIMIT ?",
             [
               command.collection.id,
               relativePath,

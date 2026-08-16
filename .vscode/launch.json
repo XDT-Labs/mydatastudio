@@ -40,8 +40,9 @@
             "name": "aichat server (python)",
             "type": "debugpy",
             "request": "launch",
+            "preLaunchTask": "Ensure aiserver venv",
             "program": "${workspaceFolder}/aiserver/main.py",
-            "console": "internalConsole",
+            "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/aiserver",
             "justMyCode": true,
             // No "python"/"pythonPath" override on purpose. Pinning the
@@ -55,6 +56,7 @@
             // the one real venv. main.py adds its own directory to sys.path, so
             // the worktree's source is what runs regardless of interpreter.
             "env": {
+                "PYTHONPATH": "${workspaceFolder}/aiserver/src",
                 "AICHAT_PORT": "8000",
                 "APP_SUPPORT_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev",
                 // Must match PythonManager.modelsDirFor — a sibling of aiserver/,
@@ -62,6 +64,11 @@
                 // APP_SUPPORT_DIR/aichat/models, so a debug-launched server
                 // downloads its own second copy of every multi-GB model and
                 // then disagrees with the bundled app about what is installed.
+                // The fallback is not merely a second copy: the legacy
+                // path still holds a 362 MB truncated gemma-4-12B, so the
+                // dev server starts, fails to load, and every chat,
+                // description and cluster-label request fails against a
+                // server that looks healthy.
                 "AICHAT_MODELS_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev/models"
             }
         },

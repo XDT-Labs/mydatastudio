@@ -83,6 +83,38 @@ void main() {
     expect(find.byType(PhotoGridTile), findsNWidgets(3));
   });
 
+  // The grid gained the same disclosure control the cluster view has, so the
+  // two grouped views behave the same way.
+  testWidgets('a date section collapses and expands from its header',
+      (WidgetTester tester) async {
+    final files = _createTestFiles();
+
+    await tester.pumpWidget(
+      _buildTestableWidget(
+        PhotoGrid(files: files, selectedIds: const {}),
+      ),
+    );
+
+    expect(find.byType(PhotoGridTile), findsNWidgets(3));
+    expect(find.byIcon(Icons.expand_more), findsNWidgets(2));
+
+    // Collapse the first section: its header stays, its tiles go, and the other
+    // section is untouched.
+    await tester.tap(find.byIcon(Icons.expand_more).first);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DateSectionHeader), findsNWidgets(2));
+    expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+    expect(find.byIcon(Icons.expand_more), findsOneWidget);
+    expect(find.byType(PhotoGridTile), findsNWidgets(1));
+
+    // And back.
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pumpAndSettle();
+    expect(find.byType(PhotoGridTile), findsNWidgets(3));
+    expect(find.byIcon(Icons.chevron_right), findsNothing);
+  });
+
   testWidgets('responsive column count at different widths', (WidgetTester tester) async {
     // Default itemSize=160: columns = (width / 160).round() clamped 1-12
     expect(PhotoGrid.getColumnCount(500), equals(3));   // 500/160=3.1 → 3

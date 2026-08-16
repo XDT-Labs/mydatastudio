@@ -4,9 +4,11 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/services/batch_action_service.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
+import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/dialogs/album_modal.dart';
+import 'package:mydatastudio/modules/photos/widgets/dialogs/hide_photos_confirm_dialog.dart';
 import 'package:mydatastudio/modules/photos/widgets/toolbar/filter_dropdown.dart';
 
 /// Module-specific top toolbar widget for the Photos app.
@@ -221,6 +223,14 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
               ],
             ],
 
+            if (_currentViewMode == PhotoViewMode.clusters) ...[
+              if (constraints.maxWidth >= 650) ...[
+                const SizedBox(width: 8),
+                const _GroupCountSlider(),
+              ],
+              const _RegroupButton(),
+            ],
+
             const Spacer(),
 
             // View Mode SegmentedButton
@@ -235,6 +245,11 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
                   value: PhotoViewMode.list,
                   icon: Icon(Icons.view_list, size: 18),
                   tooltip: 'List View',
+                ),
+                ButtonSegment<PhotoViewMode>(
+                  value: PhotoViewMode.clusters,
+                  icon: Icon(Icons.workspaces_outline, size: 18),
+                  tooltip: 'Group by Similarity',
                 ),
                 ButtonSegment<PhotoViewMode>(
                   value: PhotoViewMode.map,
@@ -309,6 +324,26 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
             BatchActionService.instance.downloadSelected(_selectedIds);
           },
         ),
+        IconButton(
+          icon: const Icon(Icons.delete_outline),
+          tooltip: 'Delete',
+          color: colorScheme.error,
+          onPressed: () async {
+            final selectedFiles =
+                _files.where((f) => _selectedIds.contains(f.id)).toList();
+            final choice =
+                await showRemovePhotosDialog(context, selectedFiles);
+            switch (choice) {
+              case RemovePhotosChoice.hide:
+                await BatchActionService.instance.hideSelected(_selectedIds);
+              case RemovePhotosChoice.delete:
+                await BatchActionService.instance
+                    .deleteSelectedFiles(_selectedIds);
+              case null:
+                break;
+            }
+          },
+        ),
       ],
     );
   }
@@ -334,6 +369,148 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
           isBatchMode
               ? _buildBatchToolbar(context)
               : _buildNormalToolbar(context),
+    );
+  }
+}
+
+/// Slider controlling how many groups the cluster view shows.
+///
+/// Changing it re-cuts the stored split tree in memory — no query, no
+/// re-clustering — so it updates live on drag rather than waiting for release.
+/// That is the whole reason the clustering is bisecting rather than flat: with
+/// flat k-means each notch would be an independent solve, and photos would
+/// scatter across the grid as the user dragged.
+class _GroupCountSlider extends StatefulWidget {
+  const _GroupCountSlider();
+
+  @override
+  State<_GroupCountSlider> createState() => _GroupCountSliderState();
+}
+
+class _GroupCountSliderState extends State<_GroupCountSlider> {
+  StreamSubscription<ClusterViewState>? _sub;
+  ClusterViewState _state = const ClusterViewState();
+
+  @override
+  void initState() {
+    super.initState();
+    _state = PhotoClusterService.instance.state.value;
+    _sub = PhotoClusterService.instance.state.listen((s) {
+      if (mounted) setState(() => _state = s);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    // Nothing to cut until a run exists, and a one-group tree has no choice to
+    // offer — showing a dead control in either case just invites confusion.
+    if (!_state.hasRun || _state.sliderMax < 2) return const SizedBox.shrink();
+    final max = _state.sliderMax;
+
+    return Tooltip(
+      message: 'Number of groups',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.workspaces_outline,
+              size: 16, color: colorScheme.onSurfaceVariant),
+          const SizedBox(width: 4),
+          SizedBox(
+            width: 120,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              ),
+              child: Slider(
+                value: _state.groupCount.clamp(1, max).toDouble(),
+                min: 1,
+                max: max.toDouble(),
+                divisions: max - 1,
+                label: '${_state.groupCount}',
+                onChanged: (val) =>
+                    PhotoClusterService.instance.setGroupCount(val.round()),
+                // Only on release: past the tree's capacity this rebuilds, and
+                // doing that per drag frame would fire a clustering pass a
+                // frame.
+                onChangeEnd: (_) =>
+                    PhotoClusterService.instance.commitGroupCount(),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 30,
+            child: Text(
+              '${_state.groupCount}',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: colorScheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Rebuilds the groups for the current source from scratch.
+///
+/// Needed for two things that are otherwise dead ends. Photos scanned since the
+/// run was built have no group and are reported as uncovered rather than
+/// guessed at; and a group whose name could not be generated is not retried, so
+/// a run labelled while the aiserver was down stays a wall of "Group N".
+/// Rebuilding produces a fresh tree whose groups are all unnamed again, which
+/// the labeller then works through.
+class _RegroupButton extends StatefulWidget {
+  const _RegroupButton();
+
+  @override
+  State<_RegroupButton> createState() => _RegroupButtonState();
+}
+
+class _RegroupButtonState extends State<_RegroupButton> {
+  StreamSubscription<ClusterViewState>? _sub;
+  ClusterViewState _state = const ClusterViewState();
+
+  @override
+  void initState() {
+    super.initState();
+    _state = PhotoClusterService.instance.state.value;
+    _sub = PhotoClusterService.instance.state.listen((s) {
+      if (mounted) setState(() => _state = s);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Disabled mid-build rather than hidden: a control that vanishes while the
+    // thing it controls is working reads as a glitch.
+    final busy = _state.isBuilding;
+    return IconButton(
+      icon: const Icon(Icons.refresh),
+      iconSize: 18,
+      tooltip: busy ? 'Grouping photos…' : 'Regroup photos',
+      onPressed: busy
+          ? null
+          : () => PhotoClusterService.instance.load(
+                _state.scope,
+                forceRebuild: true,
+              ),
     );
   }
 }

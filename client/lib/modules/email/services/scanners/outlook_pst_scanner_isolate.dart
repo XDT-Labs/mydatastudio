@@ -18,6 +18,7 @@ import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
+import 'package:mydatastudio/modules/files/services/utilities/decoration_detector.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_generator.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
@@ -278,6 +279,7 @@ class OutlookPstScannerIsolateWorker {
       }
 
       final thumbnailCache = ThumbnailCache(appDir);
+      final decorationDetector = DecorationDetector(logger: logger);
 
       logger.i(
         "PST Scanner: Started parsing ${collection.path} -> $extractionRoot",
@@ -533,8 +535,16 @@ class OutlookPstScannerIsolateWorker {
                 // extractionRoot, so this reads the extracted copy rather than
                 // going back to the archive.
                 String? thumbnail;
+                // Spacer GIFs, bullets, rules and banner graphics come through
+                // as ordinary attachments, so `is_inline` does not catch them.
+                // Classified once here and hidden from the gallery; the file is
+                // still imported and still attached to its email, so nothing is
+                // lost and the user can un-hide it.
+                var isDecoration = false;
                 if (attContentType == FilesConstants.mimeTypeImage &&
                     attPath.isNotEmpty) {
+                  isDecoration =
+                      await decorationDetector.isDecorationFile(attPath);
                   try {
                     thumbnail = await ThumbnailGenerator().generate(
                       collection.id,
@@ -577,6 +587,7 @@ class OutlookPstScannerIsolateWorker {
                     fileName: att['name'] as String?,
                     htmlBody: email.htmlBody,
                   ),
+                  isHidden: isDecoration,
                 );
                 attachmentFiles.add(file);
               }

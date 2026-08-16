@@ -5,6 +5,7 @@ This module handles loading and managing GGUF models via LlamaCpp and
 Google Gemini API models. It provides the core functionality for both
 chat and embedding models.
 """
+import logging
 import os
 import sys
 import torch
@@ -22,6 +23,103 @@ from langchain_community.llms import LlamaCpp
 
 from .config import MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE
 from .utils import find_local_model, download_gguf_model
+
+
+# ggml_log_level values, from ggml.h.
+GGML_LOG_LEVEL_INFO = 1
+GGML_LOG_LEVEL_WARN = 2
+GGML_LOG_LEVEL_ERROR = 3
+GGML_LOG_LEVEL_DEBUG = 4
+GGML_LOG_LEVEL_CONT = 5
+
+
+class MtmdLogFilter:
+    """Decides which lines from libmtmd's own logger reach stderr.
+
+    Two separate leaks, both through this one logger.
+
+    mtmd echoes every text chunk it tokenizes, at INFO, with the chunk's full
+    contents — one document description put 62k characters of prompt into the
+    log. And vision encoding narrates itself a handful of lines per image
+    ("encoding image slice...", "image slice encoded in 52 ms",
+    "clip_image_batch_encode: copying image 1/1 to input buffer"), which a
+    cluster labelling pass multiplies by every thumbnail it sends. Each line
+    crosses the pipe to Flutter and is logged again there.
+
+    Only errors survive, rather than the usual warnings-and-above, because
+    libmtmd's severity field does not mean what it says: measured against
+    gemma-4-12B, the four per-image progress lines from mtmd-helper arrive at
+    GGML_LOG_LEVEL_WARN while clip's own output arrives at INFO. A level-based
+    rule that trusts WARN therefore keeps exactly the noise it was written to
+    remove. Running the server at debug still brings every line back, which is
+    where to look when a warning from this library actually matters.
+    """
+
+    def __init__(self, keep_chatter: bool):
+        self.keep_chatter = keep_chatter
+        # A CONT line continues the one before it, so it has to inherit that
+        # line's fate — dropping the header and keeping its tail would print a
+        # fragment with nothing to attach to.
+        self._emitted = True
+
+    def should_emit(self, level: int) -> bool:
+        if level == GGML_LOG_LEVEL_CONT:
+            return self._emitted
+        self._emitted = self.keep_chatter or level == GGML_LOG_LEVEL_ERROR
+        return self._emitted
+
+
+# ctypes callbacks are collected as soon as Python stops pointing at them, and
+# libmtmd would then be calling into freed memory — so the live one is held here.
+_mtmd_log_callback = None
+
+
+def quiet_mtmd_logging() -> None:
+    """Put libmtmd's logger behind [MtmdLogFilter].
+
+    libmtmd keeps a logger state of its own, separate from libllama's, so
+    llama_cpp's `verbose=False` — which only reaches `llama_log_set` — never
+    touches it and its per-image output goes straight to stderr.
+
+    Quieting logs must never be the reason a model fails to load, so a binding
+    that turns out not to exist is reported and shrugged off.
+    """
+    global _mtmd_log_callback
+    if _mtmd_log_callback is not None:
+        return
+
+    try:
+        import ctypes
+        import llama_cpp
+        import llama_cpp.mtmd_cpp as mtmd_cpp
+
+        log_filter = MtmdLogFilter(
+            keep_chatter=logging.getLogger().getEffectiveLevel() < logging.INFO
+        )
+
+        @llama_cpp.llama_log_callback
+        def forward(level: int, text: bytes, user_data):
+            # Nothing may escape. Native code calls straight into here, and
+            # CPython answers an exception at that boundary by writing an
+            # "Exception ignored on calling ctypes callback function"
+            # traceback to stderr — several lines per image, which is worse
+            # than the output this exists to suppress. stderr is the likely
+            # culprit too: it is a pipe to Flutter, so a client that has gone
+            # away turns every write into a BrokenPipeError, and the traceback
+            # would go down the same dead pipe. A dropped log line is the
+            # cheapest possible failure here.
+            try:
+                if log_filter.should_emit(level) and text:
+                    sys.stderr.write(text.decode("utf-8", "replace"))
+                    sys.stderr.flush()
+            except Exception:
+                pass
+
+        _mtmd_log_callback = forward
+        mtmd_cpp.mtmd_log_set(forward, ctypes.c_void_p(0))
+        mtmd_cpp.mtmd_helper_log_set(forward, ctypes.c_void_p(0))
+    except Exception as e:
+        print(f"[LOADER] Could not quiet libmtmd logging: {e}")
 
 
 def load_gemini_model(model_id: str = "gemini-2.0-flash", api_key: Optional[str] = None) -> ChatGoogleGenerativeAI:
@@ -128,65 +226,6 @@ def load_grok_model(model_id: str = "grok-3", api_key: Optional[str] = None) -> 
     )
 
 
-# ── mtmd logging ─────────────────────────────────────────────────────────────
-#
-# mtmd logs every text chunk it tokenizes, at INFO, with the chunk's full
-# contents — `add_text: <the entire prompt>`. One document description put 62k
-# characters into the log, and the description isolate runs over the whole
-# archive, so this is a log-size problem rather than noise.
-#
-# `verbose=False` does not reach it. The chat handler wraps its *init* calls in
-# `suppress_stdout_stderr` but not `mtmd_tokenize`, and mtmd keeps its own
-# logger instead of routing through `llama_log_set`. llama-cpp-python exposes
-# the setters and never calls them, so we do.
-#
-# ggml's own ordering (ggml.h): NONE, DEBUG, INFO, WARN, ERROR, CONT.
-_GGML_LOG_LEVEL_DEBUG = 1
-_GGML_LOG_LEVEL_INFO = 2
-_GGML_LOG_LEVEL_WARN = 3
-_GGML_LOG_LEVEL_ERROR = 4
-_GGML_LOG_LEVEL_CONT = 5
-
-# Held on the module, not in a local: ctypes builds a trampoline for the
-# callback, and if Python collects it while C still holds the pointer the next
-# generation segfaults rather than quietly logging nothing.
-_mtmd_log_sink = None
-
-
-def _forward_mtmd_log(level: int, text: bytes, user_data=None) -> None:
-    """Keep mtmd's diagnostics, drop its transcript of the prompt.
-
-    CONT is dropped with the rest: it continues whatever was logged last, so
-    forwarding it once its INFO parent is gone would print orphaned fragments
-    of the prompt — the same leak in a form that reads like corruption.
-    """
-    if level not in (_GGML_LOG_LEVEL_WARN, _GGML_LOG_LEVEL_ERROR) or not text:
-        return
-    sys.stderr.write(text.decode("utf-8", "replace"))
-    sys.stderr.flush()
-
-
-def _import_mtmd():
-    """Split out so the installer can be tested without the native library."""
-    import llama_cpp.mtmd_cpp as mtmd_cpp
-
-    return mtmd_cpp
-
-
-def _silence_mtmd_logging() -> None:
-    """Install [_forward_mtmd_log] on both mtmd loggers. Idempotent."""
-    global _mtmd_log_sink
-    if _mtmd_log_sink is not None:
-        return
-
-    import llama_cpp
-
-    mtmd_cpp = _import_mtmd()
-    _mtmd_log_sink = llama_cpp.llama_log_callback(_forward_mtmd_log)
-    mtmd_cpp.mtmd_log_set(_mtmd_log_sink, None)
-    mtmd_cpp.mtmd_helper_log_set(_mtmd_log_sink, None)
-
-
 def load_local_model(
     model_name: str,
     model_path: str,
@@ -215,9 +254,8 @@ def load_local_model(
             print(f"[LOADER] Unknown chat handler '{handler_cls_name}', falling back to Gemma4ChatHandler")
             handler_cls = llama_chat_format.Gemma4ChatHandler
         print(f"[LOADER] Vision mode — {handler_cls_name} with mmproj: {clip_model_path}")
+        quiet_mtmd_logging()
         chat_handler = handler_cls(clip_model_path=clip_model_path, verbose=False)
-        # Before the first generation, which is where the prompt echo happens.
-        _silence_mtmd_logging()
 
     return llama_cpp.Llama(
         model_path=model_path,

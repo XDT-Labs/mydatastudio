@@ -1,3 +1,4 @@
+import 'package:mydatastudio/app_constants.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -109,7 +110,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
   bool _isLLMServiceRunning = PythonManager.isLLMServiceRunning.value;
   bool _modelsReady = ModelDownloadManager.isReady.value;
   List<ModelDownloadItem> _downloadItems = ModelDownloadManager.items.value;
-  String _selectedModel = 'gemma4:12b';
+  String _selectedModel = AppConstants.defaultChatModelAlias;
   List<AichatModel> _dbModels = [];
   StreamSubscription<List<AichatModel>>? _modelsSub;
 

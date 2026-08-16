@@ -263,6 +263,7 @@ class DatabaseRepository {
         ?
       ) AS v ON e.rowid = v.rowid
       WHERE f.is_deleted = 0
+        AND f.is_user_deleted = 0
         AND e.type = 'file'
         $excludeClause
       ORDER BY v.distance ASC
@@ -311,6 +312,7 @@ class DatabaseRepository {
              OR IFNULL(fe.model_version, '') <> ?)
         AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
         AND f.is_deleted = 0
+        AND f.is_user_deleted = 0
         AND f.is_inline = 0
         AND f.embedding_attempts < ?
         $exclusion
@@ -518,6 +520,7 @@ class DatabaseRepository {
               OR f.content_type IN ($exportableTypes)
             )
         AND f.is_deleted = 0
+        AND f.is_user_deleted = 0
         AND f.is_inline = 0
         AND f.description_attempts < ?
       LIMIT ?

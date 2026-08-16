@@ -48,6 +48,9 @@ class _PhotoGridState extends State<PhotoGrid> {
   int _activeIndex = 0;
   List<double> _sectionOffsets = [];
 
+  /// Month buckets the user has collapsed, keyed the same way the sections are.
+  final Set<String> _collapsedMonths = {};
+
   StreamSubscription<double>? _gridSizeSub;
   double _gridItemSize = 160.0;
 
@@ -158,13 +161,20 @@ class _PhotoGridState extends State<PhotoGrid> {
     final itemWidth = (usableGridWidth - (columns - 1) * 8.0) / columns;
     final itemHeight = itemWidth;
 
-    for (final monthFiles in groups.values) {
+    for (final entry in groups.entries) {
       offsets.add(currentOffset);
 
       const headerHeight = 40.0;
-      final rows = (monthFiles.length / columns).ceil();
-      final gridHeight =
-          rows == 0 ? 0.0 : 16.0 + rows * itemHeight + (rows - 1) * 8.0;
+      // A collapsed section is its header and nothing else. The quick-jump
+      // scrubber scrolls by these offsets, so leaving the grid's height in
+      // would send every jump past its target by the height of everything
+      // collapsed above it.
+      final rows = _collapsedMonths.contains(entry.key)
+          ? 0
+          : (entry.value.length / columns).ceil();
+      final gridHeight = rows == 0
+          ? 0.0
+          : 16.0 + rows * itemHeight + (rows - 1) * 8.0;
 
       currentOffset += headerHeight + gridHeight;
     }
@@ -237,6 +247,12 @@ class _PhotoGridState extends State<PhotoGrid> {
                 dateLabel: monthYear,
                 itemCount: monthFiles.length,
                 isSelected: isGroupAllSelected,
+                isCollapsed: _collapsedMonths.contains(monthYear),
+                onToggleCollapsed: () => setState(() {
+                  if (!_collapsedMonths.remove(monthYear)) {
+                    _collapsedMonths.add(monthYear);
+                  }
+                }),
                 onSelectAll: (val) {
                   if (val) {
                     SelectionService.instance.selectAll(
@@ -252,7 +268,11 @@ class _PhotoGridState extends State<PhotoGrid> {
             ),
           );
 
-          // 2. Month photo grid
+          // 2. Month photo grid — omitted entirely when collapsed rather than
+          // rendered at zero height, so a collapsed month costs nothing to
+          // scroll past.
+          if (_collapsedMonths.contains(monthYear)) return;
+
           slivers.add(
             SliverPadding(
               padding: const EdgeInsets.all(8.0),

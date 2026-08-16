@@ -14,7 +14,7 @@ import 'package:path/path.dart' as p;
 /// existing isolate. This class only handles on-demand UI operations:
 /// listing a folder's contents, downloading (a no-op for local files),
 /// deleting from disk, and opening in the system viewer.
-class LocalFileProvider implements FileSourceProvider {
+class LocalFileProvider extends FileSourceProvider {
   const LocalFileProvider();
 
   @override

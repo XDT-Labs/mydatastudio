@@ -8,6 +8,12 @@ from unittest.mock import Mock, patch
 from PIL import Image
 
 from aichat.model_manager import (
+    GGML_LOG_LEVEL_CONT,
+    GGML_LOG_LEVEL_DEBUG,
+    GGML_LOG_LEVEL_ERROR,
+    GGML_LOG_LEVEL_INFO,
+    GGML_LOG_LEVEL_WARN,
+    MtmdLogFilter,
     load_gemini_model,
     load_claude_model,
     load_openai_model,
@@ -192,6 +198,42 @@ class TestModelManager:
             clip_model_path="/fake/path/mmproj.gguf", verbose=False
         )
 
+    @patch('aichat.model_manager.quiet_mtmd_logging')
+    @patch('llama_cpp.llama_chat_format')
+    @patch('llama_cpp.Llama')
+    def test_vision_mode_quiets_mtmd_before_the_handler_exists(
+        self, mock_llamacpp, mock_chat_format, mock_quiet
+    ):
+        """libmtmd's logger has to be redirected before it can say anything.
+
+        `verbose=False` only reaches libllama; libmtmd keeps its own logger and
+        narrates every image it encodes straight to stderr, which a cluster
+        labelling pass turns into hundreds of lines crossing the pipe to
+        Flutter. The call has to land before the handler loads the mmproj,
+        because that load is itself the first thing libmtmd logs about.
+        """
+        order = []
+        mock_quiet.side_effect = lambda: order.append('quiet')
+        mock_chat_format.Gemma4ChatHandler.side_effect = (
+            lambda **kwargs: order.append('handler') or Mock()
+        )
+
+        load_local_model(
+            "bartowski/gemma",
+            "/fake/path/model.gguf",
+            clip_model_path="/fake/path/mmproj.gguf",
+        )
+
+        assert order == ['quiet', 'handler']
+
+    @patch('aichat.model_manager.quiet_mtmd_logging')
+    @patch('llama_cpp.Llama')
+    def test_text_only_load_leaves_mtmd_alone(self, mock_llamacpp, mock_quiet):
+        """No mmproj means libmtmd is never loaded, so there is nothing to quiet."""
+        load_local_model("bartowski/gemma", "/fake/path/model.gguf")
+
+        mock_quiet.assert_not_called()
+
     @patch('aichat.model_manager.find_local_model')
     @patch('aichat.model_manager.download_gguf_model')
     @patch('aichat.model_manager.LlamaCpp')
@@ -271,69 +313,106 @@ class TestModelManager:
                 decode_base64_image(valid_b64)
             assert "Unable to locate Ghostscript" in str(exc_info.value)
 
-class TestMtmdLogSilencing:
-    """mtmd echoes every text chunk it tokenizes, at INFO, with the chunk's
-    full contents — so one document description put 62k characters of prompt
-    into the log. `verbose=False` does not reach it: the chat handler wraps its
-    *init* calls in `suppress_stdout_stderr` but not `mtmd_tokenize`, and mtmd
-    keeps its own logger rather than routing through `llama_log_set`.
-    """
+class TestMtmdLogFilter:
+    """The rule libmtmd's output is held to once its logger is ours."""
 
-    def test_an_info_line_is_dropped(self, capsys):
-        """The whole point: this is where the prompt echo arrives."""
-        from aichat.model_manager import _forward_mtmd_log, _GGML_LOG_LEVEL_INFO
+    def test_running_commentary_is_dropped_but_failures_are_not(self):
+        log_filter = MtmdLogFilter(keep_chatter=False)
 
-        _forward_mtmd_log(_GGML_LOG_LEVEL_INFO, b"add_text: <the entire prompt>")
+        # clip's per-image narration arrives at INFO...
+        assert not log_filter.should_emit(GGML_LOG_LEVEL_INFO)
+        assert not log_filter.should_emit(GGML_LOG_LEVEL_DEBUG)
+        # ...and mtmd-helper's arrives at WARN. Measured against gemma-4-12B:
+        # "encoding image slice...", "image slice encoded in 173 ms",
+        # "decoding image batch 1/1" and "image decoded (batch 1/1) in 160 ms"
+        # are all level 2. Trusting WARN here keeps the exact noise this was
+        # written to remove, so WARN goes with the rest.
+        assert not log_filter.should_emit(GGML_LOG_LEVEL_WARN)
+        # A model that fails to encode an image still has to be able to say so.
+        assert log_filter.should_emit(GGML_LOG_LEVEL_ERROR)
 
-        assert capsys.readouterr().err == ""
+    # develop's own reason for silencing this logger, kept as a case against
+    # the surviving implementation: mtmd echoes every tokenized text chunk at
+    # INFO with its full contents, and one document description put 62k
+    # characters of prompt into the log.
+    def test_the_prompt_echo_is_dropped(self):
+        log_filter = MtmdLogFilter(keep_chatter=False)
 
-    def test_a_warning_still_reaches_the_log(self, capsys):
-        """Silencing the echo must not silence the diagnostics. A model that
-        warns about its own state is the thing worth keeping."""
-        from aichat.model_manager import _forward_mtmd_log, _GGML_LOG_LEVEL_WARN
+        assert not log_filter.should_emit(GGML_LOG_LEVEL_INFO)
+        # And its continuation, which would otherwise print orphaned fragments
+        # of that same prompt.
+        assert not log_filter.should_emit(GGML_LOG_LEVEL_CONT)
 
-        _forward_mtmd_log(_GGML_LOG_LEVEL_WARN, b"clip: image too large\n")
+    def test_debug_runs_keep_everything(self):
+        """Someone debugging the vision path is asking for exactly these lines."""
+        log_filter = MtmdLogFilter(keep_chatter=True)
 
-        assert "clip: image too large" in capsys.readouterr().err
+        assert log_filter.should_emit(GGML_LOG_LEVEL_INFO)
+        assert log_filter.should_emit(GGML_LOG_LEVEL_DEBUG)
+        assert log_filter.should_emit(GGML_LOG_LEVEL_WARN)
 
-    def test_an_error_still_reaches_the_log(self, capsys):
-        from aichat.model_manager import _forward_mtmd_log, _GGML_LOG_LEVEL_ERROR
+    def test_a_continuation_follows_the_line_it_continues(self):
+        """CONT carries no level of its own — it is the tail of the previous line.
 
-        _forward_mtmd_log(_GGML_LOG_LEVEL_ERROR, b"failed to encode image\n")
+        Judging it independently would either strand a fragment with no header
+        or truncate an error message halfway through.
+        """
+        log_filter = MtmdLogFilter(keep_chatter=False)
 
-        assert "failed to encode image" in capsys.readouterr().err
+        log_filter.should_emit(GGML_LOG_LEVEL_ERROR)
+        assert log_filter.should_emit(GGML_LOG_LEVEL_CONT)
 
-    def test_a_continuation_of_a_dropped_line_is_dropped_too(self, capsys):
-        """CONT continues whatever was logged last. Forwarding it after its
-        INFO parent was dropped would print orphaned fragments of the prompt —
-        the same leak in a form that reads like corruption."""
-        from aichat.model_manager import _forward_mtmd_log, _GGML_LOG_LEVEL_CONT
+        log_filter.should_emit(GGML_LOG_LEVEL_WARN)
+        assert not log_filter.should_emit(GGML_LOG_LEVEL_CONT)
 
-        _forward_mtmd_log(_GGML_LOG_LEVEL_CONT, b"...rest of the prompt")
 
-        assert capsys.readouterr().err == ""
+class TestQuietMtmdLoggingCallback:
+    """The callback native code calls into, once libmtmd's loggers are ours."""
 
-    def test_the_callback_is_held_against_collection(self, monkeypatch):
-        """A ctypes trampoline that Python collects while C still holds the
-        pointer is a segfault during generation, not a quiet no-op — so the
-        installer must keep a reference and must not install twice."""
+    @staticmethod
+    def _install():
+        """Run quiet_mtmd_logging with the native setters stubbed, and return
+        the callback it handed them."""
         import aichat.model_manager as mm
 
-        installed = []
+        captured = []
+        mm._mtmd_log_callback = None
+        try:
+            with patch('llama_cpp.mtmd_cpp.mtmd_log_set') as log_set, \
+                 patch('llama_cpp.mtmd_cpp.mtmd_helper_log_set') as helper_set:
+                mm.quiet_mtmd_logging()
+                captured.append(log_set.call_args[0][0])
+                # Both of libmtmd's loggers have to be claimed: clip's output
+                # goes through one and mtmd-helper's per-image progress through
+                # the other, and missing either leaves half the noise.
+                assert helper_set.called
+        finally:
+            mm._mtmd_log_callback = None
+        return captured[0]
 
-        class _FakeMtmd:
-            def mtmd_log_set(self, cb, user_data):
-                installed.append(cb)
+    def test_a_broken_stderr_does_not_escape_into_native_code(self):
+        """CPython answers an exception here by dumping a traceback to stderr
+        for every line — worse than the output being suppressed, and the pipe
+        to Flutter dying is exactly how it would start happening."""
+        forward = self._install()
 
-            def mtmd_helper_log_set(self, cb, user_data):
-                installed.append(cb)
+        with patch('sys.stderr') as fake_stderr:
+            fake_stderr.write.side_effect = BrokenPipeError("client is gone")
+            forward(GGML_LOG_LEVEL_ERROR, b"vision encode failed\n", None)
 
-        monkeypatch.setattr(mm, "_mtmd_log_sink", None)
-        monkeypatch.setattr(mm, "_import_mtmd", lambda: _FakeMtmd())
+    def test_a_null_message_does_not_escape_either(self):
+        """ctypes hands a NULL char* over as None, which has no .decode."""
+        forward = self._install()
 
-        mm._silence_mtmd_logging()
-        mm._silence_mtmd_logging()
+        forward(GGML_LOG_LEVEL_ERROR, None, None)
 
-        assert len(installed) == 2, "installed once, on both mtmd loggers"
-        assert mm._mtmd_log_sink is not None
-        assert all(cb is mm._mtmd_log_sink for cb in installed)
+    def test_errors_still_reach_stderr(self):
+        """The guard must not turn into a blanket mute — this is the one level
+        that survives the filter, so it has to actually come out."""
+        forward = self._install()
+
+        with patch('sys.stderr') as fake_stderr:
+            forward(GGML_LOG_LEVEL_ERROR, b"vision encode failed\n", None)
+            forward(GGML_LOG_LEVEL_WARN, b"image slice encoded in 173 ms\n", None)
+
+        fake_stderr.write.assert_called_once_with("vision encode failed\n")

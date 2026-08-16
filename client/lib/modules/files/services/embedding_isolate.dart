@@ -16,6 +16,14 @@ import 'package:mydatastudio/services/embedding_message_handler.dart';
 import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 
+/// Why an embedding attempt did not produce a vector.
+///
+/// The distinction decides whether the file's attempt counter moves. A file the
+/// server cannot parse will fail identically forever and should eventually be
+/// dropped; a server that is down says nothing about the file, and counting
+/// that would spend every photo's budget during one outage.
+enum EmbeddingOutcome { ok, unusable, unreachable }
+
 class EmbeddingIsolate {
   Isolate? _isolate;
   ReceivePort? _receivePort;
@@ -331,9 +339,12 @@ class EmbeddingIsolate {
             // decoder from the extension, so a converted .nef still called
             // .nef sends JPEG bytes to rawpy and loses that photo its
             // embedding.
-            final embedding =
+            final result =
                 prepared == null
-                    ? null
+                    ? (
+                      outcome: EmbeddingOutcome.unreachable,
+                      embedding: null as List<double>?,
+                    )
                     : await _generateEmbedding(
                       prepared.bytes,
                       prepared.fileName,
@@ -341,6 +352,7 @@ class EmbeddingIsolate {
                       serviceToken,
                       logger,
                     );
+            final embedding = result.embedding;
             final duration = DateTime.now().difference(start);
             logger.d("Processed file ${file.path} in $duration");
 
@@ -387,12 +399,18 @@ class EmbeddingIsolate {
                   "${file.collectionId}: ${file.path}",
                 );
               }
-            } else {
+            } else if (result.outcome == EmbeddingOutcome.unusable) {
               // Read fine and still produced nothing: the bytes themselves are
               // the problem (truncated JPEG, unsupported encoding). That is
               // what the attempt budget is for — see maxEmbeddingAttempts.
               logger.w("Skipped unprocessable file: ${file.path}");
               replyTo.send({'type': 'embeddingFailed', 'id': file.id});
+            } else {
+              // The service is down, still loading its model, or wedged. The
+              // file is fine as far as anyone knows, so it is retried next
+              // pass at no cost to its budget.
+              logger.w("Embedding service unavailable, will retry: "
+                  "${file.path}");
             }
             // Batch complete
           } catch (e) {
@@ -495,7 +513,15 @@ class EmbeddingIsolate {
     return row.map((e) => (e as num).toDouble()).toList();
   }
 
-  static Future<List<double>?> _generateEmbedding(
+  /// Embeds one image, saying *why* when it does not.
+  ///
+  /// A bare null cannot carry that: a file whose bytes the model rejects will
+  /// fail identically forever and should eventually be retired, while a server
+  /// that is down has said nothing about the file at all. Collapsing the two
+  /// spends every photo's attempt budget during a single outage and retires
+  /// the whole library, with nothing in the UI to say so.
+  static Future<({EmbeddingOutcome outcome, List<double>? embedding})>
+      _generateEmbedding(
     List<int> bytes,
     String filename,
     String serviceUrl,
@@ -505,35 +531,56 @@ class EmbeddingIsolate {
     final base64Image = base64Encode(bytes);
 
     try {
-      final response = await http.post(
-        Uri.parse("$serviceUrl/util/embedding"),
-        headers: {
-          'Content-Type': 'application/json',
-          ...aiServerAuthHeaders(serviceToken),
-        },
-        body: jsonEncode({
-          'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
-          'filename': filename,
-          // A list of one: images are not batched — two photos of different
-          // dimensions expand to different numbers of vision tokens — but the
-          // request shape is the same one text uses, so there is a single
-          // contract to keep in step.
-          'images_base64': [base64Image],
-        }),
-      );
+      final response = await http
+          .post(
+            Uri.parse("$serviceUrl/util/embedding"),
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(serviceToken),
+            },
+            body: jsonEncode({
+              'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+              'filename': filename,
+              // A list of one: images are not batched — two photos of different
+              // dimensions expand to different numbers of vision tokens — but the
+              // request shape is the same one text uses, so there is a single
+              // contract to keep in step.
+              'images_base64': [base64Image],
+            }),
+          )
+          // Without a deadline a wedged aiserver stops this isolate for good:
+          // there is no other timer, so the whole backlog waits on one request
+          // that will never answer. Generous, because the server serialises
+          // generation behind a lock and a queued request waits on the one in
+          // front of it. A TimeoutException lands in the catch below as
+          // unreachable, which is what it is.
+          .timeout(const Duration(minutes: 2));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return _firstVector(data);
-      } else {
-        logger.e(
-          "Python service error: ${response.statusCode} ${response.body}",
-        );
-        return null;
+        final vector = _firstVector(data);
+        return vector == null
+            ? (outcome: EmbeddingOutcome.unusable, embedding: null)
+            : (outcome: EmbeddingOutcome.ok, embedding: vector);
       }
+
+      logger.e(
+        "Python service error: ${response.statusCode} ${response.body}",
+      );
+      // 400 is the endpoint's answer for an image it could not decode — it
+      // maps the parse ValueError to a 400 — so that is a verdict on this
+      // file. 503 (model still downloading) and 5xx are about the service.
+      return (
+        outcome: response.statusCode == 400
+            ? EmbeddingOutcome.unusable
+            : EmbeddingOutcome.unreachable,
+        embedding: null,
+      );
     } catch (e) {
+      // Connection refused, timeout, malformed response — all about the
+      // service, none about the file.
       logger.e("Error calling Python embedding service: $e");
-      return null;
+      return (outcome: EmbeddingOutcome.unreachable, embedding: null);
     }
   }
 
