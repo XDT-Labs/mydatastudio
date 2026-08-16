@@ -1,16 +1,21 @@
 import 'package:material_ui/material_ui.dart';
-import 'package:reactive_forms/reactive_forms.dart';
 
 class LocalFilesTabView extends StatelessWidget {
   const LocalFilesTabView({
     super.key,
-    required this.form,
+    required this.formKey,
+    required this.nameController,
+    required this.pathController,
     required this.onBrowse,
     required this.onSave,
     required this.onCancel,
   });
 
-  final FormGroup form;
+  /// Owned by the page, so it can validate on save and light up both fields'
+  /// errors at once.
+  final GlobalKey<FormState> formKey;
+  final TextEditingController nameController;
+  final TextEditingController pathController;
   final VoidCallback onBrowse;
   final VoidCallback onSave;
   final VoidCallback onCancel;
@@ -20,8 +25,9 @@ class LocalFilesTabView extends StatelessWidget {
     return Center(
       child: SizedBox(
         width: MediaQuery.of(context).size.width / 2,
-        child: ReactiveForm(
-          formGroup: form,
+        child: Form(
+          key: formKey,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.start,
@@ -35,8 +41,13 @@ class LocalFilesTabView extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: ReactiveTextField(
-                      formControlName: 'name',
+                    child: TextFormField(
+                      controller: nameController,
+                      validator:
+                          (value) =>
+                              (value == null || value.isEmpty)
+                                  ? 'Name is required'
+                                  : null,
                       decoration: const InputDecoration(
                         hintText: 'Name of folder',
                         labelText: 'Name *',
@@ -50,9 +61,14 @@ class LocalFilesTabView extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: ReactiveTextField(
-                      formControlName: 'path',
+                    child: TextFormField(
+                      controller: pathController,
                       readOnly: true,
+                      validator:
+                          (value) =>
+                              (value == null || value.isEmpty)
+                                  ? 'Folder is required'
+                                  : null,
                       decoration: const InputDecoration(
                         icon: Icon(Icons.folder_open),
                         hintText: 'Click Browse to select a folder',
@@ -73,10 +89,7 @@ class LocalFilesTabView extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: onCancel,
-                    child: const Text('Cancel'),
-                  ),
+                  TextButton(onPressed: onCancel, child: const Text('Cancel')),
                   const SizedBox(width: 12),
                   ElevatedButton(
                     onPressed: onSave,

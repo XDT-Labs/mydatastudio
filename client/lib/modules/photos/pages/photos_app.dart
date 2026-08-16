@@ -1,6 +1,9 @@
 import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/photos/models/photo_cluster.dart';
+import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_service.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
@@ -12,6 +15,7 @@ import 'package:mydatastudio/modules/photos/widgets/toolbar/photos_toolbar.dart'
 import 'package:mydatastudio/modules/photos/widgets/toolbar/place_filter_bar.dart';
 import 'package:mydatastudio/modules/photos/widgets/viewer/fullscreen_viewer.dart';
 import 'package:mydatastudio/modules/photos/widgets/keyboard_shortcut_handler.dart';
+import 'package:mydatastudio/modules/photos/widgets/views/photo_cluster_view.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_grid.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_list_view.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_map_view.dart';
@@ -61,6 +65,7 @@ class _PhotosAppState extends State<PhotosApp> {
 
     _viewModeSub = ViewStateService.instance.viewMode.listen((mode) {
       if (mounted) setState(() => _viewMode = mode);
+      if (mode == PhotoViewMode.clusters) _syncClusterScope();
     });
 
     _photosSub = PhotosService.instance.sink.listen((files) {
@@ -82,11 +87,17 @@ class _PhotosAppState extends State<PhotosApp> {
     _filterSub = ViewStateService.instance.activeFilter.listen((filter) {
       if (mounted) setState(() => _activeFilter = filter);
       PhotosService.instance.invoke(PhotosServiceCommand(filter));
+      if (_viewMode == PhotoViewMode.clusters) _syncClusterScope();
     });
 
     _selectionSub = SelectionService.instance.selectedIds.listen((ids) {
       if (mounted) setState(() => _selectedIds = ids);
     });
+
+    // The view-mode subscription only fires on change, so a session that opens
+    // straight into the cluster view would otherwise sit on "No groups yet"
+    // until the user touched the filter.
+    if (_viewMode == PhotoViewMode.clusters) _syncClusterScope();
   }
 
   @override
@@ -101,23 +112,32 @@ class _PhotosAppState extends State<PhotosApp> {
     super.dispose();
   }
 
+  /// Points the cluster view at the run for whatever source is selected.
+  ///
+  /// The cluster view is a view, not a separate library: All Photos groups
+  /// every source together, and picking one source groups only that source.
+  /// A run already built for a scope is reused, so switching back to a source
+  /// visited earlier is instant rather than a re-clustering pass.
+  void _syncClusterScope() {
+    final filter = ViewStateService.instance.activeFilter.value;
+    final scope = ClusterScope.fromFilter(filter);
+    if (PhotoClusterService.instance.state.value.scope == scope &&
+        PhotoClusterService.instance.state.value.hasRun) {
+      return;
+    }
+    PhotoClusterService.instance.load(scope);
+  }
+
   Widget _buildActiveView() {
     switch (_viewMode) {
       case PhotoViewMode.grid:
-        return PhotoGrid(
-          files: _files,
-          selectedIds: _selectedIds,
-        );
+        return PhotoGrid(files: _files, selectedIds: _selectedIds);
       case PhotoViewMode.list:
-        return PhotoListView(
-          files: _files,
-          selectedIds: _selectedIds,
-        );
+        return PhotoListView(files: _files, selectedIds: _selectedIds);
       case PhotoViewMode.map:
-        return PhotoMapView(
-          files: _geoFiles,
-          selectedIds: _selectedIds,
-        );
+        return PhotoMapView(files: _geoFiles, selectedIds: _selectedIds);
+      case PhotoViewMode.clusters:
+        return PhotoClusterView(files: _files, selectedIds: _selectedIds);
     }
   }
 
@@ -141,10 +161,7 @@ class _PhotosAppState extends State<PhotosApp> {
   }
 
   Widget _buildInfoPanel() {
-    return AnimatedInfoPanel(
-      isOpen: _isInfoOpen,
-      child: const InfoSidebar(),
-    );
+    return AnimatedInfoPanel(isOpen: _isInfoOpen, child: const InfoSidebar());
   }
 
   Widget _buildStatusBar(BuildContext context) {
@@ -152,13 +169,14 @@ class _PhotosAppState extends State<PhotosApp> {
     final colorScheme = theme.colorScheme;
     final textTheme = theme.textTheme;
 
-    final videoCount = _files.where((f) {
-      final mime = f.contentType;
-      return mime.startsWith('video/') ||
-          f.name.endsWith('.mp4') ||
-          f.name.endsWith('.mov') ||
-          f.name.endsWith('.avi');
-    }).length;
+    final videoCount =
+        _files.where((f) {
+          final mime = f.contentType;
+          return mime.startsWith('video/') ||
+              f.name.endsWith('.mp4') ||
+              f.name.endsWith('.mov') ||
+              f.name.endsWith('.avi');
+        }).length;
     final photoCount = _files.length - videoCount;
 
     String countText = '$photoCount photos, $videoCount videos';
@@ -171,9 +189,7 @@ class _PhotosAppState extends State<PhotosApp> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainer,
-        border: Border(
-          top: BorderSide(color: colorScheme.outlineVariant),
-        ),
+        border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
       ),
       child: Row(
         children: [
@@ -231,9 +247,7 @@ class _PhotosAppState extends State<PhotosApp> {
               Expanded(
                 child: Row(
                   children: [
-                    Expanded(
-                      child: _buildActiveView(),
-                    ),
+                    Expanded(child: _buildActiveView()),
                     _buildInfoPanel(),
                   ],
                 ),
@@ -249,11 +263,15 @@ class _PhotosAppState extends State<PhotosApp> {
                     child: FullscreenViewer(
                       currentFile: _lightboxMedia!,
                       mediaList: _files,
-                      onClose: () => ViewStateService.instance.setLightboxMedia(null),
-                      onOpenInfo: (file) => ViewStateService.instance.openInfo(file),
+                      onClose:
+                          () =>
+                              ViewStateService.instance.setLightboxMedia(null),
+                      onOpenInfo:
+                          (file) => ViewStateService.instance.openInfo(file),
                       onToggleFavorite: (file) async {
                         await _photosRepo.toggleFavorite(file.id);
-                        final updatedList = await PhotosService.instance.refresh();
+                        final updatedList =
+                            await PhotosService.instance.refresh();
                         final updated = updatedList.firstWhere(
                           (f) => f.id == file.id,
                           orElse: () => file..isFavorite = !file.isFavorite,

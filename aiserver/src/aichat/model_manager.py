@@ -5,13 +5,15 @@ This module handles loading and managing GGUF models via LlamaCpp and
 Google Gemini API models. It provides the core functionality for both
 chat and embedding models.
 """
+import logging
 import os
+import sys
 import torch
 from PIL import Image
 import base64
 import io
 from typing import Any, List, Optional
-from transformers import AutoModel, AutoProcessor
+from transformers import AutoModelForImageTextToText, AutoProcessor
 from qwen_vl_utils import process_vision_info
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -21,6 +23,103 @@ from langchain_community.llms import LlamaCpp
 
 from .config import MAX_NEW_TOKENS, TEMPERATURE, DO_SAMPLE
 from .utils import find_local_model, download_gguf_model
+
+
+# ggml_log_level values, from ggml.h.
+GGML_LOG_LEVEL_INFO = 1
+GGML_LOG_LEVEL_WARN = 2
+GGML_LOG_LEVEL_ERROR = 3
+GGML_LOG_LEVEL_DEBUG = 4
+GGML_LOG_LEVEL_CONT = 5
+
+
+class MtmdLogFilter:
+    """Decides which lines from libmtmd's own logger reach stderr.
+
+    Two separate leaks, both through this one logger.
+
+    mtmd echoes every text chunk it tokenizes, at INFO, with the chunk's full
+    contents — one document description put 62k characters of prompt into the
+    log. And vision encoding narrates itself a handful of lines per image
+    ("encoding image slice...", "image slice encoded in 52 ms",
+    "clip_image_batch_encode: copying image 1/1 to input buffer"), which a
+    cluster labelling pass multiplies by every thumbnail it sends. Each line
+    crosses the pipe to Flutter and is logged again there.
+
+    Only errors survive, rather than the usual warnings-and-above, because
+    libmtmd's severity field does not mean what it says: measured against
+    gemma-4-12B, the four per-image progress lines from mtmd-helper arrive at
+    GGML_LOG_LEVEL_WARN while clip's own output arrives at INFO. A level-based
+    rule that trusts WARN therefore keeps exactly the noise it was written to
+    remove. Running the server at debug still brings every line back, which is
+    where to look when a warning from this library actually matters.
+    """
+
+    def __init__(self, keep_chatter: bool):
+        self.keep_chatter = keep_chatter
+        # A CONT line continues the one before it, so it has to inherit that
+        # line's fate — dropping the header and keeping its tail would print a
+        # fragment with nothing to attach to.
+        self._emitted = True
+
+    def should_emit(self, level: int) -> bool:
+        if level == GGML_LOG_LEVEL_CONT:
+            return self._emitted
+        self._emitted = self.keep_chatter or level == GGML_LOG_LEVEL_ERROR
+        return self._emitted
+
+
+# ctypes callbacks are collected as soon as Python stops pointing at them, and
+# libmtmd would then be calling into freed memory — so the live one is held here.
+_mtmd_log_callback = None
+
+
+def quiet_mtmd_logging() -> None:
+    """Put libmtmd's logger behind [MtmdLogFilter].
+
+    libmtmd keeps a logger state of its own, separate from libllama's, so
+    llama_cpp's `verbose=False` — which only reaches `llama_log_set` — never
+    touches it and its per-image output goes straight to stderr.
+
+    Quieting logs must never be the reason a model fails to load, so a binding
+    that turns out not to exist is reported and shrugged off.
+    """
+    global _mtmd_log_callback
+    if _mtmd_log_callback is not None:
+        return
+
+    try:
+        import ctypes
+        import llama_cpp
+        import llama_cpp.mtmd_cpp as mtmd_cpp
+
+        log_filter = MtmdLogFilter(
+            keep_chatter=logging.getLogger().getEffectiveLevel() < logging.INFO
+        )
+
+        @llama_cpp.llama_log_callback
+        def forward(level: int, text: bytes, user_data):
+            # Nothing may escape. Native code calls straight into here, and
+            # CPython answers an exception at that boundary by writing an
+            # "Exception ignored on calling ctypes callback function"
+            # traceback to stderr — several lines per image, which is worse
+            # than the output this exists to suppress. stderr is the likely
+            # culprit too: it is a pipe to Flutter, so a client that has gone
+            # away turns every write into a BrokenPipeError, and the traceback
+            # would go down the same dead pipe. A dropped log line is the
+            # cheapest possible failure here.
+            try:
+                if log_filter.should_emit(level) and text:
+                    sys.stderr.write(text.decode("utf-8", "replace"))
+                    sys.stderr.flush()
+            except Exception:
+                pass
+
+        _mtmd_log_callback = forward
+        mtmd_cpp.mtmd_log_set(forward, ctypes.c_void_p(0))
+        mtmd_cpp.mtmd_helper_log_set(forward, ctypes.c_void_p(0))
+    except Exception as e:
+        print(f"[LOADER] Could not quiet libmtmd logging: {e}")
 
 
 def load_gemini_model(model_id: str = "gemini-2.0-flash", api_key: Optional[str] = None) -> ChatGoogleGenerativeAI:
@@ -155,6 +254,7 @@ def load_local_model(
             print(f"[LOADER] Unknown chat handler '{handler_cls_name}', falling back to Gemma4ChatHandler")
             handler_cls = llama_chat_format.Gemma4ChatHandler
         print(f"[LOADER] Vision mode — {handler_cls_name} with mmproj: {clip_model_path}")
+        quiet_mtmd_logging()
         chat_handler = handler_cls(clip_model_path=clip_model_path, verbose=False)
 
     return llama_cpp.Llama(
@@ -218,68 +318,168 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
         model_path = model_id
 
     print(f"[EMBEDDING] Loading from {model_path}...")
-    model = AutoModel.from_pretrained(
+    # AutoModel is wrong for this checkpoint and fails *silently*. Qwen3-VL
+    # Embedding declares Qwen3VLForConditionalGeneration, whose state dict nests
+    # the language model under `model.language_model.*`; AutoModel resolves to
+    # the bare Qwen3VLModel, which expects `language_model.*`. Every one of the
+    # 625 language-model tensors therefore fails to match, gets dropped, and is
+    # replaced by a fresh random initialisation — so the model still loads, still
+    # returns 2048 normalised floats, and every one of them is noise.
+    model, loading_info = AutoModelForImageTextToText.from_pretrained(
         model_path,
-        dtype=torch.float16 if device != "cpu" else torch.float32
-    ).to(device)
+        dtype=torch.float16 if device != "cpu" else torch.float32,
+        output_loading_info=True,
+    )
+    model = model.to(device)
+
+    # Fail loudly rather than serve noise. Randomly-initialised weights are not
+    # a degraded mode: the embeddings are meaningless, they are meaningless
+    # *differently* on every process launch (so vectors written by one run can
+    # never be compared with another's), and nothing downstream can detect it —
+    # cosine similarity over garbage still returns plausible-looking numbers.
+    missing = loading_info.get("missing_keys") or []
+    if missing:
+        raise RuntimeError(
+            f"Embedding model {model_id} loaded with {len(missing)} randomly "
+            f"initialised tensors (e.g. {missing[:3]}). Its embeddings would be "
+            "noise. This means the checkpoint does not match the model class."
+        )
 
     processor = AutoProcessor.from_pretrained(model_path)
-    
+
     print(f"[EMBEDDING] Transformers model {model_id} loaded successfully.")
     return model, processor
 
 
-def generate_embedding(
-    model: Any, 
-    processor: Any, 
-    text: Optional[str] = None, 
-    image_base64: Optional[str] = None,
+def generate_embeddings(
+    model: Any,
+    processor: Any,
+    texts: Optional[List[str]] = None,
+    images_base64: Optional[List[str]] = None,
     filename: Optional[str] = None
-) -> List[float]:
+) -> List[List[float]]:
     """
     Universal embedding generator that handles both LlamaCpp and Transformers.
+
+    Takes and returns lists, one vector per input, in order. Callers with a
+    single item send a list of one — a uniform shape beats a singular and a
+    plural path that can drift apart.
     """
     # Which route is taken is a property of the loaded model, not of the call,
     # so it was logging the same line thousands of times per import.
     if hasattr(model, 'client') and hasattr(model.client, 'embed'):
-        # LlamaCpp path (Text only)
-        if image_base64:
+        # LlamaCpp path (Text only). No batching available here — llama.cpp's
+        # embed is one string at a time — so the list is honoured by looping.
+        if images_base64:
             raise ValueError("LlamaCpp does not support image embeddings in this implementation.")
-        return generate_text_embedding(text, model, processor)
+        return [generate_text_embedding(text, model, processor) for text in (texts or [])]
 
     # Transformers path
-    return generate_transformers_multimodal_embedding(model, processor, text, image_base64, filename)
+    return generate_transformers_multimodal_embedding(model, processor, texts, images_base64, filename)
+
+
+def last_token_indices(attention_mask: "torch.Tensor") -> "torch.Tensor":
+    """Index of each row's final real (non-padding) token.
+
+    This exists because the checkpoint pools with `lasttoken` — it reads one
+    position out of the sequence and calls that the embedding. Taking position
+    `-1` is only that token when nothing is padded, which was true while every
+    call embedded exactly one item and stops being true the moment a batch
+    holds two different lengths.
+
+    Getting it wrong does not raise: a row would be handed the hidden state of
+    a PAD token, producing a confident, normalized, meaningless vector for
+    every item in the batch except the longest. Search results would just
+    quietly get worse.
+
+    Derived from the mask rather than from a padding-side setting, because
+    nothing in this codebase sets `padding_side` — it inherits whatever the
+    processor's tokenizer config happens to carry, so depending on it would be
+    depending on a default we do not control. Counting from the right works
+    under either convention.
+    """
+    # Number of trailing zeros per row: argmax on the reversed mask finds the
+    # first 1 from the end. `flip` costs nothing at these sizes.
+    trailing_pad = attention_mask.flip(dims=[1]).argmax(dim=1)
+    return attention_mask.shape[1] - 1 - trailing_pad
+
+
+def _pool_last_token(last_hidden_state: "torch.Tensor", attention_mask: "torch.Tensor") -> "torch.Tensor":
+    """Last-token pooling, then L2 normalization — per the checkpoint's own
+    1_Pooling/config.json ("pooling_mode": "lasttoken")."""
+    indices = last_token_indices(attention_mask)
+    pooled = last_hidden_state[torch.arange(last_hidden_state.shape[0]), indices]
+    return torch.nn.functional.normalize(pooled, p=2, dim=1)
 
 
 def generate_transformers_multimodal_embedding(
-    model: Any, 
-    processor: Any, 
-    text: Optional[str] = None, 
-    image_base64: Optional[str] = None,
+    model: Any,
+    processor: Any,
+    texts: Optional[List[str]] = None,
+    images_base64: Optional[List[str]] = None,
     filename: Optional[str] = None
-) -> List[float]:
+) -> List[List[float]]:
     """
     Generate embeddings using Qwen3-VL Transformers model.
+
+    Text is embedded as a true batch — one forward pass over all of it. That is
+    the whole point of the list: at ~500 tokens per chunk, per-call overhead
+    (kernel launches, the processor's Python work, the HTTP round trip) costs
+    more than the matmuls, so N separate calls cost far more than one call with
+    N rows. Email body chunks are a uniform 2,000 characters, so they pad
+    against each other with little waste.
+
+    Images are looped rather than batched, and callers send a list of one. Two
+    photos of different dimensions expand to different numbers of vision
+    tokens, so batching them is a real piece of work with no demand behind it
+    — one image per file, and the file corpus is not the slow part.
     """
     device = next(model.parameters()).device
-    
-    content = []
-    if image_base64:
-        # Decode and validate base64 image into a loaded PIL Image
-        pil_image = decode_base64_image(image_base64, filename)
-        content.append({"type": "image", "image": pil_image})
-    
-    if text:
-        content.append({"type": "text", "text": text})
-    
-    messages = [{"role": "user", "content": content}]
-    
+
+    if images_base64:
+        return [
+            _embed_one_multimodal(model, processor, device, image_base64=image, filename=filename)
+            for image in images_base64
+        ]
+
+    messages_batch = [
+        [{"role": "user", "content": [{"type": "text", "text": text}]}]
+        for text in (texts or [])
+    ]
+    prompts = [
+        processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+        for messages in messages_batch
+    ]
+
+    inputs = processor(
+        text=prompts,
+        images=None,
+        videos=None,
+        padding=True,
+        return_tensors="pt"
+    ).to(device)
+
+    return _encode(model, inputs, device)
+
+
+def _embed_one_multimodal(
+    model: Any,
+    processor: Any,
+    device: Any,
+    image_base64: str,
+    filename: Optional[str] = None
+) -> List[float]:
+    """One image through the vision path, returning a single vector."""
+    # Decode and validate base64 image into a loaded PIL Image
+    pil_image = decode_base64_image(image_base64, filename)
+    messages = [{"role": "user", "content": [{"type": "image", "image": pil_image}]}]
+
     # Prepare inputs using Qwen-VL utilities and processor
     image_inputs, video_inputs = process_vision_info(messages)
-    
+
     # Use chat template to ensure multimodal tokens (<|image_pad|>, etc.) are correctly inserted
     prompt = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
-    
+
     inputs = processor(
         text=[prompt],
         images=image_inputs,
@@ -287,18 +487,23 @@ def generate_transformers_multimodal_embedding(
         padding=True,
         return_tensors="pt"
     ).to(device)
-    
+
+    return _encode(model, inputs, device)[0]
+
+
+def _encode(model: Any, inputs: Any, device: Any) -> List[List[float]]:
+    """Run the encoder and pool, with the existing CPU fallback for device errors."""
+    # `.model` rather than the model itself: the checkpoint's class is a
+    # generation head, whose forward returns vocabulary logits. The embedding
+    # lives one level down, in the base model's hidden states.
+    encoder = model.model
+
     try:
         with torch.no_grad():
-            outputs = model(**inputs)
-            # Last Token Pooling ([EOS]) as per research
-            # Qwen3-VL-Embedding returns the embedding in the last hidden state of the [EOS] token
-            embeddings = outputs.last_hidden_state[:, -1, :]
+            outputs = encoder(**inputs)
+            embeddings = _pool_last_token(outputs.last_hidden_state, inputs["attention_mask"])
 
-            # Normalize the embedding
-            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-
-        return embeddings[0].tolist()
+        return embeddings.tolist()
     except Exception as e:
         if "buffer size" in str(e).lower() or "out of memory" in str(e).lower() or "mps" in str(e).lower():
             print(f"[EMBEDDING] Device error on {device} ({e}). Falling back to CPU...")
@@ -306,10 +511,9 @@ def generate_transformers_multimodal_embedding(
             model.to(cpu_device)
             inputs_cpu = {k: (v.to(cpu_device) if isinstance(v, torch.Tensor) else v) for k, v in inputs.items()}
             with torch.no_grad():
-                outputs = model(**inputs_cpu)
-                embeddings = outputs.last_hidden_state[:, -1, :]
-                embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-            return embeddings[0].tolist()
+                outputs = model.model(**inputs_cpu)
+                embeddings = _pool_last_token(outputs.last_hidden_state, inputs_cpu["attention_mask"])
+            return embeddings.tolist()
         raise
 
 

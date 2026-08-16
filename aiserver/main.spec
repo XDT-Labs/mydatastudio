@@ -45,6 +45,20 @@ for pkg in ['langchain_google_genai', 'langchain_openai', 'langchain_anthropic']
     except Exception as e:
         print(f"Warning: Failed to copy metadata for {pkg}: {e}")
 
+# pdfium IS bundled, unlike the models below, and the asymmetry is the point.
+# It is 3.4 MB, and it cannot be a runtime download the way models are: the
+# only downloader available is docling's, which serves a Linux x86-64 build on
+# macOS and reports success (search plan §18d-1). `make pdfium` vendors it and
+# verifies the Mach-O header; this copies it in. The Makefile's signing pass
+# picks it up with every other Mach-O file in dist/.
+_pdfium = os.path.join(os.path.dirname(os.path.abspath(SPEC)), 'vendor', 'pdfium', 'lib', 'libpdfium.dylib')
+if os.path.exists(_pdfium):
+    binaries += [(_pdfium, 'vendor/pdfium/lib')]
+    print(f"  - Bundling pdfium from {_pdfium}")
+else:
+    print("Warning: vendor/pdfium/lib/libpdfium.dylib missing — PDF extraction "
+          "will be disabled in this build. Run `make pdfium`.")
+
 # Models are deliberately NOT bundled. They live beside the extracted server
 # (Application Support/models, via AICHAT_MODELS_DIR) so that re-extracting
 # aiserver/ on an app upgrade leaves the multi-gigabyte downloads untouched.

@@ -15,7 +15,9 @@ class PhotosRepository {
   AppLogger logger = AppLogger(null);
 
   static const String _excludeInline = " AND f.is_inline = 0";
-  static const String _excludeDeleted = " AND f.is_deleted = 0";
+  static const String _excludeDeleted =
+      " AND f.is_deleted = 0 AND f.is_user_deleted = 0";
+  static const String _excludeHidden = " AND f.is_hidden = 0";
 
   static const String _isImage =
       " (f.content_type = ? OR f.content_type LIKE 'image/%')";
@@ -23,7 +25,7 @@ class PhotosRepository {
   static const String _isMedia = " ($_isImage OR $_isVideo)";
 
   String _buildFilterQuery(PhotoFilter? filter, List<Object?> params) {
-    String q = _excludeInline + _excludeDeleted;
+    String q = _excludeInline + _excludeDeleted + _excludeHidden;
 
     if (filter == null) {
       q += " AND $_isMedia";
@@ -56,8 +58,12 @@ class PhotosRepository {
     if (filter.collectionId != null) {
       q += " AND f.collection_id = ?";
       params.add(filter.collectionId);
-    } else if (filter.collectionIds != null && filter.collectionIds!.isNotEmpty) {
-      final placeholders = List.filled(filter.collectionIds!.length, '?').join(',');
+    } else if (filter.collectionIds != null &&
+        filter.collectionIds!.isNotEmpty) {
+      final placeholders = List.filled(
+        filter.collectionIds!.length,
+        '?',
+      ).join(',');
       q += " AND f.collection_id IN ($placeholders)";
       params.addAll(filter.collectionIds!);
     }
@@ -113,9 +119,40 @@ class PhotosRepository {
       case PhotoSortOrder.size:
         return " ORDER BY f.size DESC";
       case PhotoSortOrder.dateDesc:
-      default:
         return " ORDER BY f.date_created DESC";
     }
+  }
+
+  /// The files behind [fileIds], with paths resolved.
+  ///
+  /// Deliberately does not filter on `is_user_deleted`: the delete path marks
+  /// the rows first and then needs them back to reach their sources, so this
+  /// has to see rows the gallery no longer shows.
+  Future<List<File>> filesByIds(Set<String> fileIds) async {
+    AppDatabase? db = DatabaseManager.instance.database;
+    if (db == null || fileIds.isEmpty) return [];
+
+    final placeholders = List.filled(fileIds.length, '?').join(',');
+    final rows = await db.select(
+      "SELECT f.*, c.path as col_path, c.local_copy_path, c.scanner"
+      " FROM files f"
+      " JOIN collections c ON f.collection_id = c.id"
+      " WHERE f.id IN ($placeholders)",
+      fileIds.toList(),
+    );
+    return rows.map((r) => _fileWithAbsolutePath(r)).toList();
+  }
+
+  /// The collection a file belongs to, or null if it has gone.
+  Future<Collection?> collectionFor(String collectionId) async {
+    AppDatabase? db = DatabaseManager.instance.database;
+    if (db == null) return null;
+    final rows = await db.select(
+      "SELECT * FROM collections WHERE id = ? LIMIT 1",
+      [collectionId],
+    );
+    if (rows.isEmpty) return null;
+    return Collection.fromDbMap(rows.first);
   }
 
   Future<List<File>> photos({PhotoFilter? filter}) async {
@@ -341,7 +378,7 @@ class PhotosRepository {
       '''
       SELECT f.collection_id, COUNT(f.id) as count
       FROM files f
-      WHERE 1=1 $_excludeInline $_excludeDeleted AND $_isMedia
+      WHERE 1=1 $_excludeInline $_excludeDeleted $_excludeHidden AND $_isMedia
       GROUP BY f.collection_id
     ''',
       [FilesConstants.mimeTypeImage],
@@ -365,7 +402,7 @@ class PhotosRepository {
         SUM(CASE WHEN f.is_favorite = 1 THEN 1 ELSE 0 END) as favorites,
         SUM(CASE WHEN f.content_type LIKE 'video/%' THEN 1 ELSE 0 END) as videos
       FROM files f
-      WHERE 1=1 $_excludeInline $_excludeDeleted AND $_isMedia
+      WHERE 1=1 $_excludeInline $_excludeDeleted $_excludeHidden AND $_isMedia
     ''',
       [FilesConstants.mimeTypeImage],
     );
@@ -606,9 +643,8 @@ class PhotosRepository {
       file.collectionId,
     ]);
     return PhotoSource(
-      collectionName: rows.isEmpty
-          ? ''
-          : ((rows.first['name'] as String?) ?? ''),
+      collectionName:
+          rows.isEmpty ? '' : ((rows.first['name'] as String?) ?? ''),
       folder: file.parent,
       leaf: file.name,
     );
@@ -625,19 +661,12 @@ class PhotosRepository {
     return getFile(fileId);
   }
 
-  Future<void> deleteFile(String fileId) async {
-    AppDatabase? db = DatabaseManager.instance.database;
-    if (db == null) return;
-
-    await db.execute("UPDATE files SET is_deleted = 1 WHERE id = ?", [fileId]);
-  }
-
   Future<({int usedBytes, int totalBytes})> storageUsage() async {
     AppDatabase? db = DatabaseManager.instance.database;
     if (db == null) return (usedBytes: 0, totalBytes: 0);
 
     final rows = await db.select(
-      "SELECT SUM(f.size) as total_size FROM files f WHERE 1=1 $_excludeDeleted AND $_isMedia",
+      "SELECT SUM(f.size) as total_size FROM files f WHERE 1=1 $_excludeDeleted $_excludeHidden AND $_isMedia",
       [FilesConstants.mimeTypeImage],
     );
     int usedBytes = 0;

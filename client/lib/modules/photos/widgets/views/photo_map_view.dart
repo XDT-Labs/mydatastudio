@@ -42,9 +42,10 @@ class _PhotoMapViewState extends State<PhotoMapView> {
   List<File> get _geoFiles => _cachedGeoFiles;
 
   void _recomputeGeoFiles() {
-    final validFiles = widget.files
-        .where((f) => f.latitude != null && f.longitude != null)
-        .toList();
+    final validFiles =
+        widget.files
+            .where((f) => f.latitude != null && f.longitude != null)
+            .toList();
     validFiles.sort((a, b) => a.dateCreated.compareTo(b.dateCreated));
     _cachedGeoFiles = validFiles;
     _cachedZoomBucket = null;
@@ -88,10 +89,7 @@ class _PhotoMapViewState extends State<PhotoMapView> {
     } else {
       final bounds = LatLngBounds.fromPoints(points);
       _mapController.fitCamera(
-        CameraFit.bounds(
-          bounds: bounds,
-          padding: const EdgeInsets.all(40.0),
-        ),
+        CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40.0)),
       );
     }
   }
@@ -113,7 +111,8 @@ class _PhotoMapViewState extends State<PhotoMapView> {
           final newLat =
               (c.center.latitude * (c.files.length - 1) + lat) / c.files.length;
           final newLng =
-              (c.center.longitude * (c.files.length - 1) + lng) / c.files.length;
+              (c.center.longitude * (c.files.length - 1) + lng) /
+              c.files.length;
           clusters[i] = _PhotoCluster(
             files: c.files,
             center: LatLng(newLat, newLng),
@@ -124,12 +123,7 @@ class _PhotoMapViewState extends State<PhotoMapView> {
       }
 
       if (!added) {
-        clusters.add(
-          _PhotoCluster(
-            files: [file],
-            center: LatLng(lat, lng),
-          ),
-        );
+        clusters.add(_PhotoCluster(files: [file], center: LatLng(lat, lng)));
       }
     }
 
@@ -192,9 +186,7 @@ class _PhotoMapViewState extends State<PhotoMapView> {
               ),
             ],
           ),
-          child: ClipOval(
-            child: _buildThumbnail(file, theme),
-          ),
+          child: ClipOval(child: _buildThumbnail(file, theme)),
         ),
       ),
     );
@@ -218,10 +210,7 @@ class _PhotoMapViewState extends State<PhotoMapView> {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: colorScheme.primaryContainer,
-            border: Border.all(
-              color: colorScheme.primary,
-              width: 2.0,
-            ),
+            border: Border.all(color: colorScheme.primary, width: 2.0),
             boxShadow: [
               BoxShadow(
                 color: colorScheme.primary.withValues(alpha: 0.3),
@@ -250,9 +239,10 @@ class _PhotoMapViewState extends State<PhotoMapView> {
     if (_cachedZoomBucket == bucket && _cachedClusters != null) {
       return _cachedClusters!;
     }
-    final threshold = zoom < 8
-        ? 0.5
-        : zoom < 12
+    final threshold =
+        zoom < 8
+            ? 0.5
+            : zoom < 12
             ? 0.1
             : 0.02;
     _cachedZoomBucket = bucket;
@@ -295,7 +285,9 @@ class _PhotoMapViewState extends State<PhotoMapView> {
               Icon(
                 Icons.map_outlined,
                 size: 64,
-                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                color: theme.colorScheme.onSurfaceVariant.withValues(
+                  alpha: 0.5,
+                ),
               ),
               const SizedBox(height: 16),
               Text(
@@ -340,9 +332,7 @@ class _PhotoMapViewState extends State<PhotoMapView> {
           userAgentPackageName: 'com.mydatastudio.app',
           tileProvider: widget.tileProvider,
         ),
-        MarkerLayer(
-          markers: _buildMarkers(geo, theme),
-        ),
+        MarkerLayer(markers: _buildMarkers(geo, theme)),
         SimpleAttributionWidget(
           source: Text(
             '© OpenStreetMap contributors, © CARTO',

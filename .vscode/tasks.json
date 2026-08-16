@@ -15,6 +15,29 @@
             "group": "build"
         },
         {
+            // The python launch configs point at aiserver/.venv/bin/python, but
+            // .venv is gitignored while .vscode/launch.json is tracked — so a
+            // fresh worktree always has the config and never has the
+            // interpreter, and launching the server fails.
+            //
+            // `pdm install` alone does NOT fix it. aiserver/.pdm-python holds an
+            // absolute path to the main checkout's .venv and follows the tree
+            // into every new worktree, so pdm re-syncs that venv, reports
+            // success, and creates nothing locally. Deleting the stale pointer
+            // first is what makes pdm honour venv.in_project and build one
+            // here (~15s, 124 packages).
+            //
+            // No-op once the venv exists, so it costs nothing on every launch.
+            "label": "Ensure aiserver venv",
+            "type": "shell",
+            "command": "cd aiserver && ([ -x .venv/bin/python ] || (rm -f .pdm-python && pdm install))",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            }
+        },
+        {
             "label": "Use Dev Pubspec",
             "type": "shell",
             "command": "cp client/pubspec.dev.yaml client/pubspec.yaml",

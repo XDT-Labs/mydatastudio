@@ -101,8 +101,7 @@ class _LoginFormState extends State<LoginForm> {
         _formKey.currentState?.save();
         formSubmitHandler(
           null,
-          _formKey.currentState?.instantValue ??
-              {'password': null},
+          _formKey.currentState?.instantValue ?? {'password': null},
         );
       }
     }

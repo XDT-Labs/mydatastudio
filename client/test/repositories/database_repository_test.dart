@@ -1,4 +1,5 @@
 import 'dart:io' as io;
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uuid/uuid.dart';
@@ -6,7 +7,6 @@ import 'package:uuid/uuid.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
-import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/repositories/user_repository.dart';
@@ -216,7 +216,10 @@ void main() {
       // Initially, the file has missing embeddings (none exists)
       var missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 10);
       expect(missing.any((f) => f.id == fileId), isTrue);
-      expect(missing.firstWhere((f) => f.id == fileId).path, equals('/photos/test_img.png'));
+      expect(
+        missing.firstWhere((f) => f.id == fileId).path,
+        equals('/photos/test_img.png'),
+      );
 
       // Upsert a 2048-dimension embedding (Qwen3-VL)
       final embedding = List<double>.filled(2048, 0.5);
@@ -236,8 +239,105 @@ void main() {
 
       // Clean up/delete embedding
       await dbRepo.deleteFileEmbedding(fileId);
-      rows = await db.select('SELECT * FROM files_embeddings WHERE file_id = ?', [fileId]);
+      rows = await db.select(
+        'SELECT * FROM files_embeddings WHERE file_id = ?',
+        [fileId],
+      );
       expect(rows, isEmpty);
+    });
+
+    group('embedding attempt budget', () {
+      late DatabaseRepository dbRepo;
+      late String fileId;
+
+      setUp(() async {
+        final db = databaseManager.database!;
+        dbRepo = DatabaseRepository(db);
+        final colRepo = CollectionRepository(db);
+        final fileRepo = FileDesktopRepository(db);
+
+        final colId = const Uuid().v4();
+        await colRepo.addCollection(
+          Collection(
+            id: colId,
+            name: 'Photos',
+            path: '/photos',
+            type: 'file',
+            scanner: 'local',
+            needsReAuth: false,
+            scanStatus: 'idle',
+          ),
+        );
+
+        fileId = const Uuid().v4();
+        await fileRepo.create(
+          File(
+            id: fileId,
+            name: 'broken.jpg',
+            path: 'broken.jpg',
+            parent: '/photos',
+            dateCreated: DateTime.now(),
+            dateLastModified: DateTime.now(),
+            collectionId: colId,
+            contentType: 'image/jpeg',
+            size: 2048,
+            isDeleted: false,
+          ),
+        );
+      });
+
+      test(
+        'an image that can never decode eventually leaves the queue',
+        () async {
+          // Without this the same file is re-selected every batch forever: the
+          // queue never drains, the aiserver decodes the same broken bytes on a
+          // loop, and the log fills with identical errors. Seven files were doing
+          // exactly this on the dev archive.
+          for (var i = 0; i < DatabaseRepository.maxEmbeddingAttempts; i++) {
+            final missing = await dbRepo.getFilesWithMissingEmbeddings(
+              limit: 50,
+            );
+            expect(
+              missing.any((f) => f.id == fileId),
+              isTrue,
+              reason: 'must stay eligible for attempt ${i + 1}',
+            );
+            await dbRepo.incrementEmbeddingAttempts(fileId);
+          }
+
+          final missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 50);
+          expect(missing.any((f) => f.id == fileId), isFalse);
+        },
+      );
+
+      test('a successful embedding clears the budget', () async {
+        // The eligibility query re-selects on a model_version change, so a
+        // file that once exhausted its attempts and later succeeded would be
+        // held back at the next revision bump — silently, because a stale
+        // vector is still a vector.
+        for (var i = 0; i < DatabaseRepository.maxEmbeddingAttempts; i++) {
+          await dbRepo.incrementEmbeddingAttempts(fileId);
+        }
+        await dbRepo.upsertFileEmbedding(
+          fileId,
+          List<double>.filled(2048, 0.5),
+        );
+
+        final rows = await databaseManager.database!.select(
+          'SELECT embedding_attempts FROM files WHERE id = ?',
+          [fileId],
+        );
+        expect(rows.first['embedding_attempts'], 0);
+
+        // Simulate the next pipeline revision invalidating stored vectors.
+        await databaseManager.database!.execute(
+          "UPDATE files_embeddings SET model_version = 'older-pipeline@1' "
+          'WHERE file_id = ?',
+          [fileId],
+        );
+        final missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 50);
+        expect(missing.any((f) => f.id == fileId), isTrue);
+      });
     });
 
     test(
@@ -300,10 +400,10 @@ void main() {
           embedding: descriptionEmbedding,
         );
 
-        final fileRow = (await db.select(
-          'SELECT description FROM files WHERE id = ?',
-          [fileId],
-        )).first;
+        final fileRow =
+            (await db.select('SELECT description FROM files WHERE id = ?', [
+              fileId,
+            ])).first;
         expect(
           fileRow['description'],
           'The Eiffel Tower at sunset with a clear sky.',
@@ -313,11 +413,10 @@ void main() {
           'SELECT tag FROM file_tags WHERE file_id = ? ORDER BY tag',
           [fileId],
         );
-        expect(
-          tagRows.map((r) => r['tag']),
-          ['landmark', 'sunset'],
-          reason: 'duplicate tag is deduped by the (file_id, tag) key',
-        );
+        expect(tagRows.map((r) => r['tag']), [
+          'landmark',
+          'sunset',
+        ], reason: 'duplicate tag is deduped by the (file_id, tag) key');
 
         final landmarkRows = await db.select(
           'SELECT landmark FROM file_landmarks WHERE file_id = ?',
@@ -435,9 +534,9 @@ void main() {
       var missing = await dbRepo.getEmailsWithMissingEmbeddings(limit: 10);
       expect(missing.any((e) => e.id == emailId), isTrue);
 
-      // Upsert embedding
+      // Write the chunk embeddings
       final embedding = List<double>.filled(2048, 0.1);
-      await dbRepo.upsertEmailEmbedding(emailId, embedding);
+      await dbRepo.replaceEmailEmbeddings(emailId, [embedding]);
 
       // Check database to ensure qwen3_vl_embedding is populated
       var rows = await db.select(
@@ -452,14 +551,104 @@ void main() {
       expect(missing.any((e) => e.id == emailId), isFalse);
 
       // Get email embedding back
-      final retrieved = await dbRepo.getEmailEmbedding(emailId);
-      expect(retrieved, isNotNull);
-      expect(retrieved!.length, equals(2048));
+      final retrieved = await dbRepo.getEmailEmbeddings(emailId);
+      expect(retrieved, hasLength(1));
+      expect(retrieved.first.length, equals(2048));
 
       // Clean up/delete email embedding
       await dbRepo.deleteEmailEmbedding(emailId);
-      rows = await db.select('SELECT * FROM emails_embeddings WHERE email_id = ?', [emailId]);
+      rows = await db.select(
+        'SELECT * FROM emails_embeddings WHERE email_id = ?',
+        [emailId],
+      );
       expect(rows, isEmpty);
+    });
+
+    test('a long email is queued once, not once per chunk', () async {
+      // The backfill query used to be an outer join, which emitted a copy of
+      // an email for every embedding row it owned. Under chunking that turns a
+      // batch of 100 into a handful of distinct emails re-embedded dozens of
+      // times each, and the queue stops draining.
+      final db = databaseManager.database!;
+      final dbRepo = DatabaseRepository(db);
+      final emailId = const Uuid().v4();
+
+      await db.execute(
+        '''
+        INSERT INTO emails (
+          id, collection_id, date, "from", "to", cc, subject, plain_body, is_deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+        ''',
+        [
+          emailId,
+          const Uuid().v4(),
+          DateTime.now().millisecondsSinceEpoch,
+          'sender@example.com',
+          'recipient@example.com',
+          '',
+          'Long thread',
+          'body',
+        ],
+      );
+
+      // Five chunks, all stale: a model_version nothing recognises stands in
+      // for the pre-chunking pipeline.
+      for (var i = 0; i < 5; i++) {
+        await db.execute(
+          'INSERT INTO emails_embeddings '
+          '(email_id, chunk_index, qwen3_vl_embedding, model_version) '
+          'VALUES (?, ?, ?, ?)',
+          [emailId, i, Uint8List(8192), 'older-pipeline@1'],
+        );
+      }
+
+      final missing = await dbRepo.getEmailsWithMissingEmbeddings(limit: 100);
+      expect(missing.where((e) => e.id == emailId), hasLength(1));
+    });
+
+    test('re-embedding a shortened email leaves no surplus chunks', () async {
+      // A body can shrink — an edit, or a scanner replacing a truncated
+      // snippet with the real text. Chunks 3..9 of the previous write are not
+      // orphans (their `emails` row is very much alive), so nothing else in
+      // the system would ever remove them, and every search would keep scoring
+      // superseded text.
+      final db = databaseManager.database!;
+      final dbRepo = DatabaseRepository(db);
+      final emailId = const Uuid().v4();
+
+      await db.execute(
+        '''
+        INSERT INTO emails (
+          id, collection_id, date, "from", "to", cc, subject, plain_body, is_deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+        ''',
+        [
+          emailId,
+          const Uuid().v4(),
+          DateTime.now().millisecondsSinceEpoch,
+          'sender@example.com',
+          'recipient@example.com',
+          '',
+          'Shrinking',
+          'body',
+        ],
+      );
+
+      await dbRepo.replaceEmailEmbeddings(emailId, [
+        for (var i = 0; i < 10; i++) List<double>.filled(2048, i / 10),
+      ]);
+      expect(await dbRepo.getEmailEmbeddings(emailId), hasLength(10));
+
+      await dbRepo.replaceEmailEmbeddings(emailId, [
+        for (var i = 0; i < 3; i++) List<double>.filled(2048, 0.5),
+      ]);
+
+      final rows = await db.select(
+        'SELECT chunk_index FROM emails_embeddings WHERE email_id = ? '
+        'ORDER BY chunk_index',
+        [emailId],
+      );
+      expect(rows.map((r) => r['chunk_index']), [0, 1, 2]);
     });
 
     test('embedding queue skips images embedded in an email body', () async {
@@ -485,7 +674,10 @@ void main() {
         ),
       );
 
-      Future<String> addImage({required bool isInline, required String name}) async {
+      Future<String> addImage({
+        required bool isInline,
+        required String name,
+      }) async {
         final id = const Uuid().v4();
         await fileRepo.create(
           File(
@@ -519,81 +711,132 @@ void main() {
       );
     });
 
-    test('AichatModelRepository Ollama model initialization and update', () async {
-      final db = databaseManager.database!;
-      final repo = AichatModelRepository(db);
+    test(
+      'AichatModelRepository Ollama model initialization and update',
+      () async {
+        final db = databaseManager.database!;
+        final repo = AichatModelRepository(db);
 
-      // Fetch all models
-      final models = await repo.getAll();
-      final ollamaModel = models.firstWhere((m) => m.group == 'ollama');
+        // Fetch all models
+        final models = await repo.getAll();
+        final ollamaModel = models.firstWhere((m) => m.group == 'ollama');
 
-      // Verify default is disabled and has null base_url
-      expect(ollamaModel.baseUrl, isNull);
-      expect(ollamaModel.enabled, isFalse);
+        // Verify default is disabled and has null base_url
+        expect(ollamaModel.baseUrl, isNull);
+        expect(ollamaModel.enabled, isFalse);
 
-      // Verify setBaseUrl and setEnabled
-      await repo.setBaseUrl(ollamaModel.id, 'http://localhost:11434');
-      await repo.setEnabled(ollamaModel.id, true);
+        // Verify setBaseUrl and setEnabled
+        await repo.setBaseUrl(ollamaModel.id, 'http://localhost:11434');
+        await repo.setEnabled(ollamaModel.id, true);
 
-      final updatedModels = await repo.getAll();
-      final updatedOllama = updatedModels.firstWhere((m) => m.id == ollamaModel.id);
-      expect(updatedOllama.baseUrl, equals('http://localhost:11434'));
-      expect(updatedOllama.enabled, isTrue);
-    });
+        final updatedModels = await repo.getAll();
+        final updatedOllama = updatedModels.firstWhere(
+          (m) => m.id == ollamaModel.id,
+        );
+        expect(updatedOllama.baseUrl, equals('http://localhost:11434'));
+        expect(updatedOllama.enabled, isTrue);
+      },
+    );
 
-    test('AichatModelRepository OpenAI models description verification', () async {
-      final db = databaseManager.database!;
-      final repo = AichatModelRepository(db);
+    test(
+      'AichatModelRepository OpenAI models description verification',
+      () async {
+        final db = databaseManager.database!;
+        final repo = AichatModelRepository(db);
 
-      // Fetch all models
-      final models = await repo.getAll();
-      final openaiModels = models.where((m) => m.group == 'openai').toList();
+        // Fetch all models
+        final models = await repo.getAll();
+        final openaiModels = models.where((m) => m.group == 'openai').toList();
 
-      expect(openaiModels.length, equals(4));
+        expect(openaiModels.length, equals(4));
 
-      final gpt55 = openaiModels.firstWhere((m) => m.alias == 'gpt-5.5');
-      expect(gpt55.name, equals('GPT-5.5'));
-      expect(gpt55.description, equals('A new class of intelligence for coding and professional work.'));
+        final gpt55 = openaiModels.firstWhere((m) => m.alias == 'gpt-5.5');
+        expect(gpt55.name, equals('GPT-5.5'));
+        expect(
+          gpt55.description,
+          equals(
+            'A new class of intelligence for coding and professional work.',
+          ),
+        );
 
-      final gpt54 = openaiModels.firstWhere((m) => m.alias == 'gpt-5.4');
-      expect(gpt54.name, equals('GPT-5.4'));
-      expect(gpt54.description, equals('A more affordable model for coding and professional work.'));
+        final gpt54 = openaiModels.firstWhere((m) => m.alias == 'gpt-5.4');
+        expect(gpt54.name, equals('GPT-5.4'));
+        expect(
+          gpt54.description,
+          equals('A more affordable model for coding and professional work.'),
+        );
 
-      final gptMini = openaiModels.firstWhere((m) => m.alias == 'gpt-5.4-mini');
-      expect(gptMini.name, equals('GPT-5.4 mini'));
-      expect(gptMini.description, equals('Our strongest mini model yet for coding, computer use, and subagents'));
+        final gptMini = openaiModels.firstWhere(
+          (m) => m.alias == 'gpt-5.4-mini',
+        );
+        expect(gptMini.name, equals('GPT-5.4 mini'));
+        expect(
+          gptMini.description,
+          equals(
+            'Our strongest mini model yet for coding, computer use, and subagents',
+          ),
+        );
 
-      final gptImage = openaiModels.firstWhere((m) => m.alias == 'gpt-image-2');
-      expect(gptImage.name, equals('GPT Image 2'));
-      expect(gptImage.description, equals('State-of-the-art image generation model'));
-    });
+        final gptImage = openaiModels.firstWhere(
+          (m) => m.alias == 'gpt-image-2',
+        );
+        expect(gptImage.name, equals('GPT Image 2'));
+        expect(
+          gptImage.description,
+          equals('State-of-the-art image generation model'),
+        );
+      },
+    );
 
-    test('AichatModelRepository Claude models description verification', () async {
-      final db = databaseManager.database!;
-      final repo = AichatModelRepository(db);
+    test(
+      'AichatModelRepository Claude models description verification',
+      () async {
+        final db = databaseManager.database!;
+        final repo = AichatModelRepository(db);
 
-      // Fetch all models
-      final models = await repo.getAll();
-      final claudeModels = models.where((m) => m.group == 'claude').toList();
+        // Fetch all models
+        final models = await repo.getAll();
+        final claudeModels = models.where((m) => m.group == 'claude').toList();
 
-      expect(claudeModels.length, equals(4));
+        expect(claudeModels.length, equals(4));
 
-      final fabel5 = claudeModels.firstWhere((m) => m.alias == 'claude-fabel-5');
-      expect(fabel5.name, equals('Fabel 5'));
-      expect(fabel5.description, equals('Next-generation intelligence for long-running agents'));
+        final fabel5 = claudeModels.firstWhere(
+          (m) => m.alias == 'claude-fabel-5',
+        );
+        expect(fabel5.name, equals('Fabel 5'));
+        expect(
+          fabel5.description,
+          equals('Next-generation intelligence for long-running agents'),
+        );
 
-      final opus48 = claudeModels.firstWhere((m) => m.alias == 'claude-opus-4-8');
-      expect(opus48.name, equals('Opus 4.8'));
-      expect(opus48.description, equals('For complex agentic coding and enterprise work'));
+        final opus48 = claudeModels.firstWhere(
+          (m) => m.alias == 'claude-opus-4-8',
+        );
+        expect(opus48.name, equals('Opus 4.8'));
+        expect(
+          opus48.description,
+          equals('For complex agentic coding and enterprise work'),
+        );
 
-      final sonnet5 = claudeModels.firstWhere((m) => m.alias == 'claude-sonnet-5');
-      expect(sonnet5.name, equals('Sonnet 5'));
-      expect(sonnet5.description, equals('The best combination of speed and intelligence'));
+        final sonnet5 = claudeModels.firstWhere(
+          (m) => m.alias == 'claude-sonnet-5',
+        );
+        expect(sonnet5.name, equals('Sonnet 5'));
+        expect(
+          sonnet5.description,
+          equals('The best combination of speed and intelligence'),
+        );
 
-      final haiku45 = claudeModels.firstWhere((m) => m.alias == 'claude-haiku-4-5');
-      expect(haiku45.name, equals('Haiku 4.5'));
-      expect(haiku45.description, equals('The fastest model with near-frontier intelligence'));
-    });
+        final haiku45 = claudeModels.firstWhere(
+          (m) => m.alias == 'claude-haiku-4-5',
+        );
+        expect(haiku45.name, equals('Haiku 4.5'));
+        expect(
+          haiku45.description,
+          equals('The fastest model with near-frontier intelligence'),
+        );
+      },
+    );
 
     test('AichatModelRepository Grok models description verification', () async {
       final db = databaseManager.database!;
@@ -607,19 +850,45 @@ void main() {
 
       final grok43 = grokModels.firstWhere((m) => m.alias == 'grok-4.3');
       expect(grok43.name, equals('Grok 4.3'));
-      expect(grok43.description, equals('For everything except code, audio, image, and video. The most intelligent and fastest model we’ve built.'));
+      expect(
+        grok43.description,
+        equals(
+          'For everything except code, audio, image, and video. The most intelligent and fastest model we’ve built.',
+        ),
+      );
 
-      final grokImgGen = grokModels.firstWhere((m) => m.alias == 'grok-imagine-image-quality');
+      final grokImgGen = grokModels.firstWhere(
+        (m) => m.alias == 'grok-imagine-image-quality',
+      );
       expect(grokImgGen.name, equals('Imaging Generation'));
-      expect(grokImgGen.description, equals('Generate images from text prompts with configurable aspect ratio, resolution, and count.'));
+      expect(
+        grokImgGen.description,
+        equals(
+          'Generate images from text prompts with configurable aspect ratio, resolution, and count.',
+        ),
+      );
 
-      final grokVideo = grokModels.firstWhere((m) => m.alias == 'grok-imagine-video-1.5');
+      final grokVideo = grokModels.firstWhere(
+        (m) => m.alias == 'grok-imagine-video-1.5',
+      );
       expect(grokVideo.name, equals('Image-to-Video'));
-      expect(grokVideo.description, equals('Animate a still image with a text prompt. The source image becomes the first frame.'));
+      expect(
+        grokVideo.description,
+        equals(
+          'Animate a still image with a text prompt. The source image becomes the first frame.',
+        ),
+      );
 
-      final grokImgEdit = grokModels.firstWhere((m) => m.alias == 'grok-imagine-image-editing');
+      final grokImgEdit = grokModels.firstWhere(
+        (m) => m.alias == 'grok-imagine-image-editing',
+      );
       expect(grokImgEdit.name, equals('Image Editing'));
-      expect(grokImgEdit.description, equals('Edit images with natural language. Supports up to 3 reference images per request.'));
+      expect(
+        grokImgEdit.description,
+        equals(
+          'Edit images with natural language. Supports up to 3 reference images per request.',
+        ),
+      );
     });
 
     test('AichatModelRepository Gemini models description verification', () async {
@@ -632,17 +901,38 @@ void main() {
 
       expect(geminiModels.length, equals(3));
 
-      final gemini35 = geminiModels.firstWhere((m) => m.alias == 'gemini-3.5-flash');
+      final gemini35 = geminiModels.firstWhere(
+        (m) => m.alias == 'gemini-3.5-flash',
+      );
       expect(gemini35.name, equals('Gemini 3.5 Flash'));
-      expect(gemini35.description, equals('Frontier-level intelligence optimized for real-world tasks at a higher speed and lower cost.'));
+      expect(
+        gemini35.description,
+        equals(
+          'Frontier-level intelligence optimized for real-world tasks at a higher speed and lower cost.',
+        ),
+      );
 
-      final gemini31 = geminiModels.firstWhere((m) => m.alias == 'gemini-3.1-pro-preview');
+      final gemini31 = geminiModels.firstWhere(
+        (m) => m.alias == 'gemini-3.1-pro-preview',
+      );
       expect(gemini31.name, equals('Gemini 3.1 Pro'));
-      expect(gemini31.description, equals('Provides better thinking, improved token efficiency, and a more grounded, factually consistent experience.'));
+      expect(
+        gemini31.description,
+        equals(
+          'Provides better thinking, improved token efficiency, and a more grounded, factually consistent experience.',
+        ),
+      );
 
-      final geminiBanana = geminiModels.firstWhere((m) => m.alias == 'gemini-3.1-flash-image');
+      final geminiBanana = geminiModels.firstWhere(
+        (m) => m.alias == 'gemini-3.1-flash-image',
+      );
       expect(geminiBanana.name, equals('Nano Banana 2'));
-      expect(geminiBanana.description, equals('Provides high-quality image generation and conversational editing'));
+      expect(
+        geminiBanana.description,
+        equals(
+          'Provides high-quality image generation and conversational editing',
+        ),
+      );
     });
   });
 }

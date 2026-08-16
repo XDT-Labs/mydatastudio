@@ -99,11 +99,12 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
         Semantics(
           link: true,
           child: InkWell(
-            onTap: () => launchUrl(
-              Uri.parse(
-                'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
-              ),
-            ),
+            onTap:
+                () => launchUrl(
+                  Uri.parse(
+                    'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
+                  ),
+                ),
             child: const Text(
               'Get Credentials from Microsoft Azure Portal',
               textAlign: TextAlign.center,

@@ -12,17 +12,16 @@ import 'package:mydatastudio/modules/photos/widgets/toolbar/filter_dropdown.dart
 
 Widget createTestApp(Widget child) {
   return MaterialApp(
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: darkColorScheme,
-    ),
+    theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
     home: Scaffold(body: Center(child: child)),
   );
 }
 
 void main() {
   group('DrawerSection', () {
-    testWidgets('renders title, icon, child, and toggles expand/collapse', (tester) async {
+    testWidgets('renders title, icon, child, and toggles expand/collapse', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         createTestApp(
           const DrawerSection(
@@ -43,7 +42,9 @@ void main() {
       // Tap header to collapse
       await tester.tap(find.text('Library'));
       await tester.pumpAndSettle();
-      final crossFade = tester.widget<AnimatedCrossFade>(find.byType(AnimatedCrossFade));
+      final crossFade = tester.widget<AnimatedCrossFade>(
+        find.byType(AnimatedCrossFade),
+      );
       expect(crossFade.crossFadeState, equals(CrossFadeState.showSecond));
 
       // Tap header to re-expand
@@ -54,7 +55,9 @@ void main() {
   });
 
   group('DrawerNavItem', () {
-    testWidgets('renders label, icon, count badge and handles tap callbacks', (tester) async {
+    testWidgets('renders label, icon, count badge and handles tap callbacks', (
+      tester,
+    ) async {
       bool tapped = false;
       bool secondaryTapped = false;
 
@@ -95,10 +98,7 @@ void main() {
     testWidgets('renders progress bar and formatted string', (tester) async {
       await tester.pumpWidget(
         createTestApp(
-          const StorageMeter(
-            usedBytes: 1288490188,
-            totalBytes: 2199023255552,
-          ),
+          const StorageMeter(usedBytes: 1288490188, totalBytes: 2199023255552),
         ),
       );
 
@@ -108,7 +108,9 @@ void main() {
   });
 
   group('TagChip', () {
-    testWidgets('renders tag label with count and handles tap & remove', (tester) async {
+    testWidgets('renders tag label with count and handles tap & remove', (
+      tester,
+    ) async {
       bool tapped = false;
       bool removed = false;
 
@@ -135,7 +137,9 @@ void main() {
   });
 
   group('DateSectionHeader', () {
-    testWidgets('renders date label, item count, and select all checkbox', (tester) async {
+    testWidgets('renders date label, item count, and select all checkbox', (
+      tester,
+    ) async {
       bool? selectedState;
 
       await tester.pumpWidget(
@@ -240,19 +244,22 @@ void main() {
   });
 
   group('KeyboardShortcutsModal', () {
-    testWidgets('renders shortcuts dialog and closes on button tap', (tester) async {
+    testWidgets('renders shortcuts dialog and closes on button tap', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         createTestApp(
           Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (_) => const KeyboardShortcutsModal(),
-                );
-              },
-              child: const Text('Open Dialog'),
-            ),
+            builder:
+                (context) => ElevatedButton(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (_) => const KeyboardShortcutsModal(),
+                    );
+                  },
+                  child: const Text('Open Dialog'),
+                ),
           ),
         ),
       );
@@ -273,54 +280,57 @@ void main() {
   });
 
   group('FilterDropdown', () {
-    testWidgets('renders popup menu button and handles callbacks on selection', (tester) async {
-      String? updatedMediaType;
-      bool? updatedFavorites;
-      String? updatedSort;
+    testWidgets(
+      'renders popup menu button and handles callbacks on selection',
+      (tester) async {
+        String? updatedMediaType;
+        bool? updatedFavorites;
+        String? updatedSort;
 
-      await tester.pumpWidget(
-        createTestApp(
-          FilterDropdown(
-            mediaType: null,
-            onlyFavorites: false,
-            sortBy: 'dateDesc',
-            onMediaTypeChanged: (val) => updatedMediaType = val,
-            onFavoritesChanged: (val) => updatedFavorites = val,
-            onSortChanged: (val) => updatedSort = val,
+        await tester.pumpWidget(
+          createTestApp(
+            FilterDropdown(
+              mediaType: null,
+              onlyFavorites: false,
+              sortBy: 'dateDesc',
+              onMediaTypeChanged: (val) => updatedMediaType = val,
+              onFavoritesChanged: (val) => updatedFavorites = val,
+              onSortChanged: (val) => updatedSort = val,
+            ),
           ),
-        ),
-      );
+        );
 
-      expect(find.byIcon(Icons.filter_list), findsOneWidget);
+        expect(find.byIcon(Icons.filter_list), findsOneWidget);
 
-      // Open popup menu
-      await tester.tap(find.byIcon(Icons.filter_list));
-      await tester.pumpAndSettle();
+        // Open popup menu
+        await tester.tap(find.byIcon(Icons.filter_list));
+        await tester.pumpAndSettle();
 
-      expect(find.text('MEDIA TYPE'), findsOneWidget);
-      expect(find.text('Photos'), findsOneWidget);
-      expect(find.text('Favorites Only'), findsOneWidget);
-      expect(find.text('SORT BY'), findsOneWidget);
-      expect(find.text('Oldest'), findsOneWidget);
+        expect(find.text('MEDIA TYPE'), findsOneWidget);
+        expect(find.text('Photos'), findsOneWidget);
+        expect(find.text('Favorites Only'), findsOneWidget);
+        expect(find.text('SORT BY'), findsOneWidget);
+        expect(find.text('Oldest'), findsOneWidget);
 
-      // Select Photos
-      await tester.tap(find.text('Photos'));
-      await tester.pumpAndSettle();
-      expect(updatedMediaType, 'photo');
+        // Select Photos
+        await tester.tap(find.text('Photos'));
+        await tester.pumpAndSettle();
+        expect(updatedMediaType, 'photo');
 
-      // Re-open popup menu and select Favorites Only
-      await tester.tap(find.byIcon(Icons.filter_list));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Favorites Only'));
-      await tester.pumpAndSettle();
-      expect(updatedFavorites, isTrue);
+        // Re-open popup menu and select Favorites Only
+        await tester.tap(find.byIcon(Icons.filter_list));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Favorites Only'));
+        await tester.pumpAndSettle();
+        expect(updatedFavorites, isTrue);
 
-      // Re-open popup menu and select Oldest
-      await tester.tap(find.byIcon(Icons.filter_list));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Oldest'));
-      await tester.pumpAndSettle();
-      expect(updatedSort, 'dateAsc');
-    });
+        // Re-open popup menu and select Oldest
+        await tester.tap(find.byIcon(Icons.filter_list));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Oldest'));
+        await tester.pumpAndSettle();
+        expect(updatedSort, 'dateAsc');
+      },
+    );
   });
 }

@@ -133,7 +133,13 @@ Both `main` and `develop` branches currently build to `com.xdtlabs.mydatastudio`
 - **Build before test**: run a build and fix compiler/analyzer errors before running the test suite — don't let test failures mask build breaks.
 - **Regression tests**: when fixing a bug, add a test that would have caught it, not just the fix itself (see Rule 9).
 - **Code qualities**: concrete enough to be understood, abstract enough to change; expose the problem's domain in naming; high cohesion / loose coupling; single responsibility per method/class.
-- **Git commits**: always get explicit user approval before committing — never commit unprompted.
+- **Git commits**: never run `git commit` unless the user asked for a commit in the message being responded to. Code gets reviewed before it enters history.
+  - Finishing work is not permission. Passing tests, a clean analyzer, a completed task, or a plan listing "commit" as a step are not approval — leave the work in the working tree and say it's ready.
+  - Approval does not carry forward. "Commit this" authorizes that one commit; the next change needs its own ask, even later in the same session.
+  - Commit exactly what was named, nothing else. Prefer explicit paths over `git add .` or `git add -A`, unstage unrelated changes, and report what remains uncommitted.
+  - Same bar for anything outward-facing: no `git push`, branch deletion, PR creation, or merges unless asked in that message.
+  - Exception: skills the user invokes that commit as part of their documented job (`/ship`, `/qa`, `/design-review`). Invoking one is the ask; the exception covers only that skill and ends when it does.
+  - If a skill says to generate a commit message and stop, stop — don't upgrade that into running the commit.
 - **Mermaid diagrams**: quote node labels that contain spaces, newlines, or special characters (`()`, `[]`, `{}`, etc.) to avoid syntax errors.
 
 

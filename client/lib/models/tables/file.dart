@@ -20,6 +20,15 @@ class File implements FileAsset {
   String contentType; //mime/type
   int size;
   bool isDeleted;
+
+  /// User-owned "hide from gallery" flag. Unlike [isDeleted] — which scanners
+  /// clear on every rescan to mean "the source still has this file" — no
+  /// scanner ever writes this column. It's how the Photos module lets a user
+  /// hide a photo without pretending the file was deleted from its source.
+  bool isHidden;
+
+  /// The user deleted this file from the app. Never written by a scanner.
+  bool isUserDeleted;
   String? thumbnail;
   String? downloadUrl;
   String? emailId;
@@ -53,6 +62,8 @@ class File implements FileAsset {
     required this.contentType,
     required this.size,
     required this.isDeleted,
+    this.isHidden = false,
+    this.isUserDeleted = false,
     this.thumbnail,
     this.downloadUrl,
     this.emailId,
@@ -87,6 +98,8 @@ class File implements FileAsset {
       contentType: map['content_type'] as String,
       size: map['size'] as int,
       isDeleted: (map['is_deleted'] as int? ?? 0) != 0,
+      isHidden: (map['is_hidden'] as int? ?? 0) != 0,
+      isUserDeleted: (map['is_user_deleted'] as int? ?? 0) != 0,
       thumbnail: map['thumbnail'] as String?,
       downloadUrl: map['download_url'] as String?,
       emailId: map['email_id'] as String?,
@@ -117,6 +130,8 @@ class File implements FileAsset {
       'content_type': contentType,
       'size': size,
       'is_deleted': isDeleted ? 1 : 0,
+      'is_hidden': isHidden ? 1 : 0,
+      'is_user_deleted': isUserDeleted ? 1 : 0,
       'thumbnail': thumbnail,
       'download_url': downloadUrl,
       'email_id': emailId,

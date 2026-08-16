@@ -1,21 +1,22 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_idle_view.dart';
-import 'package:reactive_forms/reactive_forms.dart';
 
 void main() {
   group('YahooIdleView', () {
-    late FormGroup form;
+    late GlobalKey<FormState> formKey;
+    late TextEditingController email;
+    late TextEditingController appPassword;
 
     setUp(() {
-      form = FormGroup({
-        'email': FormControl<String>(
-          validators: [Validators.required, Validators.email],
-        ),
-        'appPassword': FormControl<String>(
-          validators: [Validators.required, Validators.minLength(16)],
-        ),
-      });
+      formKey = GlobalKey<FormState>();
+      email = TextEditingController();
+      appPassword = TextEditingController();
+    });
+
+    tearDown(() {
+      email.dispose();
+      appPassword.dispose();
     });
 
     testWidgets('shows Connect Yahoo Mail heading', (tester) async {
@@ -23,7 +24,9 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: YahooIdleView(
-              form: form,
+              formKey: formKey,
+              emailController: email,
+              appPasswordController: appPassword,
               onConnect: () {},
               onLaunchSecurity: () {},
             ),
@@ -39,7 +42,9 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: YahooIdleView(
-              form: form,
+              formKey: formKey,
+              emailController: email,
+              appPasswordController: appPassword,
               onConnect: () {},
               onLaunchSecurity: () {},
             ),
@@ -56,7 +61,9 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: YahooIdleView(
-              form: form,
+              formKey: formKey,
+              emailController: email,
+              appPasswordController: appPassword,
               onConnect: () {},
               onLaunchSecurity: () {},
             ),
@@ -74,7 +81,9 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: YahooIdleView(
-              form: form,
+              formKey: formKey,
+              emailController: email,
+              appPasswordController: appPassword,
               onConnect: () => called = true,
               onLaunchSecurity: () {},
             ),

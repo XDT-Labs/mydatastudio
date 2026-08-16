@@ -32,7 +32,7 @@ class FileDesktopRepository {
     int offset = 0,
   }) async {
     final rows = await db.select(
-      "SELECT * FROM files WHERE collection_id = ? AND parent = ? AND is_deleted = 0 ORDER BY name LIMIT ? OFFSET ?",
+      "SELECT * FROM files WHERE collection_id = ? AND parent = ? AND is_deleted = 0 AND is_user_deleted = 0 ORDER BY name LIMIT ? OFFSET ?",
       [collectionId, path, limit, offset],
     );
     return rows.map((r) => File.fromDbMap(r)).toList();
@@ -42,8 +42,9 @@ class FileDesktopRepository {
     await db.execute(
       "INSERT INTO files (id, name, path, parent, date_created, date_last_modified, "
       "last_scanned_date, collection_id, content_type, size, is_deleted, thumbnail, "
-      "download_url, email_id, latitude, longitude, local_path, content_id, is_inline) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "download_url, email_id, latitude, longitude, local_path, content_id, is_inline, "
+      "is_hidden, is_user_deleted) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         f.id,
         f.name,
@@ -64,6 +65,8 @@ class FileDesktopRepository {
         f.localPath,
         f.contentId,
         f.isInline ? 1 : 0,
+        f.isHidden ? 1 : 0,
+        f.isUserDeleted ? 1 : 0,
       ],
     );
     return f;
@@ -160,9 +163,7 @@ class FileDesktopRepository {
     if (local != null && local.isNotEmpty) paths.add(local);
 
     final resolved =
-        collection != null
-            ? FilePathResolver.absolute(f, collection)
-            : f.path;
+        collection != null ? FilePathResolver.absolute(f, collection) : f.path;
     if (resolved.startsWith('gdrive://')) return paths;
     if (p.isAbsolute(resolved)) {
       paths.add(resolved);
@@ -244,8 +245,15 @@ class FileDesktopRepository {
         await tx.execute(
           "INSERT INTO files (id, name, path, parent, date_created, date_last_modified, "
           "last_scanned_date, collection_id, content_type, size, is_deleted, thumbnail, "
-          "download_url, email_id, latitude, longitude, local_path, content_id, is_inline) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+          "download_url, email_id, latitude, longitude, local_path, content_id, is_inline, "
+          "is_hidden, is_user_deleted) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+          // is_hidden and is_user_deleted are absent from the DO UPDATE clause
+          // on purpose. The
+          // importer sets it once to keep spacer GIFs and banners out of the
+          // gallery, but after that it belongs to the user: re-applying it on
+          // every scan would undo an un-hide, which is the same bug that made
+          // is_deleted unusable for this.
           "ON CONFLICT(id) DO UPDATE SET "
           "name = excluded.name, "
           "path = excluded.path, "
@@ -291,6 +299,8 @@ class FileDesktopRepository {
             f.localPath,
             f.contentId,
             f.isInline ? 1 : 0,
+            f.isHidden ? 1 : 0,
+            f.isUserDeleted ? 1 : 0,
           ],
         );
       }
@@ -299,7 +309,7 @@ class FileDesktopRepository {
 
   Future<List<File>> getByEmailId(String emailId) async {
     final rows = await db.select(
-      "SELECT * FROM files WHERE email_id = ? AND is_deleted = 0",
+      "SELECT * FROM files WHERE email_id = ? AND is_deleted = 0 AND is_user_deleted = 0",
       [emailId],
     );
     return rows.map((r) => File.fromDbMap(r)).toList();
@@ -318,7 +328,7 @@ class FileDesktopRepository {
       final placeholders = List.filled(chunk.length, '?').join(',');
       final rows = await db.select(
         "SELECT * FROM files WHERE email_id IN ($placeholders)"
-        "${includeDeleted ? '' : ' AND is_deleted = 0'}",
+        "${includeDeleted ? '' : ' AND is_deleted = 0 AND is_user_deleted = 0'}",
         chunk,
       );
       files.addAll(rows.map((r) => File.fromDbMap(r)));
@@ -328,7 +338,7 @@ class FileDesktopRepository {
 
   Future<List<File>> getFilesToDownload(String collectionId) async {
     final rows = await db.select(
-      "SELECT * FROM files WHERE collection_id = ? AND local_path IS NULL AND is_deleted = 0",
+      "SELECT * FROM files WHERE collection_id = ? AND local_path IS NULL AND is_deleted = 0 AND is_user_deleted = 0",
       [collectionId],
     );
     return rows.map((r) => File.fromDbMap(r)).toList();

@@ -36,16 +36,14 @@ List<File> _createTestFiles() {
   ];
 }
 
-Widget _buildTestableWidget(Widget child, {double width = 1000, double height = 800}) {
+Widget _buildTestableWidget(
+  Widget child, {
+  double width = 1000,
+  double height = 800,
+}) {
   return MaterialApp(
     theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
-    home: Scaffold(
-      body: SizedBox(
-        width: width,
-        height: height,
-        child: child,
-      ),
-    ),
+    home: Scaffold(body: SizedBox(width: width, height: height, child: child)),
   );
 }
 
@@ -54,12 +52,7 @@ void main() {
     final files = _createTestFiles();
 
     await tester.pumpWidget(
-      _buildTestableWidget(
-        PhotoListView(
-          files: files,
-          selectedIds: const {},
-        ),
-      ),
+      _buildTestableWidget(PhotoListView(files: files, selectedIds: const {})),
     );
 
     // Verify header column titles are rendered
@@ -80,7 +73,9 @@ void main() {
     expect(find.text('2 KB'), findsOneWidget);
   });
 
-  testWidgets('row click triggers selection callback', (WidgetTester tester) async {
+  testWidgets('row click triggers selection callback', (
+    WidgetTester tester,
+  ) async {
     final files = _createTestFiles();
     File? selectedFile;
 
@@ -105,12 +100,7 @@ void main() {
     final files = _createTestFiles();
 
     await tester.pumpWidget(
-      _buildTestableWidget(
-        PhotoListView(
-          files: files,
-          selectedIds: const {},
-        ),
-      ),
+      _buildTestableWidget(PhotoListView(files: files, selectedIds: const {})),
     );
 
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
@@ -118,10 +108,12 @@ void main() {
     await tester.pump();
 
     final initialContainer = tester.widget<Container>(
-      find.ancestor(
-        of: find.text('july_photo1.jpg'),
-        matching: find.byType(Container),
-      ).first,
+      find
+          .ancestor(
+            of: find.text('july_photo1.jpg'),
+            matching: find.byType(Container),
+          )
+          .first,
     );
     final initialColor = (initialContainer.decoration as BoxDecoration).color;
 
@@ -130,40 +122,38 @@ void main() {
     await tester.pumpAndSettle();
 
     final hoveredContainer = tester.widget<Container>(
-      find.ancestor(
-        of: find.text('july_photo1.jpg'),
-        matching: find.byType(Container),
-      ).first,
+      find
+          .ancestor(
+            of: find.text('july_photo1.jpg'),
+            matching: find.byType(Container),
+          )
+          .first,
     );
     final hoveredColor = (hoveredContainer.decoration as BoxDecoration).color;
 
     expect(hoveredColor, isNot(equals(initialColor)));
   });
 
-  testWidgets('empty state shows message when files list is empty', (WidgetTester tester) async {
+  testWidgets('empty state shows message when files list is empty', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(
-      _buildTestableWidget(
-        const PhotoListView(
-          files: [],
-          selectedIds: {},
-        ),
-      ),
+      _buildTestableWidget(const PhotoListView(files: [], selectedIds: {})),
     );
 
     expect(find.byIcon(Icons.photo_library), findsOneWidget);
     expect(find.text('No photos found'), findsOneWidget);
   });
 
-  testWidgets('renders without overflow in narrow width layout', (WidgetTester tester) async {
+  testWidgets('renders without overflow in narrow width layout', (
+    WidgetTester tester,
+  ) async {
     final files = _createTestFiles();
 
     // Render in a narrow width (400px) simulating open sidebar
     await tester.pumpWidget(
       _buildTestableWidget(
-        PhotoListView(
-          files: files,
-          selectedIds: const {},
-        ),
+        PhotoListView(files: files, selectedIds: const {}),
         width: 400,
         height: 600,
       ),

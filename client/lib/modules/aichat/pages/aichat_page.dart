@@ -1,5 +1,7 @@
+import 'package:mydatastudio/app_constants.dart';
 import 'dart:io';
 import 'package:material_ui/material_ui.dart';
+import 'package:mydatastudio/helpers/markdown_theme_bridge.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:genui/genui.dart';
@@ -10,6 +12,7 @@ import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/modules/aichat/services/local_llm_content_generator.dart';
 import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/services/model_download_manager.dart';
+import 'package:mydatastudio/models/tables/aichat_message.dart';
 import 'package:mydatastudio/models/tables/aichat_model.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 import 'package:mydatastudio/repositories/aichat_repository.dart';
@@ -55,6 +58,36 @@ class GenUiSurfaceItem extends ChatItem {
   GenUiSurfaceItem({required this.surfaceId});
 }
 
+/// What a persisted conversation becomes when it is reopened: the turns to
+/// put on screen, and the history to hand the model.
+///
+/// The two are not the same list, and that difference is the whole reason this
+/// is a function rather than a loop inside the page. A `system` message is
+/// context, not a turn — the search handoff seeds one holding up to 60,000
+/// characters of source material behind a summary. The model must read it to
+/// answer "what was the technical question, and what was the answer"; showing
+/// it would bury the summary under material nobody asked to read.
+({List<TextMessageItem> transcript, List<Map<String, dynamic>> history})
+splitConversation(List<AichatMessage> messages) {
+  final transcript = <TextMessageItem>[];
+  final history = <Map<String, dynamic>>[];
+
+  for (final m in messages) {
+    final usage =
+        (m.tokenCount != null && m.tokenCount! > 0)
+            ? {'total_tokens': m.tokenCount!}
+            : null;
+    if (m.role != 'system') {
+      transcript.add(
+        TextMessageItem(role: m.role, text: m.content, usage: usage),
+      );
+    }
+    history.add({'role': m.role, 'content': m.content});
+  }
+
+  return (transcript: transcript, history: history);
+}
+
 class _AichatPage extends State<AichatPage> with RouteAware {
   // Theme-derived palette (AUDIT I1 follow-up). The chat page previously used a
   // fixed iOS-style dark palette; each role now maps to a ColorScheme token so
@@ -78,7 +111,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
   bool _isLLMServiceRunning = PythonManager.isLLMServiceRunning.value;
   bool _modelsReady = ModelDownloadManager.isReady.value;
   List<ModelDownloadItem> _downloadItems = ModelDownloadManager.items.value;
-  String _selectedModel = 'gemma4:12b';
+  String _selectedModel = AppConstants.defaultChatModelAlias;
   List<AichatModel> _dbModels = [];
   StreamSubscription<List<AichatModel>>? _modelsSub;
 
@@ -342,20 +375,8 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     if (!mounted) return;
 
     // Rebuild display list and LLM history from persisted messages
-    final chatItems = <TextMessageItem>[];
-    final llmHistory = <Map<String, dynamic>>[];
+    final (:transcript, :history) = splitConversation(messages);
     String conversationName = '';
-
-    for (final m in messages) {
-      final usage =
-          (m.tokenCount != null && m.tokenCount! > 0)
-              ? {'total_tokens': m.tokenCount!}
-              : null;
-      chatItems.add(
-        TextMessageItem(role: m.role, text: m.content, usage: usage),
-      );
-      llmHistory.add({'role': m.role, 'content': m.content});
-    }
 
     // Fetch the conversation name
     final rows = await DatabaseManager.instance.database?.select(
@@ -370,13 +391,13 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       }
     }
 
-    _contentGenerator.loadHistory(llmHistory);
+    _contentGenerator.loadHistory(history);
 
     setState(() {
       _conversationId = id;
       _chatItems
         ..clear()
-        ..addAll(chatItems);
+        ..addAll(transcript);
       _streamingText = null;
       _titleController.text = conversationName;
     });
@@ -666,7 +687,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
               ),
               child: MarkdownBody(
                 data: streaming ? '$text▋' : text,
-                styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+                styleSheet: MarkdownStyleSheet.fromTheme(
+                  markdownThemeOf(theme),
+                ).copyWith(
                   p: textTheme.bodyMedium?.copyWith(
                     color: _textColor,
                     height: 1.45,
@@ -1003,14 +1026,14 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                           keyboardType: TextInputType.multiline,
                           minLines: 1,
                           maxLines: 10,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: _textColor,
-                          ),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(color: _textColor),
                           decoration: InputDecoration(
                             hintText: "Ask a question",
-                            hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: _hintColor,
-                            ),
+                            hintStyle: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.copyWith(color: _hintColor),
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 14.0,
                               vertical: 14.0,

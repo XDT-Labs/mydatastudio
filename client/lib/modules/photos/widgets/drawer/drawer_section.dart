@@ -50,7 +50,10 @@ class _DrawerSectionState extends State<DrawerSection> {
           onTap: _toggleExpanded,
           borderRadius: BorderRadius.circular(8),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12.0,
+              vertical: 8.0,
+            ),
             child: Row(
               children: [
                 Icon(
@@ -85,9 +88,10 @@ class _DrawerSectionState extends State<DrawerSection> {
         AnimatedCrossFade(
           firstChild: widget.child,
           secondChild: const SizedBox(width: double.infinity, height: 0),
-          crossFadeState: _isExpanded
-              ? CrossFadeState.showFirst
-              : CrossFadeState.showSecond,
+          crossFadeState:
+              _isExpanded
+                  ? CrossFadeState.showFirst
+                  : CrossFadeState.showSecond,
           duration: const Duration(milliseconds: 200),
         ),
       ],

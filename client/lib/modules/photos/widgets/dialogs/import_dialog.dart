@@ -48,9 +48,9 @@ class _ImportDialogState extends State<ImportDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking files: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error picking files: $e')));
       }
     } finally {
       if (mounted) {
@@ -68,7 +68,9 @@ class _ImportDialogState extends State<ImportDialog> {
     if (db == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Database is not initialized for import.')),
+          const SnackBar(
+            content: Text('Database is not initialized for import.'),
+          ),
         );
         setState(() => _isImporting = false);
       }
@@ -82,25 +84,29 @@ class _ImportDialogState extends State<ImportDialog> {
         final fileId = const Uuid().v4();
         final now = DateTime.now().millisecondsSinceEpoch;
         final ext = pf.extension?.toLowerCase() ?? '';
-        final mimeType = ['mp4', 'mov', 'avi', 'mkv'].contains(ext)
-            ? 'video/$ext'
-            : 'image/${ext.isEmpty ? 'jpeg' : ext}';
+        final mimeType =
+            ['mp4', 'mov', 'avi', 'mkv'].contains(ext)
+                ? 'video/$ext'
+                : 'image/${ext.isEmpty ? 'jpeg' : ext}';
 
-        await db.execute('''
+        await db.execute(
+          '''
           INSERT INTO files (
             id, name, path, parent, date_created, date_last_modified,
             collection_id, content_type, size, is_deleted
           ) VALUES (?, ?, ?, ?, ?, ?, 'local_import', ?, ?, 0)
-        ''', [
-          fileId,
-          pf.name,
-          pf.path,
-          p.dirname(pf.path!),
-          now,
-          now,
-          mimeType,
-          pf.size,
-        ]);
+        ''',
+          [
+            fileId,
+            pf.name,
+            pf.path,
+            p.dirname(pf.path!),
+            now,
+            now,
+            mimeType,
+            pf.size,
+          ],
+        );
         importedCount++;
       }
 
@@ -115,9 +121,9 @@ class _ImportDialogState extends State<ImportDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to import files: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to import files: $e')));
       }
     } finally {
       if (mounted) {
@@ -267,19 +273,21 @@ class _ImportDialogState extends State<ImportDialog> {
                       borderRadius: BorderRadius.circular(8.0),
                     ),
                   ),
-                  onPressed: _selectedFiles.isEmpty || _isImporting
-                      ? null
-                      : _handleImport,
-                  child: _isImporting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text('Import'),
+                  onPressed:
+                      _selectedFiles.isEmpty || _isImporting
+                          ? null
+                          : _handleImport,
+                  child:
+                      _isImporting
+                          ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                          : const Text('Import'),
                 ),
               ],
             ),

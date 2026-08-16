@@ -1,7 +1,6 @@
 import 'package:mydatastudio/app_router.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 class FamilyDamApp extends StatelessWidget {
   const FamilyDamApp({super.key});
@@ -14,8 +13,7 @@ class FamilyDamApp extends StatelessWidget {
   ];
 
   ThemeData _buildTheme(ColorScheme colorScheme, BuildContext context) {
-    final textTheme = ThemeData.light()
-        .textTheme
+    final textTheme = ThemeData.light().textTheme
         .copyWith(
           displayLarge: const TextStyle(
             fontSize: 56,

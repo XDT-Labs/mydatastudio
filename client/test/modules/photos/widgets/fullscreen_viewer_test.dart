@@ -58,7 +58,9 @@ void main() {
       );
     }
 
-    testWidgets('renders correctly with an image file', (WidgetTester tester) async {
+    testWidgets('renders correctly with an image file', (
+      WidgetTester tester,
+    ) async {
       await tester.pumpWidget(
         buildTestWidget(
           currentFile: imageFile1,
@@ -94,7 +96,9 @@ void main() {
       expect(closed, isTrue);
     });
 
-    testWidgets('navigation arrows cycle through mediaList', (WidgetTester tester) async {
+    testWidgets('navigation arrows cycle through mediaList', (
+      WidgetTester tester,
+    ) async {
       await tester.pumpWidget(
         buildTestWidget(
           currentFile: imageFile1,
@@ -160,7 +164,9 @@ void main() {
       expect(find.text('100%'), findsOneWidget);
     });
 
-    testWidgets('keyboard shortcuts work (Escape closes, arrows navigate)', (WidgetTester tester) async {
+    testWidgets('keyboard shortcuts work (Escape closes, arrows navigate)', (
+      WidgetTester tester,
+    ) async {
       bool closed = false;
 
       await tester.pumpWidget(
@@ -190,7 +196,9 @@ void main() {
       expect(closed, isTrue);
     });
 
-    testWidgets('info button triggers onOpenInfo callback', (WidgetTester tester) async {
+    testWidgets('info button triggers onOpenInfo callback', (
+      WidgetTester tester,
+    ) async {
       File? openedFile;
       await tester.pumpWidget(
         buildTestWidget(

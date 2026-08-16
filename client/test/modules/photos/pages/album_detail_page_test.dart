@@ -29,7 +29,11 @@ class FakePhotosRepository extends PhotosRepository {
   }
 
   @override
-  Future<void> updateAlbum(String albumId, String name, String? description) async {
+  Future<void> updateAlbum(
+    String albumId,
+    String name,
+    String? description,
+  ) async {
     updatedAlbum = (albumId, name, description);
     testAlbum = Album(id: albumId, name: name, description: description);
   }
@@ -59,10 +63,7 @@ Widget createTestApp(Widget child) {
   final router = GoRouter(
     initialLocation: '/',
     routes: [
-      GoRoute(
-        path: '/',
-        builder: (context, state) => child,
-      ),
+      GoRoute(path: '/', builder: (context, state) => child),
       GoRoute(
         path: '/photos',
         builder: (context, state) => const Scaffold(body: Text('Photos')),
@@ -71,10 +72,7 @@ Widget createTestApp(Widget child) {
   );
 
   return MaterialApp.router(
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: darkColorScheme,
-    ),
+    theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
     routerConfig: router,
   );
 }
@@ -96,13 +94,14 @@ void main() {
   });
 
   group('AlbumDetailPage Widget Tests', () {
-    testWidgets('renders album header title, description, and photo count', (tester) async {
-      await tester.pumpWidget(createTestApp(
-        AlbumDetailPage(
-          albumId: 'a100',
-          photosRepository: fakeRepo,
+    testWidgets('renders album header title, description, and photo count', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        createTestApp(
+          AlbumDetailPage(albumId: 'a100', photosRepository: fakeRepo),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('Summer Trip 2026'), findsOneWidget);
@@ -112,13 +111,14 @@ void main() {
       expect(fakeRepo.capturedFilter!.albumId, equals('a100'));
     });
 
-    testWidgets('shows edit album dialog and updates title and description', (tester) async {
-      await tester.pumpWidget(createTestApp(
-        AlbumDetailPage(
-          albumId: 'a100',
-          photosRepository: fakeRepo,
+    testWidgets('shows edit album dialog and updates title and description', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        createTestApp(
+          AlbumDetailPage(albumId: 'a100', photosRepository: fakeRepo),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       // Tap Edit icon button
@@ -128,7 +128,10 @@ void main() {
       expect(find.text('Edit Album'), findsOneWidget);
 
       // Change title
-      await tester.enterText(find.byType(TextField).first, 'Updated Summer Trip');
+      await tester.enterText(
+        find.byType(TextField).first,
+        'Updated Summer Trip',
+      );
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
@@ -136,13 +139,14 @@ void main() {
       expect(fakeRepo.updatedAlbum!.$2, 'Updated Summer Trip');
     });
 
-    testWidgets('shows delete album dialog and deletes album when confirmed', (tester) async {
-      await tester.pumpWidget(createTestApp(
-        AlbumDetailPage(
-          albumId: 'a100',
-          photosRepository: fakeRepo,
+    testWidgets('shows delete album dialog and deletes album when confirmed', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        createTestApp(
+          AlbumDetailPage(albumId: 'a100', photosRepository: fakeRepo),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       // Tap Delete icon button

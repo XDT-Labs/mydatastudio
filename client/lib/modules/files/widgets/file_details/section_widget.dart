@@ -15,7 +15,9 @@ class SectionWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final labelColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6);
+    final labelColor = theme.colorScheme.onSurfaceVariant.withValues(
+      alpha: 0.6,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

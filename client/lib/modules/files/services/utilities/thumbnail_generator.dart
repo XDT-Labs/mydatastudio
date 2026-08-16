@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io' as io;
+
 import 'package:http/http.dart' as http;
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
@@ -75,9 +76,7 @@ class ThumbnailGenerator {
         // at 50MB, and base64-ing an uncapped file into a JSON body is worse.
         final rawLength = await io.File(filePath).length();
         if (rawLength > 100 * 1024 * 1024) {
-          _logger.w(
-            'ThumbnailGenerator: file over 100MB, skipping: $filePath',
-          );
+          _logger.w('ThumbnailGenerator: file over 100MB, skipping: $filePath');
           return null;
         }
         final rawBytes = await io.File(filePath).readAsBytes();

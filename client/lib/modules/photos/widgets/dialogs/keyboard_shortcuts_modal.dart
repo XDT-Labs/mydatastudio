@@ -32,9 +32,7 @@ class KeyboardShortcutsModal extends StatelessWidget {
           const SizedBox(width: 12),
           Text(
             'Keyboard Shortcuts',
-            style: textTheme.titleLarge?.copyWith(
-              color: colorScheme.onSurface,
-            ),
+            style: textTheme.titleLarge?.copyWith(color: colorScheme.onSurface),
           ),
         ],
       ),
@@ -43,55 +41,53 @@ class KeyboardShortcutsModal extends StatelessWidget {
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: _shortcuts.map((shortcut) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6.0),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8.0,
-                        vertical: 4.0,
-                      ),
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHigh,
-                        borderRadius: BorderRadius.circular(4.0),
-                        border: Border.all(
-                          color: colorScheme.outlineVariant,
+            children:
+                _shortcuts.map((shortcut) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6.0),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8.0,
+                            vertical: 4.0,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHigh,
+                            borderRadius: BorderRadius.circular(4.0),
+                            border: Border.all(
+                              color: colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: Text(
+                            shortcut.keyLabel,
+                            style: GoogleFonts.robotoMono(
+                              textStyle: textTheme.labelMedium,
+                              color: colorScheme.onSurface,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
-                      ),
-                      child: Text(
-                        shortcut.keyLabel,
-                        style: GoogleFonts.robotoMono(
-                          textStyle: textTheme.labelMedium,
-                          color: colorScheme.onSurface,
-                          fontWeight: FontWeight.bold,
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Text(
+                            shortcut.actionLabel,
+                            style: textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Text(
-                        shortcut.actionLabel,
-                        style: textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
+                  );
+                }).toList(),
           ),
         ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: Text(
-            'Close',
-            style: TextStyle(color: colorScheme.primary),
-          ),
+          child: Text('Close', style: TextStyle(color: colorScheme.primary)),
         ),
       ],
     );

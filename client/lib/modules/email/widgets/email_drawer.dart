@@ -534,11 +534,21 @@ class _EmailFolderListState extends State<_EmailFolderList> {
         inbox = f;
       } else if (normalizedId == 'SENT' || normalizedName == 'SENT') {
         sent = f;
-      } else if (normalizedId == 'DRAFT' || normalizedId == 'DRAFTS' || normalizedName == 'DRAFT' || normalizedName == 'DRAFTS') {
+      } else if (normalizedId == 'DRAFT' ||
+          normalizedId == 'DRAFTS' ||
+          normalizedName == 'DRAFT' ||
+          normalizedName == 'DRAFTS') {
         drafts = f;
-      } else if (normalizedId == 'TRASH' || normalizedId == 'DELETED' || normalizedName == 'TRASH' || normalizedName == 'DELETED' || normalizedName == 'DELETED ITEMS') {
+      } else if (normalizedId == 'TRASH' ||
+          normalizedId == 'DELETED' ||
+          normalizedName == 'TRASH' ||
+          normalizedName == 'DELETED' ||
+          normalizedName == 'DELETED ITEMS') {
         trash = f;
-      } else if (normalizedId == 'SPAM' || normalizedId == 'JUNK' || normalizedName == 'SPAM' || normalizedName == 'JUNK') {
+      } else if (normalizedId == 'SPAM' ||
+          normalizedId == 'JUNK' ||
+          normalizedName == 'SPAM' ||
+          normalizedName == 'JUNK') {
         spam = f;
       } else {
         // Filter out internal Gmail system categories/labels that shouldn't show up as folders
@@ -604,10 +614,7 @@ class _EmailFolderListState extends State<_EmailFolderList> {
           ),
         if (otherFolders.isNotEmpty) ...[
           Padding(
-            padding: const EdgeInsets.symmetric(
-              vertical: 2.0,
-              horizontal: 8.0,
-            ),
+            padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 8.0),
             child: AccessibleTap(
               expanded: _showAllFolders,
               label: 'All Folders',

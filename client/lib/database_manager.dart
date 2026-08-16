@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/app_constants.dart';
@@ -14,9 +15,13 @@ import 'package:path_provider_platform_interface/path_provider_platform_interfac
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:mydatastudio/modules/files/services/document_chunk_isolate.dart';
 import 'package:mydatastudio/modules/files/services/embedding_isolate.dart';
 import 'package:mydatastudio/modules/files/services/file_description_isolate.dart';
 import 'package:mydatastudio/modules/email/services/email_embedding_isolate.dart';
+import 'package:mydatastudio/modules/email/services/searchable_body.dart';
+import 'package:mydatastudio/modules/search/services/email_contact_repository.dart';
+import 'package:mydatastudio/modules/search/services/place_repository.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:uuid/uuid.dart';
 
@@ -40,6 +45,7 @@ class DatabaseManager {
   EmbeddingIsolate? _embeddingIsolate;
   EmailEmbeddingIsolate? _emailEmbeddingIsolate;
   FileDescriptionIsolate? _fileDescriptionIsolate;
+  DocumentChunkIsolate? _documentChunkIsolate;
   DatabaseRepository? _repository;
   bool _backgroundServicesStarted = false;
   VoidCallback? _vaultUnlockListener;
@@ -237,6 +243,23 @@ class DatabaseManager {
 
     isInitializedNotifier.value = true;
 
+    // Not awaited: a first launch imports ~70k gazetteer rows, and no part of
+    // startup depends on them. The import runs in one transaction, so another
+    // connection sees either no gazetteer or all of it — never a half-loaded
+    // one that would resolve `near:banff` to nothing and quietly demote it to
+    // free text. Skipped under test, where the asset bundle is not present and
+    // the tables are built per-test anyway.
+    if (!isTesting) {
+      unawaited(
+        PlaceRepository(appDatabase!).importIfEmpty().catchError((Object e) {
+          logger.w(
+            'DatabaseManager: gazetteer import failed, near: disabled: $e',
+          );
+          return 0;
+        }),
+      );
+    }
+
     // If vault is already unlocked at initialization (e.g. auto-login flow), start background services.
     if (!isTesting && VaultManager.instance.isUnlocked) {
       unawaited(startBackgroundServices());
@@ -282,6 +305,12 @@ class DatabaseManager {
     if (appDatabase != null && _fileDescriptionIsolate == null) {
       await _startFileDescriptionIsolate(appDatabase!.path!);
     }
+
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (generation != _startGeneration) return;
+    if (appDatabase != null && _documentChunkIsolate == null) {
+      await _startDocumentChunkIsolate(appDatabase!.path!);
+    }
   }
 
   void stopBackgroundServices() {
@@ -293,6 +322,8 @@ class DatabaseManager {
     _emailEmbeddingIsolate = null;
     unawaited(_fileDescriptionIsolate?.stop());
     _fileDescriptionIsolate = null;
+    unawaited(_documentChunkIsolate?.stop());
+    _documentChunkIsolate = null;
   }
 
   Future<AppDatabase> _openDatabase(String dbDir) async {
@@ -366,11 +397,21 @@ class DatabaseManager {
     );
   }
 
+  Future<void> _startDocumentChunkIsolate(String storagePath) async {
+    _documentChunkIsolate = DocumentChunkIsolate();
+    await _documentChunkIsolate!.start(
+      storagePath,
+      AppConstants.dbName,
+      RootIsolateToken.instance!,
+    );
+  }
+
   void pauseEmbeddingIsolates() {
     logger.d("Pausing embedding isolates for active scanner/import");
     _embeddingIsolate?.pause();
     _emailEmbeddingIsolate?.pause();
     _fileDescriptionIsolate?.pause();
+    _documentChunkIsolate?.pause();
   }
 
   void resumeEmbeddingIsolates() {
@@ -380,6 +421,7 @@ class DatabaseManager {
     _embeddingIsolate?.resume();
     _emailEmbeddingIsolate?.resume();
     _fileDescriptionIsolate?.resume();
+    _documentChunkIsolate?.resume();
   }
 
   void dispose() {
@@ -525,9 +567,46 @@ class AppDatabase {
     }
     await _db.execute('''
       CREATE TABLE IF NOT EXISTS emails_embeddings (
-        email_id TEXT PRIMARY KEY,
+        email_id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL DEFAULT 0,
         qwen3_vl_embedding BLOB,
+        model_version TEXT,
+        PRIMARY KEY (email_id, chunk_index),
         FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
+      );
+    ''');
+    // The text and provenance behind each `type='chunk'` row in
+    // files_embeddings, keyed to match it: (file_id, chunk_index) here is
+    // (file_id, sequence) there. Kept in its own table rather than widened
+    // onto files_embeddings because a vector table should hold vectors —
+    // and because the footnote fields are what search *renders*, so they are
+    // read on every result and the blobs are not (search plan §18e).
+    //
+    // `page` is null for every format that has no pages, which is all of them
+    // except PDF; `heading_path` is the anchor those formats do carry.
+    //
+    // `model_version` lives here as well as on the vector row, and it is what
+    // the backfill queue actually reads. A document that was extracted but
+    // deliberately *not* embedded — the oversized case (§18a-2) — has chunk
+    // rows and no vectors, which is indistinguishable from "never embedded" if
+    // only the vector table is consulted, so it would be re-extracted on every
+    // pass forever. Stamping the chunk set records that this generation of the
+    // pipeline already considered the file and is done with it. It is not
+    // redundant with the vector's copy: chunk *boundaries* depend on the
+    // embedding model too, because the token budget is counted with that
+    // model's tokenizer.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS file_chunks (
+        file_id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        page INTEGER,
+        heading_path TEXT,
+        char_start INTEGER,
+        char_end INTEGER,
+        text TEXT NOT NULL,
+        model_version TEXT,
+        PRIMARY KEY (file_id, chunk_index),
+        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
       );
     ''');
     await _db.execute('''
@@ -541,6 +620,11 @@ class AppDatabase {
     await _db.execute(
       'CREATE INDEX IF NOT EXISTS file_tags_tag_idx ON file_tags (tag);',
     );
+    // The same index under an older name. Both were being created, so every
+    // tag write maintained two identical B-trees while the planner could only
+    // ever use one. Dropping runs on every open because the archives that
+    // already carry it will not create it again to notice.
+    await _db.execute('DROP INDEX IF EXISTS idx_file_tags_tag;');
     await _db.execute('''
       CREATE TABLE IF NOT EXISTS album_files (
         album_id TEXT NOT NULL,
@@ -562,6 +646,71 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS file_landmarks_landmark_idx '
       'ON file_landmarks (landmark);',
     );
+    // Photo clustering. A "run" is one bisecting spherical k-means pass over a
+    // scoped set of image embeddings; its nodes form a binary split tree, and
+    // the group-count slider is a cut through that tree rather than a re-run.
+    //
+    // `collection_scope` is NULL for All Photos, otherwise a comma-separated
+    // list of collection ids. The cluster view shows exactly what the drawer's
+    // source filter shows, so each distinct scope needs its own run: a tree
+    // built over the whole library and then filtered down to one source would
+    // leave groups that are mostly empty and labels describing photos that are
+    // no longer on screen.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS photo_cluster_runs (
+        id TEXT PRIMARY KEY,
+        collection_scope TEXT,
+        created_at INTEGER NOT NULL,
+        photo_count INTEGER NOT NULL,
+        max_groups INTEGER NOT NULL,
+        seed INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        last_group_count INTEGER
+      );
+    ''');
+    // `split_rank` is the node's position in the run's split sequence, or NULL
+    // if it was never split. Replaying splits 0..k-2 yields the k groups the
+    // slider asks for, which is what makes changing k a query instead of a
+    // re-clustering pass. Interior nodes keep their members and their label for
+    // the same reason: a label stays valid at every k where that node is a leaf.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS photo_cluster_nodes (
+        run_id TEXT NOT NULL,
+        node_id INTEGER NOT NULL,
+        parent_id INTEGER,
+        split_rank INTEGER,
+        member_count INTEGER NOT NULL,
+        coherence REAL NOT NULL,
+        centroid BLOB NOT NULL,
+        representatives TEXT,
+        label TEXT,
+        label_status TEXT NOT NULL DEFAULT 'pending',
+        PRIMARY KEY (run_id, node_id),
+        FOREIGN KEY (run_id) REFERENCES photo_cluster_runs(id) ON DELETE CASCADE
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS photo_cluster_nodes_split_idx '
+      'ON photo_cluster_nodes (run_id, split_rank);',
+    );
+    // Membership is recorded once per photo against its deepest leaf. The
+    // groups at any k are that leaf's ancestors, so a photo is stored once
+    // rather than once per level.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS photo_cluster_members (
+        run_id TEXT NOT NULL,
+        node_id INTEGER NOT NULL,
+        file_id TEXT NOT NULL,
+        PRIMARY KEY (run_id, file_id),
+        FOREIGN KEY (run_id) REFERENCES photo_cluster_runs(id) ON DELETE CASCADE,
+        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS photo_cluster_members_node_idx '
+      'ON photo_cluster_members (run_id, node_id);',
+    );
+
     // The embedded gazetteer (assets/gazetteer/cities.tsv.gz). Seeded lazily
     // by GazetteerRepository the first time a location search runs, not here:
     // this method also executes on the scanner and embedding isolates, which
@@ -602,7 +751,13 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS files_latlng_idx '
       'ON files (latitude, longitude);',
     );
+    // `idx_files_geo` was the same index over the same two columns, created
+    // separately alongside the gazetteer. `files` is the most-written table in
+    // the archive, so the duplicate cost every scanner insert a second B-tree
+    // update and bought nothing back.
+    await _db.execute('DROP INDEX IF EXISTS idx_files_geo;');
     await _migrateFilesEmbeddingsKey();
+    await _migrateEmailEmbeddingsToChunks();
     final added = await _addMissingColumns();
 
     // Only on the open that introduces the column, so a large archive pays for
@@ -611,7 +766,83 @@ class AppDatabase {
       await _backfillInlineAttachments();
     }
 
+    // The photo timeline's paging index. It lives here rather than in
+    // schemaDDL because schemaDDL runs only when the database is created —
+    // so an index declared there alone reaches fresh installs and no others,
+    // and every archive that predates it keeps full-scanning `files` forever.
+    // Strictly after _addMissingColumns: on an install old enough to lack
+    // `is_inline`, indexing that column before the ALTER adds it throws and
+    // takes the whole open down with it.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_files_active_date '
+      'ON files (is_deleted, is_inline, date_created);',
+    );
+
     await _reapOrphanedArtifacts();
+
+    // Strictly before _createSearchIndexes: that method creates
+    // `emails_contacts` with IF NOT EXISTS, which on an install still holding
+    // the old `contacts` table would happily make a second, empty one beside
+    // it — leaving the archive with a populated table nothing reads and an
+    // empty table everything reads.
+    await _renameContactsTable();
+
+    // Strictly after _addMissingColumns: files_fts indexes `description`, a
+    // column added long after the initial schema. Creating the trigger that
+    // reads `new.description` before that ALTER lands would build it against
+    // a table that has no such column, and the failure would surface later as
+    // a broken INSERT on an upgraded install only.
+    await _createSearchIndexes();
+    await _backfillSearchIndexes();
+    await _createGeoIndexes();
+
+    // Strictly after _addMissingColumns (reads `embedding_attempts`) and after
+    // `file_chunks` exists above, and after _backfillSearchIndexes because it
+    // takes the next `user_version` from the one that sets it.
+    await _unretirePdfsRetiredByMissingPdfium();
+    await _unretireDocsRetiredByAnIncompleteReader();
+  }
+
+  /// Creates the gazetteer table and the name indexes `near:` looks places up in.
+  ///
+  /// Separate from [_createSearchIndexes] because nothing here is a text index:
+  /// `near:banff` is answered by turning one place name into a centre point and
+  /// running a radius against coordinates already on `files`. The index over
+  /// those coordinates is `files_latlng_idx`, created with the rest of the
+  /// `files` schema — this method used to declare a second, identical copy.
+  ///
+  /// The rows are loaded separately — see [GazetteerImporter]. Reading a bundled
+  /// asset needs the Flutter binding, and scanner isolates open their own
+  /// [AppDatabase] (and so run this method) without one.
+  ///
+  /// No spatial index exists to build: resqlite's SQLite is compiled with
+  /// `SQLITE_ENABLE_MATH_FUNCTIONS` but not R-Tree, so a radius is a
+  /// bounding-box scan narrowed by haversine in SQL. That is cheap here — a few
+  /// float comparisons per row, against 10% of the library that carries GPS at
+  /// all — and it is why H3 cells would buy nothing.
+  Future<void> _createGeoIndexes() async {
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS places (
+        id         INTEGER PRIMARY KEY,
+        name       TEXT NOT NULL,
+        ascii_name TEXT NOT NULL,
+        latitude   REAL NOT NULL,
+        longitude  REAL NOT NULL,
+        country    TEXT,
+        admin1     TEXT,
+        population INTEGER
+      );
+    ''');
+    // Both spellings are indexed: a query may type either "Zürich" or "Zurich",
+    // and only `ascii_name` holds the second.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS places_ascii_idx '
+      'ON places (ascii_name COLLATE NOCASE);',
+    );
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS places_name_idx '
+      'ON places (name COLLATE NOCASE);',
+    );
   }
 
   /// One-time sweep of artifacts stranded by the delete paths before they
@@ -654,6 +885,86 @@ class AppDatabase {
     await _db.execute('PRAGMA user_version = $reapVersion');
   }
 
+  /// Un-retires PDFs that were retired by a bug rather than by their contents.
+  ///
+  /// The document extractor answered 422 — *unprocessable content* — when the
+  /// aiserver simply had no `libpdfium` to read PDFs with. The client counts a
+  /// 422 toward [DatabaseRepository.maxEmbeddingAttempts], so five passes
+  /// retired every PDF in the archive permanently, and they would have stayed
+  /// retired after the library arrived: `embedding_attempts` only resets on
+  /// success, and success was impossible. Measured here at 29 of 47 PDFs
+  /// before the PDF pipeline had even shipped. The server now answers 503 for
+  /// this, which costs no attempt (search plan §18i).
+  ///
+  /// Scoped to PDFs with no chunks rather than to all documents, because that
+  /// is exactly the bug's blast radius — PDF is the only format needing
+  /// pdfium. The `.doc` failures were left alone here on the belief that they
+  /// genuinely could not be parsed; §18m later showed that was the reader's
+  /// fault rather than the files', and they get their own pass below.
+  ///
+  /// Gated on `PRAGMA user_version`: this corrects a specific historical
+  /// state, and re-running it would keep resurrecting files that later retire
+  /// for real reasons.
+  Future<void> _unretirePdfsRetiredByMissingPdfium() async {
+    const pdfRecoveryVersion = 4;
+
+    final rows = await _db.select('PRAGMA user_version');
+    final current = rows.isEmpty ? 0 : (rows.first.values.first as int? ?? 0);
+    if (current >= pdfRecoveryVersion) return;
+
+    final result = await _db.execute('''
+      UPDATE files SET embedding_attempts = 0
+      WHERE embedding_attempts > 0
+        AND lower(name) LIKE '%.pdf'
+        AND NOT EXISTS (SELECT 1 FROM file_chunks fc WHERE fc.file_id = files.id)
+    ''');
+    if (result.affectedRows > 0) {
+      logger.i(
+        'AppDatabase: cleared embedding_attempts on ${result.affectedRows} '
+        'PDFs retired while pdfium was unavailable',
+      );
+    }
+    await _db.execute('PRAGMA user_version = $pdfRecoveryVersion');
+  }
+
+  /// Un-retires legacy `.doc` files that a partial reader could not open.
+  ///
+  /// Same shape as [_unretirePdfsRetiredByMissingPdfium] and the same cause:
+  /// files retired for a defect in the extractor rather than for anything about
+  /// their contents. docling's Rust CFB reader parsed 142 of this archive's 229
+  /// `.doc` files and reported the other 87 as damaged — "no WordDocument
+  /// stream" on files whose OLE2 directory plainly lists one. §18m adds macOS's
+  /// own `textutil` as a fallback behind it, which recovered 85 of the 87.
+  ///
+  /// Without this pass the fallback would reach almost nothing it was built
+  /// for: `embedding_attempts` only resets on success, so the files that
+  /// motivated the work are exactly the ones already sitting at the cap.
+  ///
+  /// Scoped to `.doc` with no chunks — the fallback's blast radius. The two
+  /// files textutil also cannot read will simply retire again, which is the
+  /// correct outcome and costs ten attempts across the archive.
+  Future<void> _unretireDocsRetiredByAnIncompleteReader() async {
+    const docRecoveryVersion = 5;
+
+    final rows = await _db.select('PRAGMA user_version');
+    final current = rows.isEmpty ? 0 : (rows.first.values.first as int? ?? 0);
+    if (current >= docRecoveryVersion) return;
+
+    final result = await _db.execute('''
+      UPDATE files SET embedding_attempts = 0
+      WHERE embedding_attempts > 0
+        AND lower(name) LIKE '%.doc'
+        AND NOT EXISTS (SELECT 1 FROM file_chunks fc WHERE fc.file_id = files.id)
+    ''');
+    if (result.affectedRows > 0) {
+      logger.i(
+        'AppDatabase: cleared embedding_attempts on ${result.affectedRows} '
+        'legacy .doc files retired by an incomplete reader',
+      );
+    }
+    await _db.execute('PRAGMA user_version = $docRecoveryVersion');
+  }
+
   /// Deletes cached thumbnails no `files` row references any more.
   ///
   /// Walks the cache rather than the table: a thumbnail whose row is gone can
@@ -688,34 +999,368 @@ class AppDatabase {
     }
   }
 
-  /// Rebuilds `files_embeddings` onto a `(file_id, type)` primary key when it
-  /// still has the original `file_id`-only key (with or without the `type`
-  /// column added by an earlier version of this migration).
+  /// Renames the derived address index `contacts` → `emails_contacts`.
+  ///
+  /// The table only ever held addresses parsed out of `emails.from`/`to`/`cc`,
+  /// so `contacts` overstated it: it is an email-derived search index, not a
+  /// contact book. The plain name is reserved for a future root-level contacts
+  /// module, which will be *person*-level — this table is keyed by address, and
+  /// one person routinely owns several rows here.
+  ///
+  /// Renamed rather than dropped and rebuilt, even though the contents are
+  /// fully derivable. `backfillFromEmails` re-parses every message in the
+  /// archive, and on an archive this size that is real work to repeat for a
+  /// change that moves no data. SQLite carries the existing indexes across a
+  /// RENAME under their old names, so they are dropped here and recreated by
+  /// [_createSearchIndexes] — otherwise an install would keep `contacts_*`
+  /// index names against a table that no longer answers to `contacts`.
+  ///
+  /// Not gated on `user_version`: the guard is the rename itself, which is a
+  /// no-op once `emails_contacts` exists. That is cheaper than a version bump
+  /// and cannot be skipped by an install that jumped several versions.
+  Future<void> _renameContactsTable() async {
+    final existing = await _db.select(
+      "SELECT name FROM sqlite_master WHERE type = 'table' "
+      "AND name IN ('contacts', 'emails_contacts')",
+    );
+    final names = existing.map((r) => r['name'] as String).toSet();
+    if (!names.contains('contacts') || names.contains('emails_contacts')) {
+      return;
+    }
+
+    await _db.execute('ALTER TABLE contacts RENAME TO emails_contacts');
+    for (final index in const [
+      'contacts_name_idx',
+      'contacts_local_idx',
+      'contacts_rank_idx',
+    ]) {
+      await _db.execute('DROP INDEX IF EXISTS $index');
+    }
+    logger.i('AppDatabase: renamed contacts -> emails_contacts');
+  }
+
+  /// Creates the keyword-search indexes: two FTS5 virtual tables and the
+  /// derived `emails_contacts` index.
+  ///
+  /// Deliberately not part of [schemaDDL]. That list only runs for a brand-new
+  /// database, so an existing install would never see these; running them here
+  /// covers both cases from one place. Every statement is `IF NOT EXISTS`,
+  /// which matters because [create] calls [initSchema] on two connections.
+  ///
+  /// Both FTS5 tables are **external-content** (`content='<table>'`): FTS5
+  /// stores only the inverted index and reads column values back from the real
+  /// row. Storing the text twice would roughly double the database for an
+  /// archive whose bulk is already email bodies.
+  ///
+  /// Sync is by trigger rather than from the write paths in Dart. Every scanner
+  /// (Gmail, Yahoo, Outlook, PST, local FS, Drive) reaches these tables through
+  /// the main-isolate write relay, so a trigger cannot be bypassed — whereas a
+  /// Dart-side call is one thing a sixth scanner can forget to make.
+  Future<void> _createSearchIndexes() async {
+    // An earlier version indexed `plain_body`, which left HTML-only mail — a
+    // third of a real archive — with no searchable body at all. `IF NOT
+    // EXISTS` cannot widen an existing virtual table, so the old shape is
+    // dropped and rebuilt; `_backfillSearchIndexes` repopulates it.
+    final ftsColumns = await _db.select('PRAGMA table_info(emails_fts)');
+    final indexesBodyText = ftsColumns.any((r) => r['name'] == 'body_text');
+    if (ftsColumns.isNotEmpty && !indexesBodyText) {
+      logger.i('AppDatabase: rebuilding emails_fts to index body_text');
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_ai');
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_au');
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_ad');
+      await _db.execute('DROP TABLE IF EXISTS emails_fts');
+    }
+
+    // unicode61 + remove_diacritics: "resume" should find "résumé", and a
+    // personal archive is exactly where accented names turn up.
+    await _db.execute('''
+      CREATE VIRTUAL TABLE IF NOT EXISTS emails_fts USING fts5(
+        subject, "from", "to", cc, body_text,
+        content='emails', content_rowid='rowid',
+        tokenize='unicode61 remove_diacritics 2'
+      );
+    ''');
+    await _db.execute('''
+      CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
+        name, path, description,
+        content='files', content_rowid='rowid',
+        tokenize='unicode61 remove_diacritics 2'
+      );
+    ''');
+
+    // A second files index, not a widening of the first. `files_fts` is
+    // external-content over `files`, and an external-content index can only
+    // hold columns of its content table — chunk text lives in `file_chunks`,
+    // so it is unreachable from there. Without this, a document's *contents*
+    // would be findable by vector search and by nothing else, leaving the
+    // known-item lookup that motivates document search ("find my graduation
+    // speech") with no lexical path at all.
+    await _db.execute('''
+      CREATE VIRTUAL TABLE IF NOT EXISTS file_chunks_fts USING fts5(
+        text,
+        content='file_chunks', content_rowid='rowid',
+        tokenize='unicode61 remove_diacritics 2'
+      );
+    ''');
+
+    // An external-content delete must replay the OLD column values: FTS5 keeps
+    // no copy of the row, so it can only find the terms to retract by being
+    // handed what they were. Passing new values, or omitting them, silently
+    // leaves stale terms pointing at a row that no longer matches.
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS emails_fts_ai AFTER INSERT ON emails BEGIN
+        INSERT INTO emails_fts(rowid, subject, "from", "to", cc, body_text)
+        VALUES (new.rowid, new.subject, new."from", new."to", new.cc,
+                new.body_text);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS emails_fts_ad AFTER DELETE ON emails BEGIN
+        INSERT INTO emails_fts(emails_fts, rowid, subject, "from", "to", cc,
+                               body_text)
+        VALUES ('delete', old.rowid, old.subject, old."from", old."to", old.cc,
+                old.body_text);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS emails_fts_au AFTER UPDATE ON emails BEGIN
+        INSERT INTO emails_fts(emails_fts, rowid, subject, "from", "to", cc,
+                               body_text)
+        VALUES ('delete', old.rowid, old.subject, old."from", old."to", old.cc,
+                old.body_text);
+        INSERT INTO emails_fts(rowid, subject, "from", "to", cc, body_text)
+        VALUES (new.rowid, new.subject, new."from", new."to", new.cc,
+                new.body_text);
+      END;
+    ''');
+
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS files_fts_ai AFTER INSERT ON files BEGIN
+        INSERT INTO files_fts(rowid, name, path, description)
+        VALUES (new.rowid, new.name, new.path, new.description);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS files_fts_ad AFTER DELETE ON files BEGIN
+        INSERT INTO files_fts(files_fts, rowid, name, path, description)
+        VALUES ('delete', old.rowid, old.name, old.path, old.description);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS files_fts_au AFTER UPDATE ON files BEGIN
+        INSERT INTO files_fts(files_fts, rowid, name, path, description)
+        VALUES ('delete', old.rowid, old.name, old.path, old.description);
+        INSERT INTO files_fts(rowid, name, path, description)
+        VALUES (new.rowid, new.name, new.path, new.description);
+      END;
+    ''');
+
+    // Chunk rows are rewritten wholesale (delete-then-insert) rather than
+    // updated in place, so the delete trigger carries the real load here: it
+    // is what stops a re-extracted document's superseded text from staying
+    // matchable. The update trigger exists anyway — an external-content index
+    // that misses one write is silently wrong, not loudly broken.
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS file_chunks_fts_ai
+      AFTER INSERT ON file_chunks BEGIN
+        INSERT INTO file_chunks_fts(rowid, text) VALUES (new.rowid, new.text);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS file_chunks_fts_ad
+      AFTER DELETE ON file_chunks BEGIN
+        INSERT INTO file_chunks_fts(file_chunks_fts, rowid, text)
+        VALUES ('delete', old.rowid, old.text);
+      END;
+    ''');
+    await _db.execute('''
+      CREATE TRIGGER IF NOT EXISTS file_chunks_fts_au
+      AFTER UPDATE ON file_chunks BEGIN
+        INSERT INTO file_chunks_fts(file_chunks_fts, rowid, text)
+        VALUES ('delete', old.rowid, old.text);
+        INSERT INTO file_chunks_fts(rowid, text) VALUES (new.rowid, new.text);
+      END;
+    ''');
+
+    // `address` is stored already-lowercased and is the identity key: the same
+    // mailbox reaches us in several casings, and real archives already carry
+    // such duplicates. `display_name` keeps human casing for presentation.
+    //
+    // This one cannot be trigger-maintained like the FTS5 tables above —
+    // populating it means parsing RFC 5322 (`Name <addr@host>`) and splitting
+    // the comma-joined `to`/`cc` lists, neither of which is expressible in SQL.
+    // See ContactIndexer.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS emails_contacts (
+        address        TEXT PRIMARY KEY,
+        display_name   TEXT,
+        local_part     TEXT NOT NULL,
+        message_count  INTEGER NOT NULL DEFAULT 0,
+        sent_count     INTEGER NOT NULL DEFAULT 0,
+        first_seen     INTEGER,
+        last_seen      INTEGER
+      );
+    ''');
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS emails_contacts_name_idx '
+      'ON emails_contacts (display_name COLLATE NOCASE);',
+    );
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS emails_contacts_local_idx '
+      'ON emails_contacts (local_part COLLATE NOCASE);',
+    );
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS emails_contacts_rank_idx '
+      'ON emails_contacts (message_count DESC);',
+    );
+  }
+
+  /// Populates the FTS5 indexes for rows that predate them.
+  ///
+  /// The triggers in [_createSearchIndexes] only see writes from the moment
+  /// they exist, so every email and file already in the archive is invisible to
+  /// keyword search until this runs once.
+  ///
+  /// Gated on `PRAGMA user_version` for the same reasons as
+  /// [_reapOrphanedArtifacts]: `'rebuild'` re-tokenizes every row of both
+  /// tables, which is real work on a large archive, and the gate is also what
+  /// stops it running twice given [create] calls [initSchema] on two
+  /// connections.
+  ///
+  /// Failure here is deliberately not fatal. An empty or partial index degrades
+  /// keyword search; it does not stop the app opening, and the next version
+  /// bump re-attempts it.
+  Future<void> _backfillSearchIndexes() async {
+    const searchIndexVersion = 3;
+
+    final rows = await _db.select('PRAGMA user_version');
+    final current = rows.isEmpty ? 0 : (rows.first.values.first as int? ?? 0);
+    if (current >= searchIndexVersion) return;
+
+    try {
+      logger.i('AppDatabase: building full-text search indexes...');
+
+      // The triggers must not fire while the backfill runs. Each UPDATE would
+      // issue an FTS5 'delete' carrying the row's old values, and retracting
+      // terms that were never inserted — which is the case for an index just
+      // recreated empty — corrupts it outright (SQLITE_CORRUPT), taking the
+      // whole migration down with it.
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_ai');
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_au');
+      await _db.execute('DROP TRIGGER IF EXISTS emails_fts_ad');
+
+      // Must precede the rebuild: 'rebuild' reads body_text straight off the
+      // content table, so an unpopulated column would index nothing at all.
+      await _backfillEmailBodyText();
+
+      // Restored before the rebuild so no write can slip through unindexed.
+      await _createSearchIndexes();
+
+      await _db.execute("INSERT INTO emails_fts(emails_fts) VALUES('rebuild')");
+      await _db.execute("INSERT INTO files_fts(files_fts) VALUES('rebuild')");
+      await EmailContactRepository(this).backfillFromEmails();
+      await _db.execute('PRAGMA user_version = $searchIndexVersion');
+      logger.i('AppDatabase: full-text search indexes built');
+    } catch (e, stackTrace) {
+      logger.e(
+        'AppDatabase: failed to build full-text search indexes: $e',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  /// Populates `emails.body_text` for mail stored before the column existed.
+  ///
+  /// Reads in pages and pulls only the three columns involved — bodies are the
+  /// bulk of an archive, and loading every one at once to derive a fourth
+  /// column would be a needless multi-gigabyte read.
+  ///
+  /// Rows where `plain_body` already has content are handled in SQL, since
+  /// that is the majority and needs no HTML parsing. Only the HTML-only
+  /// remainder — around a third of a real archive — comes back to Dart.
+  Future<void> _backfillEmailBodyText() async {
+    final copied = await _db.execute(
+      "UPDATE emails SET body_text = plain_body "
+      "WHERE body_text IS NULL AND plain_body IS NOT NULL AND plain_body <> ''",
+    );
+    logger.i(
+      'AppDatabase: body_text copied from plain_body for '
+      '${copied.affectedRows} emails',
+    );
+
+    var stripped = 0;
+    while (true) {
+      final rows = await _db.select(
+        "SELECT id, html_body FROM emails "
+        "WHERE body_text IS NULL AND html_body IS NOT NULL AND html_body <> '' "
+        "LIMIT 200",
+      );
+      if (rows.isEmpty) break;
+
+      await _db.transaction((tx) async {
+        for (final row in rows) {
+          final text = bodyTextFrom(null, row['html_body'] as String?);
+          // Written even when extraction yields nothing — an empty string
+          // still marks the row as processed, and leaving it null would make
+          // this loop reselect the same page forever.
+          await tx.execute('UPDATE emails SET body_text = ? WHERE id = ?', [
+            text,
+            row['id'],
+          ]);
+        }
+      });
+      stripped += rows.length;
+    }
+
+    if (stripped > 0) {
+      logger.i(
+        'AppDatabase: body_text extracted from HTML for $stripped emails',
+      );
+    }
+  }
+
+  /// Rebuilds `files_embeddings` onto a `(file_id, type, sequence)` primary
+  /// key, from either of the two earlier shapes: the original `file_id`-only
+  /// key, or the `(file_id, type)` key that replaced it.
   ///
   /// SQLite can't alter a primary key with `ALTER TABLE`, so this is a
   /// rename-recreate-copy-drop done inside a transaction. Safe to run on
-  /// every open: once the key covers `type` this is a single `PRAGMA
-  /// table_info` read and nothing else. A single-column key can't hold both
-  /// a 'file' and a 'description' embedding for the same file — the second
-  /// insert would silently overwrite the first's vector instead of adding a
-  /// row — so this has to land before anything writes a non-'file' row.
+  /// every open: once the key covers `sequence` this is a single `PRAGMA
+  /// table_info` read and nothing else.
+  ///
+  /// Two widenings, each forced by the same failure. `(file_id)` alone can't
+  /// hold both a 'file' and a 'description' embedding for one file — the
+  /// second insert silently overwrites the first's vector instead of adding a
+  /// row. `(file_id, type)` then can't hold a *document's* many `type='chunk'`
+  /// vectors, for exactly the same reason: a 40-page PDF would keep only
+  /// whichever chunk was written last. So this has to land before anything
+  /// writes a chunk row (search plan §18e).
+  ///
+  /// Unlike the mail equivalent below, **nothing is discarded**. `sequence`
+  /// defaults to 0, which is the correct value for every existing row: image
+  /// and description embeddings are one-per-type by nature. Carrying
+  /// `model_version` across matters for the same reason — dropping it would
+  /// present several thousand valid image vectors to the backfill queue as
+  /// unfinished work.
   Future<void> _migrateFilesEmbeddingsKey() async {
     final info = await _db.select('PRAGMA table_info(files_embeddings)');
     if (info.isEmpty) return;
-    Map<String, Object?>? typeColumn;
-    for (final row in info) {
-      if (row['name'] == 'type') {
-        typeColumn = row;
-        break;
-      }
-    }
-    final keyedByType = typeColumn != null && (typeColumn['pk'] as int) > 0;
-    if (keyedByType) return;
+    final columns = {for (final row in info) row['name'] as String: row};
+    bool isKeyed(String column) =>
+        columns.containsKey(column) && (columns[column]!['pk'] as int) > 0;
+
+    if (isKeyed('sequence')) return;
 
     logger.i(
-      'AppDatabase: migrating files_embeddings to a (file_id, type) key',
+      'AppDatabase: migrating files_embeddings to a '
+      '(file_id, type, sequence) key',
     );
-    final hasTypeColumn = typeColumn != null;
+    // Both columns may be absent: `type` on the original shape, and
+    // `model_version` whenever this runs before _addMissingColumns on a
+    // database old enough to predate it.
+    final typeSource = columns.containsKey('type') ? 'type' : "'file'";
+    final hasModelVersion = columns.containsKey('model_version');
     await _db.transaction((tx) async {
       await tx.execute(
         'ALTER TABLE files_embeddings RENAME TO files_embeddings_old',
@@ -724,17 +1369,74 @@ class AppDatabase {
         CREATE TABLE files_embeddings (
           file_id TEXT NOT NULL,
           type TEXT NOT NULL DEFAULT 'file',
+          sequence INTEGER NOT NULL DEFAULT 0,
           qwen3_vl_embedding BLOB,
-          PRIMARY KEY (file_id, type),
+          model_version TEXT,
+          PRIMARY KEY (file_id, type, sequence),
           FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
         )
       ''');
       await tx.execute('''
-        INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding)
-        SELECT file_id, ${hasTypeColumn ? 'type' : "'file'"}, qwen3_vl_embedding
+        INSERT INTO files_embeddings
+          (file_id, type, sequence, qwen3_vl_embedding, model_version)
+        SELECT file_id, $typeSource, 0, qwen3_vl_embedding,
+               ${hasModelVersion ? 'model_version' : 'NULL'}
         FROM files_embeddings_old
       ''');
       await tx.execute('DROP TABLE files_embeddings_old');
+    });
+  }
+
+  /// Rebuilds `emails_embeddings` onto an `(email_id, chunk_index)` primary
+  /// key, **discarding every row it held**.
+  ///
+  /// Discarding is the migration, not a shortcut around one. The stored
+  /// vectors are whole-body embeddings, which is precisely what chunking
+  /// replaces (§16 of the search plan); but they carry the current
+  /// `model_version`, and `model_version` is the only signal
+  /// `getEmailsWithMissingEmbeddings` has. Copied forward as chunk 0 they
+  /// would read as finished work, and every long email in the archive would
+  /// keep its diluted single vector forever — the exact failure the chunking
+  /// change exists to fix, made invisible.
+  ///
+  /// The alternative — bumping [EmbeddingModel.revision] so the rows age out
+  /// on their own — is worse here, because that constant is shared with
+  /// `files_embeddings`: it would invalidate several thousand image vectors
+  /// that nothing about this change touches. The revision stays put and the
+  /// mail vectors go.
+  ///
+  /// SQLite can't alter a primary key with `ALTER TABLE`, so this is a
+  /// drop-recreate inside a transaction. Safe to run on every open: once the
+  /// key covers `chunk_index` it is a single `PRAGMA table_info` read.
+  Future<void> _migrateEmailEmbeddingsToChunks() async {
+    final info = await _db.select('PRAGMA table_info(emails_embeddings)');
+    if (info.isEmpty) return;
+    final chunked = info.any(
+      (row) => row['name'] == 'chunk_index' && (row['pk'] as int) > 0,
+    );
+    if (chunked) return;
+
+    final existing = await _db.select(
+      'SELECT COUNT(*) AS n FROM emails_embeddings',
+    );
+    final discarded = existing.first['n'] as int? ?? 0;
+    logger.i(
+      'AppDatabase: rebuilding emails_embeddings on (email_id, chunk_index); '
+      'discarding $discarded whole-body vectors to be re-embedded as chunks',
+    );
+
+    await _db.transaction((tx) async {
+      await tx.execute('DROP TABLE emails_embeddings');
+      await tx.execute('''
+        CREATE TABLE emails_embeddings (
+          email_id TEXT NOT NULL,
+          chunk_index INTEGER NOT NULL DEFAULT 0,
+          qwen3_vl_embedding BLOB,
+          model_version TEXT,
+          PRIMARY KEY (email_id, chunk_index),
+          FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
+        )
+      ''');
     });
   }
 
@@ -765,10 +1467,77 @@ class AppDatabase {
         // a file that can never succeed gets re-selected and retried by
         // getFilesWithMissingDescriptions forever.
         'description_attempts': 'INTEGER NOT NULL DEFAULT 0',
+        // The user hid this file from the gallery. Distinct from `is_deleted`,
+        // which the scanner owns: `FileDesktopRepository`'s upsert ends with
+        // `is_deleted = 0`, so anything the user removed reappears the next
+        // time its collection is scanned. That is right for `is_deleted` —
+        // the file really is back — but it made hiding useless for live
+        // sources, where a cleaned-out batch of email attachments returned on
+        // the next sync. One column can't mean both "the source no longer has
+        // this" and "the user doesn't want to see this", so hiding gets its
+        // own column that no scanner writes.
+        'is_hidden': 'INTEGER NOT NULL DEFAULT 0',
+        // How many times EmbeddingIsolate has tried and failed to embed this
+        // file for reasons the file itself causes — a truncated JPEG, bytes
+        // that are not an image at all, a path that no longer exists. Mirrors
+        // `description_attempts`, and for the same reason: without it
+        // getFilesWithMissingEmbeddings re-selects a file that can never
+        // succeed on every pass, so a couple of bad attachments produce an
+        // endless stream of identical parse errors in the log. Only
+        // rejected-bytes failures count — see
+        // DatabaseRepository.maxEmbeddingAttempts — because an unreadable
+        // file says nothing about whether the model could embed it.
+        'embedding_attempts': 'INTEGER NOT NULL DEFAULT 0',
+        // The user deleted this file from the app. Distinct from both
+        // `is_deleted`, which the scanner owns and resets to 0 whenever the
+        // source still has the file, and `is_hidden`, which only takes a photo
+        // out of the gallery. This one means "gone everywhere", and no scanner
+        // writes it — a manual Sync runs with force: true, which bypasses the
+        // "already seen this message" skip and re-imports attachments, so
+        // without a flag the scanner owns nothing and one Sync click would undo
+        // every delete the user made.
+        'is_user_deleted': 'INTEGER NOT NULL DEFAULT 0',
       },
-      'albums': {
-        'description': 'TEXT',
-        'cover_file_id': 'TEXT',
+      'albums': {'description': 'TEXT', 'cover_file_id': 'TEXT'},
+      // Which embedding pipeline produced the vector in this row. See
+      // EmbeddingModel: two vectors are only comparable when built the same
+      // way, and nothing downstream can detect otherwise — cosine over
+      // incompatible spaces returns plausible numbers, not an error.
+      //
+      // Nullable on purpose, and that is the migration. Every row already in
+      // these tables was written before the loader fix and holds noise; adding
+      // the column leaves them NULL, which reads as "unknown pipeline", which
+      // the embedding isolates treat as work to redo. The archive re-embeds
+      // itself on the next launch with no hand-written DELETE.
+      'files_embeddings': {'model_version': 'TEXT'},
+      'emails_embeddings': {'model_version': 'TEXT'},
+      'emails': {
+        // The body text keyword search actually indexes: `plain_body` when the
+        // sender provided one, otherwise the HTML body with its markup
+        // stripped. A third of the mail in a real archive arrives HTML-only,
+        // and indexing `plain_body` alone left every word of it unsearchable.
+        //
+        // Materialised rather than computed in the FTS declaration because
+        // external-content FTS5 reads columns by name — `'rebuild'` issues its
+        // own SELECT, so an expression would apply to trigger-written rows and
+        // not to rebuilt ones, leaving the index quietly inconsistent with
+        // itself.
+        'body_text': 'TEXT',
+      },
+      'photo_cluster_runs': {
+        // Where the user left the group slider for this scope. Persisted
+        // because labelling a run is minutes of vision calls, so reopening at
+        // a different cut than the one those labels were watched onto throws
+        // the wait away.
+        'last_group_count': 'INTEGER',
+      },
+      'photo_cluster_nodes': {
+        // File ids of the members nearest this node's centroid, comma
+        // separated — the photos a vision model is shown when asked to name
+        // the group. Computed during clustering, where the vectors are already
+        // in memory; recovering it later would mean re-reading every member's
+        // embedding just to rank it against a centroid we already stored.
+        'representatives': 'TEXT',
       },
     };
 
@@ -908,7 +1677,7 @@ class AppDatabase {
       // enables this row once the download completes.
       {
         'id': const Uuid().v4(),
-        'alias': 'gemma4:12b',
+        'alias': AppConstants.defaultChatModelAlias,
         'group': 'local',
         'name': 'Gemma 4 12B',
         'type': 'gguf',
@@ -1337,10 +2106,6 @@ class AppDatabase {
       description TEXT
     );
     ''',
-    '''
-    CREATE INDEX IF NOT EXISTS idx_files_active_date
-      ON files (is_deleted, is_inline, date_created);
-    ''',
     // folders
     '''
     CREATE TABLE IF NOT EXISTS folders (
@@ -1375,9 +2140,6 @@ class AppDatabase {
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
     ''',
-    '''
-    CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag);
-    ''',
     // album_files
     '''
     CREATE TABLE IF NOT EXISTS album_files (
@@ -1399,8 +2161,10 @@ class AppDatabase {
     CREATE TABLE IF NOT EXISTS files_embeddings (
       file_id TEXT NOT NULL,
       type TEXT NOT NULL DEFAULT 'file',
+      sequence INTEGER NOT NULL DEFAULT 0,
       qwen3_vl_embedding BLOB,
-      PRIMARY KEY (file_id, type),
+      model_version TEXT,
+      PRIMARY KEY (file_id, type, sequence),
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
     );
     ''',
@@ -1431,8 +2195,11 @@ class AppDatabase {
     // emails_embeddings
     '''
     CREATE TABLE IF NOT EXISTS emails_embeddings (
-      email_id TEXT PRIMARY KEY,
+      email_id TEXT NOT NULL,
+      chunk_index INTEGER NOT NULL DEFAULT 0,
       qwen3_vl_embedding BLOB,
+      model_version TEXT,
+      PRIMARY KEY (email_id, chunk_index),
       FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
     );
     ''',

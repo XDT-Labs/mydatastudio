@@ -36,30 +36,31 @@ class _AichatSkillsSettingsPageState extends State<AichatSkillsSettingsPage> {
   Future<void> _openEditor({AichatSkill? skill}) async {
     await showDialog<void>(
       context: context,
-      builder: (_) => _SkillEditorDialog(
-        repo: _repo,
-        skill: skill,
-      ),
+      builder: (_) => _SkillEditorDialog(repo: _repo, skill: skill),
     );
   }
 
   Future<void> _deleteSkill(AichatSkill skill) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Skill'),
-        content: Text('Delete "${skill.name}" (${skill.trigger})?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Delete Skill'),
+            content: Text('Delete "${skill.name}" (${skill.trigger})?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text(
+                  'Delete',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
     );
     if (confirmed == true) {
       await _repo.delete(skill.id);
@@ -91,7 +92,9 @@ class _AichatSkillsSettingsPageState extends State<AichatSkillsSettingsPage> {
                         Text(
                           'Type /trigger in chat to activate a skill. Skills inject a system prompt that shapes how the model responds.',
                           style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                            color: theme.colorScheme.onSurface.withValues(
+                              alpha: 0.6,
+                            ),
                           ),
                         ),
                       ],
@@ -117,18 +120,15 @@ class _AichatSkillsSettingsPageState extends State<AichatSkillsSettingsPage> {
             SliverPadding(
               padding: const EdgeInsets.all(16),
               sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final skill = _skills[index];
-                    return _SkillTile(
-                      skill: skill,
-                      onToggle: (val) => _repo.setEnabled(skill.id, val),
-                      onEdit: () => _openEditor(skill: skill),
-                      onDelete: () => _deleteSkill(skill),
-                    );
-                  },
-                  childCount: _skills.length,
-                ),
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final skill = _skills[index];
+                  return _SkillTile(
+                    skill: skill,
+                    onToggle: (val) => _repo.setEnabled(skill.id, val),
+                    onEdit: () => _openEditor(skill: skill),
+                    onDelete: () => _deleteSkill(skill),
+                  );
+                }, childCount: _skills.length),
               ),
             ),
         ],
@@ -175,23 +175,21 @@ class _SkillTile extends StatelessWidget {
           visualDensity: VisualDensity.compact,
         ),
         title: Text(skill.name),
-        subtitle: skill.description != null
-            ? Text(
-                skill.description!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                ),
-              )
-            : null,
+        subtitle:
+            skill.description != null
+                ? Text(
+                  skill.description!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                  ),
+                )
+                : null,
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Switch(
-              value: skill.enabled,
-              onChanged: onToggle,
-            ),
+            Switch(value: skill.enabled, onChanged: onToggle),
             IconButton(
               icon: const Icon(Icons.edit_outlined, size: 20),
               tooltip: 'Edit',
@@ -240,7 +238,9 @@ class _SkillEditorDialogState extends State<_SkillEditorDialog> {
     _triggerController = TextEditingController(text: s?.trigger ?? '/');
     _nameController = TextEditingController(text: s?.name ?? '');
     _descriptionController = TextEditingController(text: s?.description ?? '');
-    _systemPromptController = TextEditingController(text: s?.systemPrompt ?? '');
+    _systemPromptController = TextEditingController(
+      text: s?.systemPrompt ?? '',
+    );
     _enabled = s?.enabled ?? true;
   }
 
@@ -266,13 +266,15 @@ class _SkillEditorDialogState extends State<_SkillEditorDialog> {
       final systemPrompt = _systemPromptController.text.trim();
 
       if (_isEditing) {
-        await widget.repo.upsert(widget.skill!.copyWith(
-          trigger: trigger,
-          name: name,
-          description: description.isEmpty ? null : description,
-          systemPrompt: systemPrompt,
-          enabled: _enabled,
-        ));
+        await widget.repo.upsert(
+          widget.skill!.copyWith(
+            trigger: trigger,
+            name: name,
+            description: description.isEmpty ? null : description,
+            systemPrompt: systemPrompt,
+            enabled: _enabled,
+          ),
+        );
       } else {
         await widget.repo.create(
           trigger: trigger,
@@ -285,9 +287,10 @@ class _SkillEditorDialogState extends State<_SkillEditorDialog> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       setState(() {
-        _saveError = e.toString().contains('UNIQUE')
-            ? 'A skill with this trigger already exists.'
-            : 'Failed to save: $e';
+        _saveError =
+            e.toString().contains('UNIQUE')
+                ? 'A skill with this trigger already exists.'
+                : 'Failed to save: $e';
         _saving = false;
       });
     }
@@ -335,8 +338,10 @@ class _SkillEditorDialogState extends State<_SkillEditorDialog> {
                         ),
                         validator: (v) {
                           if (v == null || v.trim().isEmpty) return 'Required';
-                          if (!v.trim().startsWith('/')) return 'Must start with /';
-                          if (v.trim().contains(' ')) return 'No spaces allowed';
+                          if (!v.trim().startsWith('/'))
+                            return 'Must start with /';
+                          if (v.trim().contains(' '))
+                            return 'No spaces allowed';
                           return null;
                         },
                       ),
@@ -350,8 +355,11 @@ class _SkillEditorDialogState extends State<_SkillEditorDialog> {
                           hintText: 'Summarize',
                           border: OutlineInputBorder(),
                         ),
-                        validator: (v) =>
-                            (v == null || v.trim().isEmpty) ? 'Required' : null,
+                        validator:
+                            (v) =>
+                                (v == null || v.trim().isEmpty)
+                                    ? 'Required'
+                                    : null,
                       ),
                     ),
                   ],
@@ -375,8 +383,9 @@ class _SkillEditorDialogState extends State<_SkillEditorDialog> {
                     alignLabelWithHint: true,
                   ),
                   maxLines: 5,
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  validator:
+                      (v) =>
+                          (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -391,10 +400,7 @@ class _SkillEditorDialogState extends State<_SkillEditorDialog> {
                 ),
                 if (_saveError != null) ...[
                   const SizedBox(height: 8),
-                  Text(
-                    _saveError!,
-                    style: const TextStyle(color: Colors.red),
-                  ),
+                  Text(_saveError!, style: const TextStyle(color: Colors.red)),
                 ],
                 const SizedBox(height: 20),
                 Row(
@@ -407,13 +413,16 @@ class _SkillEditorDialogState extends State<_SkillEditorDialog> {
                     const SizedBox(width: 8),
                     FilledButton(
                       onPressed: _saving ? null : _save,
-                      child: _saving
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(_isEditing ? 'Save' : 'Create'),
+                      child:
+                          _saving
+                              ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                              : Text(_isEditing ? 'Save' : 'Create'),
                     ),
                   ],
                 ),

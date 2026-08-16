@@ -30,6 +30,7 @@ dependencies = [
     "accelerate",
     "libpff-python",
     "rawpy==0.26.1",
+    "docling-rs>=1.7.0",
 ]
 
 requires-python = ">=3.11,<3.15"

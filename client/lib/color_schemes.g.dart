@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 const lightColorScheme = ColorScheme(
   brightness: Brightness.light,
@@ -31,7 +31,7 @@ const lightColorScheme = ColorScheme(
   shadow: Color(0x0A2C3437), // 4% opacity of onSurface for ambient shadow
   surfaceTint: Color(0xFF3452D4),
   scrim: Color(0xFF000000),
-  
+
   // Custom Material 3 container colors mapped to the Digital Curator specifications
   surfaceContainerLowest: Color(0xFFFFFFFF),
   surfaceContainerLow: Color(0xFFF0F4F6),
@@ -39,7 +39,6 @@ const lightColorScheme = ColorScheme(
   surfaceContainerHigh: Color(0xFFE3E8EB),
   surfaceContainerHighest: Color(0xFFDCE1E4),
 );
-
 
 const darkColorScheme = ColorScheme(
   brightness: Brightness.dark,
@@ -73,7 +72,7 @@ const darkColorScheme = ColorScheme(
   shadow: Color(0x0A000000),
   surfaceTint: Color(0xFFCFBCFF),
   scrim: Color(0xFF000000),
-  
+
   // Custom Material 3 container colors mapped to the Digital Curator specifications
   surfaceContainerLowest: Color(0xFF0F0D12),
   surfaceContainerLow: Color(0xFF1D1B20),
@@ -81,6 +80,3 @@ const darkColorScheme = ColorScheme(
   surfaceContainerHigh: Color(0xFF2B292E),
   surfaceContainerHighest: Color(0xFF363439),
 );
-
-
-

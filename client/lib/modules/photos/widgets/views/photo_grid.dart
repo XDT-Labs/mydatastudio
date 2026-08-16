@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:intl/intl.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -47,6 +48,9 @@ class _PhotoGridState extends State<PhotoGrid> {
 
   int _activeIndex = 0;
   List<double> _sectionOffsets = [];
+
+  /// Month buckets the user has collapsed, keyed the same way the sections are.
+  final Set<String> _collapsedMonths = {};
 
   StreamSubscription<double>? _gridSizeSub;
   double _gridItemSize = 160.0;
@@ -158,14 +162,20 @@ class _PhotoGridState extends State<PhotoGrid> {
     final itemWidth = (usableGridWidth - (columns - 1) * 8.0) / columns;
     final itemHeight = itemWidth;
 
-    for (final monthFiles in groups.values) {
+    for (final entry in groups.entries) {
       offsets.add(currentOffset);
 
       const headerHeight = 40.0;
-      final rows = (monthFiles.length / columns).ceil();
-      final gridHeight = rows == 0
-          ? 0.0
-          : 16.0 + rows * itemHeight + (rows - 1) * 8.0;
+      // A collapsed section is its header and nothing else. The quick-jump
+      // scrubber scrolls by these offsets, so leaving the grid's height in
+      // would send every jump past its target by the height of everything
+      // collapsed above it.
+      final rows =
+          _collapsedMonths.contains(entry.key)
+              ? 0
+              : (entry.value.length / columns).ceil();
+      final gridHeight =
+          rows == 0 ? 0.0 : 16.0 + rows * itemHeight + (rows - 1) * 8.0;
 
       currentOffset += headerHeight + gridHeight;
     }
@@ -188,7 +198,9 @@ class _PhotoGridState extends State<PhotoGrid> {
                   Icon(
                     Icons.photo_library,
                     size: 64,
-                    color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                    color: theme.colorScheme.onSurfaceVariant.withValues(
+                      alpha: 0.5,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Text(
@@ -201,10 +213,7 @@ class _PhotoGridState extends State<PhotoGrid> {
               ),
             ),
           ),
-          TimelineQuickJump(
-            monthLabels: const [],
-            onJumpTo: (_) {},
-          ),
+          TimelineQuickJump(monthLabels: const [], onJumpTo: (_) {}),
         ],
       );
     }
@@ -212,13 +221,16 @@ class _PhotoGridState extends State<PhotoGrid> {
     final groups = _groupByMonthYear(widget.files);
     final monthLabels = groups.keys.toList();
     final Map<String, int> photoCounts = {
-      for (final entry in groups.entries) entry.key: entry.value.length
+      for (final entry in groups.entries) entry.key: entry.value.length,
     };
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final mainWidth = max(0.0, constraints.maxWidth - 48.0);
-        final columns = PhotoGrid.getColumnCount(mainWidth, itemSize: _gridItemSize);
+        final columns = PhotoGrid.getColumnCount(
+          mainWidth,
+          itemSize: _gridItemSize,
+        );
 
         _sectionOffsets = _calculateSectionOffsets(groups, mainWidth, columns);
 
@@ -236,6 +248,13 @@ class _PhotoGridState extends State<PhotoGrid> {
                 dateLabel: monthYear,
                 itemCount: monthFiles.length,
                 isSelected: isGroupAllSelected,
+                isCollapsed: _collapsedMonths.contains(monthYear),
+                onToggleCollapsed:
+                    () => setState(() {
+                      if (!_collapsedMonths.remove(monthYear)) {
+                        _collapsedMonths.add(monthYear);
+                      }
+                    }),
                 onSelectAll: (val) {
                   if (val) {
                     SelectionService.instance.selectAll(
@@ -251,7 +270,11 @@ class _PhotoGridState extends State<PhotoGrid> {
             ),
           );
 
-          // 2. Month photo grid
+          // 2. Month photo grid — omitted entirely when collapsed rather than
+          // rendered at zero height, so a collapsed month costs nothing to
+          // scroll past.
+          if (_collapsedMonths.contains(monthYear)) return;
+
           slivers.add(
             SliverPadding(
               padding: const EdgeInsets.all(8.0),
@@ -262,24 +285,21 @@ class _PhotoGridState extends State<PhotoGrid> {
                   mainAxisSpacing: 8.0,
                   childAspectRatio: 1.0,
                 ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final file = monthFiles[index];
-                    final isSelected = widget.selectedIds.contains(file.id);
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final file = monthFiles[index];
+                  final isSelected = widget.selectedIds.contains(file.id);
 
-                    return buildWiredPhotoGridTile(
-                      file: file,
-                      isSelected: isSelected,
-                      allFiles: widget.files,
-                      onTapTile: widget.onTapTile,
-                      onSelectTile: widget.onSelectTile,
-                      onToggleFavoriteTile: widget.onToggleFavoriteTile,
-                      onOpenLightboxTile: widget.onOpenLightboxTile,
-                      onOpenInfoTile: widget.onOpenInfoTile,
-                    );
-                  },
-                  childCount: monthFiles.length,
-                ),
+                  return buildWiredPhotoGridTile(
+                    file: file,
+                    isSelected: isSelected,
+                    allFiles: widget.files,
+                    onTapTile: widget.onTapTile,
+                    onSelectTile: widget.onSelectTile,
+                    onToggleFavoriteTile: widget.onToggleFavoriteTile,
+                    onOpenLightboxTile: widget.onOpenLightboxTile,
+                    onOpenInfoTile: widget.onOpenInfoTile,
+                  );
+                }, childCount: monthFiles.length),
               ),
             ),
           );

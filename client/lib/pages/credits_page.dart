@@ -99,10 +99,11 @@ class CreditsPage extends StatelessWidget {
                 ),
               ),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => showLicensePage(
-                context: context,
-                applicationName: 'My Data Studio',
-              ),
+              onTap:
+                  () => showLicensePage(
+                    context: context,
+                    applicationName: 'My Data Studio',
+                  ),
             ),
           ),
         ],

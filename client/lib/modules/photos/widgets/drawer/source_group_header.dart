@@ -33,9 +33,10 @@ class SourceGroupHeader extends StatelessWidget {
         isActive ? colorScheme.primaryContainer : Colors.transparent;
     final textColor =
         isActive ? colorScheme.onPrimaryContainer : colorScheme.onSurface;
-    final iconColor = isActive
-        ? colorScheme.onPrimaryContainer
-        : colorScheme.onSurfaceVariant;
+    final iconColor =
+        isActive
+            ? colorScheme.onPrimaryContainer
+            : colorScheme.onSurfaceVariant;
 
     return Material(
       color: backgroundColor,
@@ -68,17 +69,21 @@ class SourceGroupHeader extends StatelessWidget {
                     vertical: 2.0,
                   ),
                   decoration: BoxDecoration(
-                    color: isActive
-                        ? colorScheme.surfaceContainerHighest.withValues(alpha: 0.5)
-                        : colorScheme.surfaceContainerHighest,
+                    color:
+                        isActive
+                            ? colorScheme.surfaceContainerHighest.withValues(
+                              alpha: 0.5,
+                            )
+                            : colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
                     '$count',
                     style: textTheme.labelSmall?.copyWith(
-                      color: isActive
-                          ? colorScheme.onPrimaryContainer
-                          : colorScheme.onSurfaceVariant,
+                      color:
+                          isActive
+                              ? colorScheme.onPrimaryContainer
+                              : colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),

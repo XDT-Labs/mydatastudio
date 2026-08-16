@@ -99,9 +99,12 @@ class _GmailConfigureViewState extends State<GmailConfigureView> {
         Semantics(
           link: true,
           child: InkWell(
-            onTap: () => launchUrl(
-              Uri.parse('https://console.cloud.google.com/apis/credentials'),
-            ),
+            onTap:
+                () => launchUrl(
+                  Uri.parse(
+                    'https://console.cloud.google.com/apis/credentials',
+                  ),
+                ),
             child: const Text(
               'Get Credentials from Google Cloud Console',
               textAlign: TextAlign.center,

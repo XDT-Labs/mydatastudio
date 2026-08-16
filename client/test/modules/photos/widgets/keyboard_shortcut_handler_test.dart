@@ -26,13 +26,8 @@ File _createTestFile(String id, String name) {
 
 Widget createTestApp(Widget child) {
   return MaterialApp(
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: darkColorScheme,
-    ),
-    home: Scaffold(
-      body: child,
-    ),
+    theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
+    home: Scaffold(body: child),
   );
 }
 
@@ -51,11 +46,9 @@ void main() {
 
   group('KeyboardShortcutHandler Widget Tests', () {
     testWidgets('I key toggles info sidebar', (tester) async {
-      await tester.pumpWidget(createTestApp(
-        KeyboardShortcutHandler(
-          child: Container(),
-        ),
-      ));
+      await tester.pumpWidget(
+        createTestApp(KeyboardShortcutHandler(child: Container())),
+      );
       await tester.pumpAndSettle();
 
       expect(ViewStateService.instance.isInfoOpen.value, isFalse);
@@ -71,45 +64,44 @@ void main() {
       expect(ViewStateService.instance.isInfoOpen.value, isFalse);
     });
 
-    testWidgets('Escape key closes lightbox, sidebar, or selection in priority order', (tester) async {
-      await tester.pumpWidget(createTestApp(
-        KeyboardShortcutHandler(
-          child: Container(),
-        ),
-      ));
-      await tester.pumpAndSettle();
+    testWidgets(
+      'Escape key closes lightbox, sidebar, or selection in priority order',
+      (tester) async {
+        await tester.pumpWidget(
+          createTestApp(KeyboardShortcutHandler(child: Container())),
+        );
+        await tester.pumpAndSettle();
 
-      // Open lightbox, info sidebar, and select items
-      ViewStateService.instance.openLightbox(file1);
-      ViewStateService.instance.toggleInfo();
-      SelectionService.instance.selectAll(['f1', 'f2']);
-      await tester.pumpAndSettle();
+        // Open lightbox, info sidebar, and select items
+        ViewStateService.instance.openLightbox(file1);
+        ViewStateService.instance.toggleInfo();
+        SelectionService.instance.selectAll(['f1', 'f2']);
+        await tester.pumpAndSettle();
 
-      // 1st Escape -> Closes Lightbox
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-      expect(ViewStateService.instance.lightboxMedia.value, isNull);
-      expect(ViewStateService.instance.isInfoOpen.value, isTrue);
-      expect(SelectionService.instance.selectedIds.value, isNotEmpty);
+        // 1st Escape -> Closes Lightbox
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(ViewStateService.instance.lightboxMedia.value, isNull);
+        expect(ViewStateService.instance.isInfoOpen.value, isTrue);
+        expect(SelectionService.instance.selectedIds.value, isNotEmpty);
 
-      // 2nd Escape -> Closes Info Sidebar
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-      expect(ViewStateService.instance.isInfoOpen.value, isFalse);
-      expect(SelectionService.instance.selectedIds.value, isNotEmpty);
+        // 2nd Escape -> Closes Info Sidebar
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(ViewStateService.instance.isInfoOpen.value, isFalse);
+        expect(SelectionService.instance.selectedIds.value, isNotEmpty);
 
-      // 3rd Escape -> Deselects All
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-      expect(SelectionService.instance.selectedIds.value, isEmpty);
-    });
+        // 3rd Escape -> Deselects All
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(SelectionService.instance.selectedIds.value, isEmpty);
+      },
+    );
 
     testWidgets('Ctrl+A selects all visible items', (tester) async {
-      await tester.pumpWidget(createTestApp(
-        KeyboardShortcutHandler(
-          child: Container(),
-        ),
-      ));
+      await tester.pumpWidget(
+        createTestApp(KeyboardShortcutHandler(child: Container())),
+      );
       await tester.pumpAndSettle();
 
       expect(SelectionService.instance.selectedIds.value, isEmpty);
@@ -119,16 +111,17 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
       await tester.pumpAndSettle();
 
-      expect(SelectionService.instance.selectedIds.value, containsAll(['f1', 'f2']));
+      expect(
+        SelectionService.instance.selectedIds.value,
+        containsAll(['f1', 'f2']),
+      );
     });
 
     testWidgets('Cmd+A selects all visible items on macOS', (tester) async {
       SelectionService.instance.deselectAll();
-      await tester.pumpWidget(createTestApp(
-        KeyboardShortcutHandler(
-          child: Container(),
-        ),
-      ));
+      await tester.pumpWidget(
+        createTestApp(KeyboardShortcutHandler(child: Container())),
+      );
       await tester.pumpAndSettle();
 
       expect(SelectionService.instance.selectedIds.value, isEmpty);
@@ -138,15 +131,16 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
       await tester.pumpAndSettle();
 
-      expect(SelectionService.instance.selectedIds.value, containsAll(['f1', 'f2']));
+      expect(
+        SelectionService.instance.selectedIds.value,
+        containsAll(['f1', 'f2']),
+      );
     });
 
     testWidgets('? key opens KeyboardShortcutsModal dialog', (tester) async {
-      await tester.pumpWidget(createTestApp(
-        KeyboardShortcutHandler(
-          child: Container(),
-        ),
-      ));
+      await tester.pumpWidget(
+        createTestApp(KeyboardShortcutHandler(child: Container())),
+      );
       await tester.pumpAndSettle();
 
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);

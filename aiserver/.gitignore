@@ -11,3 +11,6 @@ __pypackages__
 .ruff_cache/
 .pdm-python
 aichat.egg-info
+
+# Vendored by `make pdfium` — a 3.4 MB binary, fetched not tracked.
+vendor/

@@ -125,7 +125,6 @@ void main() {
     testWidgets('shows the active place and points at the radius control', (
       tester,
     ) async {
-
       await tester.pumpWidget(
         _wrap(
           LocationSearchField(

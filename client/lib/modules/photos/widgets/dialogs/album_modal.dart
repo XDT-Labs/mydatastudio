@@ -69,9 +69,10 @@ class _AlbumModalState extends State<AlbumModal> {
 
     setState(() => _isSubmitting = true);
     try {
-      final selectedAlbums = _albumsWithCounts.where(
-        (a) => _selectedAlbumIds.contains(a.album.id),
-      ).toList();
+      final selectedAlbums =
+          _albumsWithCounts
+              .where((a) => _selectedAlbumIds.contains(a.album.id))
+              .toList();
 
       await _repo.addFilesToAlbums(widget.selectedFileIds, _selectedAlbumIds);
 
@@ -88,9 +89,9 @@ class _AlbumModalState extends State<AlbumModal> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to add to album: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to add to album: $e')));
       }
     } finally {
       if (mounted) {
@@ -107,9 +108,8 @@ class _AlbumModalState extends State<AlbumModal> {
       final title = _titleController.text.trim();
       final description = _descController.text.trim();
 
-      final coverId = widget.selectedFileIds.isEmpty
-          ? null
-          : widget.selectedFileIds.first;
+      final coverId =
+          widget.selectedFileIds.isEmpty ? null : widget.selectedFileIds.first;
 
       final newAlbum = Album(
         id: const Uuid().v4(),
@@ -133,9 +133,9 @@ class _AlbumModalState extends State<AlbumModal> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to create album: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to create album: $e')));
       }
     } finally {
       if (mounted) {
@@ -159,18 +159,20 @@ class _AlbumModalState extends State<AlbumModal> {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                 decoration: BoxDecoration(
-                  color: _mode == AlbumModalMode.addToExisting
-                      ? colorScheme.primary
-                      : Colors.transparent,
+                  color:
+                      _mode == AlbumModalMode.addToExisting
+                          ? colorScheme.primary
+                          : Colors.transparent,
                   borderRadius: BorderRadius.circular(6.0),
                 ),
                 alignment: Alignment.center,
                 child: Text(
                   'Add to Existing Album',
                   style: TextStyle(
-                    color: _mode == AlbumModalMode.addToExisting
-                        ? colorScheme.onPrimary
-                        : colorScheme.onSurfaceVariant,
+                    color:
+                        _mode == AlbumModalMode.addToExisting
+                            ? colorScheme.onPrimary
+                            : colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                   ),
@@ -186,18 +188,20 @@ class _AlbumModalState extends State<AlbumModal> {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                 decoration: BoxDecoration(
-                  color: _mode == AlbumModalMode.createNew
-                      ? colorScheme.primary
-                      : Colors.transparent,
+                  color:
+                      _mode == AlbumModalMode.createNew
+                          ? colorScheme.primary
+                          : Colors.transparent,
                   borderRadius: BorderRadius.circular(6.0),
                 ),
                 alignment: Alignment.center,
                 child: Text(
                   'Create New Album',
                   style: TextStyle(
-                    color: _mode == AlbumModalMode.createNew
-                        ? colorScheme.onPrimary
-                        : colorScheme.onSurfaceVariant,
+                    color:
+                        _mode == AlbumModalMode.createNew
+                            ? colorScheme.onPrimary
+                            : colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                   ),
@@ -289,9 +293,10 @@ class _AlbumModalState extends State<AlbumModal> {
             ),
             secondary: Icon(
               Icons.photo_album_outlined,
-              color: isSelected
-                  ? colorScheme.primary
-                  : colorScheme.onSurfaceVariant,
+              color:
+                  isSelected
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
             ),
           );
         },
@@ -407,28 +412,30 @@ class _AlbumModalState extends State<AlbumModal> {
                       borderRadius: BorderRadius.circular(8.0),
                     ),
                   ),
-                  onPressed: _isSubmitting
-                      ? null
-                      : (_mode == AlbumModalMode.addToExisting
-                          ? (_selectedAlbumIds.isNotEmpty &&
-                                  _albumsWithCounts.isNotEmpty
-                              ? _handleAddToExisting
-                              : null)
-                          : _handleCreateAndAdd),
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+                  onPressed:
+                      _isSubmitting
+                          ? null
+                          : (_mode == AlbumModalMode.addToExisting
+                              ? (_selectedAlbumIds.isNotEmpty &&
+                                      _albumsWithCounts.isNotEmpty
+                                  ? _handleAddToExisting
+                                  : null)
+                              : _handleCreateAndAdd),
+                  child:
+                      _isSubmitting
+                          ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                          : Text(
+                            _mode == AlbumModalMode.addToExisting
+                                ? 'Add to Album'
+                                : 'Create & Add',
                           ),
-                        )
-                      : Text(
-                          _mode == AlbumModalMode.addToExisting
-                              ? 'Add to Album'
-                              : 'Create & Add',
-                        ),
                 ),
               ],
             ),

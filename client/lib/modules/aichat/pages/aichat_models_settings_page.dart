@@ -1,3 +1,4 @@
+import 'package:mydatastudio/app_constants.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:material_ui/material_ui.dart';
@@ -546,7 +547,8 @@ class _AichatModelsSettingsPageState extends State<AichatModelsSettingsPage> {
     final downloaded =
         _byGroup(
           'local',
-        ).where((m) => m.alias != 'gemma4:12b' && m.enabled).toList();
+        ).where((m) =>
+            m.alias != AppConstants.defaultChatModelAlias && m.enabled).toList();
 
     return Card(
       child: Padding(

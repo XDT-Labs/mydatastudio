@@ -29,13 +29,14 @@ class AnimatedInfoPanel extends StatelessWidget {
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeInOut,
       alignment: Alignment.topRight,
-      child: isOpen
-          ? Container(
-              width: width,
-              color: colorScheme.surfaceContainer,
-              child: child,
-            )
-          : const SizedBox(width: 0, height: double.infinity),
+      child:
+          isOpen
+              ? Container(
+                width: width,
+                color: colorScheme.surfaceContainer,
+                child: child,
+              )
+              : const SizedBox(width: 0, height: double.infinity),
     );
   }
 }

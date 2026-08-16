@@ -14,6 +14,10 @@ import 'package:mydatastudio/models/tables/collection.dart';
 /// To resolve the correct provider for a given [Collection] at runtime, use
 /// [FileSourceRegistry.forCollection].
 abstract class FileSourceProvider {
+  /// Subclasses are stateless and const-constructed, so this has to be const
+  /// for them to stay that way.
+  const FileSourceProvider();
+
   /// Short identifier matching [AppConstants.scannerFile*] constants.
   /// Examples: `'local'`, `'gdrive'`, `'dropbox'`
   String get providerKey;
@@ -61,6 +65,26 @@ abstract class FileSourceProvider {
   ///
   /// Returns `true` on success.
   Future<bool> deleteFile(Collection collection, FileSourceFile file);
+
+  /// Deletes every file in [files] from the source, returning how many went.
+  ///
+  /// One call per file by default. Providers that pay a fixed cost per delete
+  /// — building an authenticated client, checking a token — should override
+  /// this to pay it once for the batch instead of once per file, which is what
+  /// a photo cleanup over a few hundred files turns it into.
+  ///
+  /// Individual failures are the implementation's to log and count, not to
+  /// throw: one unreachable file must not abandon the rest of the batch.
+  Future<int> deleteFiles(
+    Collection collection,
+    List<FileSourceFile> files,
+  ) async {
+    var deleted = 0;
+    for (final file in files) {
+      if (await deleteFile(collection, file)) deleted++;
+    }
+    return deleted;
+  }
 
   /// Opens [file] using the appropriate viewer.
   ///

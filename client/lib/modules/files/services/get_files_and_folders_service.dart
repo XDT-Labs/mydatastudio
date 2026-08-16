@@ -126,28 +126,33 @@ class GetFileAndFoldersService
       await _currentSubscription?.cancel();
 
       // Start reactive stream query for both folders and files
-      final folderStream = db.stream(
-        "SELECT * FROM folders WHERE collection_id = ? AND parent = ? ORDER BY name",
-        [command.collection.id, relativePath],
-      ).map((rows) => rows.map((r) => Folder.fromDbMap(r)).toList());
+      final folderStream = db
+          .stream(
+            "SELECT * FROM folders WHERE collection_id = ? AND parent = ? ORDER BY name",
+            [command.collection.id, relativePath],
+          )
+          .map((rows) => rows.map((r) => Folder.fromDbMap(r)).toList());
 
-      final fileStream = db.stream(
-        "SELECT * FROM files WHERE collection_id = ? AND parent = ? AND is_deleted = 0 ORDER BY name LIMIT ?",
-        [
-          command.collection.id,
-          relativePath,
-          command.offset + command.pageSize,
-        ],
-      ).map((rows) => rows.map((r) => File.fromDbMap(r)).toList());
+      final fileStream = db
+          .stream(
+            "SELECT * FROM files WHERE collection_id = ? AND parent = ? AND is_deleted = 0 AND is_user_deleted = 0 ORDER BY name LIMIT ?",
+            [
+              command.collection.id,
+              relativePath,
+              command.offset + command.pageSize,
+            ],
+          )
+          .map((rows) => rows.map((r) => File.fromDbMap(r)).toList());
 
-      _currentSubscription = Rx.combineLatest2<List<Folder>, List<File>, List<FileAsset>>(
-        folderStream,
-        fileStream,
-        (fldrs, fls) => [...fldrs, ...fls],
-      ).listen((updatedItems) {
-        _currentItems = updatedItems;
-        sink.add(updatedItems);
-      });
+      _currentSubscription =
+          Rx.combineLatest2<List<Folder>, List<File>, List<FileAsset>>(
+            folderStream,
+            fileStream,
+            (fldrs, fls) => [...fldrs, ...fls],
+          ).listen((updatedItems) {
+            _currentItems = updatedItems;
+            sink.add(updatedItems);
+          });
 
       // ── 2. THEN trigger scanner in background ────────────────────
       // Fire-and-forget: the scanner writes to the DB directly.

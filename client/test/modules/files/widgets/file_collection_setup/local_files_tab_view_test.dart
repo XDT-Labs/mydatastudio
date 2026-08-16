@@ -1,17 +1,22 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/local_files_tab_view.dart';
-import 'package:reactive_forms/reactive_forms.dart';
 
 void main() {
   group('LocalFilesTabView', () {
-    late FormGroup form;
+    late GlobalKey<FormState> formKey;
+    late TextEditingController name;
+    late TextEditingController path;
 
     setUp(() {
-      form = FormGroup({
-        'name': FormControl<String>(validators: [Validators.required]),
-        'path': FormControl<String>(validators: [Validators.required]),
-      });
+      formKey = GlobalKey<FormState>();
+      name = TextEditingController();
+      path = TextEditingController();
+    });
+
+    tearDown(() {
+      name.dispose();
+      path.dispose();
     });
 
     testWidgets('renders name and path fields', (tester) async {
@@ -19,7 +24,9 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: LocalFilesTabView(
-              form: form,
+              formKey: formKey,
+              nameController: name,
+              pathController: path,
               onBrowse: () {},
               onSave: () {},
               onCancel: () {},
@@ -38,7 +45,9 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: LocalFilesTabView(
-              form: form,
+              formKey: formKey,
+              nameController: name,
+              pathController: path,
               onBrowse: () => called = true,
               onSave: () {},
               onCancel: () {},
@@ -59,7 +68,9 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: LocalFilesTabView(
-              form: form,
+              formKey: formKey,
+              nameController: name,
+              pathController: path,
               onBrowse: () {},
               onSave: () => called = true,
               onCancel: () {},
@@ -80,7 +91,9 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: LocalFilesTabView(
-              form: form,
+              formKey: formKey,
+              nameController: name,
+              pathController: path,
               onBrowse: () {},
               onSave: () {},
               onCancel: () => called = true,

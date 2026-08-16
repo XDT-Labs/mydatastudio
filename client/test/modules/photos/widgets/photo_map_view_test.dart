@@ -54,23 +54,21 @@ List<File> _createTestFilesWithGps() {
   ];
 }
 
-Widget _buildTestableWidget(Widget child,
-    {double width = 1000, double height = 800}) {
+Widget _buildTestableWidget(
+  Widget child, {
+  double width = 1000,
+  double height = 800,
+}) {
   return MaterialApp(
     theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
-    home: Scaffold(
-      body: SizedBox(
-        width: width,
-        height: height,
-        child: child,
-      ),
-    ),
+    home: Scaffold(body: SizedBox(width: width, height: height, child: child)),
   );
 }
 
 void main() {
-  testWidgets('renders map when files with coordinates provided',
-      (WidgetTester tester) async {
+  testWidgets('renders map when files with coordinates provided', (
+    WidgetTester tester,
+  ) async {
     final files = _createTestFilesWithGps();
 
     await tester.pumpWidget(
@@ -92,8 +90,9 @@ void main() {
     expect(find.byType(MarkerLayer), findsOneWidget);
   });
 
-  testWidgets('markers placed for geotagged files',
-      (WidgetTester tester) async {
+  testWidgets('markers placed for geotagged files', (
+    WidgetTester tester,
+  ) async {
     final files = _createTestFilesWithGps();
 
     await tester.pumpWidget(
@@ -114,8 +113,9 @@ void main() {
     expect(find.byKey(const Key('photo_marker_f3')), findsNothing);
   });
 
-  testWidgets('empty state when no geotagged files',
-      (WidgetTester tester) async {
+  testWidgets('empty state when no geotagged files', (
+    WidgetTester tester,
+  ) async {
     final filesNoGps = [
       File(
         id: 'f3',

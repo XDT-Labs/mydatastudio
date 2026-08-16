@@ -54,9 +54,7 @@ class PlaceFilterBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHigh,
-        border: Border(
-          bottom: BorderSide(color: colorScheme.outlineVariant),
-        ),
+        border: Border(bottom: BorderSide(color: colorScheme.outlineVariant)),
       ),
       child: Row(
         children: [
@@ -84,7 +82,8 @@ class PlaceFilterBar extends StatelessWidget {
           if (place == null) ...[
             const SizedBox(width: 8),
             Tooltip(
-              message: 'Matched by what the photo shows, not by GPS — '
+              message:
+                  'Matched by what the photo shows, not by GPS — '
                   'so there is no distance to widen.',
               child: Text(
                 'recognised in photo',
@@ -143,9 +142,10 @@ class PlaceFilterBar extends StatelessWidget {
                     ? 'No geotagged photos here — try a wider radius'
                     : 'No photos',
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: matchCount == 0
-                      ? colorScheme.error
-                      : colorScheme.onSurfaceVariant,
+                  color:
+                      matchCount == 0
+                          ? colorScheme.error
+                          : colorScheme.onSurfaceVariant,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

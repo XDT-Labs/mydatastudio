@@ -16,7 +16,6 @@ import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
-import 'package:reactive_forms/reactive_forms.dart';
 import 'package:uuid/uuid.dart';
 
 class NewFileCollectionPage extends StatefulWidget {
@@ -30,10 +29,16 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
   String? name;
   String? path;
 
-  final form = FormGroup({
-    'name': FormControl<String>(validators: [Validators.required]),
-    'path': FormControl<String>(validators: [Validators.required]),
-  });
+  final _formKey = GlobalKey<FormState>();
+  final _name = TextEditingController();
+  final _path = TextEditingController();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _path.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +69,9 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
 
   Widget _buildLocalFilesTab(BuildContext context) {
     return LocalFilesTabView(
-      form: form,
+      formKey: _formKey,
+      nameController: _name,
+      pathController: _path,
       onBrowse: () => _browse(),
       onSave: () => _save(context),
       onCancel: () => GoRouter.of(context).go('/files'),
@@ -74,8 +81,8 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
   Future<void> _browse() async {
     final result = await FilePicker.platform.getDirectoryPath();
     if (result != null) {
-      form.control('name').value = result.split('/').last;
-      form.control('path').value = result;
+      _name.text = result.split('/').last;
+      _path.text = result;
       setState(() {
         name = result.split('/').last;
         path = result;
@@ -84,11 +91,13 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
   }
 
   void _save(BuildContext context) {
-    if (form.valid) {
-      final selectedPath = form.control('path').value as String;
+    // validate() both answers the question and paints the errors, which is
+    // what the old markAllAsTouched() branch existed to do.
+    if (_formKey.currentState?.validate() ?? false) {
+      final selectedPath = _path.text;
       final fc = Collection(
         id: const Uuid().v4().toString(),
-        name: form.control('name').value,
+        name: _name.text,
         path: selectedPath,
         localCopyPath: selectedPath,
         type: 'file',
@@ -108,8 +117,6 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
       });
 
       GoRouter.of(context).go('/files');
-    } else {
-      form.markAllAsTouched();
     }
   }
 }
