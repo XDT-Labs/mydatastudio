@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class YahooLoadingView extends StatelessWidget {
   const YahooLoadingView({super.key});

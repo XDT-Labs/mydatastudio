@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -14,10 +14,7 @@ import 'package:mydatastudio/modules/photos/widgets/views/photo_map_view.dart';
 
 Widget createTestApp(Widget child) {
   return MaterialApp(
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: darkColorScheme,
-    ),
+    theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
     home: Scaffold(body: child),
   );
 }
@@ -58,22 +55,25 @@ void main() {
     });
 
     testWidgets(
-        'shows and hides info sidebar based on ViewStateService.isInfoOpen',
-        (tester) async {
-      await tester.pumpWidget(createTestApp(const PhotosApp()));
-      await tester.pumpAndSettle();
+      'shows and hides info sidebar based on ViewStateService.isInfoOpen',
+      (tester) async {
+        await tester.pumpWidget(createTestApp(const PhotosApp()));
+        await tester.pumpAndSettle();
 
-      var panel =
-          tester.widget<AnimatedInfoPanel>(find.byType(AnimatedInfoPanel));
-      expect(panel.isOpen, isFalse);
+        var panel = tester.widget<AnimatedInfoPanel>(
+          find.byType(AnimatedInfoPanel),
+        );
+        expect(panel.isOpen, isFalse);
 
-      ViewStateService.instance.isInfoOpen.add(true);
-      await tester.pumpAndSettle();
+        ViewStateService.instance.isInfoOpen.add(true);
+        await tester.pumpAndSettle();
 
-      panel =
-          tester.widget<AnimatedInfoPanel>(find.byType(AnimatedInfoPanel));
-      expect(panel.isOpen, isTrue);
-    });
+        panel = tester.widget<AnimatedInfoPanel>(
+          find.byType(AnimatedInfoPanel),
+        );
+        expect(panel.isOpen, isTrue);
+      },
+    );
 
     testWidgets(
       'map view gets only geotagged photos from photosWithLocation, not the '
@@ -87,19 +87,19 @@ void main() {
         // PhotosService.photosWithLocation stream instead.
         final now = DateTime(2026, 1, 1);
         File makeFile(String id, {double? lat, double? lng}) => File(
-              id: id,
-              name: '$id.jpg',
-              path: '$id.jpg',
-              parent: '',
-              dateCreated: now,
-              dateLastModified: now,
-              collectionId: 'col-1',
-              contentType: 'image/jpeg',
-              size: 1,
-              isDeleted: false,
-              latitude: lat,
-              longitude: lng,
-            );
+          id: id,
+          name: '$id.jpg',
+          path: '$id.jpg',
+          parent: '',
+          dateCreated: now,
+          dateLastModified: now,
+          collectionId: 'col-1',
+          contentType: 'image/jpeg',
+          size: 1,
+          isDeleted: false,
+          latitude: lat,
+          longitude: lng,
+        );
 
         final withGps = makeFile('geo-1', lat: 35.0, lng: 139.0);
         final withoutGps = makeFile('no-geo-1');

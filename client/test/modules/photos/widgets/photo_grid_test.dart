@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -48,30 +48,25 @@ List<File> _createTestFiles() {
   ];
 }
 
-Widget _buildTestableWidget(Widget child, {double width = 1000, double height = 800}) {
+Widget _buildTestableWidget(
+  Widget child, {
+  double width = 1000,
+  double height = 800,
+}) {
   return MaterialApp(
     theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
-    home: Scaffold(
-      body: SizedBox(
-        width: width,
-        height: height,
-        child: child,
-      ),
-    ),
+    home: Scaffold(body: SizedBox(width: width, height: height, child: child)),
   );
 }
 
 void main() {
-  testWidgets('renders grid with date-grouped sections', (WidgetTester tester) async {
+  testWidgets('renders grid with date-grouped sections', (
+    WidgetTester tester,
+  ) async {
     final files = _createTestFiles();
 
     await tester.pumpWidget(
-      _buildTestableWidget(
-        PhotoGrid(
-          files: files,
-          selectedIds: const {},
-        ),
-      ),
+      _buildTestableWidget(PhotoGrid(files: files, selectedIds: const {})),
     );
 
     // Should render two date section headers: July 2026 and June 2026
@@ -85,14 +80,13 @@ void main() {
 
   // The grid gained the same disclosure control the cluster view has, so the
   // two grouped views behave the same way.
-  testWidgets('a date section collapses and expands from its header',
-      (WidgetTester tester) async {
+  testWidgets('a date section collapses and expands from its header', (
+    WidgetTester tester,
+  ) async {
     final files = _createTestFiles();
 
     await tester.pumpWidget(
-      _buildTestableWidget(
-        PhotoGrid(files: files, selectedIds: const {}),
-      ),
+      _buildTestableWidget(PhotoGrid(files: files, selectedIds: const {})),
     );
 
     expect(find.byType(PhotoGridTile), findsNWidgets(3));
@@ -115,27 +109,32 @@ void main() {
     expect(find.byIcon(Icons.chevron_right), findsNothing);
   });
 
-  testWidgets('responsive column count at different widths', (WidgetTester tester) async {
+  testWidgets('responsive column count at different widths', (
+    WidgetTester tester,
+  ) async {
     // Default itemSize=160: columns = (width / 160).round() clamped 1-12
-    expect(PhotoGrid.getColumnCount(500), equals(3));   // 500/160=3.1 → 3
-    expect(PhotoGrid.getColumnCount(750), equals(5));   // 750/160=4.7 → 5
-    expect(PhotoGrid.getColumnCount(1000), equals(6));  // 1000/160=6.25 → 6
-    expect(PhotoGrid.getColumnCount(1300), equals(8));  // 1300/160=8.1 → 8
+    expect(PhotoGrid.getColumnCount(500), equals(3)); // 500/160=3.1 → 3
+    expect(PhotoGrid.getColumnCount(750), equals(5)); // 750/160=4.7 → 5
+    expect(PhotoGrid.getColumnCount(1000), equals(6)); // 1000/160=6.25 → 6
+    expect(PhotoGrid.getColumnCount(1300), equals(8)); // 1300/160=8.1 → 8
     expect(PhotoGrid.getColumnCount(1600), equals(10)); // 1600/160=10 → 10
 
     // With a custom itemSize of 200
-    expect(PhotoGrid.getColumnCount(800, itemSize: 200), equals(4));  // 800/200=4 → 4
-    expect(PhotoGrid.getColumnCount(1200, itemSize: 200), equals(6)); // 1200/200=6 → 6
+    expect(
+      PhotoGrid.getColumnCount(800, itemSize: 200),
+      equals(4),
+    ); // 800/200=4 → 4
+    expect(
+      PhotoGrid.getColumnCount(1200, itemSize: 200),
+      equals(6),
+    ); // 1200/200=6 → 6
   });
 
-  testWidgets('empty state shows message when files list is empty', (WidgetTester tester) async {
+  testWidgets('empty state shows message when files list is empty', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(
-      _buildTestableWidget(
-        const PhotoGrid(
-          files: [],
-          selectedIds: {},
-        ),
-      ),
+      _buildTestableWidget(const PhotoGrid(files: [], selectedIds: {})),
     );
 
     expect(find.byIcon(Icons.photo_library), findsOneWidget);
@@ -143,7 +142,9 @@ void main() {
     expect(find.byType(PhotoGridTile), findsNothing);
   });
 
-  testWidgets('tile tap interactions trigger callbacks', (WidgetTester tester) async {
+  testWidgets('tile tap interactions trigger callbacks', (
+    WidgetTester tester,
+  ) async {
     final files = _createTestFiles();
     File? tappedFile;
     File? selectedFile;
@@ -168,7 +169,9 @@ void main() {
     expect(tappedFile, equals(files.first));
 
     // Trigger onSelect on tile widget
-    final tileWidget = tester.widget<PhotoGridTile>(find.byType(PhotoGridTile).first);
+    final tileWidget = tester.widget<PhotoGridTile>(
+      find.byType(PhotoGridTile).first,
+    );
     tileWidget.onSelect();
     expect(selectedFile, equals(files.first));
 
@@ -179,34 +182,29 @@ void main() {
     expect(lightboxFile, equals(files.first));
   });
 
-  testWidgets('selected tiles show selection styling', (WidgetTester tester) async {
+  testWidgets('selected tiles show selection styling', (
+    WidgetTester tester,
+  ) async {
     final files = _createTestFiles();
 
     await tester.pumpWidget(
-      _buildTestableWidget(
-        PhotoGrid(
-          files: files,
-          selectedIds: {'f1'},
-        ),
-      ),
+      _buildTestableWidget(PhotoGrid(files: files, selectedIds: {'f1'})),
     );
 
-    final tiles = tester.widgetList<PhotoGridTile>(find.byType(PhotoGridTile)).toList();
+    final tiles =
+        tester.widgetList<PhotoGridTile>(find.byType(PhotoGridTile)).toList();
     expect(tiles[0].isSelected, isTrue);
     expect(tiles[1].isSelected, isFalse);
     expect(tiles[2].isSelected, isFalse);
   });
 
-  testWidgets('renders timeline quick jump bar and jump interaction', (WidgetTester tester) async {
+  testWidgets('renders timeline quick jump bar and jump interaction', (
+    WidgetTester tester,
+  ) async {
     final files = _createTestFiles();
 
     await tester.pumpWidget(
-      _buildTestableWidget(
-        PhotoGrid(
-          files: files,
-          selectedIds: const {},
-        ),
-      ),
+      _buildTestableWidget(PhotoGrid(files: files, selectedIds: const {})),
     );
 
     expect(find.byType(TimelineQuickJump), findsOneWidget);

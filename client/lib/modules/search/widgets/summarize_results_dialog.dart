@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/aichat/pages/aichat_page.dart';
@@ -96,8 +96,7 @@ class _SummarizeResultsDialogState extends State<SummarizeResultsDialog> {
     SummarizeFailure.modelError =>
       'The AI service rejected the request. Check that a chat model is '
           'selected and loaded.',
-    SummarizeFailure.serviceUnavailable =>
-      'Could not reach the AI service.',
+    SummarizeFailure.serviceUnavailable => 'Could not reach the AI service.',
     null => 'Could not summarize these results.',
   };
 

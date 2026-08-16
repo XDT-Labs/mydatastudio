@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:mydatastudio/models/tables/gazetteer_place.dart';
@@ -125,7 +125,6 @@ void main() {
     testWidgets('shows the active place and points at the radius control', (
       tester,
     ) async {
-
       await tester.pumpWidget(
         _wrap(
           LocationSearchField(

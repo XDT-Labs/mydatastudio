@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Section header for one group in the cluster view.
 ///
@@ -71,9 +71,10 @@ class ClusterSectionHeader extends StatelessWidget {
                   child: Text(
                     label,
                     style: textTheme.titleSmall?.copyWith(
-                      color: isLabelPending
-                          ? colorScheme.onSurfaceVariant
-                          : colorScheme.onSurface,
+                      color:
+                          isLabelPending
+                              ? colorScheme.onSurfaceVariant
+                              : colorScheme.onSurface,
                       fontWeight: FontWeight.w600,
                       fontStyle:
                           isLabelPending ? FontStyle.italic : FontStyle.normal,
@@ -95,7 +96,8 @@ class ClusterSectionHeader extends StatelessWidget {
                 if (isMixed) ...[
                   const SizedBox(width: 8),
                   Tooltip(
-                    message: 'These photos are less alike than the other '
+                    message:
+                        'These photos are less alike than the other '
                         'groups — the name may not fit all of them.',
                     child: Icon(
                       Icons.blur_on,
@@ -122,9 +124,7 @@ class ClusterSectionHeader extends StatelessWidget {
               // Points down when open and right when closed, the direction the
               // content is in — the disclosure convention users already read
               // without thinking about it.
-              icon: Icon(
-                isCollapsed ? Icons.chevron_right : Icons.expand_more,
-              ),
+              icon: Icon(isCollapsed ? Icons.chevron_right : Icons.expand_more),
               iconSize: 20,
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,

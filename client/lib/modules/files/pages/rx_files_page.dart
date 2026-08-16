@@ -29,7 +29,8 @@ import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io' as io;
 import 'package:path/path.dart' as p;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:mydatastudio/helpers/markdown_theme_bridge.dart';
 import 'package:http/http.dart' as http;
 import 'package:mydatastudio/file_sources/google_drive/google_drive_auth_service.dart';
 import 'package:flutter_breadcrumb/flutter_breadcrumb.dart';
@@ -256,7 +257,8 @@ class _RxFilesPage extends State<RxFilesPage> {
 
     // Arriving from another module — or from a Similar match in a collection
     // this page has never shown — there is no subscription to its rows yet.
-    if (_filesAndFoldersService == null || collection?.id != targetCollection.id) {
+    if (_filesAndFoldersService == null ||
+        collection?.id != targetCollection.id) {
       _attachCollectionServices(targetCollection);
     }
 
@@ -1239,7 +1241,9 @@ class _RxFilesPage extends State<RxFilesPage> {
                 if (ext == '.md' || ext == '.markdown') {
                   return MarkdownBody(
                     data: snapshot.data!,
-                    styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+                    styleSheet: MarkdownStyleSheet.fromTheme(
+                      markdownThemeOf(theme),
+                    ).copyWith(
                       p: const TextStyle(color: Colors.white70),
                       h1: const TextStyle(color: Colors.white),
                       h2: const TextStyle(color: Colors.white),
@@ -1253,7 +1257,14 @@ class _RxFilesPage extends State<RxFilesPage> {
                 return Text(
                   snapshot.data!,
                   style: const TextStyle(
-                    fontFamily: 'Courier',
+                    fontFamily: 'SF Mono',
+                    fontFamilyFallback: [
+                      'SF Mono',
+                      'Menlo',
+                      'Consolas',
+                      'DejaVu Sans Mono',
+                      'monospace',
+                    ],
                     fontSize: 13,
                     color: Colors.white70,
                   ),

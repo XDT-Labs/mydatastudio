@@ -14,7 +14,7 @@ import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:mydatastudio/widgets/accessible_tap.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 
 enum _EmailAccordionSection { gmail, yahoo, outlook, other }

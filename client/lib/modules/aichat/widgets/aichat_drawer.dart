@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/aichat_conversation.dart';
 import 'package:mydatastudio/modules/aichat/pages/aichat_page.dart';
@@ -249,12 +250,14 @@ class _ConversationTileState extends State<_ConversationTile> {
                           widget.conversation.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(
                             color:
                                 widget.isActive
                                     ? _textPrimary
                                     : const Color(0xFFE5E5EA),
-                            fontSize: 13,
+                            fontSize: 13.5,
                             fontWeight:
                                 widget.isActive
                                     ? FontWeight.w500

@@ -2,8 +2,7 @@ import 'dart:io';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/material.dart';
-import 'package:reactive_forms/reactive_forms.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/database_manager.dart';
 
 class SetupStep2 extends StatefulWidget {
@@ -26,9 +25,17 @@ class _SetupStep2State extends State<SetupStep2> {
   String? errorMessage;
   bool isNetworkShare = false;
 
-  final storageForm = FormGroup({
-    'storageLocation': FormControl<String>(validators: [Validators.required]),
-  });
+  /// The chosen archive path. Only ever written programmatically — by the
+  /// initial seed below or by Browse — so the field itself stays read-only.
+  final _storageLocation = TextEditingController();
+
+  bool get _isValid => _storageLocation.text.isNotEmpty;
+
+  @override
+  void dispose() {
+    _storageLocation.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -55,7 +62,7 @@ class _SetupStep2State extends State<SetupStep2> {
   Future<void> onStepContinueHandler(BuildContext context) async {
     var appUser = widget.appUser;
 
-    if (storageForm.valid && appUser != null) {
+    if (_isValid && appUser != null) {
       String? dbDir = MainApp.appDataDirectory.value;
       appUser.localStoragePath =
           (dbDir! is Directory) ? (dbDir as Directory).path : dbDir;
@@ -102,7 +109,7 @@ class _SetupStep2State extends State<SetupStep2> {
         widget.onSubmit(appUser);
       } catch (e) {
         //Missing permissions required to use folder
-        storageForm.findControl('storageLocation')?.value = '';
+        _storageLocation.clear();
         setState(() {
           errorMessage = 'Missing permissions required to use folder';
         });
@@ -117,8 +124,7 @@ class _SetupStep2State extends State<SetupStep2> {
 
     //handle async setup for validators
     var dir = MainApp.supportDirectory.valueOrNull;
-    var field = storageForm.findControl('storageLocation');
-    if (field != null && (field.value == null || field.value!.isEmpty)) {
+    if (_storageLocation.text.isEmpty) {
       String? initialPath;
       if (widget.appUser?.localStoragePath != null &&
           widget.appUser!.localStoragePath.isNotEmpty) {
@@ -129,134 +135,119 @@ class _SetupStep2State extends State<SetupStep2> {
         initialPath = dir.path;
       }
       if (initialPath != null) {
-        field.value = initialPath;
+        _storageLocation.text = initialPath;
         MainApp.appDataDirectory.add(initialPath);
       }
     }
 
-    return ReactiveForm(
-      formGroup: storageForm,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            'Choose your archive location',
-            style: textTheme.titleLarge?.copyWith(color: colorScheme.onSurface),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Choose your archive location',
+          style: textTheme.titleLarge?.copyWith(color: colorScheme.onSurface),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'This is where My Data Studio stores everything it downloads from your '
+          'different online services — files, emails, social media posts, and more. '
+          'Choose your largest hard drive. If you have an external NAS or drive, use that.',
+          style: textTheme.bodyMedium?.copyWith(
+            color: colorScheme.onSurfaceVariant,
           ),
-          const SizedBox(height: 4),
-          Text(
-            'This is where My Data Studio stores everything it downloads from your '
-            'different online services — files, emails, social media posts, and more. '
-            'Choose your largest hard drive. If you have an external NAS or drive, use that.',
-            style: textTheme.bodyMedium?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(10),
           ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.folder_outlined,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ReactiveTextField(
-                    readOnly: true,
-                    formControlName: 'storageLocation',
-                    style: TextStyle(color: colorScheme.onSurface),
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      isDense: true,
-                    ),
+          child: Row(
+            children: [
+              Icon(Icons.folder_outlined, color: colorScheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  readOnly: true,
+                  controller: _storageLocation,
+                  style: TextStyle(color: colorScheme.onSurface),
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
                   ),
                 ),
-                const SizedBox(width: 12),
-                OutlinedButton(
-                  onPressed: () async {
-                    String? result =
-                        await FilePicker.platform.getDirectoryPath();
-                    if (result != null) {
-                      storageForm.findControl('storageLocation')?.value =
-                          result;
-                      MainApp.appDataDirectory.add(result);
-                      final supportsWal =
-                          await DatabaseManager.testPathSupportsWal(result);
-                      setState(() {
-                        isNetworkShare = !supportsWal;
-                      });
-                    }
-                  },
-                  child: const Text('Browse'),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (errorMessage != null)
-            Text(errorMessage!, style: TextStyle(color: colorScheme.error)),
-          if (isNetworkShare)
-            Padding(
-              padding: const EdgeInsets.only(top: 8.0),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: colorScheme.tertiaryContainer.withValues(alpha: 0.25),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: colorScheme.tertiary),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.info_outline,
-                      color: colorScheme.tertiary,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'This path is on a network share. The database will be stored '
-                        'locally on your primary drive for compatibility and performance, '
-                        'while your files and backups remain on the network share.',
-                        style: textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurface,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
               ),
-            ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              TextButton(
-                onPressed: () => onStepCancelHandler(),
-                child: const Text('Back'),
-              ),
-              const Spacer(),
-              ReactiveFormConsumer(
-                builder: (context, form, child) {
-                  return FilledButton(
-                    onPressed:
-                        storageForm.valid
-                            ? () => onStepContinueHandler(context)
-                            : null,
-                    child: const Text('Continue'),
-                  );
+              const SizedBox(width: 12),
+              OutlinedButton(
+                onPressed: () async {
+                  String? result = await FilePicker.platform.getDirectoryPath();
+                  if (result != null) {
+                    _storageLocation.text = result;
+                    MainApp.appDataDirectory.add(result);
+                    final supportsWal =
+                        await DatabaseManager.testPathSupportsWal(result);
+                    setState(() {
+                      isNetworkShare = !supportsWal;
+                    });
+                  }
                 },
+                child: const Text('Browse'),
               ),
             ],
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 12),
+        if (errorMessage != null)
+          Text(errorMessage!, style: TextStyle(color: colorScheme.error)),
+        if (isNetworkShare)
+          Padding(
+            padding: const EdgeInsets.only(top: 8.0),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colorScheme.tertiaryContainer.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: colorScheme.tertiary),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: colorScheme.tertiary,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'This path is on a network share. The database will be stored '
+                      'locally on your primary drive for compatibility and performance, '
+                      'while your files and backups remain on the network share.',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            TextButton(
+              onPressed: () => onStepCancelHandler(),
+              child: const Text('Back'),
+            ),
+            const Spacer(),
+            FilledButton(
+              onPressed: _isValid ? () => onStepContinueHandler(context) : null,
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

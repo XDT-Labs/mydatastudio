@@ -4,7 +4,7 @@ import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:mydatastudio/modules/files/widgets/file_drawer/accordion_header_widget.dart';
 import 'package:mydatastudio/widgets/accessible_tap.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:meta/meta.dart';

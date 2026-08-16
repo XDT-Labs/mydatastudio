@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class SectionSubHeaderWidget extends StatelessWidget {
   const SectionSubHeaderWidget({super.key, required this.title});

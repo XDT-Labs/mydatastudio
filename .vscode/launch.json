@@ -42,7 +42,7 @@
             "request": "launch",
             "preLaunchTask": "Ensure aiserver venv",
             "program": "${workspaceFolder}/aiserver/main.py",
-            "console": "integratedTerminal",
+            "console": "internalConsole",
             "cwd": "${workspaceFolder}/aiserver",
             "justMyCode": true,
             // No "python"/"pythonPath" override on purpose. Pinning the

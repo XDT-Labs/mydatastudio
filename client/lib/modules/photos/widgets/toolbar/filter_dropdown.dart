@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Filter dropdown popup menu widget for the Photos module toolbar.
 class FilterDropdown extends StatelessWidget {

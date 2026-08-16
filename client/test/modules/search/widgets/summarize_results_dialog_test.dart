@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mydatastudio/modules/aichat/pages/aichat_page.dart';
@@ -18,10 +18,7 @@ ResultSetSummary _summary({
   batches: 17,
 );
 
-Future<void> _pump(
-  WidgetTester tester, {
-  required SummarizeRunner run,
-}) async {
+Future<void> _pump(WidgetTester tester, {required SummarizeRunner run}) async {
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
@@ -40,8 +37,12 @@ void main() {
       await _pump(
         tester,
         run:
-            (query, {semanticOnly = 0, retrieved = const [], onProgress}) async =>
-                _summary(coverage: SummaryCoverage.complete),
+            (
+              query, {
+              semanticOnly = 0,
+              retrieved = const [],
+              onProgress,
+            }) async => _summary(coverage: SummaryCoverage.complete),
       );
       await tester.pumpAndSettle();
 
@@ -64,7 +65,12 @@ void main() {
       await _pump(
         tester,
         run:
-            (query, {semanticOnly = 0, retrieved = const [], onProgress}) async => _summary(
+            (
+              query, {
+              semanticOnly = 0,
+              retrieved = const [],
+              onProgress,
+            }) async => _summary(
               coverage: SummaryCoverage.sample,
               itemsSummarized: 200,
               matchTotal: 2000,
@@ -112,7 +118,9 @@ void main() {
   ) async {
     await _pump(
       tester,
-      run: (query, {semanticOnly = 0, retrieved = const [], onProgress}) async => null,
+      run:
+          (query, {semanticOnly = 0, retrieved = const [], onProgress}) async =>
+              null,
     );
     await tester.pumpAndSettle();
 
@@ -120,91 +128,98 @@ void main() {
     expect(find.text('Continue in chat'), findsNothing);
   });
 
-  testWidgets('the handoff is only offered once there is something to hand off', (
-    tester,
-  ) async {
-    await _pump(
-      tester,
-      run:
-          (query, {semanticOnly = 0, retrieved = const [], onProgress}) async =>
-              _summary(coverage: SummaryCoverage.complete),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'the handoff is only offered once there is something to hand off',
+    (tester) async {
+      await _pump(
+        tester,
+        run:
+            (
+              query, {
+              semanticOnly = 0,
+              retrieved = const [],
+              onProgress,
+            }) async => _summary(coverage: SummaryCoverage.complete),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Continue in chat'), findsOneWidget);
-  });
+      expect(find.text('Continue in chat'), findsOneWidget);
+    },
+  );
 
-  testWidgets('continuing in chat selects the seeded conversation, then navigates', (
-    tester,
-  ) async {
-    // The bug this replaced: the summary went through the route as `extra` and
-    // was read in the chat page's initState, which depended on the route
-    // rebuilding that page's State. It did not, so what opened was the
-    // previous conversation with none of the summary in it. Selecting a
-    // persisted conversation through the notifier the drawer already uses does
-    // not depend on any of that.
-    AichatPage.selectConversationId.value = 'a-previous-conversation';
-    ResultSetSummary? handedOff;
+  testWidgets(
+    'continuing in chat selects the seeded conversation, then navigates',
+    (tester) async {
+      // The bug this replaced: the summary went through the route as `extra` and
+      // was read in the chat page's initState, which depended on the route
+      // rebuilding that page's State. It did not, so what opened was the
+      // previous conversation with none of the summary in it. Selecting a
+      // persisted conversation through the notifier the drawer already uses does
+      // not depend on any of that.
+      AichatPage.selectConversationId.value = 'a-previous-conversation';
+      ResultSetSummary? handedOff;
 
-    // Shown with showDialog, the way the search page shows it. Mounting it as
-    // a page body instead makes the dialog's own `pop` tear down the route,
-    // which is a property of the test rig rather than of the widget.
-    final router = GoRouter(
-      initialLocation: '/search',
-      routes: [
-        GoRoute(
-          path: '/search',
-          builder:
-              (context, state) => Scaffold(
-                body: Builder(
-                  builder:
-                      (inner) => TextButton(
-                        onPressed:
-                            () => showDialog<void>(
-                              context: inner,
-                              builder:
-                                  (_) => SummarizeResultsDialog(
-                                    query: QueryParser.parse(
-                                      'from:russel@jong.com',
+      // Shown with showDialog, the way the search page shows it. Mounting it as
+      // a page body instead makes the dialog's own `pop` tear down the route,
+      // which is a property of the test rig rather than of the widget.
+      final router = GoRouter(
+        initialLocation: '/search',
+        routes: [
+          GoRoute(
+            path: '/search',
+            builder:
+                (context, state) => Scaffold(
+                  body: Builder(
+                    builder:
+                        (inner) => TextButton(
+                          onPressed:
+                              () => showDialog<void>(
+                                context: inner,
+                                builder:
+                                    (_) => SummarizeResultsDialog(
+                                      query: QueryParser.parse(
+                                        'from:russel@jong.com',
+                                      ),
+                                      run:
+                                          (
+                                            query, {
+                                            semanticOnly = 0,
+                                            retrieved = const [],
+                                            onProgress,
+                                          }) async => _summary(
+                                            coverage: SummaryCoverage.complete,
+                                          ),
+                                      handoff: (query, summary) async {
+                                        handedOff = summary;
+                                        return 'new-conversation-id';
+                                      },
                                     ),
-                                    run:
-                                        (
-                                          query, {
-                                          semanticOnly = 0,
-                                          retrieved = const [],
-                                          onProgress,
-                                        }) async => _summary(
-                                          coverage: SummaryCoverage.complete,
-                                        ),
-                                    handoff: (query, summary) async {
-                                      handedOff = summary;
-                                      return 'new-conversation-id';
-                                    },
-                                  ),
-                            ),
-                        child: const Text('open'),
-                      ),
+                              ),
+                          child: const Text('open'),
+                        ),
+                  ),
                 ),
-              ),
-        ),
-        GoRoute(
-          path: '/aichat',
-          builder: (context, state) => const Scaffold(body: Text('chat page')),
-        ),
-      ],
-    );
-    addTearDown(router.dispose);
+          ),
+          GoRoute(
+            path: '/aichat',
+            builder:
+                (context, state) => const Scaffold(body: Text('chat page')),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
 
-    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-    await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue in chat'));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Continue in chat'));
+      await tester.pumpAndSettle();
 
-    expect(handedOff?.text, 'They discussed the contract in June.');
-    expect(AichatPage.selectConversationId.value, 'new-conversation-id');
-    expect(find.text('chat page'), findsOneWidget);
-  });
+      expect(handedOff?.text, 'They discussed the contract in June.');
+      expect(AichatPage.selectConversationId.value, 'new-conversation-id');
+      expect(find.text('chat page'), findsOneWidget);
+    },
+  );
 
   testWidgets('the semantic count reaches the summarizer', (tester) async {
     // It is what decides whether the answer may claim completeness, so a
@@ -217,7 +232,12 @@ void main() {
           body: SummarizeResultsDialog(
             query: QueryParser.parse('dogs'),
             semanticOnly: 7,
-            run: (query, {semanticOnly = 0, retrieved = const [], onProgress}) async {
+            run: (
+              query, {
+              semanticOnly = 0,
+              retrieved = const [],
+              onProgress,
+            }) async {
               seen = semanticOnly;
               return _summary(coverage: SummaryCoverage.sample);
             },

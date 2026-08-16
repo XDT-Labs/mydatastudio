@@ -1,27 +1,37 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/modules/email/widgets/email_setup/step_indicator_widget.dart';
-import 'package:reactive_forms/reactive_forms.dart';
 
 class YahooIdleView extends StatelessWidget {
   const YahooIdleView({
     super.key,
-    required this.form,
+    required this.formKey,
+    required this.emailController,
+    required this.appPasswordController,
     required this.onConnect,
     required this.onLaunchSecurity,
   });
 
-  final FormGroup form;
+  /// Owned by the tab, which validates on Connect.
+  final GlobalKey<FormState> formKey;
+  final TextEditingController emailController;
+  final TextEditingController appPasswordController;
   final VoidCallback onConnect;
   final VoidCallback onLaunchSecurity;
 
   static const Color _yahooPurple = Color(0xFF6001D2);
 
+  /// Stands in for the old `Validators.email`: a local part, an `@`, and a
+  /// dotted domain. Deliberately loose — the address is proved by the IMAP
+  /// login that follows, not by this.
+  static final RegExp _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(vertical: 32),
-      child: ReactiveForm(
-        formGroup: form,
+      child: Form(
+        key: formKey,
+        autovalidateMode: AutovalidateMode.onUserInteraction,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -86,8 +96,16 @@ class YahooIdleView extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 8),
-            ReactiveTextField<String>(
-              formControlName: 'email',
+            TextFormField(
+              controller: emailController,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Email is required';
+                }
+                return _emailPattern.hasMatch(value)
+                    ? null
+                    : 'Enter a valid email address';
+              },
               decoration: InputDecoration(
                 hintText: 'yourname@yahoo.com',
                 prefixIcon: const Icon(Icons.alternate_email),
@@ -102,9 +120,17 @@ class YahooIdleView extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 8),
-            ReactiveTextField<String>(
-              formControlName: 'appPassword',
+            TextFormField(
+              controller: appPasswordController,
               obscureText: true,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'App password is required';
+                }
+                return value.length >= 16
+                    ? null
+                    : 'App password should be 16 characters';
+              },
               decoration: InputDecoration(
                 hintText: 'Enter 16-character app password',
                 prefixIcon: const Icon(Icons.lock_outline),
@@ -112,10 +138,6 @@ class YahooIdleView extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
-              validationMessages: {
-                'required': (error) => 'App password is required',
-                'minLength': (error) => 'App password should be 16 characters',
-              },
             ),
             const SizedBox(height: 24),
             SizedBox(

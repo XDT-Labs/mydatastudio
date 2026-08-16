@@ -1,6 +1,7 @@
 import 'package:mydatastudio/app_constants.dart';
 import 'dart:io';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:mydatastudio/helpers/markdown_theme_bridge.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:genui/genui.dart';
@@ -643,7 +644,13 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                   ),
                 ),
               if (text.isNotEmpty)
-                Text(text, style: TextStyle(color: _textColor, fontSize: 15)),
+                Text(
+                  text,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: _textColor,
+                    height: 1.4,
+                  ),
+                ),
             ],
           ),
         ),
@@ -656,6 +663,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     bool streaming = false,
     String? model,
   }) {
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Align(
@@ -668,7 +678,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
                   model,
-                  style: TextStyle(color: _hintColor, fontSize: 11),
+                  style: textTheme.labelSmall?.copyWith(color: _hintColor),
                 ),
               ),
             ConstrainedBox(
@@ -677,13 +687,25 @@ class _AichatPage extends State<AichatPage> with RouteAware {
               ),
               child: MarkdownBody(
                 data: streaming ? '$text▋' : text,
-                styleSheet: MarkdownStyleSheet(
-                  p: TextStyle(color: _textColor, fontSize: 15, height: 1.5),
-                  code: TextStyle(
+                styleSheet: MarkdownStyleSheet.fromTheme(
+                  markdownThemeOf(theme),
+                ).copyWith(
+                  p: textTheme.bodyMedium?.copyWith(
+                    color: _textColor,
+                    height: 1.45,
+                  ),
+                  code: textTheme.bodySmall?.copyWith(
+                    fontFamily: 'SF Mono',
+                    fontFamilyFallback: const [
+                      'SF Mono',
+                      'Menlo',
+                      'Consolas',
+                      'DejaVu Sans Mono',
+                      'monospace',
+                    ],
                     backgroundColor: _codeBgColor,
                     color: _textColor,
-                    fontFamily: 'monospace',
-                    fontSize: 13,
+                    fontSize: 12.5,
                   ),
                   codeblockDecoration: BoxDecoration(
                     color: _codeBlockBgColor,
@@ -696,27 +718,27 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                       left: BorderSide(color: _mutedColor, width: 3),
                     ),
                   ),
-                  h1: TextStyle(
+                  h1: textTheme.titleLarge?.copyWith(
                     color: _textColor,
-                    fontSize: 22,
                     fontWeight: FontWeight.bold,
                   ),
-                  h2: TextStyle(
+                  h2: textTheme.titleMedium?.copyWith(
                     color: _textColor,
-                    fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
-                  h3: TextStyle(
+                  h3: textTheme.titleSmall?.copyWith(
                     color: _textColor,
-                    fontSize: 16,
                     fontWeight: FontWeight.w600,
                   ),
-                  listBullet: TextStyle(color: _textColor),
-                  strong: TextStyle(
+                  listBullet: textTheme.bodyMedium?.copyWith(color: _textColor),
+                  strong: textTheme.bodyMedium?.copyWith(
                     color: _textColor,
                     fontWeight: FontWeight.bold,
                   ),
-                  em: TextStyle(color: _textColor, fontStyle: FontStyle.italic),
+                  em: textTheme.bodyMedium?.copyWith(
+                    color: _textColor,
+                    fontStyle: FontStyle.italic,
+                  ),
                 ),
               ),
             ),
@@ -1004,13 +1026,14 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                           keyboardType: TextInputType.multiline,
                           minLines: 1,
                           maxLines: 10,
-                          style: TextStyle(fontSize: 15, color: _textColor),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(color: _textColor),
                           decoration: InputDecoration(
                             hintText: "Ask a question",
-                            hintStyle: TextStyle(
-                              color: _hintColor,
-                              fontSize: 15,
-                            ),
+                            hintStyle: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.copyWith(color: _hintColor),
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 14.0,
                               vertical: 14.0,

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:mydatastudio/models/tables/album.dart';
@@ -27,7 +27,10 @@ class FakePhotosRepository extends PhotosRepository {
   }
 
   @override
-  Future<void> addFilesToAlbums(Iterable<String> fileIds, Iterable<String> albumIds) async {
+  Future<void> addFilesToAlbums(
+    Iterable<String> fileIds,
+    Iterable<String> albumIds,
+  ) async {
     for (final albumId in albumIds) {
       for (final fileId in fileIds) {
         addedFiles.add((fileId, albumId));
@@ -38,13 +41,8 @@ class FakePhotosRepository extends PhotosRepository {
 
 Widget createTestApp(Widget child) {
   return MaterialApp(
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: darkColorScheme,
-    ),
-    home: Scaffold(
-      body: child,
-    ),
+    theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
+    home: Scaffold(body: child),
   );
 }
 
@@ -60,13 +58,17 @@ void main() {
   });
 
   group('AlbumModal Widget Tests', () {
-    testWidgets('renders both tab modes and switches between them', (tester) async {
-      await tester.pumpWidget(createTestApp(
-        AlbumModal(
-          selectedFileIds: const {'f1', 'f2'},
-          photosRepository: fakeRepo,
+    testWidgets('renders both tab modes and switches between them', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        createTestApp(
+          AlbumModal(
+            selectedFileIds: const {'f1', 'f2'},
+            photosRepository: fakeRepo,
+          ),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       // Check header
@@ -88,14 +90,18 @@ void main() {
       expect(find.text('Create & Add'), findsOneWidget);
     });
 
-    testWidgets('validates required album title on create new album submit', (tester) async {
-      await tester.pumpWidget(createTestApp(
-        AlbumModal(
-          selectedFileIds: const {'f1'},
-          initialMode: AlbumModalMode.createNew,
-          photosRepository: fakeRepo,
+    testWidgets('validates required album title on create new album submit', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        createTestApp(
+          AlbumModal(
+            selectedFileIds: const {'f1'},
+            initialMode: AlbumModalMode.createNew,
+            photosRepository: fakeRepo,
+          ),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       // Tap Create & Add button without entering title
@@ -107,18 +113,23 @@ void main() {
     });
 
     testWidgets('creates a new album and adds selected files', (tester) async {
-      await tester.pumpWidget(createTestApp(
-        AlbumModal(
-          selectedFileIds: const {'f1', 'f2'},
-          initialMode: AlbumModalMode.createNew,
-          photosRepository: fakeRepo,
+      await tester.pumpWidget(
+        createTestApp(
+          AlbumModal(
+            selectedFileIds: const {'f1', 'f2'},
+            initialMode: AlbumModalMode.createNew,
+            photosRepository: fakeRepo,
+          ),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       // Enter title and description
       await tester.enterText(find.byType(TextFormField).first, 'Road Trip');
-      await tester.enterText(find.byType(TextFormField).last, 'California coast photos');
+      await tester.enterText(
+        find.byType(TextFormField).last,
+        'California coast photos',
+      );
       await tester.pumpAndSettle();
 
       // Tap Create & Add
@@ -132,14 +143,18 @@ void main() {
       expect(fakeRepo.addedFiles.length, 2);
     });
 
-    testWidgets('adds selected files to existing album selections', (tester) async {
-      await tester.pumpWidget(createTestApp(
-        AlbumModal(
-          selectedFileIds: const {'f10'},
-          initialMode: AlbumModalMode.addToExisting,
-          photosRepository: fakeRepo,
+    testWidgets('adds selected files to existing album selections', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        createTestApp(
+          AlbumModal(
+            selectedFileIds: const {'f10'},
+            initialMode: AlbumModalMode.addToExisting,
+            photosRepository: fakeRepo,
+          ),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       // 'Vacation 2025' ('a1') is pre-selected. Tap 'Family' ('a2') checkbox to multi-select both

@@ -1,7 +1,7 @@
 import 'package:mydatastudio/widgets/adaptive_app_bar.dart';
 import 'package:mydatastudio/widgets/collapsing_drawer.dart';
 import 'package:mydatastudio/widgets/router/status_message.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class NavigationWrapper extends StatefulWidget {
   const NavigationWrapper({super.key, required this.body, this.drawer});

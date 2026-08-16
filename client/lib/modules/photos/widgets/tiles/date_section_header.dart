@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Sticky date section header widget used in Photos grid and timeline views.
 class DateSectionHeader extends StatelessWidget {
@@ -67,9 +67,7 @@ class DateSectionHeader extends StatelessWidget {
             IconButton(
               // Same control, same place, same direction as the cluster view's
               // header — the two grouped views are the same grid to the user.
-              icon: Icon(
-                isCollapsed ? Icons.chevron_right : Icons.expand_more,
-              ),
+              icon: Icon(isCollapsed ? Icons.chevron_right : Icons.expand_more),
               iconSize: 20,
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,

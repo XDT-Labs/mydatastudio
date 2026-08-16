@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// A navigation list item widget for the Photos module left drawer.
 class DrawerNavItem extends StatelessWidget {

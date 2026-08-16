@@ -1,4 +1,5 @@
 import 'dart:io' as io;
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -29,7 +30,9 @@ void main() {
     late PhotosRepository photos;
 
     setUp(() async {
-      tempDir = await io.Directory.systemTemp.createTemp('mydatastudio_photos_');
+      tempDir = await io.Directory.systemTemp.createTemp(
+        'mydatastudio_photos_',
+      );
 
       const MethodChannel channel = MethodChannel(
         'plugins.flutter.io/path_provider',
@@ -90,22 +93,24 @@ void main() {
       );
     }
 
-    test('accepts both the coarse category and a real image MIME type',
-        () async {
-      await addFile('scanned.jpg', FilesConstants.mimeTypeImage);
-      await addFile('gmail-attachment.jpg', 'image/jpeg');
-      await addFile('gmail-attachment.png', 'image/png');
-      await addFile('report.pdf', FilesConstants.mimeTypePdf);
-      await addFile('notes.txt', FilesConstants.mimeTypeUnKnown);
+    test(
+      'accepts both the coarse category and a real image MIME type',
+      () async {
+        await addFile('scanned.jpg', FilesConstants.mimeTypeImage);
+        await addFile('gmail-attachment.jpg', 'image/jpeg');
+        await addFile('gmail-attachment.png', 'image/png');
+        await addFile('report.pdf', FilesConstants.mimeTypePdf);
+        await addFile('notes.txt', FilesConstants.mimeTypeUnKnown);
 
-      final names = (await photos.photos()).map((f) => f.name).toSet();
+        final names = (await photos.photos()).map((f) => f.name).toSet();
 
-      expect(names, {
-        'scanned.jpg',
-        'gmail-attachment.jpg',
-        'gmail-attachment.png',
-      });
-    });
+        expect(names, {
+          'scanned.jpg',
+          'gmail-attachment.jpg',
+          'gmail-attachment.png',
+        });
+      },
+    );
 
     test('still excludes inline body images regardless of spelling', () async {
       await addFile('real-photo.jpg', 'image/jpeg');
@@ -198,17 +203,20 @@ void main() {
       );
     }
 
-    test('dateRange reports the min, max and total across all matches', () async {
-      await addFile('a.jpg', DateTime(2016, 1, 5));
-      await addFile('b.jpg', DateTime(2020, 6, 15));
-      await addFile('c.jpg', DateTime(2026, 4, 30));
+    test(
+      'dateRange reports the min, max and total across all matches',
+      () async {
+        await addFile('a.jpg', DateTime(2016, 1, 5));
+        await addFile('b.jpg', DateTime(2020, 6, 15));
+        await addFile('c.jpg', DateTime(2026, 4, 30));
 
-      final range = await photos.dateRange();
+        final range = await photos.dateRange();
 
-      expect(range.min, DateTime(2016, 1, 5));
-      expect(range.max, DateTime(2026, 4, 30));
-      expect(range.total, 3);
-    });
+        expect(range.min, DateTime(2016, 1, 5));
+        expect(range.max, DateTime(2026, 4, 30));
+        expect(range.total, 3);
+      },
+    );
 
     test('sectionSummaries buckets by month and counts each bucket', () async {
       await addFile('apr-1.jpg', DateTime(2026, 4, 3));
@@ -236,46 +244,53 @@ void main() {
       expect(sections.map((s) => s.count), [1, 2]);
     });
 
-    test('photosInBucket returns only files from that bucket, paginated', () async {
-      await addFile('apr-1.jpg', DateTime(2026, 4, 1));
-      await addFile('apr-2.jpg', DateTime(2026, 4, 2));
-      await addFile('apr-3.jpg', DateTime(2026, 4, 3));
-      await addFile('mar-1.jpg', DateTime(2026, 3, 1));
+    test(
+      'photosInBucket returns only files from that bucket, paginated',
+      () async {
+        await addFile('apr-1.jpg', DateTime(2026, 4, 1));
+        await addFile('apr-2.jpg', DateTime(2026, 4, 2));
+        await addFile('apr-3.jpg', DateTime(2026, 4, 3));
+        await addFile('mar-1.jpg', DateTime(2026, 3, 1));
 
-      final firstPage = await photos.photosInBucket(
-        granularity: PhotoSectionGranularity.month,
-        bucketKey: '2026-04',
-        limit: 2,
-        offset: 0,
-      );
-      final secondPage = await photos.photosInBucket(
-        granularity: PhotoSectionGranularity.month,
-        bucketKey: '2026-04',
-        limit: 2,
-        offset: 2,
-      );
+        final firstPage = await photos.photosInBucket(
+          granularity: PhotoSectionGranularity.month,
+          bucketKey: '2026-04',
+          limit: 2,
+          offset: 0,
+        );
+        final secondPage = await photos.photosInBucket(
+          granularity: PhotoSectionGranularity.month,
+          bucketKey: '2026-04',
+          limit: 2,
+          offset: 2,
+        );
 
-      expect(firstPage.map((f) => f.name), ['apr-3.jpg', 'apr-2.jpg']);
-      expect(secondPage.map((f) => f.name), ['apr-1.jpg']);
-    });
+        expect(firstPage.map((f) => f.name), ['apr-3.jpg', 'apr-2.jpg']);
+        expect(secondPage.map((f) => f.name), ['apr-1.jpg']);
+      },
+    );
 
-    test('photosPage pages through results without duplicates or gaps', () async {
-      for (var i = 1; i <= 5; i++) {
-        await addFile('$i.jpg', DateTime(2026, 1, i));
-      }
+    test(
+      'photosPage pages through results without duplicates or gaps',
+      () async {
+        for (var i = 1; i <= 5; i++) {
+          await addFile('$i.jpg', DateTime(2026, 1, i));
+        }
 
-      final firstPage = await photos.photosPage(limit: 2, offset: 0);
-      final secondPage = await photos.photosPage(limit: 2, offset: 2);
-      final thirdPage = await photos.photosPage(limit: 2, offset: 4);
+        final firstPage = await photos.photosPage(limit: 2, offset: 0);
+        final secondPage = await photos.photosPage(limit: 2, offset: 2);
+        final thirdPage = await photos.photosPage(limit: 2, offset: 4);
 
-      final allNames = [
-        ...firstPage,
-        ...secondPage,
-        ...thirdPage,
-      ].map((f) => f.name).toList();
+        final allNames =
+            [
+              ...firstPage,
+              ...secondPage,
+              ...thirdPage,
+            ].map((f) => f.name).toList();
 
-      expect(allNames, ['5.jpg', '4.jpg', '3.jpg', '2.jpg', '1.jpg']);
-    });
+        expect(allNames, ['5.jpg', '4.jpg', '3.jpg', '2.jpg', '1.jpg']);
+      },
+    );
   });
 
   group('PhotosRepository collection filtering', () {
@@ -378,9 +393,10 @@ void main() {
       await addFile('gmail-1', 'b.jpg');
       await addFile('gmail-2', 'c.jpg');
 
-      final names = (await photos.photos(
-        filter: const PhotoFilter(collectionId: 'gmail-1'),
-      )).map((f) => f.name).toSet();
+      final names =
+          (await photos.photos(
+            filter: const PhotoFilter(collectionId: 'gmail-1'),
+          )).map((f) => f.name).toSet();
 
       expect(names, {'b.jpg'});
     });
@@ -390,9 +406,10 @@ void main() {
       await addFile('gmail-1', 'b.jpg');
       await addFile('gmail-2', 'c.jpg');
 
-      final names = (await photos.photos(
-        filter: const PhotoFilter(collectionIds: ['gmail-1', 'gmail-2']),
-      )).map((f) => f.name).toSet();
+      final names =
+          (await photos.photos(
+            filter: const PhotoFilter(collectionIds: ['gmail-1', 'gmail-2']),
+          )).map((f) => f.name).toSet();
 
       expect(names, {'b.jpg', 'c.jpg'});
     });
@@ -478,9 +495,10 @@ void main() {
       await addPhoto('round-rock.jpg', lat: 30.5083, lng: -97.6789); // ~28 km
       await addPhoto('houston.jpg', lat: 29.7604, lng: -95.3698); // ~235 km
 
-      final names = (await photos.photos(
-        filter: PhotoFilter(place: austin.copyWith(radiusMiles: 5)),
-      )).map((f) => f.name).toSet();
+      final names =
+          (await photos.photos(
+            filter: PhotoFilter(place: austin.copyWith(radiusMiles: 5)),
+          )).map((f) => f.name).toSet();
 
       expect(names, {'downtown.jpg'});
     });
@@ -493,9 +511,10 @@ void main() {
       await addPhoto('round-rock.jpg', lat: 30.5083, lng: -97.6789);
       await addPhoto('houston.jpg', lat: 29.7604, lng: -95.3698);
 
-      final names = (await photos.photos(
-        filter: const PhotoFilter(place: austin),
-      )).map((f) => f.name).toSet();
+      final names =
+          (await photos.photos(
+            filter: const PhotoFilter(place: austin),
+          )).map((f) => f.name).toSet();
 
       expect(names, {'downtown.jpg', 'round-rock.jpg'});
     });
@@ -505,9 +524,10 @@ void main() {
       await addPhoto('round-rock.jpg', lat: 30.5083, lng: -97.6789);
       await addPhoto('houston.jpg', lat: 29.7604, lng: -95.3698);
 
-      final names = (await photos.photos(
-        filter: PhotoFilter(place: austin.copyWith(radiusMiles: 250)),
-      )).map((f) => f.name).toSet();
+      final names =
+          (await photos.photos(
+            filter: PhotoFilter(place: austin.copyWith(radiusMiles: 250)),
+          )).map((f) => f.name).toSet();
 
       expect(names, {'downtown.jpg', 'round-rock.jpg', 'houston.jpg'});
     });
@@ -518,50 +538,59 @@ void main() {
       await addPhoto('scanned-print.jpg');
       await addPhoto('downtown.jpg', lat: 30.2672, lng: -97.7431);
 
-      final names = (await photos.photos(
-        filter: const PhotoFilter(place: austin),
-      )).map((f) => f.name).toSet();
+      final names =
+          (await photos.photos(
+            filter: const PhotoFilter(place: austin),
+          )).map((f) => f.name).toSet();
 
       expect(names, {'downtown.jpg'});
     });
 
-    test('combines with the other filters rather than replacing them', () async {
-      // Picking a city narrows what is already on screen — a location plus
-      // Favorites has to mean both, or the drawer lies about its own state.
-      await addPhoto('downtown.jpg', lat: 30.2672, lng: -97.7431);
-      await addPhoto('downtown-fav.jpg', lat: 30.2680, lng: -97.7440);
-      await db.execute("UPDATE files SET is_favorite = 1 WHERE id = ?", [
-        'col-1:downtown-fav.jpg',
-      ]);
+    test(
+      'combines with the other filters rather than replacing them',
+      () async {
+        // Picking a city narrows what is already on screen — a location plus
+        // Favorites has to mean both, or the drawer lies about its own state.
+        await addPhoto('downtown.jpg', lat: 30.2672, lng: -97.7431);
+        await addPhoto('downtown-fav.jpg', lat: 30.2680, lng: -97.7440);
+        await db.execute("UPDATE files SET is_favorite = 1 WHERE id = ?", [
+          'col-1:downtown-fav.jpg',
+        ]);
 
-      final names = (await photos.photos(
-        filter: const PhotoFilter(place: austin, onlyFavorites: true),
-      )).map((f) => f.name).toSet();
+        final names =
+            (await photos.photos(
+              filter: const PhotoFilter(place: austin, onlyFavorites: true),
+            )).map((f) => f.name).toSet();
 
-      expect(names, {'downtown-fav.jpg'});
-    });
+        expect(names, {'downtown-fav.jpg'});
+      },
+    );
 
-    test('a place spanning the antimeridian still matches both sides', () async {
-      // Raw bounds run past +180 here. Written as a plain BETWEEN the range
-      // inverts and matches nothing, so a Fiji search would look empty rather
-      // than wrong.
-      await addPhoto('suva.jpg', lat: -18.14, lng: 178.44);
-      await addPhoto('east-of-line.jpg', lat: -18.20, lng: -179.60);
-      await addPhoto('austin.jpg', lat: 30.2672, lng: -97.7431);
+    test(
+      'a place spanning the antimeridian still matches both sides',
+      () async {
+        // Raw bounds run past +180 here. Written as a plain BETWEEN the range
+        // inverts and matches nothing, so a Fiji search would look empty rather
+        // than wrong.
+        await addPhoto('suva.jpg', lat: -18.14, lng: 178.44);
+        await addPhoto('east-of-line.jpg', lat: -18.20, lng: -179.60);
+        await addPhoto('austin.jpg', lat: 30.2672, lng: -97.7431);
 
-      final names = (await photos.photos(
-        filter: const PhotoFilter(
-          place: PhotoPlaceFilter(
-            label: 'Suva, Fiji',
-            latitude: -18.14,
-            longitude: 178.44,
-            radiusKm: 250,
-          ),
-        ),
-      )).map((f) => f.name).toSet();
+        final names =
+            (await photos.photos(
+              filter: const PhotoFilter(
+                place: PhotoPlaceFilter(
+                  label: 'Suva, Fiji',
+                  latitude: -18.14,
+                  longitude: 178.44,
+                  radiusKm: 250,
+                ),
+              ),
+            )).map((f) => f.name).toSet();
 
-      expect(names, {'suva.jpg', 'east-of-line.jpg'});
-    });
+        expect(names, {'suva.jpg', 'east-of-line.jpg'});
+      },
+    );
   });
 
   // Once mail attachments and scanned files share one grid, a photo on its own
@@ -679,7 +708,10 @@ void main() {
 
       final source = await photos.sourceFor(file);
 
-      expect(source!.path, 'Gmail (one@example.com)/Holidays/Beach trip photos');
+      expect(
+        source!.path,
+        'Gmail (one@example.com)/Holidays/Beach trip photos',
+      );
       // The id is what lets the sidebar route to the message, so an attachment
       // that resolves without one is a link that cannot be built.
       expect(source.emailId, 'msg-1');
@@ -709,22 +741,25 @@ void main() {
       expect(source!.path, 'My Pictures/root.jpg');
     });
 
-    test('an attachment whose message is gone falls back to the file', () async {
-      // Deleting a mailbox drops the messages but their attachment rows can
-      // outlive them; a link to a message that no longer exists is worse than
-      // no link at all.
-      final file = await addFile(
-        'gmail-1:orphan.jpg',
-        'gmail-1',
-        'orphan.jpg',
-        emailId: 'msg-gone',
-      );
+    test(
+      'an attachment whose message is gone falls back to the file',
+      () async {
+        // Deleting a mailbox drops the messages but their attachment rows can
+        // outlive them; a link to a message that no longer exists is worse than
+        // no link at all.
+        final file = await addFile(
+          'gmail-1:orphan.jpg',
+          'gmail-1',
+          'orphan.jpg',
+          emailId: 'msg-gone',
+        );
 
-      final source = await photos.sourceFor(file);
+        final source = await photos.sourceFor(file);
 
-      expect(source!.path, 'Gmail (one@example.com)/orphan.jpg');
-      expect(source.emailId, isNull);
-    });
+        expect(source!.path, 'Gmail (one@example.com)/orphan.jpg');
+        expect(source.emailId, isNull);
+      },
+    );
   });
 
   group('PhotosRepository hidden photos', () {
@@ -800,10 +835,9 @@ void main() {
     test('excludes photos with is_hidden = 1 from the gallery', () async {
       await FileDesktopRepository(db).create(makeFile('hidden.jpg'));
       await FileDesktopRepository(db).create(makeFile('visible.jpg'));
-      await db.execute(
-        "UPDATE files SET is_hidden = 1 WHERE id = ?",
-        ['col-1:hidden.jpg'],
-      );
+      await db.execute("UPDATE files SET is_hidden = 1 WHERE id = ?", [
+        'col-1:hidden.jpg',
+      ]);
 
       final names = (await photos.photos()).map((f) => f.name).toSet();
 
@@ -816,18 +850,16 @@ void main() {
 
       // User hides one photo from the gallery (what BatchActionService.
       // deleteSelected / PhotosRepository.deleteFile now do).
-      await db.execute(
-        "UPDATE files SET is_hidden = 1 WHERE id = ?",
-        ['col-1:hidden.jpg'],
-      );
+      await db.execute("UPDATE files SET is_hidden = 1 WHERE id = ?", [
+        'col-1:hidden.jpg',
+      ]);
 
       // Simulate the collection being rescanned: the scanner still sees the
       // file on disk and hands it back to the same upsert every scanner
       // uses, which unconditionally sets is_deleted = 0 on conflict.
-      await FileDesktopRepository(db).upsertAll([
-        makeFile('hidden.jpg'),
-        makeFile('visible.jpg'),
-      ]);
+      await FileDesktopRepository(
+        db,
+      ).upsertAll([makeFile('hidden.jpg'), makeFile('visible.jpg')]);
 
       final rows = await db.select(
         "SELECT is_deleted, is_hidden FROM files WHERE id = ?",

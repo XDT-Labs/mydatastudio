@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class YahooSuccessView extends StatelessWidget {
   const YahooSuccessView({super.key, required this.connectedEmail});

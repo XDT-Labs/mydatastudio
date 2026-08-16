@@ -11,7 +11,7 @@ import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/oauth/desktop_oauth_manager.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:uuid/uuid.dart';

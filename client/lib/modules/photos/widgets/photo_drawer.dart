@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+
+import 'package:material_ui/material_ui.dart';
 
 import 'package:mydatastudio/models/tables/album.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
@@ -712,9 +713,10 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                                     // also what drops any searched place —
                                     // see _selectPlace for why the two cannot
                                     // both be applied.
-                                    final newFilter = isActive
-                                        ? const PhotoFilter()
-                                        : PhotoFilter(location: loc);
+                                    final newFilter =
+                                        isActive
+                                            ? const PhotoFilter()
+                                            : PhotoFilter(location: loc);
                                     ViewStateService.instance.setActiveNav(
                                       isActive ? 'all' : 'loc_$loc',
                                     );

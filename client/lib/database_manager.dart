@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
-import 'package:flutter/material.dart';
+
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
@@ -1345,9 +1346,7 @@ class AppDatabase {
   Future<void> _migrateFilesEmbeddingsKey() async {
     final info = await _db.select('PRAGMA table_info(files_embeddings)');
     if (info.isEmpty) return;
-    final columns = {
-      for (final row in info) row['name'] as String: row,
-    };
+    final columns = {for (final row in info) row['name'] as String: row};
     bool isKeyed(String column) =>
         columns.containsKey(column) && (columns[column]!['pk'] as int) > 0;
 

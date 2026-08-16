@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Animated slide-in wrapper widget for the Photos right info panel.
 ///
@@ -29,13 +29,14 @@ class AnimatedInfoPanel extends StatelessWidget {
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeInOut,
       alignment: Alignment.topRight,
-      child: isOpen
-          ? Container(
-              width: width,
-              color: colorScheme.surfaceContainer,
-              child: child,
-            )
-          : const SizedBox(width: 0, height: double.infinity),
+      child:
+          isOpen
+              ? Container(
+                width: width,
+                color: colorScheme.surfaceContainer,
+                child: child,
+              )
+              : const SizedBox(width: 0, height: double.infinity),
     );
   }
 }

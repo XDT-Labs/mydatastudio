@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
@@ -13,10 +13,7 @@ import 'package:mydatastudio/services/get_collections_service.dart';
 
 Widget createTestApp(Widget child) {
   return MaterialApp(
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: darkColorScheme,
-    ),
+    theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
     home: Scaffold(body: child),
   );
 }
@@ -56,8 +53,9 @@ void main() {
       expect(ViewStateService.instance.viewMode.value, PhotoViewMode.map);
     });
 
-    testWidgets('batch mode shows selection count and action buttons',
-        (tester) async {
+    testWidgets('batch mode shows selection count and action buttons', (
+      tester,
+    ) async {
       await tester.pumpWidget(createTestApp(const PhotosToolbar()));
 
       // Initially in normal mode
@@ -85,9 +83,9 @@ void main() {
       expect(find.text('2 selected'), findsNothing);
     });
 
-    testWidgets(
-        'delete button offers hide and delete, with source-aware copy',
-        (tester) async {
+    testWidgets('delete button offers hide and delete, with source-aware copy', (
+      tester,
+    ) async {
       GetCollectionsService.instance.sink.add([
         Collection(
           id: 'col-gdrive',
@@ -147,7 +145,10 @@ void main() {
       // Two distinct promises, offered separately, because a single "Delete"
       // that only set a flag was the dishonesty this dialog exists to remove.
       expect(find.text('Remove 2 photos?'), findsOneWidget);
-      expect(find.widgetWithText(TextButton, 'Hide in gallery'), findsOneWidget);
+      expect(
+        find.widgetWithText(TextButton, 'Hide in gallery'),
+        findsOneWidget,
+      );
       expect(find.widgetWithText(FilledButton, 'Delete file'), findsOneWidget);
       expect(
         find.textContaining('stay on disk and in their source'),
@@ -163,10 +164,7 @@ void main() {
 
       // And delete says what it can actually reach per source: Drive has its
       // own trash, an email keeps its attachment whatever the app does.
-      expect(
-        find.textContaining('trash in Google Drive'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('trash in Google Drive'), findsOneWidget);
       expect(find.textContaining('email keeps its copy'), findsOneWidget);
 
       // Cancel closes without invoking either action.
@@ -188,7 +186,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 350));
 
       expect(
-          ViewStateService.instance.activeFilter.value.searchQuery, 'vacation');
+        ViewStateService.instance.activeFilter.value.searchQuery,
+        'vacation',
+      );
     });
   });
 }

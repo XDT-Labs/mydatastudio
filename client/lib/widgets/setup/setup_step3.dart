@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/helpers/encryption_helper.dart';
 import 'package:mydatastudio/app_logger.dart';
@@ -155,7 +155,16 @@ class _SetupStep3State extends State<SetupStep3> {
           ),
           child: SelectableText(
             value,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            style: const TextStyle(
+              fontFamily: 'SF Mono',
+              fontFamilyFallback: [
+                'SF Mono',
+                'Menlo',
+                'Consolas',
+                'monospace',
+              ],
+              fontSize: 12,
+            ),
           ),
         ),
       ],

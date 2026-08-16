@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_source_group.dart';
@@ -119,16 +119,14 @@ Future<RemovePhotosChoice?> showRemovePhotosDialog(
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () =>
-                Navigator.of(ctx).pop(RemovePhotosChoice.hide),
+            onPressed: () => Navigator.of(ctx).pop(RemovePhotosChoice.hide),
             child: const Text('Hide in gallery'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: theme.colorScheme.error,
             ),
-            onPressed: () =>
-                Navigator.of(ctx).pop(RemovePhotosChoice.delete),
+            onPressed: () => Navigator.of(ctx).pop(RemovePhotosChoice.delete),
             child: const Text('Delete file'),
           ),
         ],

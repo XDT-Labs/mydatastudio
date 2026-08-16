@@ -20,7 +20,7 @@ import 'package:mydatastudio/modules/email/widgets/scanning_placeholder_widget.d
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_breadcrumb/flutter_breadcrumb.dart';
 import 'package:moment_dart/moment_dart.dart';

@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/services/batch_action_service.dart';
@@ -331,14 +332,14 @@ class _PhotosToolbarState extends State<PhotosToolbar> {
           onPressed: () async {
             final selectedFiles =
                 _files.where((f) => _selectedIds.contains(f.id)).toList();
-            final choice =
-                await showRemovePhotosDialog(context, selectedFiles);
+            final choice = await showRemovePhotosDialog(context, selectedFiles);
             switch (choice) {
               case RemovePhotosChoice.hide:
                 await BatchActionService.instance.hideSelected(_selectedIds);
               case RemovePhotosChoice.delete:
-                await BatchActionService.instance
-                    .deleteSelectedFiles(_selectedIds);
+                await BatchActionService.instance.deleteSelectedFiles(
+                  _selectedIds,
+                );
               case null:
                 break;
             }
@@ -420,8 +421,11 @@ class _GroupCountSliderState extends State<_GroupCountSlider> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.workspaces_outline,
-              size: 16, color: colorScheme.onSurfaceVariant),
+          Icon(
+            Icons.workspaces_outline,
+            size: 16,
+            color: colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(width: 4),
           SizedBox(
             width: 120,
@@ -436,13 +440,14 @@ class _GroupCountSliderState extends State<_GroupCountSlider> {
                 max: max.toDouble(),
                 divisions: max - 1,
                 label: '${_state.groupCount}',
-                onChanged: (val) =>
-                    PhotoClusterService.instance.setGroupCount(val.round()),
+                onChanged:
+                    (val) =>
+                        PhotoClusterService.instance.setGroupCount(val.round()),
                 // Only on release: past the tree's capacity this rebuilds, and
                 // doing that per drag frame would fire a clustering pass a
                 // frame.
-                onChangeEnd: (_) =>
-                    PhotoClusterService.instance.commitGroupCount(),
+                onChangeEnd:
+                    (_) => PhotoClusterService.instance.commitGroupCount(),
               ),
             ),
           ),
@@ -450,10 +455,9 @@ class _GroupCountSliderState extends State<_GroupCountSlider> {
             width: 30,
             child: Text(
               '${_state.groupCount}',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: colorScheme.onSurfaceVariant),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
         ],
@@ -505,9 +509,10 @@ class _RegroupButtonState extends State<_RegroupButton> {
       icon: const Icon(Icons.refresh),
       iconSize: 18,
       tooltip: busy ? 'Grouping photos…' : 'Regroup photos',
-      onPressed: busy
-          ? null
-          : () => PhotoClusterService.instance.load(
+      onPressed:
+          busy
+              ? null
+              : () => PhotoClusterService.instance.load(
                 _state.scope,
                 forceRebuild: true,
               ),

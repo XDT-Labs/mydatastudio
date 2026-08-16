@@ -1,4 +1,5 @@
 import 'dart:io' as io;
+
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/file_sources/file_source_file.dart';
@@ -141,14 +142,17 @@ class BatchActionService {
 
     for (final file in files) {
       if (!collections.containsKey(file.collectionId)) {
-        collections[file.collectionId] =
-            await repository.collectionFor(file.collectionId);
+        collections[file.collectionId] = await repository.collectionFor(
+          file.collectionId,
+        );
       }
       final collection = collections[file.collectionId];
       final scanner = collection?.scanner ?? '';
 
       if (scanner == AppConstants.scannerFileGDrive && collection != null) {
-        drivePerCollection.putIfAbsent(collection.id, () => []).add(
+        drivePerCollection
+            .putIfAbsent(collection.id, () => [])
+            .add(
               FileSourceFile(
                 // Drive's own id, not ours — it lives in the path as
                 // `gdrive://<id>`, the same way rx_files_page reads it.
@@ -163,7 +167,8 @@ class BatchActionService {
 
       // Local originals, and the app's extracted copy of an email attachment.
       // Both are real files on disk that the app is allowed to move.
-      final path = file.localPath?.isNotEmpty == true ? file.localPath! : file.path;
+      final path =
+          file.localPath?.isNotEmpty == true ? file.localPath! : file.path;
       if (path.isNotEmpty && !path.startsWith('gdrive://')) {
         await systemTrash.moveToTrash(path);
       }

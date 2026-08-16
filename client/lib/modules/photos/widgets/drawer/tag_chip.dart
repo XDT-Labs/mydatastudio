@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// A compact pill-shaped tag chip widget displaying a tag name and optional count/remove button.
 class TagChip extends StatelessWidget {

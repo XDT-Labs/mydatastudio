@@ -1,6 +1,6 @@
 import 'dart:io' as io;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -256,9 +256,8 @@ void main() {
         await tester.runAsync(() async {
           // Copy the GPS-tagged fixture into the temp collection dir so the
           // absolute path resolves to a real file on disk.
-          final fixtureBytes = await io.File(
-            'test/resources/gps-536x354.jpg',
-          ).readAsBytes();
+          final fixtureBytes =
+              await io.File('test/resources/gps-536x354.jpg').readAsBytes();
           final imgPath = p.join(tempDir.path, 'photo.jpg');
           await io.File(imgPath).writeAsBytes(fixtureBytes);
 
@@ -317,13 +316,14 @@ void main() {
         routes: [
           GoRoute(
             path: '/photos',
-            builder: (context, state) => Scaffold(
-              body: SizedBox(
-                width: 320,
-                height: 800,
-                child: InfoSidebar(repository: fakeRepo),
-              ),
-            ),
+            builder:
+                (context, state) => Scaffold(
+                  body: SizedBox(
+                    width: 320,
+                    height: 800,
+                    child: InfoSidebar(repository: fakeRepo),
+                  ),
+                ),
           ),
           GoRoute(
             path: '/files',

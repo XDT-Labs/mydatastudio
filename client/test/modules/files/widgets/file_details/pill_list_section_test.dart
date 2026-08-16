@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/modules/files/widgets/file_details/pill_list_section.dart';
 
@@ -67,7 +67,9 @@ void main() {
         of: find.text('beach'),
         matching: find.byType(Row),
       );
-      await tester.tap(find.descendant(of: beachPill, matching: find.byIcon(Icons.close)));
+      await tester.tap(
+        find.descendant(of: beachPill, matching: find.byIcon(Icons.close)),
+      );
       await tester.pump();
 
       expect(deleted, 'beach');
@@ -95,39 +97,36 @@ void main() {
       },
     );
 
-    testWidgets(
-      'tapping "+" reveals a text field; submitting calls onAdd and '
-      'collapses back to the "+" pill',
-      (tester) async {
-        String? added;
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: PillListSection(
-                title: 'Tags',
-                icon: Icons.label_outline,
-                items: const ['beach'],
-                onDelete: (_) {},
-                onAdd: (item) => added = item,
-              ),
+    testWidgets('tapping "+" reveals a text field; submitting calls onAdd and '
+        'collapses back to the "+" pill', (tester) async {
+      String? added;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PillListSection(
+              title: 'Tags',
+              icon: Icons.label_outline,
+              items: const ['beach'],
+              onDelete: (_) {},
+              onAdd: (item) => added = item,
             ),
           ),
-        );
+        ),
+      );
 
-        await tester.tap(find.byIcon(Icons.add));
-        await tester.pump();
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pump();
 
-        expect(find.byType(TextField), findsOneWidget);
+      expect(find.byType(TextField), findsOneWidget);
 
-        await tester.enterText(find.byType(TextField), 'sunset');
-        await tester.testTextInput.receiveAction(TextInputAction.done);
-        await tester.pump();
+      await tester.enterText(find.byType(TextField), 'sunset');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
 
-        expect(added, 'sunset');
-        expect(find.byType(TextField), findsNothing);
-        expect(find.byIcon(Icons.add), findsOneWidget);
-      },
-    );
+      expect(added, 'sunset');
+      expect(find.byType(TextField), findsNothing);
+      expect(find.byIcon(Icons.add), findsOneWidget);
+    });
 
     testWidgets('submitting an empty field does not call onAdd', (
       tester,

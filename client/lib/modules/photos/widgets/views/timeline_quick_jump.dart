@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Fixed vertical quick-jump bar widget on the right side of the timeline view.
 class TimelineQuickJump extends StatelessWidget {

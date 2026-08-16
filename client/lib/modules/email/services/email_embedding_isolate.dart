@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -307,10 +308,9 @@ class EmailEmbeddingIsolate {
         final chunksPerEmail = [
           for (final email in emails) formatEmailForEmbedding(email),
         ];
-        final groups = groupByChunkBudget(
-          [for (final chunks in chunksPerEmail) chunks.length],
-          maxChunksPerRequest,
-        );
+        final groups = groupByChunkBudget([
+          for (final chunks in chunksPerEmail) chunks.length,
+        ], maxChunksPerRequest);
 
         for (final group in groups) {
           if (isPaused) {

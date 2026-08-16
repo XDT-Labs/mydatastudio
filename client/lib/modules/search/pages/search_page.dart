@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
@@ -487,7 +487,8 @@ class _SearchPageState extends State<SearchPage> {
       builder:
           (_) => SummarizeResultsDialog(
             query: query,
-            semanticOnly: _results.emailSemanticOnly + _results.fileSemanticOnly,
+            semanticOnly:
+                _results.emailSemanticOnly + _results.fileSemanticOnly,
             retrieved: SearchService.instance.retrieved,
           ),
     );

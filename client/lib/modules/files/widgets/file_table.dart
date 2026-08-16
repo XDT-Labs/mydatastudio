@@ -13,7 +13,7 @@ import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/files/notifications/file_notification.dart';
 import 'package:mydatastudio/modules/files/notifications/path_changed_notification.dart';
 import 'package:mydatastudio/modules/files/notifications/sort_changed_notification.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:moment_dart/moment_dart.dart';
 import 'package:path/path.dart' as p;
 

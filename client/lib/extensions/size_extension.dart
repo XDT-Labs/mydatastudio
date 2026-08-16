@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 ///
 /// Calculate the media query ranges in one place so we can reuse throughout the app

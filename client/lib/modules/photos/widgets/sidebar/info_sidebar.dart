@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io' as io;
 
 import 'package:exif/exif.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -656,14 +656,12 @@ class _SourceRow extends StatelessWidget {
           ),
           Expanded(
             child: InkWell(
-              onTap: isEmail
-                  ? () => onOpenEmail(resolved.emailId!)
-                  : onOpenFile,
+              onTap:
+                  isEmail ? () => onOpenEmail(resolved.emailId!) : onOpenFile,
               borderRadius: BorderRadius.circular(4),
               child: Tooltip(
-                message: isEmail
-                    ? 'Open this email'
-                    : 'Show this file in Files',
+                message:
+                    isEmail ? 'Open this email' : 'Show this file in Files',
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

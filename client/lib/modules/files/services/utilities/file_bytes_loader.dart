@@ -1,4 +1,5 @@
 import 'dart:io' as io;
+
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
 import 'package:mydatastudio/app_logger.dart';
@@ -238,7 +239,8 @@ class FileBytesLoader {
         // Only on the export path: the extractor sniffs the shared ZIP
         // signature and needs the extension to tell DOCX from XLSX. The
         // file's own Drive name cannot supply it.
-        filenameHint: export == null ? null : '${file.name}.${export.extension}',
+        filenameHint:
+            export == null ? null : '${file.name}.${export.extension}',
       );
     } catch (e) {
       // Drive refuses exports over 10 MB, permanently — no retry helps, and

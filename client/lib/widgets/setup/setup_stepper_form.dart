@@ -17,7 +17,7 @@ import 'package:mydatastudio/widgets/setup/setup_step1.dart';
 import 'package:mydatastudio/widgets/setup/setup_step2.dart';
 import 'package:mydatastudio/widgets/setup/setup_step3.dart';
 import 'package:mydatastudio/widgets/setup/setup_step4.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as p;

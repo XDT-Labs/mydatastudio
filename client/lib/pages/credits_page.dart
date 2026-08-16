@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// One piece of third-party work the app ships and has to credit.
@@ -99,10 +99,11 @@ class CreditsPage extends StatelessWidget {
                 ),
               ),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => showLicensePage(
-                context: context,
-                applicationName: 'My Data Studio',
-              ),
+              onTap:
+                  () => showLicensePage(
+                    context: context,
+                    applicationName: 'My Data Studio',
+                  ),
             ),
           ),
         ],

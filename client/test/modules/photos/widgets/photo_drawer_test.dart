@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:mydatastudio/app_constants.dart';
@@ -15,16 +15,8 @@ import '../../../helpers/file_fixture.dart';
 
 Widget createTestApp(Widget child) {
   return MaterialApp(
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: darkColorScheme,
-    ),
-    home: Scaffold(
-      body: SizedBox(
-        height: 1000,
-        child: child,
-      ),
-    ),
+    theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
+    home: Scaffold(body: SizedBox(height: 1000, child: child)),
   );
 }
 
@@ -53,49 +45,63 @@ void main() {
   });
 
   group('PhotoDrawer Widget Tests', () {
-    testWidgets('renders all sections (Library, Sources, Albums, Tags, Locations)', (tester) async {
-      await tester.pumpWidget(createTestApp(const PhotoDrawer()));
-      await tester.pumpAndSettle();
+    testWidgets(
+      'renders all sections (Library, Sources, Albums, Tags, Locations)',
+      (tester) async {
+        await tester.pumpWidget(createTestApp(const PhotoDrawer()));
+        await tester.pumpAndSettle();
 
-      // Section 1: Library items
-      expect(find.text('All Photos'), findsOneWidget);
-      expect(find.text('Favorites'), findsOneWidget);
-      expect(find.text('Videos'), findsOneWidget);
+        // Section 1: Library items
+        expect(find.text('All Photos'), findsOneWidget);
+        expect(find.text('Favorites'), findsOneWidget);
+        expect(find.text('Videos'), findsOneWidget);
 
-      // Section 2: Sources (empty state — no collections seeded)
-      expect(find.text('Sources'), findsOneWidget);
-      expect(find.text('No sources'), findsOneWidget);
+        // Section 2: Sources (empty state — no collections seeded)
+        expect(find.text('Sources'), findsOneWidget);
+        expect(find.text('No sources'), findsOneWidget);
 
-      // Section 3: Albums
-      expect(find.text('Albums'), findsOneWidget);
+        // Section 3: Albums
+        expect(find.text('Albums'), findsOneWidget);
 
-      // Section 4: Tags
-      expect(find.text('Tags'), findsOneWidget);
+        // Section 4: Tags
+        expect(find.text('Tags'), findsOneWidget);
 
-      // Section 5: Locations
-      expect(find.text('Locations'), findsOneWidget);
-    });
+        // Section 5: Locations
+        expect(find.text('Locations'), findsOneWidget);
+      },
+    );
 
-    testWidgets('tapping library nav items updates active state in ViewStateService', (tester) async {
-      await tester.pumpWidget(createTestApp(const PhotoDrawer()));
-      await tester.pumpAndSettle();
+    testWidgets(
+      'tapping library nav items updates active state in ViewStateService',
+      (tester) async {
+        await tester.pumpWidget(createTestApp(const PhotoDrawer()));
+        await tester.pumpAndSettle();
 
-      // Tap Favorites
-      await tester.tap(find.text('Favorites'));
-      await tester.pumpAndSettle();
+        // Tap Favorites
+        await tester.tap(find.text('Favorites'));
+        await tester.pumpAndSettle();
 
-      expect(ViewStateService.instance.activeNav.value, equals('favorites'));
-      expect(ViewStateService.instance.activeFilter.value.onlyFavorites, isTrue);
+        expect(ViewStateService.instance.activeNav.value, equals('favorites'));
+        expect(
+          ViewStateService.instance.activeFilter.value.onlyFavorites,
+          isTrue,
+        );
 
-      // Tap Videos
-      await tester.tap(find.text('Videos'));
-      await tester.pumpAndSettle();
+        // Tap Videos
+        await tester.tap(find.text('Videos'));
+        await tester.pumpAndSettle();
 
-      expect(ViewStateService.instance.activeNav.value, equals('videos'));
-      expect(ViewStateService.instance.activeFilter.value.mediaType, equals('video'));
-    });
+        expect(ViewStateService.instance.activeNav.value, equals('videos'));
+        expect(
+          ViewStateService.instance.activeFilter.value.mediaType,
+          equals('video'),
+        );
+      },
+    );
 
-    testWidgets('groups collections by source and shows one header per group', (tester) async {
+    testWidgets('groups collections by source and shows one header per group', (
+      tester,
+    ) async {
       final localCol = makeTestCollection(
         name: 'My Computer',
         type: 'file',
@@ -131,7 +137,9 @@ void main() {
       expect(find.text('My Computer'), findsOneWidget);
     });
 
-    testWidgets('tapping a collection filters to just that collection', (tester) async {
+    testWidgets('tapping a collection filters to just that collection', (
+      tester,
+    ) async {
       final localCol = makeTestCollection(
         name: 'My Computer',
         type: 'file',
@@ -168,106 +176,127 @@ void main() {
       expect(ViewStateService.instance.activeNav.value, equals('all'));
     });
 
-    testWidgets('tapping a source group header filters to every collection in the group', (tester) async {
-      final gmailCol1 = makeTestCollection(
-        name: 'Gmail (one@example.com)',
-        type: 'email',
-        scanner: AppConstants.scannerEmailGmail,
-      );
-      final gmailCol2 = makeTestCollection(
-        name: 'Gmail (two@example.com)',
-        type: 'email',
-        scanner: AppConstants.scannerEmailGmail,
-      );
-      GetCollectionsService.instance.sink.add([gmailCol1, gmailCol2]);
+    testWidgets(
+      'tapping a source group header filters to every collection in the group',
+      (tester) async {
+        final gmailCol1 = makeTestCollection(
+          name: 'Gmail (one@example.com)',
+          type: 'email',
+          scanner: AppConstants.scannerEmailGmail,
+        );
+        final gmailCol2 = makeTestCollection(
+          name: 'Gmail (two@example.com)',
+          type: 'email',
+          scanner: AppConstants.scannerEmailGmail,
+        );
+        GetCollectionsService.instance.sink.add([gmailCol1, gmailCol2]);
 
-      await tester.pumpWidget(createTestApp(const PhotoDrawer()));
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(createTestApp(const PhotoDrawer()));
+        await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Gmail'));
-      await tester.pumpAndSettle();
+        await tester.tap(find.text('Gmail'));
+        await tester.pumpAndSettle();
 
-      final filter = ViewStateService.instance.activeFilter.value;
-      expect(filter.collectionId, isNull);
-      expect(
-        filter.collectionIds?.toSet(),
-        equals({gmailCol1.id, gmailCol2.id}),
-      );
-      expect(
-        ViewStateService.instance.activeNav.value,
-        equals('source_group_gmail'),
-      );
+        final filter = ViewStateService.instance.activeFilter.value;
+        expect(filter.collectionId, isNull);
+        expect(
+          filter.collectionIds?.toSet(),
+          equals({gmailCol1.id, gmailCol2.id}),
+        );
+        expect(
+          ViewStateService.instance.activeNav.value,
+          equals('source_group_gmail'),
+        );
 
-      // Tapping the group header again clears the filter.
-      await tester.tap(find.text('Gmail'));
-      await tester.pumpAndSettle();
+        // Tapping the group header again clears the filter.
+        await tester.tap(find.text('Gmail'));
+        await tester.pumpAndSettle();
 
-      expect(ViewStateService.instance.activeFilter.value.collectionIds, isNull);
-      expect(ViewStateService.instance.activeNav.value, equals('all'));
-    });
+        expect(
+          ViewStateService.instance.activeFilter.value.collectionIds,
+          isNull,
+        );
+        expect(ViewStateService.instance.activeNav.value, equals('all'));
+      },
+    );
 
-    testWidgets('source groups start collapsed, and the chevron toggles visibility without changing the filter', (tester) async {
-      final localCol = makeTestCollection(
-        name: 'My Computer',
-        type: 'file',
-        scanner: AppConstants.scannerFileLocal,
-      );
-      GetCollectionsService.instance.sink.add([localCol]);
+    testWidgets(
+      'source groups start collapsed, and the chevron toggles visibility without changing the filter',
+      (tester) async {
+        final localCol = makeTestCollection(
+          name: 'My Computer',
+          type: 'file',
+          scanner: AppConstants.scannerFileLocal,
+        );
+        GetCollectionsService.instance.sink.add([localCol]);
 
-      await tester.pumpWidget(createTestApp(const PhotoDrawer()));
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(createTestApp(const PhotoDrawer()));
+        await tester.pumpAndSettle();
 
-      // Collapsed by default.
-      expect(find.text('My Computer'), findsNothing);
+        // Collapsed by default.
+        expect(find.text('My Computer'), findsNothing);
 
-      await _expandGroup(tester, 'Local Folders');
-      expect(find.text('My Computer'), findsOneWidget);
-      expect(ViewStateService.instance.activeFilter.value.collectionId, isNull);
+        await _expandGroup(tester, 'Local Folders');
+        expect(find.text('My Computer'), findsOneWidget);
+        expect(
+          ViewStateService.instance.activeFilter.value.collectionId,
+          isNull,
+        );
 
-      // The chevron is the trailing expand/collapse icon within this group's
-      // own header row — other DrawerSections (Sources, Albums) also render
-      // expand_less icons, so scope the finder to the Local Folders header.
-      final headerFinder = find.ancestor(
-        of: find.text('Local Folders'),
-        matching: find.byType(SourceGroupHeader),
-      );
-      final chevronFinder = find.descendant(
-        of: headerFinder,
-        matching: find.byIcon(Icons.expand_less),
-      );
-      await tester.tap(chevronFinder);
-      await tester.pumpAndSettle();
+        // The chevron is the trailing expand/collapse icon within this group's
+        // own header row — other DrawerSections (Sources, Albums) also render
+        // expand_less icons, so scope the finder to the Local Folders header.
+        final headerFinder = find.ancestor(
+          of: find.text('Local Folders'),
+          matching: find.byType(SourceGroupHeader),
+        );
+        final chevronFinder = find.descendant(
+          of: headerFinder,
+          matching: find.byIcon(Icons.expand_less),
+        );
+        await tester.tap(chevronFinder);
+        await tester.pumpAndSettle();
 
-      expect(find.text('My Computer'), findsNothing);
-      expect(ViewStateService.instance.activeFilter.value.collectionId, isNull);
-    });
+        expect(find.text('My Computer'), findsNothing);
+        expect(
+          ViewStateService.instance.activeFilter.value.collectionId,
+          isNull,
+        );
+      },
+    );
 
-    testWidgets('clear filters button appears when filter active and clears on tap', (tester) async {
-      await tester.pumpWidget(createTestApp(const PhotoDrawer()));
-      await tester.pumpAndSettle();
+    testWidgets(
+      'clear filters button appears when filter active and clears on tap',
+      (tester) async {
+        await tester.pumpWidget(createTestApp(const PhotoDrawer()));
+        await tester.pumpAndSettle();
 
-      // Initially no filter is active, so Clear Filters is not visible
-      expect(find.text('Clear Filters'), findsNothing);
+        // Initially no filter is active, so Clear Filters is not visible
+        expect(find.text('Clear Filters'), findsNothing);
 
-      // Set filter to Favorites by tapping Favorites
-      await tester.tap(find.text('Favorites'));
-      await tester.pumpAndSettle();
+        // Set filter to Favorites by tapping Favorites
+        await tester.tap(find.text('Favorites'));
+        await tester.pumpAndSettle();
 
-      // Clear Filters button should now be visible
-      final clearButtonFinder = find.text('Clear Filters');
-      expect(clearButtonFinder, findsOneWidget);
+        // Clear Filters button should now be visible
+        final clearButtonFinder = find.text('Clear Filters');
+        expect(clearButtonFinder, findsOneWidget);
 
-      // Scroll to button and tap
-      await tester.ensureVisible(clearButtonFinder);
-      await tester.pumpAndSettle();
-      await tester.tap(clearButtonFinder);
-      await tester.pumpAndSettle();
+        // Scroll to button and tap
+        await tester.ensureVisible(clearButtonFinder);
+        await tester.pumpAndSettle();
+        await tester.tap(clearButtonFinder);
+        await tester.pumpAndSettle();
 
-      // Filter should be reset
-      expect(find.text('Clear Filters'), findsNothing);
-      expect(ViewStateService.instance.activeNav.value, equals('all'));
-      expect(ViewStateService.instance.activeFilter.value.onlyFavorites, isFalse);
-    });
+        // Filter should be reset
+        expect(find.text('Clear Filters'), findsNothing);
+        expect(ViewStateService.instance.activeNav.value, equals('all'));
+        expect(
+          ViewStateService.instance.activeFilter.value.onlyFavorites,
+          isFalse,
+        );
+      },
+    );
 
     testWidgets('choosing another filter drops the location filter', (
       tester,

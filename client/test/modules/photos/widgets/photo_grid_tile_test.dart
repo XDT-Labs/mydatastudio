@@ -1,5 +1,5 @@
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -32,19 +32,15 @@ Widget _buildTestableWidget(Widget child) {
   return MaterialApp(
     theme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
     home: Scaffold(
-      body: Center(
-        child: SizedBox(
-          width: 200,
-          height: 200,
-          child: child,
-        ),
-      ),
+      body: Center(child: SizedBox(width: 200, height: 200, child: child)),
     ),
   );
 }
 
 void main() {
-  testWidgets('renders thumbnail fallback or image', (WidgetTester tester) async {
+  testWidgets('renders thumbnail fallback or image', (
+    WidgetTester tester,
+  ) async {
     final file = _createTestFile();
 
     await tester.pumpWidget(
@@ -102,9 +98,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(favoriteCalled, isTrue);
 
-    await gesture.moveTo(tester.getCenter(find.byIcon(Icons.radio_button_unchecked)));
+    await gesture.moveTo(
+      tester.getCenter(find.byIcon(Icons.radio_button_unchecked)),
+    );
     await tester.pumpAndSettle();
-    await gesture.down(tester.getCenter(find.byIcon(Icons.radio_button_unchecked)));
+    await gesture.down(
+      tester.getCenter(find.byIcon(Icons.radio_button_unchecked)),
+    );
     await gesture.up();
     await tester.pump(const Duration(milliseconds: 300));
     expect(selectCalled, isTrue);
@@ -119,7 +119,9 @@ void main() {
     await gesture.removePointer();
   });
 
-  testWidgets('selected state shows border and checked icon', (WidgetTester tester) async {
+  testWidgets('selected state shows border and checked icon', (
+    WidgetTester tester,
+  ) async {
     final file = _createTestFile();
 
     await tester.pumpWidget(
@@ -171,9 +173,7 @@ void main() {
   });
 
   testWidgets('video files show duration badge', (WidgetTester tester) async {
-    final videoFile = _createTestFile(
-      contentType: 'video/mp4',
-    );
+    final videoFile = _createTestFile(contentType: 'video/mp4');
 
     await tester.pumpWidget(
       _buildTestableWidget(

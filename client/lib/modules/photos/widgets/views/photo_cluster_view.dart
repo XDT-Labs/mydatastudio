@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_cluster.dart';
 import 'package:mydatastudio/modules/photos/services/clustering/clustering_isolate.dart';
@@ -115,8 +115,10 @@ class _PhotoClusterViewState extends State<PhotoClusterView> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final mainWidth = max(0.0, constraints.maxWidth - 48.0);
-        final columns =
-            PhotoGrid.getColumnCount(mainWidth, itemSize: _gridItemSize);
+        final columns = PhotoGrid.getColumnCount(
+          mainWidth,
+          itemSize: _gridItemSize,
+        );
 
         final slivers = <Widget>[];
 
@@ -130,8 +132,9 @@ class _PhotoClusterViewState extends State<PhotoClusterView> {
 
         for (final group in groups) {
           final photos = group.photos;
-          final allSelected =
-              photos.every((f) => widget.selectedIds.contains(f.id));
+          final allSelected = photos.every(
+            (f) => widget.selectedIds.contains(f.id),
+          );
           final isCollapsed = _collapsed.contains(group.group.nodeId);
 
           slivers.add(
@@ -144,18 +147,21 @@ class _PhotoClusterViewState extends State<PhotoClusterView> {
                 isCollapsed: isCollapsed,
                 isLabelPending:
                     group.group.labelStatus == ClusterLabelStatus.pending,
-                onToggleCollapsed: () => setState(() {
-                  if (!_collapsed.remove(group.group.nodeId)) {
-                    _collapsed.add(group.group.nodeId);
-                  }
-                }),
+                onToggleCollapsed:
+                    () => setState(() {
+                      if (!_collapsed.remove(group.group.nodeId)) {
+                        _collapsed.add(group.group.nodeId);
+                      }
+                    }),
                 onSelectAll: (val) {
                   if (val) {
-                    SelectionService.instance
-                        .selectAll(photos.map((f) => f.id).toList());
+                    SelectionService.instance.selectAll(
+                      photos.map((f) => f.id).toList(),
+                    );
                   } else {
-                    SelectionService.instance
-                        .deselectMany(photos.map((f) => f.id));
+                    SelectionService.instance.deselectMany(
+                      photos.map((f) => f.id),
+                    );
                   }
                 },
               ),
@@ -177,22 +183,19 @@ class _PhotoClusterViewState extends State<PhotoClusterView> {
                   mainAxisSpacing: 8.0,
                   childAspectRatio: 1.0,
                 ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final file = photos[index];
-                    return buildWiredPhotoGridTile(
-                      file: file,
-                      isSelected: widget.selectedIds.contains(file.id),
-                      allFiles: widget.files,
-                      onTapTile: widget.onTapTile,
-                      onSelectTile: widget.onSelectTile,
-                      onToggleFavoriteTile: widget.onToggleFavoriteTile,
-                      onOpenLightboxTile: widget.onOpenLightboxTile,
-                      onOpenInfoTile: widget.onOpenInfoTile,
-                    );
-                  },
-                  childCount: photos.length,
-                ),
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final file = photos[index];
+                  return buildWiredPhotoGridTile(
+                    file: file,
+                    isSelected: widget.selectedIds.contains(file.id),
+                    allFiles: widget.files,
+                    onTapTile: widget.onTapTile,
+                    onSelectTile: widget.onSelectTile,
+                    onToggleFavoriteTile: widget.onToggleFavoriteTile,
+                    onOpenLightboxTile: widget.onOpenLightboxTile,
+                    onOpenInfoTile: widget.onOpenInfoTile,
+                  );
+                }, childCount: photos.length),
               ),
             ),
           );
@@ -212,18 +215,16 @@ class _PhotoClusterViewState extends State<PhotoClusterView> {
 
     // Determinate once the clustering phase reports splits, because that phase
     // is the long one and a spinner with no end in sight reads as a hang.
-    final fraction = progress?.phase == ClusteringPhase.clustering
-        ? progress?.fraction
-        : null;
+    final fraction =
+        progress?.phase == ClusteringPhase.clustering
+            ? progress?.fraction
+            : null;
 
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          SizedBox(
-            width: 180,
-            child: LinearProgressIndicator(value: fraction),
-          ),
+          SizedBox(width: 180, child: LinearProgressIndicator(value: fraction)),
           const SizedBox(height: 16),
           Text(
             switch (progress?.phase) {
@@ -232,8 +233,9 @@ class _PhotoClusterViewState extends State<PhotoClusterView> {
               ClusteringPhase.saving => 'Saving groups…',
               null => 'Grouping photos…',
             },
-            style: theme.textTheme.titleMedium
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -257,8 +259,9 @@ class _PhotoClusterViewState extends State<PhotoClusterView> {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -298,8 +301,9 @@ class _CoverageNotice extends StatelessWidget {
               '$count ${count == 1 ? 'photo is' : 'photos are'} not in a group '
               'yet — added since these groups were built, or still being '
               'analysed. Regroup to include them.',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
         ],

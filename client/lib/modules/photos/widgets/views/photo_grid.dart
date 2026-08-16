@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
-import 'package:flutter/material.dart';
+
+import 'package:material_ui/material_ui.dart';
 import 'package:intl/intl.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/services/selection_service.dart';
@@ -169,12 +170,12 @@ class _PhotoGridState extends State<PhotoGrid> {
       // scrubber scrolls by these offsets, so leaving the grid's height in
       // would send every jump past its target by the height of everything
       // collapsed above it.
-      final rows = _collapsedMonths.contains(entry.key)
-          ? 0
-          : (entry.value.length / columns).ceil();
-      final gridHeight = rows == 0
-          ? 0.0
-          : 16.0 + rows * itemHeight + (rows - 1) * 8.0;
+      final rows =
+          _collapsedMonths.contains(entry.key)
+              ? 0
+              : (entry.value.length / columns).ceil();
+      final gridHeight =
+          rows == 0 ? 0.0 : 16.0 + rows * itemHeight + (rows - 1) * 8.0;
 
       currentOffset += headerHeight + gridHeight;
     }
@@ -248,11 +249,12 @@ class _PhotoGridState extends State<PhotoGrid> {
                 itemCount: monthFiles.length,
                 isSelected: isGroupAllSelected,
                 isCollapsed: _collapsedMonths.contains(monthYear),
-                onToggleCollapsed: () => setState(() {
-                  if (!_collapsedMonths.remove(monthYear)) {
-                    _collapsedMonths.add(monthYear);
-                  }
-                }),
+                onToggleCollapsed:
+                    () => setState(() {
+                      if (!_collapsedMonths.remove(monthYear)) {
+                        _collapsedMonths.add(monthYear);
+                      }
+                    }),
                 onSelectAll: (val) {
                   if (val) {
                     SelectionService.instance.selectAll(

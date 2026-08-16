@@ -2,7 +2,7 @@ import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/modules/email/notifications/email_selected_notification.dart';
 import 'package:mydatastudio/modules/email/notifications/email_selection_changed_notification.dart';
 import 'package:mydatastudio/modules/email/notifications/email_sort_changed_notification.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:moment_dart/moment_dart.dart';
 import 'dart:math' as math;

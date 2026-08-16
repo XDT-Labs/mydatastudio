@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/services/embedding_model.dart';
@@ -106,10 +107,9 @@ class DatabaseRepository {
       // problem that no longer exists — and held back silently, since a stale
       // vector is a present vector. [maxDescriptionAttempts] needs no
       // equivalent: a written description is never re-derived.
-      await db.execute(
-        'UPDATE files SET embedding_attempts = 0 WHERE id = ?',
-        [fileId],
-      );
+      await db.execute('UPDATE files SET embedding_attempts = 0 WHERE id = ?', [
+        fileId,
+      ]);
       logger.d(
         'upsertFileEmbedding: fileId=$fileId type=$type dim=${embedding.length}',
       );
@@ -351,6 +351,7 @@ class DatabaseRepository {
     'application/vnd.google-apps.spreadsheet',
     'application/vnd.google-apps.presentation',
   ];
+
   ///
   /// `htm`/`html` are excluded by policy — most are the HTML part of a mail
   /// whose body is already indexed, so indexing them creates a document that
@@ -382,7 +383,13 @@ class DatabaseRepository {
   /// that broke `HybridChunker` (§18a-2) were a stock export, a contact dump
   /// and a mailing list.
   static const documentExtensions = [
-    'pdf', 'doc', 'docx', 'pptx', 'rtf', 'txt', 'md',
+    'pdf',
+    'doc',
+    'docx',
+    'pptx',
+    'rtf',
+    'txt',
+    'md',
   ];
 
   /// Documents whose chunk set is missing or was built by an older model.
@@ -546,7 +553,9 @@ class DatabaseRepository {
   /// description is reachable only by its filename.
   static const describableExtensions = [
     ...documentExtensions,
-    'csv', 'xls', 'xlsx',
+    'csv',
+    'xls',
+    'xlsx',
   ];
 
   /// The head of a document's already-extracted text, for describing it.

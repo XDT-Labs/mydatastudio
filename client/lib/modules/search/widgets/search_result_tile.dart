@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:intl/intl.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_resolver.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
@@ -374,7 +374,10 @@ class _ParentEmailLink extends StatelessWidget {
         Icon(
           Icons.attachment_outlined,
           size: 13,
-          color: onOpen == null ? colorScheme.onSurfaceVariant : colorScheme.primary,
+          color:
+              onOpen == null
+                  ? colorScheme.onSurfaceVariant
+                  : colorScheme.primary,
         ),
         const SizedBox(width: 4),
         Text(

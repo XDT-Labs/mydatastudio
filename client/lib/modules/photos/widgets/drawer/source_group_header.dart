@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// A collapsible, filterable group header for the Photos module's Sources
 /// list. Tapping the row filters to every collection in the group; tapping

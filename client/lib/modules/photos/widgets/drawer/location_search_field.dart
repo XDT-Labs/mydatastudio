@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/models/tables/gazetteer_place.dart';
 import 'package:mydatastudio/modules/photos/models/photo_place_filter.dart';
 import 'package:mydatastudio/repositories/gazetteer_repository.dart';
@@ -131,16 +131,17 @@ class _LocationSearchFieldState extends State<LocationSearchField> {
                 minWidth: 32,
                 minHeight: 32,
               ),
-              suffixIcon: _searching
-                  ? const Padding(
-                      padding: EdgeInsets.all(10.0),
-                      child: SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                  : null,
+              suffixIcon:
+                  _searching
+                      ? const Padding(
+                        padding: EdgeInsets.all(10.0),
+                        child: SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                      : null,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 8,
                 vertical: 8,
@@ -158,25 +159,26 @@ class _LocationSearchFieldState extends State<LocationSearchField> {
               clipBehavior: Clip.antiAlias,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                children: _results.map((place) {
-                  return InkWell(
-                    onTap: () => _select(place),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10.0,
-                        vertical: 8.0,
-                      ),
-                      child: Text(
-                        place.label,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurface,
+                children:
+                    _results.map((place) {
+                      return InkWell(
+                        onTap: () => _select(place),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10.0,
+                            vertical: 8.0,
+                          ),
+                          child: Text(
+                            place.label,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurface,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  );
-                }).toList(),
+                      );
+                    }).toList(),
               ),
             ),
           ],

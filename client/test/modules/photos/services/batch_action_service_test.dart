@@ -1,4 +1,5 @@
 import 'dart:io' as io;
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/database_manager.dart';
@@ -15,7 +16,10 @@ void main() {
     test('deleteSelected deselects all items upon completion', () async {
       final service = BatchActionService.instance;
       SelectionService.instance.selectAll(['f1', 'f2']);
-      expect(SelectionService.instance.selectedIds.value, containsAll(['f1', 'f2']));
+      expect(
+        SelectionService.instance.selectedIds.value,
+        containsAll(['f1', 'f2']),
+      );
 
       await service.deleteSelected({'f1', 'f2'});
 

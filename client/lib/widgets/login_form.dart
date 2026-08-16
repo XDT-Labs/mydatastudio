@@ -3,7 +3,7 @@ import 'package:mydatastudio/extensions/widget_extension.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/services/get_user_service.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
 import 'package:form_builder_validators/form_builder_validators.dart';
@@ -101,8 +101,7 @@ class _LoginFormState extends State<LoginForm> {
         _formKey.currentState?.save();
         formSubmitHandler(
           null,
-          _formKey.currentState?.instantValue ??
-              {'password': null},
+          _formKey.currentState?.instantValue ?? {'password': null},
         );
       }
     }

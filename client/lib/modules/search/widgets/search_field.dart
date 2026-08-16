@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/modules/search/services/query_tokenizer.dart';
 import 'package:mydatastudio/modules/search/services/suggestions/field_suggestion.dart';
@@ -307,7 +307,10 @@ class _SearchFieldCompletionState extends State<SearchFieldCompletion> {
     // Floored rather than simply matching the field: the header's box is only
     // ~240px wide, and a contact row is a name, an address and a count. Any
     // narrower and every row ellipsises into uselessness.
-    final width = math.max(box?.size.width ?? _minOverlayWidth, _minOverlayWidth);
+    final width = math.max(
+      box?.size.width ?? _minOverlayWidth,
+      _minOverlayWidth,
+    );
 
     return Positioned(
       width: width,
@@ -331,9 +334,10 @@ class _SearchFieldCompletionState extends State<SearchFieldCompletion> {
               return InkWell(
                 onTap: () => _accept(index),
                 child: Container(
-                  color: selected
-                      ? colorScheme.primary.withValues(alpha: 0.12)
-                      : null,
+                  color:
+                      selected
+                          ? colorScheme.primary.withValues(alpha: 0.12)
+                          : null,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
                     vertical: 10,
@@ -415,33 +419,34 @@ class SearchField extends StatelessWidget {
       focusNode: focusNode,
       onSubmitted: onSubmitted,
       suggestions: suggestions,
-      fieldBuilder: (context, controller, focusNode, onSubmitted) => TextField(
-        controller: controller,
-        focusNode: focusNode,
-        autofocus: true,
-        onSubmitted: onSubmitted,
-        textInputAction: TextInputAction.search,
-        style: Theme.of(context).textTheme.bodyMedium,
-        decoration: InputDecoration(
-          hintText: 'Search files, emails, and more…',
-          prefixIcon: const Icon(Icons.search),
-          filled: true,
-          fillColor: colorScheme.surfaceContainerHigh,
-          contentPadding: const EdgeInsets.symmetric(vertical: 14),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(999),
-            borderSide: BorderSide.none,
+      fieldBuilder:
+          (context, controller, focusNode, onSubmitted) => TextField(
+            controller: controller,
+            focusNode: focusNode,
+            autofocus: true,
+            onSubmitted: onSubmitted,
+            textInputAction: TextInputAction.search,
+            style: Theme.of(context).textTheme.bodyMedium,
+            decoration: InputDecoration(
+              hintText: 'Search files, emails, and more…',
+              prefixIcon: const Icon(Icons.search),
+              filled: true,
+              fillColor: colorScheme.surfaceContainerHigh,
+              contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(999),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(999),
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(999),
+                borderSide: BorderSide(color: colorScheme.primary, width: 2),
+              ),
+            ),
           ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(999),
-            borderSide: BorderSide.none,
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(999),
-            borderSide: BorderSide(color: colorScheme.primary, width: 2),
-          ),
-        ),
-      ),
     );
   }
 }

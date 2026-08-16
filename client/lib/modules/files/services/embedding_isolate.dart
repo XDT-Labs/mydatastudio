@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
+
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:mydatastudio/app_logger.dart';
@@ -409,8 +410,10 @@ class EmbeddingIsolate {
               // The service is down, still loading its model, or wedged. The
               // file is fine as far as anyone knows, so it is retried next
               // pass at no cost to its budget.
-              logger.w("Embedding service unavailable, will retry: "
-                  "${file.path}");
+              logger.w(
+                "Embedding service unavailable, will retry: "
+                "${file.path}",
+              );
             }
             // Batch complete
           } catch (e) {
@@ -521,7 +524,7 @@ class EmbeddingIsolate {
   /// spends every photo's attempt budget during a single outage and retires
   /// the whole library, with nothing in the UI to say so.
   static Future<({EmbeddingOutcome outcome, List<double>? embedding})>
-      _generateEmbedding(
+  _generateEmbedding(
     List<int> bytes,
     String filename,
     String serviceUrl,
@@ -564,16 +567,15 @@ class EmbeddingIsolate {
             : (outcome: EmbeddingOutcome.ok, embedding: vector);
       }
 
-      logger.e(
-        "Python service error: ${response.statusCode} ${response.body}",
-      );
+      logger.e("Python service error: ${response.statusCode} ${response.body}");
       // 400 is the endpoint's answer for an image it could not decode — it
       // maps the parse ValueError to a 400 — so that is a verdict on this
       // file. 503 (model still downloading) and 5xx are about the service.
       return (
-        outcome: response.statusCode == 400
-            ? EmbeddingOutcome.unusable
-            : EmbeddingOutcome.unreachable,
+        outcome:
+            response.statusCode == 400
+                ? EmbeddingOutcome.unusable
+                : EmbeddingOutcome.unreachable,
         embedding: null,
       );
     } catch (e) {

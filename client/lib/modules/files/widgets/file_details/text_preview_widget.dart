@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:xml/xml.dart';
@@ -105,7 +105,14 @@ class _TextPreviewWidgetState extends State<TextPreviewWidget> {
                           contentPadding: EdgeInsets.all(12),
                         ),
                         style: const TextStyle(
-                          fontFamily: 'Courier',
+                          fontFamily: 'SF Mono',
+                          fontFamilyFallback: [
+                            'SF Mono',
+                            'Menlo',
+                            'Consolas',
+                            'DejaVu Sans Mono',
+                            'monospace',
+                          ],
                           fontSize: 13,
                         ),
                       )
@@ -192,12 +199,32 @@ class _TextPreviewWidgetState extends State<TextPreviewWidget> {
     if (widget.ext == '.xml' || widget.ext == '.xsl' || widget.ext == '.xslt') {
       return Text(
         _tidyXml(content),
-        style: const TextStyle(fontFamily: 'Courier', fontSize: 12),
+        style: const TextStyle(
+          fontFamily: 'SF Mono',
+          fontFamilyFallback: [
+            'SF Mono',
+            'Menlo',
+            'Consolas',
+            'DejaVu Sans Mono',
+            'monospace',
+          ],
+          fontSize: 12,
+        ),
       );
     }
     return Text(
       content,
-      style: const TextStyle(fontFamily: 'Courier', fontSize: 12),
+      style: const TextStyle(
+        fontFamily: 'SF Mono',
+        fontFamilyFallback: [
+          'SF Mono',
+          'Menlo',
+          'Consolas',
+          'DejaVu Sans Mono',
+          'monospace',
+        ],
+        fontSize: 12,
+      ),
     );
   }
 

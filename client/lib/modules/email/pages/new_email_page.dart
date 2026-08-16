@@ -13,11 +13,10 @@ import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
 import 'package:go_router/go_router.dart';
-import 'package:reactive_forms/reactive_forms.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:mydatastudio/modules/email/pages/email_page.dart';
 import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_idle_view.dart';
@@ -265,12 +264,18 @@ class _OutlookPstTab extends StatefulWidget {
 }
 
 class _OutlookPstTabState extends State<_OutlookPstTab> {
-  final _form = FormGroup({
-    'title': FormControl<String>(validators: [Validators.required]),
-    'file': FormControl<String>(validators: [Validators.required]),
-  });
+  final _formKey = GlobalKey<FormState>();
+  final _title = TextEditingController();
+  final _file = TextEditingController();
 
   bool _isImporting = false;
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _file.dispose();
+    super.dispose();
+  }
 
   Future<void> _browse() async {
     final result = await FilePicker.platform.pickFiles(
@@ -281,21 +286,19 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
 
     if (result != null && result.files.single.path != null) {
       final filePath = result.files.single.path!;
-      _form.control('file').value = filePath;
+      _file.text = filePath;
 
       // Auto-populate title if empty
-      if (_form.control('title').value == null ||
-          (_form.control('title').value as String).isEmpty) {
-        _form.control('title').value = p.basenameWithoutExtension(filePath);
+      if (_title.text.isEmpty) {
+        _title.text = p.basenameWithoutExtension(filePath);
       }
     }
   }
 
   Future<void> _import() async {
-    if (!_form.valid) {
-      _form.markAllAsTouched();
-      return;
-    }
+    // validate() both answers the question and paints the errors, which is
+    // what the old markAllAsTouched() call existed to do.
+    if (!(_formKey.currentState?.validate() ?? false)) return;
 
     setState(() => _isImporting = true);
 
@@ -305,8 +308,8 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
     bool importStarted = false;
 
     try {
-      final filePath = _form.control('file').value as String;
-      final title = _form.control('title').value as String;
+      final filePath = _file.text;
+      final title = _title.text;
 
       final appDataDir = MainApp.appDataDirectory.valueOrNull;
       if (appDataDir == null) throw Exception('App data directory not ready');
@@ -406,8 +409,9 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
           ),
           child: Padding(
             padding: const EdgeInsets.all(36),
-            child: ReactiveForm(
-              formGroup: _form,
+            child: Form(
+              key: _formKey,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -432,8 +436,13 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
                     ),
                   ),
                   const SizedBox(height: 28),
-                  ReactiveTextField<String>(
-                    formControlName: 'title',
+                  TextFormField(
+                    controller: _title,
+                    validator:
+                        (value) =>
+                            (value == null || value.isEmpty)
+                                ? 'Collection title is required'
+                                : null,
                     decoration: const InputDecoration(
                       labelText: 'Collection Title',
                       hintText: 'e.g., My Old Emails',
@@ -441,9 +450,14 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  ReactiveTextField<String>(
-                    formControlName: 'file',
+                  TextFormField(
+                    controller: _file,
                     readOnly: true,
+                    validator:
+                        (value) =>
+                            (value == null || value.isEmpty)
+                                ? 'Select a PST file'
+                                : null,
                     decoration: InputDecoration(
                       labelText: 'PST File Path',
                       hintText: 'No file selected',
@@ -509,20 +523,19 @@ class _YahooTabState extends State<_YahooTab> {
   String? _errorMessage;
   String? _connectedEmail;
 
-  final _form = FormGroup({
-    'email': FormControl<String>(
-      validators: [Validators.required, Validators.email],
-    ),
-    'appPassword': FormControl<String>(
-      validators: [Validators.required, Validators.minLength(16)],
-    ),
-  });
+  final _formKey = GlobalKey<FormState>();
+  final _email = TextEditingController();
+  final _appPassword = TextEditingController();
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _appPassword.dispose();
+    super.dispose();
+  }
 
   Future<void> _connectYahoo() async {
-    if (!_form.valid) {
-      _form.markAllAsTouched();
-      return;
-    }
+    if (!(_formKey.currentState?.validate() ?? false)) return;
 
     setState(() {
       _authState = _YahooAuthState.loading;
@@ -530,8 +543,8 @@ class _YahooTabState extends State<_YahooTab> {
     });
 
     try {
-      final email = _form.control('email').value as String;
-      final appPassword = _form.control('appPassword').value as String;
+      final email = _email.text;
+      final appPassword = _appPassword.text;
 
       // Create collection manually (App Password approach)
       final collectionId = const Uuid().v4();
@@ -612,7 +625,9 @@ class _YahooTabState extends State<_YahooTab> {
     return _cardContainer(
       key: const ValueKey('idle'),
       child: YahooIdleView(
-        form: _form,
+        formKey: _formKey,
+        emailController: _email,
+        appPasswordController: _appPassword,
         onConnect: _connectYahoo,
         onLaunchSecurity: _launchYahooSecurity,
       ),

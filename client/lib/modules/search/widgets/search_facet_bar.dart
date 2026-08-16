@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
 
 /// Which archive the result list is restricted to.

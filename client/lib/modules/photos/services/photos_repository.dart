@@ -643,9 +643,8 @@ class PhotosRepository {
       file.collectionId,
     ]);
     return PhotoSource(
-      collectionName: rows.isEmpty
-          ? ''
-          : ((rows.first['name'] as String?) ?? ''),
+      collectionName:
+          rows.isEmpty ? '' : ((rows.first['name'] as String?) ?? ''),
       folder: file.parent,
       leaf: file.name,
     );
@@ -661,7 +660,6 @@ class PhotosRepository {
     ]);
     return getFile(fileId);
   }
-
 
   Future<({int usedBytes, int totalBytes})> storageUsage() async {
     AppDatabase? db = DatabaseManager.instance.database;
