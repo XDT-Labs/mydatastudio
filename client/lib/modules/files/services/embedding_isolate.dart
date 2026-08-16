@@ -378,18 +378,27 @@ class EmbeddingIsolate {
     final base64Image = base64Encode(bytes);
 
     try {
-      final response = await http.post(
-        Uri.parse("$serviceUrl/util/embedding"),
-        headers: {
-          'Content-Type': 'application/json',
-          ...aiServerAuthHeaders(serviceToken),
-        },
-        body: jsonEncode({
-          'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
-          'filename': filename,
-          'image_base64': base64Image,
-        }),
-      );
+      final response = await http
+          .post(
+            Uri.parse("$serviceUrl/util/embedding"),
+            headers: {
+              'Content-Type': 'application/json',
+              ...aiServerAuthHeaders(serviceToken),
+            },
+            body: jsonEncode({
+              'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+              'filename': filename,
+              'image_base64': base64Image,
+            }),
+          )
+          // Without a deadline a wedged aiserver stops this isolate for good:
+          // there is no other timer, so the whole embedding backlog waits on
+          // one request that will never answer. Generous, because the server
+          // serialises generation behind a lock and a queued request can wait
+          // on the one in front of it; a TimeoutException lands in the catch
+          // below as unreachable, which is what it is, and the file is picked
+          // up on a later pass.
+          .timeout(const Duration(minutes: 2));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);

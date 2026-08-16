@@ -137,16 +137,6 @@ Future<RemovePhotosChoice?> showRemovePhotosDialog(
   );
 }
 
-/// Kept so existing callers that only offer hiding keep compiling.
-@Deprecated('Use showRemovePhotosDialog, which offers hide and delete')
-Future<bool?> showHidePhotosConfirmDialog(
-  BuildContext context,
-  List<File> selectedFiles,
-) async {
-  final choice = await showRemovePhotosDialog(context, selectedFiles);
-  return choice == RemovePhotosChoice.hide;
-}
-
 /// Exposed for tests: the collection lookup the dialog copy is built from.
 Collection? collectionForFile(File file) {
   final collections = GetCollectionsService.instance.sink.valueOrNull ?? [];

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:typed_data';
@@ -215,9 +216,19 @@ void _labellingPipelineTests() {
     });
 
     /// Points the registry's vision model at a cloud provider.
+    ///
+    /// The read-back matters: an UPDATE that matches no row is not an error in
+    /// SQL, so without it this test would pass identically against a registry
+    /// with no vision model at all — proving the "missing model" path rather
+    /// than the cloud one, which is a different test further down.
     Future<void> makeLabelModelCloud(String group) async {
       await db.execute('UPDATE aichat_models SET "group" = ? WHERE alias = ?',
           [group, kLabelModelAlias]);
+      final rows = await db.select(
+          'SELECT "group" FROM aichat_models WHERE alias = ?',
+          [kLabelModelAlias]);
+      expect(rows.single['group'], group,
+          reason: 'the row has to exist and say cloud for this to test cloud');
     }
 
     // The user's photos must never leave the machine for the sake of a caption.
@@ -353,6 +364,77 @@ void _labellingPipelineTests() {
       expect(byId[2]!.label, 'Swans');
     });
 
+    // A Regroup calls cancel() and then labelRun() for the new run. cancel()
+    // only sets a flag the loop reads between groups, so the old pass is still
+    // inside its HTTP call and _running is still true. The new request used to
+    // be dropped on the floor, and the new run's headers stayed "Group N"
+    // forever — the symptom that sent us looking here.
+    test('a run requested mid-pass is labelled once the pass lets go',
+        () async {
+      final first = await seedRun();
+      expect(first, isNotEmpty);
+      final firstRun = runId;
+
+      final labelled = <String>[];
+      final client = MockClient((request) async {
+        labelled.add(request.url.path);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {'message': {'content': '{"label": "Named"}'}}
+            ]
+          }),
+          200,
+        );
+      });
+
+      // Start a pass and, without awaiting it, ask for a second run the way
+      // _startLabelling does.
+      final firstPass =
+          ClusterLabelService.instance.labelRun(repo, firstRun, client: client);
+      ClusterLabelService.instance.cancel();
+      unawaited(
+        ClusterLabelService.instance.labelRun(repo, firstRun, client: client),
+      );
+
+      await firstPass;
+      // Let the queued pass run to completion.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      while (ClusterLabelService.instance.isRunning) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+
+      final groups = (await repo.loadTree(firstRun))!.allGroups;
+      expect(
+        groups.every((g) => g.labelStatus != ClusterLabelStatus.pending),
+        isTrue,
+        reason: 'the queued request has to actually run, not vanish',
+      );
+    });
+
+    // Thumbnails are generated in the background, so a group can be clustered
+    // before its own thumbnails exist. Marking it skipped would condemn it to
+    // "Group N" permanently; skipped is for answers that will never change.
+    test('a group with no thumbnails yet stays pending for a later pass',
+        () async {
+      await seedRun();
+      await db.execute('UPDATE files SET thumbnail = NULL');
+
+      var calls = 0;
+      final client = MockClient((_) async {
+        calls++;
+        return http.Response('{}', 200);
+      });
+
+      await ClusterLabelService.instance.labelRun(repo, runId, client: client);
+
+      expect(calls, 0, reason: 'there was nothing to show the model');
+      for (final g in (await repo.loadTree(runId))!.allGroups) {
+        expect(g.labelStatus, ClusterLabelStatus.pending,
+            reason: 'retriable once the thumbnails land');
+      }
+    });
+
     test('a second pass only retries what is still pending', () async {
       await seedRun();
       await repo.updateLabel(runId, 0, 'Already named', ClusterLabelStatus.ready);
@@ -456,7 +538,12 @@ void _labellingPipelineTests() {
       expect(byId[2]!.labelStatus, ClusterLabelStatus.pending);
     });
 
-    test('skips a group whose thumbnails are missing from disk', () async {
+    // Was asserted as skipped, which was wrong for the same reason as the
+    // never-generated case above: a wiped cache gets rebuilt, so the answer
+    // changes and the group deserves another pass. Skipped is reserved for
+    // answers that will never change.
+    test('a group whose thumbnails are gone from disk stays pending',
+        () async {
       await seedRun();
       // Wipe the cache: nothing to show the model.
       io.Directory(ThumbnailCache(tempDir.path).rootDir)
@@ -474,7 +561,7 @@ void _labellingPipelineTests() {
       final byId = {
         for (final g in (await repo.loadTree(runId))!.allGroups) g.nodeId: g
       };
-      expect(byId[0]!.labelStatus, ClusterLabelStatus.skipped);
+      expect(byId[0]!.labelStatus, ClusterLabelStatus.pending);
     });
   });
 }

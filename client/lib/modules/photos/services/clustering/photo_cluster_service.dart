@@ -239,9 +239,9 @@ class PhotoClusterService {
   /// Moves the slider. Pure in-memory re-cut — no query, no clustering — so
   /// this is safe to call on every drag frame.
   ///
-  /// Accepts a k beyond the tree's capacity so the thumb tracks the finger
-  /// rather than sticking; the grid keeps showing the finest cut available
-  /// until [commitGroupCount] rebuilds on release.
+  /// Clamped to what the loaded tree can actually cut, which is also the range
+  /// the slider offers — so every position on the track shows a real grouping
+  /// and no drag can ask for one that does not exist.
   void setGroupCount(int k) {
     final st = _current;
     if (st.tree == null) return;

@@ -166,6 +166,13 @@ ClusterTree buildClusterTree(
   if (rows == 0) {
     throw ArgumentError('cannot cluster an empty dataset');
   }
+  // Integer division would otherwise swallow a trailing partial row, and the
+  // vector that went missing is the one nobody would think to look for.
+  if (data.length % dim != 0) {
+    throw ArgumentError(
+      'data length ${data.length} is not a whole number of $dim-wide rows',
+    );
+  }
 
   final rng = Random(seed);
   final allRows = Int32List(rows);

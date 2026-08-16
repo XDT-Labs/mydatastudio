@@ -14,6 +14,14 @@ import 'package:mydatastudio/modules/photos/services/clustering/photo_cluster_re
 /// The model group labelling will talk to. Anything else is a cloud provider.
 const String _kLocalModelGroup = 'local';
 
+/// A labelling request that arrived while a pass was still winding down.
+class _QueuedRun {
+  const _QueuedRun(this.repo, this.runId, this.client);
+  final PhotoClusterRepository repo;
+  final String runId;
+  final http.Client? client;
+}
+
 /// Alias of the vision model used for group labels.
 ///
 /// Follows the client's own default model rather than naming one here, so
@@ -79,6 +87,7 @@ class ClusterLabelService {
 
   bool _running = false;
   bool _cancelled = false;
+  _QueuedRun? _queued;
 
   bool get isRunning => _running;
 
@@ -96,7 +105,16 @@ class ClusterLabelService {
     String runId, {
     http.Client? client,
   }) async {
-    if (_running) return;
+    if (_running) {
+      // Dropping this request is how a Regroup ended up with nothing but
+      // "Group N" headers. _startLabelling calls cancel() and then labelRun()
+      // for the new run, but cancel() only sets a flag the loop reads between
+      // groups — the old pass is still inside an HTTP call, so _running is
+      // still true and the new run went in the bin. Hold the newest request
+      // and start it when the current pass lets go.
+      _queued = _QueuedRun(repo, runId, client);
+      return;
+    }
     _running = true;
     _cancelled = false;
 
@@ -136,10 +154,14 @@ class ClusterLabelService {
 
         final images = await _loadRepresentativeImages(repo, runId, group);
         if (images.isEmpty) {
-          // No readable thumbnails — nothing to look at, and retrying next
-          // pass would fail identically until the thumbnails are generated.
-          await repo.updateLabel(
-            runId, group.nodeId, null, ClusterLabelStatus.skipped);
+          // No readable thumbnails yet. Left pending rather than skipped:
+          // thumbnails are generated in the background, so a group clustered
+          // before its own thumbnails exist would otherwise be condemned to
+          // "Group N" forever. Skipped is for answers that will never change.
+          logger.d(
+            'ClusterLabelService: no thumbnails yet for ${group.nodeId} — '
+            'leaving it for a later pass',
+          );
           continue;
         }
 
@@ -184,6 +206,14 @@ class ClusterLabelService {
     } finally {
       if (owned) httpClient.close();
       _running = false;
+
+      // Only ever one waiting request — a newer one replaces it, because an
+      // older run's labels are of no use once the user has regrouped.
+      final next = _queued;
+      _queued = null;
+      if (next != null) {
+        unawaited(labelRun(next.repo, next.runId, client: next.client));
+      }
     }
   }
 

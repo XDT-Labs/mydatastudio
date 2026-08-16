@@ -414,6 +414,21 @@ void main() {
       expect(await repo.latestReadyRun(const ClusterScope.all()), isNull);
     });
 
+    // The query used to say `status != building`, which let `stale` through.
+    // Nothing calls markStale yet, so it passed on a technicality — and would
+    // have started handing back retired runs the day something did. A method
+    // called latestReadyRun has to mean it.
+    test('latestReadyRun excludes a run that has been retired', () async {
+      final (_, stored, _) = await clusterAndSave();
+      expect((await repo.latestReadyRun(const ClusterScope.all()))?.id,
+          stored.run.id);
+
+      await repo.markStale(stored.run.id);
+
+      expect(await repo.latestReadyRun(const ClusterScope.all()), isNull,
+          reason: 'a stale run is retired, not the latest ready one');
+    });
+
     test('deleting a run cascades to its nodes and members', () async {
       final (_, stored, _) = await clusterAndSave();
       await repo.deleteRun(stored.run.id);

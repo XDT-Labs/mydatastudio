@@ -99,7 +99,11 @@ dart run tool/photo_clustering/run_prototype.dart /tmp/dump --k 8,20,40
 
 ---
 
-## 4. Still to build
+## 4. The design, as built
+
+Written before implementation and kept as the design record. Everything
+in this section has shipped — see **Build status** at the end for what
+each piece ended up covering, and section 6 for what is still open.
 
 ### 4.1 Schema
 
@@ -124,6 +128,7 @@ CREATE TABLE IF NOT EXISTS photo_cluster_nodes (
   member_count INTEGER NOT NULL,
   coherence REAL NOT NULL,
   centroid BLOB NOT NULL,         -- Float32, dim 2048
+  representatives TEXT,           -- file ids to show the labeller, JSON
   label TEXT,
   label_status TEXT NOT NULL DEFAULT 'pending',
   PRIMARY KEY (run_id, node_id)
@@ -176,7 +181,7 @@ Runs on the main isolate rather than in a worker, unlike the embedding and descr
 
 ### 4.4 UI
 
-- Add `clusters` to `PhotoViewMode` in `view_state_service.dart` (currently `{grid, list, map}`).
+- `PhotoViewMode` gains `clusters`, ordered grid, list, cluster, map.
 - The view maps onto the existing sectioned-sliver structure — group label as section header, same `SliverToBoxAdapter` approach `PhotoGrid` already uses for date headers.
 - Slider spans 1..`kClusterMaxGroups` (100). Runs are built to that depth up front rather than grown on demand: cost is only logarithmic in group count (16 groups 2.4s vs 96 groups 3.6s on 2,808 photos), so reaching 100 costs a few hundred milliseconds once and makes every slider position an instant tree walk. A run built under a lower ceiling still offers the full range and rebuilds **on release** if the user asks for a finer cut than it holds — never mid-drag, which would fire a clustering pass per frame.
 - Group headers are collapsible, with the chevron at the far right of the header. Collapse is keyed by node id, so a group stays collapsed as the slider moves; splitting it drops the collapse, since its children are groups the user has not decided about.
@@ -201,7 +206,7 @@ Three things about delete need to be understood before this is called a cleanup 
 
 **1. Delete is soft, and only touches the database.** `BatchActionService.deleteSelected` runs `UPDATE files SET is_deleted = 1` and nothing else. No file is removed from disk, no attachment is removed from any email, and no disk space is reclaimed. It hides rows from the gallery. That is a defensible default — this is an archive tool, and destroying a user's originals from a photo grid would be the wrong instinct — but the button's label should not promise more than it does. "Remove from gallery" is honest; "Delete" implies the file is gone.
 
-**2. Rescans resurrect deleted photos.** `FileRepository`'s upsert ends with `ON CONFLICT(id) DO UPDATE SET ... is_deleted = 0` ([file_repository.dart:273](../../client/lib/modules/files/services/repositories/file_repository.dart:273)). The next scan of a collection clears the flag on every row it sees. So:
+**2. Rescans resurrect deleted photos.** `FileRepository`'s upsert ends with `ON CONFLICT(id) DO UPDATE SET ... is_deleted = 0` (`file_repository.dart`, the upsert's ON CONFLICT clause). The next scan of a collection clears the flag on every row it sees. So:
 
 - PST-imported junk — the 436 images actually at issue — **stays deleted**, because PST import is a one-time isolate invoked from the UI and is explicitly not a registered scanner (`scanner_manager.dart:285`). Nothing re-runs over it.
 - Gmail, Yahoo, and Outlook IMAP attachments **come back on the next sync**. Local filesystem and Google Drive photos come back on the next scan.

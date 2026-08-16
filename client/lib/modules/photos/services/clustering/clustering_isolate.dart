@@ -26,7 +26,7 @@ class ClusteringProgress {
 /// Thrown when a run cannot be produced. Distinguished from a crash so the UI
 /// can say why — most often that nothing in scope has been embedded yet.
 class ClusteringFailure implements Exception {
-  ClusteringFailure(this.message);
+  const ClusteringFailure(this.message);
   final String message;
   @override
   String toString() => 'ClusteringFailure: $message';
@@ -80,6 +80,34 @@ class ClusteringIsolate {
     _receivePort = ReceivePort('ClusteringIsolate');
 
     _receivePort!.listen((data) async {
+      // Isolate.spawn's onError sends a two-element [error, stackTrace] list
+      // and its onExit sends null. Both arrive on this same port, and both
+      // used to fall through the `is! Map` guard — so a worker that threw or
+      // died left the completer hanging and the view spinning on "Grouping
+      // photos" with nothing ever arriving. An uncaught error in the worker is
+      // exactly when the user most needs to be told.
+      if (data is List && data.length == 2) {
+        if (!completer.isCompleted) {
+          completer.completeError(
+            ClusteringFailure('Grouping failed: ${data.first}'),
+          );
+        }
+        await stop();
+        return;
+      }
+      if (data == null) {
+        // onExit fires after a normal result too, so this only matters when
+        // nothing completed the future first.
+        if (!completer.isCompleted) {
+          completer.completeError(
+            const ClusteringFailure(
+              'Grouping stopped before it finished — the worker exited',
+            ),
+          );
+        }
+        await stop();
+        return;
+      }
       if (data is! Map) return;
       switch (data['type']) {
         case 'log':
@@ -133,7 +161,7 @@ class ClusteringIsolate {
       }
     });
 
-    _isolate = await Isolate.spawn(
+    final spawned = await Isolate.spawn(
       _isolateEntry,
       {
         'replyTo': _receivePort!.sendPort,
@@ -148,6 +176,16 @@ class ClusteringIsolate {
       onError: _receivePort!.sendPort,
       onExit: _receivePort!.sendPort,
     );
+
+    // A short run can deliver its result and call stop() before spawn even
+    // returns here. Assigning unconditionally would then park a live handle in
+    // a field the cleanup has already been past, and nothing would kill it.
+    // stop() nulls the port, so a missing port means this run is already over.
+    if (_receivePort == null) {
+      spawned.kill(priority: Isolate.immediate);
+    } else {
+      _isolate = spawned;
+    }
 
     return completer.future;
   }

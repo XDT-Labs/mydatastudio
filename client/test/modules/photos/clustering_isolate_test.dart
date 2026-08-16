@@ -230,7 +230,9 @@ void main() {
       await seed(groups: 1, perGroup: 2);
       await db.execute('DELETE FROM files_embeddings');
 
-      expect(
+      // awaited: without it the test can finish before the future rejects, and
+      // a failure to throw would go unnoticed.
+      await expectLater(
         () => ClusteringIsolate().run(
           scope: const ClusterScope.all(),
           storagePath: tempDir.path,

@@ -210,15 +210,19 @@ class PhotoClusterRepository {
 
   /// The newest usable run for [scope], or null if none has completed.
   ///
-  /// `status = building` rows are excluded: a run still being written, or one
-  /// abandoned by a crash, has an incomplete tree.
+  /// Only `ready` rows qualify. `building` is a run still being written or one
+  /// abandoned by a crash, and `stale` has been retired on purpose — asking for
+  /// the latest *ready* run and getting either back would be a lie the name
+  /// tells. This used to exclude `building` alone, which happened to behave
+  /// while nothing called [markStale] and would have started handing back
+  /// retired runs the moment something did.
   Future<ClusterRun?> latestReadyRun(ClusterScope scope) async {
     final key = scope.key;
     final rows = await db.select(
       'SELECT * FROM photo_cluster_runs '
-      'WHERE status != ? AND collection_scope IS ? '
+      'WHERE status = ? AND collection_scope IS ? '
       'ORDER BY created_at DESC LIMIT 1',
-      [ClusterRunStatus.building.name, key],
+      [ClusterRunStatus.ready.name, key],
     );
     if (rows.isEmpty) return null;
     return ClusterRun.fromMap(rows.first);
