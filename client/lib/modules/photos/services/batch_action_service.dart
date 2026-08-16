@@ -108,40 +108,53 @@ class BatchActionService {
     Set<String> fileIds, {
     SystemTrash? trash,
     FileSourceProvider Function(Collection)? providerFor,
+    PhotosRepository? repo,
   }) async {
     if (fileIds.isEmpty) return;
     final db = DatabaseManager.instance.database;
     if (db == null) return;
 
     final systemTrash = trash ?? SystemTrash();
-    final files = await _repo.filesByIds(fileIds);
+    final repository = repo ?? _repo;
+    final files = await repository.filesByIds(fileIds);
 
     await db.executeBatch(
       "UPDATE files SET is_user_deleted = 1 WHERE id = ?",
       fileIds.map((id) => [id]).toList(),
     );
 
+    // A selection is drawn from a handful of sources at most, so looking the
+    // collection up per file turns one query into one-per-photo against the
+    // single main-isolate connection, where they queue anyway. Cached by id,
+    // a hundred photos from one source cost one query. Nulls are cached too —
+    // a collection that has gone stays gone for the rest of the batch.
+    final collections = <String, Collection?>{};
+
+    // Drive files are gathered per collection rather than trashed as they come
+    // up: deleteFiles builds one authenticated client for the batch, where a
+    // call per file would re-read the token every time and, inside the refresh
+    // threshold, refresh it every time.
+    final drivePerCollection = <String, List<FileSourceFile>>{};
+
     for (final file in files) {
-      final collection = await _repo.collectionFor(file.collectionId);
+      if (!collections.containsKey(file.collectionId)) {
+        collections[file.collectionId] =
+            await repository.collectionFor(file.collectionId);
+      }
+      final collection = collections[file.collectionId];
       final scanner = collection?.scanner ?? '';
 
       if (scanner == AppConstants.scannerFileGDrive && collection != null) {
-        final provider = providerFor?.call(collection) ?? GoogleDriveProvider();
-        try {
-          // Drive's own id, not ours — it lives in the path as
-          // `gdrive://<id>`, the same way rx_files_page reads it.
-          await provider.deleteFile(
-            collection,
-            FileSourceFile(
-              id: file.path.replaceFirst('gdrive://', ''),
-              name: file.name,
-              mimeType: file.contentType,
-              isFolder: false,
-            ),
-          );
-        } catch (e) {
-          _logger.w('Could not trash Drive file ${file.name}: $e');
-        }
+        drivePerCollection.putIfAbsent(collection.id, () => []).add(
+              FileSourceFile(
+                // Drive's own id, not ours — it lives in the path as
+                // `gdrive://<id>`, the same way rx_files_page reads it.
+                id: file.path.replaceFirst('gdrive://', ''),
+                name: file.name,
+                mimeType: file.contentType,
+                isFolder: false,
+              ),
+            );
         continue;
       }
 
@@ -150,6 +163,28 @@ class BatchActionService {
       final path = file.localPath?.isNotEmpty == true ? file.localPath! : file.path;
       if (path.isNotEmpty && !path.startsWith('gdrive://')) {
         await systemTrash.moveToTrash(path);
+      }
+    }
+
+    for (final entry in drivePerCollection.entries) {
+      final collection = collections[entry.key]!;
+      final provider = providerFor?.call(collection) ?? GoogleDriveProvider();
+      try {
+        final trashed = await provider.deleteFiles(collection, entry.value);
+        if (trashed < entry.value.length) {
+          // The rows stay marked — the photos have left the app either way,
+          // and that is the documented order. But a file still sitting in
+          // Drive after the user asked for it gone is not something to pass
+          // over in silence.
+          _logger.w(
+            'Trashed $trashed of ${entry.value.length} in ${collection.name}; '
+            'the rest are still in Drive',
+          );
+        }
+      } catch (e) {
+        // deleteFiles counts its own per-file failures; reaching here means
+        // the whole batch went, which is worth one line rather than silence.
+        _logger.w('Could not trash Drive files for ${collection.name}: $e');
       }
     }
 

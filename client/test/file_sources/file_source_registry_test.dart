@@ -66,7 +66,7 @@ void main() {
 }
 
 // Minimal stub for testing registration
-class _StubProvider implements FileSourceProvider {
+class _StubProvider extends FileSourceProvider {
   @override
   String get providerKey => 'stub';
   @override

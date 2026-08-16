@@ -21,7 +21,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 /// For scanning (background enumerating of all files/folders), see
 /// [CloudFileIsolate] — that scanner re-instantiates this provider *inside*
 /// the isolate via [GoogleDriveProvider.fromTokens].
-class GoogleDriveProvider implements FileSourceProvider {
+class GoogleDriveProvider extends FileSourceProvider {
   static final AppLogger _logger = AppLogger(null);
 
   /// MIME type Google Drive uses to represent folders in its API.
@@ -149,6 +149,44 @@ class GoogleDriveProvider implements FileSourceProvider {
       _logger.e('Failed to trash Drive file "${file.name}": $e\n$stack');
       return false;
     }
+  }
+
+  /// Trashes every file in [files] against one Drive client.
+  ///
+  /// [buildApi] is the reason this exists. Called per file it re-reads the
+  /// token and builds a fresh authenticated client each time, and — the part
+  /// that bites — if the token is inside its five-minute refresh threshold,
+  /// every single file triggers its own refresh against Google's token
+  /// endpoint. A few hundred photos then means a few hundred refreshes, which
+  /// is how an OAuth client gets throttled. Built once, the batch spends one.
+  @override
+  Future<int> deleteFiles(
+    Collection collection,
+    List<FileSourceFile> files,
+  ) async {
+    if (files.isEmpty) return 0;
+
+    final drive.DriveApi api;
+    try {
+      api = await buildApi(collection);
+    } catch (e) {
+      // No client means no delete for any of them. Say so once rather than
+      // reporting the same auth failure per file.
+      _logger.e('Could not reach Drive for "${collection.name}": $e');
+      return 0;
+    }
+
+    var deleted = 0;
+    for (final file in files) {
+      try {
+        await api.files.update(drive.File()..trashed = true, file.id);
+        deleted++;
+      } catch (e) {
+        _logger.e('Failed to trash Drive file "${file.name}": $e');
+      }
+    }
+    _logger.i('Trashed $deleted of ${files.length} Drive files');
+    return deleted;
   }
 
   /// Opens [file] using its Google Drive web URL in the default browser.
