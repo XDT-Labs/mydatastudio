@@ -26,7 +26,7 @@ The app has two parts, built and shipped together:
 ### Prerequisites
 
 - macOS with Xcode (for the `flutter build macos` toolchain)
-- [Flutter](https://flutter.dev) 3.44.8 (bundles Dart 3.12)
+- [Flutter](https://flutter.dev) 3.47.0 (bundles Dart 3.13)
 - Python 3.11–3.14 with [pdm](https://pdm-project.org/) installed, for building `aiserver`
 - The [`hf`](https://huggingface.co/docs/huggingface_hub/guides/cli) CLI, for downloading GGUF models (`pip install -U "huggingface_hub[cli]"`)
 
