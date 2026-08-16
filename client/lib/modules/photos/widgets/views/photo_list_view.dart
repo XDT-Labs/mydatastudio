@@ -67,7 +67,8 @@ class _PhotoListViewState extends State<PhotoListView> {
 
   void _onSortHeaderTapped(PhotoSortOrder targetSort) {
     PhotoSortOrder newSort = targetSort;
-    if (targetSort == PhotoSortOrder.dateDesc || targetSort == PhotoSortOrder.dateAsc) {
+    if (targetSort == PhotoSortOrder.dateDesc ||
+        targetSort == PhotoSortOrder.dateAsc) {
       if (_currentFilter.sortBy == PhotoSortOrder.dateDesc) {
         newSort = PhotoSortOrder.dateAsc;
       } else {
@@ -80,7 +81,8 @@ class _PhotoListViewState extends State<PhotoListView> {
   }
 
   Widget _buildSortIndicator(PhotoSortOrder sortKey) {
-    if (sortKey == PhotoSortOrder.dateDesc || sortKey == PhotoSortOrder.dateAsc) {
+    if (sortKey == PhotoSortOrder.dateDesc ||
+        sortKey == PhotoSortOrder.dateAsc) {
       if (_currentFilter.sortBy == PhotoSortOrder.dateDesc) {
         return const Padding(
           padding: EdgeInsets.only(left: 4.0),
@@ -137,7 +139,8 @@ class _PhotoListViewState extends State<PhotoListView> {
     return LayoutBuilder(
       builder: (context, constraints) {
         const double minWidth = 850.0;
-        final double width = constraints.maxWidth < minWidth ? minWidth : constraints.maxWidth;
+        final double width =
+            constraints.maxWidth < minWidth ? minWidth : constraints.maxWidth;
 
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -156,7 +159,8 @@ class _PhotoListViewState extends State<PhotoListView> {
                       Expanded(
                         flex: 3,
                         child: InkWell(
-                          onTap: () => _onSortHeaderTapped(PhotoSortOrder.title),
+                          onTap:
+                              () => _onSortHeaderTapped(PhotoSortOrder.title),
                           child: Row(
                             children: [
                               Flexible(
@@ -175,7 +179,9 @@ class _PhotoListViewState extends State<PhotoListView> {
                       SizedBox(
                         width: 140,
                         child: InkWell(
-                          onTap: () => _onSortHeaderTapped(PhotoSortOrder.dateDesc),
+                          onTap:
+                              () =>
+                                  _onSortHeaderTapped(PhotoSortOrder.dateDesc),
                           child: Row(
                             children: [
                               Text('Date', style: headerStyle),
@@ -244,7 +250,10 @@ class _PhotoListViewState extends State<PhotoListView> {
                           if (widget.onSelectRow != null) {
                             widget.onSelectRow!(file);
                           } else {
-                            SelectionService.instance.handleCheckboxTap(file, widget.files);
+                            SelectionService.instance.handleCheckboxTap(
+                              file,
+                              widget.files,
+                            );
                           }
                         },
                         onToggleFavorite: () async {
@@ -269,9 +278,11 @@ class _PhotoListViewState extends State<PhotoListView> {
                             ViewStateService.instance.openInfo(file);
                           }
                         },
-                        onDownload: widget.onDownloadRow != null
-                            ? () => widget.onDownloadRow!(file)
-                            : () => BatchActionService.instance.downloadSingle(file),
+                        onDownload:
+                            widget.onDownloadRow != null
+                                ? () => widget.onDownloadRow!(file)
+                                : () => BatchActionService.instance
+                                    .downloadSingle(file),
                       );
                     },
                   ),
@@ -347,9 +358,12 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
     final isVideo = widget.file.contentType.startsWith('video/');
     final imageProvider = ThumbnailResolver.providerFor(widget.file.thumbnail);
 
-    final backgroundColor = widget.isSelected
-        ? colorScheme.primaryContainer.withValues(alpha: 0.15)
-        : (_isHovered ? colorScheme.surfaceContainerHigh : Colors.transparent);
+    final backgroundColor =
+        widget.isSelected
+            ? colorScheme.primaryContainer.withValues(alpha: 0.15)
+            : (_isHovered
+                ? colorScheme.surfaceContainerHigh
+                : Colors.transparent);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
@@ -362,7 +376,10 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
             color: backgroundColor,
             border: Border(
               left: BorderSide(
-                color: widget.isSelected ? colorScheme.primary : Colors.transparent,
+                color:
+                    widget.isSelected
+                        ? colorScheme.primary
+                        : Colors.transparent,
                 width: 3,
               ),
               bottom: BorderSide(
@@ -398,14 +415,19 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
                       child: SizedBox(
                         width: 40,
                         height: 40,
-                        child: imageProvider != null
-                            ? Image(
-                                image: imageProvider,
-                                fit: BoxFit.cover,
-                                errorBuilder: (ctx, err, stack) =>
-                                    _buildFallbackThumbnail(colorScheme, isVideo),
-                              )
-                            : _buildFallbackThumbnail(colorScheme, isVideo),
+                        child:
+                            imageProvider != null
+                                ? Image(
+                                  image: imageProvider,
+                                  fit: BoxFit.cover,
+                                  errorBuilder:
+                                      (ctx, err, stack) =>
+                                          _buildFallbackThumbnail(
+                                            colorScheme,
+                                            isVideo,
+                                          ),
+                                )
+                                : _buildFallbackThumbnail(colorScheme, isVideo),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -519,17 +541,22 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
                           widget.file.isFavorite
                               ? Icons.favorite
                               : Icons.favorite_border,
-                          color: widget.file.isFavorite
-                              ? colorScheme.error
-                              : colorScheme.onSurfaceVariant,
+                          color:
+                              widget.file.isFavorite
+                                  ? colorScheme.error
+                                  : colorScheme.onSurfaceVariant,
                           size: 18,
                         ),
                         onPressed: widget.onToggleFavorite,
-                        tooltip: widget.file.isFavorite
-                            ? 'Remove favorite'
-                            : 'Favorite',
+                        tooltip:
+                            widget.file.isFavorite
+                                ? 'Remove favorite'
+                                : 'Favorite',
                         padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
                       ),
                       const SizedBox(width: 2),
                       IconButton(
@@ -541,7 +568,10 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
                         onPressed: widget.onOpenInfo,
                         tooltip: 'Info Details',
                         padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
                       ),
                       const SizedBox(width: 2),
                       IconButton(
@@ -553,7 +583,10 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
                         onPressed: widget.onOpenLightbox,
                         tooltip: 'Expand',
                         padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
                       ),
                       const SizedBox(width: 2),
                       IconButton(
@@ -565,7 +598,10 @@ class _PhotoListRowTileState extends State<_PhotoListRowTile> {
                         onPressed: widget.onDownload,
                         tooltip: 'Download',
                         padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
                       ),
                     ],
                   ),

@@ -6,7 +6,6 @@ import 'package:uuid/uuid.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
-import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/repositories/user_repository.dart';
@@ -240,6 +239,92 @@ void main() {
       expect(rows, isEmpty);
     });
 
+    group('embedding attempt budget', () {
+      late DatabaseRepository dbRepo;
+      late String fileId;
+
+      setUp(() async {
+        final db = databaseManager.database!;
+        dbRepo = DatabaseRepository(db);
+        final colRepo = CollectionRepository(db);
+        final fileRepo = FileDesktopRepository(db);
+
+        final colId = const Uuid().v4();
+        await colRepo.addCollection(
+          Collection(
+            id: colId,
+            name: 'Photos',
+            path: '/photos',
+            type: 'file',
+            scanner: 'local',
+            needsReAuth: false,
+            scanStatus: 'idle',
+          ),
+        );
+
+        fileId = const Uuid().v4();
+        await fileRepo.create(
+          File(
+            id: fileId,
+            name: 'broken.jpg',
+            path: 'broken.jpg',
+            parent: '/photos',
+            dateCreated: DateTime.now(),
+            dateLastModified: DateTime.now(),
+            collectionId: colId,
+            contentType: 'image/jpeg',
+            size: 2048,
+            isDeleted: false,
+          ),
+        );
+      });
+
+      test('an image that can never decode eventually leaves the queue', () async {
+        // Without this the same file is re-selected every batch forever: the
+        // queue never drains, the aiserver decodes the same broken bytes on a
+        // loop, and the log fills with identical errors. Seven files were doing
+        // exactly this on the dev archive.
+        for (var i = 0; i < DatabaseRepository.maxEmbeddingAttempts; i++) {
+          final missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 50);
+          expect(
+            missing.any((f) => f.id == fileId),
+            isTrue,
+            reason: 'must stay eligible for attempt ${i + 1}',
+          );
+          await dbRepo.incrementEmbeddingAttempts(fileId);
+        }
+
+        final missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 50);
+        expect(missing.any((f) => f.id == fileId), isFalse);
+      });
+
+      test('a successful embedding clears the budget', () async {
+        // The eligibility query re-selects on a model_version change, so a
+        // file that once exhausted its attempts and later succeeded would be
+        // held back at the next revision bump — silently, because a stale
+        // vector is still a vector.
+        for (var i = 0; i < DatabaseRepository.maxEmbeddingAttempts; i++) {
+          await dbRepo.incrementEmbeddingAttempts(fileId);
+        }
+        await dbRepo.upsertFileEmbedding(fileId, List<double>.filled(2048, 0.5));
+
+        final rows = await databaseManager.database!.select(
+          'SELECT embedding_attempts FROM files WHERE id = ?',
+          [fileId],
+        );
+        expect(rows.first['embedding_attempts'], 0);
+
+        // Simulate the next pipeline revision invalidating stored vectors.
+        await databaseManager.database!.execute(
+          "UPDATE files_embeddings SET model_version = 'older-pipeline@1' "
+          'WHERE file_id = ?',
+          [fileId],
+        );
+        final missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 50);
+        expect(missing.any((f) => f.id == fileId), isTrue);
+      });
+    });
+
     test(
       'DatabaseRepository saveFileDescription writes description, tags, '
       'landmarks, and a description-type embedding alongside the file-type one',
@@ -435,9 +520,9 @@ void main() {
       var missing = await dbRepo.getEmailsWithMissingEmbeddings(limit: 10);
       expect(missing.any((e) => e.id == emailId), isTrue);
 
-      // Upsert embedding
+      // Write the chunk embeddings
       final embedding = List<double>.filled(2048, 0.1);
-      await dbRepo.upsertEmailEmbedding(emailId, embedding);
+      await dbRepo.replaceEmailEmbeddings(emailId, [embedding]);
 
       // Check database to ensure qwen3_vl_embedding is populated
       var rows = await db.select(
@@ -452,14 +537,101 @@ void main() {
       expect(missing.any((e) => e.id == emailId), isFalse);
 
       // Get email embedding back
-      final retrieved = await dbRepo.getEmailEmbedding(emailId);
-      expect(retrieved, isNotNull);
-      expect(retrieved!.length, equals(2048));
+      final retrieved = await dbRepo.getEmailEmbeddings(emailId);
+      expect(retrieved, hasLength(1));
+      expect(retrieved.first.length, equals(2048));
 
       // Clean up/delete email embedding
       await dbRepo.deleteEmailEmbedding(emailId);
       rows = await db.select('SELECT * FROM emails_embeddings WHERE email_id = ?', [emailId]);
       expect(rows, isEmpty);
+    });
+
+    test('a long email is queued once, not once per chunk', () async {
+      // The backfill query used to be an outer join, which emitted a copy of
+      // an email for every embedding row it owned. Under chunking that turns a
+      // batch of 100 into a handful of distinct emails re-embedded dozens of
+      // times each, and the queue stops draining.
+      final db = databaseManager.database!;
+      final dbRepo = DatabaseRepository(db);
+      final emailId = const Uuid().v4();
+
+      await db.execute(
+        '''
+        INSERT INTO emails (
+          id, collection_id, date, "from", "to", cc, subject, plain_body, is_deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+        ''',
+        [
+          emailId,
+          const Uuid().v4(),
+          DateTime.now().millisecondsSinceEpoch,
+          'sender@example.com',
+          'recipient@example.com',
+          '',
+          'Long thread',
+          'body',
+        ],
+      );
+
+      // Five chunks, all stale: a model_version nothing recognises stands in
+      // for the pre-chunking pipeline.
+      for (var i = 0; i < 5; i++) {
+        await db.execute(
+          'INSERT INTO emails_embeddings '
+          '(email_id, chunk_index, qwen3_vl_embedding, model_version) '
+          'VALUES (?, ?, ?, ?)',
+          [emailId, i, Uint8List(8192), 'older-pipeline@1'],
+        );
+      }
+
+      final missing = await dbRepo.getEmailsWithMissingEmbeddings(limit: 100);
+      expect(missing.where((e) => e.id == emailId), hasLength(1));
+    });
+
+    test('re-embedding a shortened email leaves no surplus chunks', () async {
+      // A body can shrink — an edit, or a scanner replacing a truncated
+      // snippet with the real text. Chunks 3..9 of the previous write are not
+      // orphans (their `emails` row is very much alive), so nothing else in
+      // the system would ever remove them, and every search would keep scoring
+      // superseded text.
+      final db = databaseManager.database!;
+      final dbRepo = DatabaseRepository(db);
+      final emailId = const Uuid().v4();
+
+      await db.execute(
+        '''
+        INSERT INTO emails (
+          id, collection_id, date, "from", "to", cc, subject, plain_body, is_deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+        ''',
+        [
+          emailId,
+          const Uuid().v4(),
+          DateTime.now().millisecondsSinceEpoch,
+          'sender@example.com',
+          'recipient@example.com',
+          '',
+          'Shrinking',
+          'body',
+        ],
+      );
+
+      await dbRepo.replaceEmailEmbeddings(emailId, [
+        for (var i = 0; i < 10; i++) List<double>.filled(2048, i / 10),
+      ]);
+      expect(await dbRepo.getEmailEmbeddings(emailId), hasLength(10));
+
+      await dbRepo.replaceEmailEmbeddings(emailId, [
+        for (var i = 0; i < 3; i++) List<double>.filled(2048, 0.5),
+      ]);
+
+      final rows = await db.select(
+        'SELECT chunk_index FROM emails_embeddings WHERE email_id = ? '
+        'ORDER BY chunk_index',
+        [emailId],
+      );
+      expect(rows.map((r) => r['chunk_index']), [0, 1, 2]);
     });
 
     test('embedding queue skips images embedded in an email body', () async {

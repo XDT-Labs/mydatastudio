@@ -1,9 +1,7 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/color_schemes.g.dart';
 import 'package:mydatastudio/models/tables/file.dart';
-import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/tiles/date_section_header.dart';
 import 'package:mydatastudio/modules/photos/widgets/tiles/photo_grid_tile.dart';
 import 'package:mydatastudio/modules/photos/widgets/views/photo_grid.dart';
@@ -171,8 +169,14 @@ void main() {
 
     // Trigger onSelect on tile widget
     final tileWidget = tester.widget<PhotoGridTile>(find.byType(PhotoGridTile).first);
-    tileWidget.onSelect?.call();
+    tileWidget.onSelect();
     expect(selectedFile, equals(files.first));
+
+    // Opening the lightbox is a third, distinct callback: selecting a tile
+    // must not open it, and opening it must report the tile that was opened.
+    expect(lightboxFile, isNull);
+    tileWidget.onOpenLightbox();
+    expect(lightboxFile, equals(files.first));
   });
 
   testWidgets('selected tiles show selection styling', (WidgetTester tester) async {

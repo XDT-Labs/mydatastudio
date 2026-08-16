@@ -7,9 +7,8 @@ String formatBytes(int bytes) {
   int i = (log(bytes) / log(1024)).floor();
   if (i >= suffixes.length) i = suffixes.length - 1;
   double value = bytes / pow(1024, i);
-  String formatted = value < 10 && i > 0
-      ? value.toStringAsFixed(1)
-      : value.toStringAsFixed(0);
+  String formatted =
+      value < 10 && i > 0 ? value.toStringAsFixed(1) : value.toStringAsFixed(0);
   if (formatted.endsWith('.0')) {
     formatted = formatted.substring(0, formatted.length - 2);
   }

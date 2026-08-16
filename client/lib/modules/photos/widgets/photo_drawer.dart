@@ -6,6 +6,7 @@ import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/photos/models/photo_filter.dart';
 import 'package:mydatastudio/modules/photos/models/photo_source_group.dart';
+import 'package:mydatastudio/modules/photos/models/photo_place_filter.dart';
 import 'package:mydatastudio/modules/photos/services/photos_repository.dart';
 import 'package:mydatastudio/modules/photos/services/photos_service.dart';
 import 'package:mydatastudio/modules/photos/services/view_state_service.dart';
@@ -13,6 +14,7 @@ import 'package:mydatastudio/modules/photos/services/selection_service.dart';
 import 'package:mydatastudio/modules/photos/widgets/dialogs/album_modal.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/drawer_nav_item.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/drawer_section.dart';
+import 'package:mydatastudio/modules/photos/widgets/drawer/location_search_field.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/source_group_header.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/storage_meter.dart';
 import 'package:mydatastudio/modules/photos/widgets/drawer/tag_chip.dart';
@@ -68,7 +70,8 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
   Map<String, int> _locationCounts = {};
   List<File> _photos = [];
   List<Collection> _sourceCollections = [];
-  final Set<PhotoSourceGroup> _collapsedGroups = PhotoSourceGroup.values.toSet();
+  final Set<PhotoSourceGroup> _collapsedGroups =
+      PhotoSourceGroup.values.toSet();
   List<({Album album, int count})> _albums = [];
 
   int _usedBytes = 0;
@@ -93,11 +96,10 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
         if (mounted) setState(() => _activeFilter = filter);
       });
 
-      _collectionCountsSub = PhotosService.instance.collectionPhotoCounts.listen((
-        counts,
-      ) {
-        if (mounted) setState(() => _collectionPhotoCounts = counts);
-      });
+      _collectionCountsSub = PhotosService.instance.collectionPhotoCounts
+          .listen((counts) {
+            if (mounted) setState(() => _collectionPhotoCounts = counts);
+          });
 
       _tagCountsSub = PhotosService.instance.tagCounts.listen((counts) {
         if (mounted) setState(() => _tagCounts = counts);
@@ -119,7 +121,9 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
         if (mounted) {
           setState(() {
             _sourceCollections =
-                value.where((c) => c.type == 'file' || c.type == 'email').toList()
+                value
+                    .where((c) => c.type == 'file' || c.type == 'email')
+                    .toList()
                   ..sort(
                     (a, b) =>
                         a.name.toLowerCase().compareTo(b.name.toLowerCase()),
@@ -190,16 +194,19 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
         _activeFilter.albumId != null ||
         _activeFilter.tag != null ||
         _activeFilter.location != null ||
+        _activeFilter.place != null ||
         _activeFilter.onlyFavorites;
   }
 
   void _selectSourceGroup(PhotoSourceGroup group, Set<String> ids) {
-    final isCurrent = _activeFilter.collectionId == null &&
+    final isCurrent =
+        _activeFilter.collectionId == null &&
         _activeFilter.collectionIds != null &&
         _sameIds(_activeFilter.collectionIds!.toSet(), ids);
-    final newFilter = isCurrent
-        ? const PhotoFilter()
-        : PhotoFilter(collectionIds: ids.toList());
+    final newFilter =
+        isCurrent
+            ? const PhotoFilter()
+            : PhotoFilter(collectionIds: ids.toList());
     ViewStateService.instance.setActiveNav(
       isCurrent ? 'all' : 'source_group_${group.name}',
     );
@@ -208,6 +215,29 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
     if (!isCurrent) {
       setState(() => _collapsedGroups.remove(group));
     }
+  }
+
+  /// Applies a place picked from the gazetteer, keeping the rest of the
+  /// filter — a location narrows what is already on screen rather than
+  /// replacing it, the way picking an album or a source does.
+  ///
+  /// The landmark filter is the exception, and is cleared. Both express "show
+  /// me this place", but one matches coordinates and the other a name the
+  /// image analysis wrote, so combining them asks for photos that are near
+  /// Chicago *and* tagged with some unrelated landmark — which is nothing.
+  /// Searching a city while a landmark was still selected emptied the grid.
+  void _selectPlace(PhotoPlaceFilter place) {
+    final newFilter = _activeFilter.copyWith(place: place, location: null);
+    ViewStateService.instance.setActiveNav('place_${place.label}');
+    ViewStateService.instance.updateFilter(newFilter);
+    PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
+  }
+
+  void _clearPlace() {
+    final newFilter = _activeFilter.copyWith(place: null);
+    ViewStateService.instance.setActiveNav('all');
+    ViewStateService.instance.updateFilter(newFilter);
+    PhotosService.instance.invoke(PhotosServiceCommand(newFilter));
   }
 
   void _selectCollection(Collection c) {
@@ -239,7 +269,8 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
         0,
         (sum, c) => sum + (_collectionPhotoCounts[c.id] ?? 0),
       );
-      final isGroupActive = _activeFilter.collectionId == null &&
+      final isGroupActive =
+          _activeFilter.collectionId == null &&
           _activeFilter.collectionIds != null &&
           _sameIds(_activeFilter.collectionIds!.toSet(), ids);
       final isExpanded = !_collapsedGroups.contains(group);
@@ -252,13 +283,14 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
           isActive: isGroupActive,
           isExpanded: isExpanded,
           onTap: () => _selectSourceGroup(group, ids),
-          onToggleExpand: () => setState(() {
-            if (isExpanded) {
-              _collapsedGroups.add(group);
-            } else {
-              _collapsedGroups.remove(group);
-            }
-          }),
+          onToggleExpand:
+              () => setState(() {
+                if (isExpanded) {
+                  _collapsedGroups.add(group);
+                } else {
+                  _collapsedGroups.remove(group);
+                }
+              }),
         ),
       );
 
@@ -268,19 +300,20 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
             padding: const EdgeInsets.only(left: 16.0, top: 2.0),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              children: cols.map((c) {
-                final count = _collectionPhotoCounts[c.id];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 2.0),
-                  child: DrawerNavItem(
-                    label: _collectionDisplayName(c),
-                    icon: _sourceGroupIcon(group),
-                    count: (count != null && count > 0) ? count : null,
-                    isActive: _activeFilter.collectionId == c.id,
-                    onTap: () => _selectCollection(c),
-                  ),
-                );
-              }).toList(),
+              children:
+                  cols.map((c) {
+                    final count = _collectionPhotoCounts[c.id];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 2.0),
+                      child: DrawerNavItem(
+                        label: _collectionDisplayName(c),
+                        icon: _sourceGroupIcon(group),
+                        count: (count != null && count > 0) ? count : null,
+                        isActive: _activeFilter.collectionId == c.id,
+                        onTap: () => _selectCollection(c),
+                      ),
+                    );
+                  }).toList(),
             ),
           ),
         );
@@ -423,23 +456,27 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                       title: 'Sources',
                       icon: Icons.cloud_outlined,
                       initiallyExpanded: true,
-                      child: _sourceCollections.isEmpty
-                          ? Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12.0,
-                                vertical: 6.0,
-                              ),
-                              child: Text(
-                                'No sources',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
+                      child:
+                          _sourceCollections.isEmpty
+                              ? Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12.0,
+                                  vertical: 6.0,
+                                ),
+                                child: Text(
+                                  'No sources',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              )
+                              : Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: _buildSourceGroups(
+                                  theme,
+                                  colorScheme,
                                 ),
                               ),
-                            )
-                          : Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: _buildSourceGroups(theme, colorScheme),
-                            ),
                     ),
                     const SizedBox(height: 12),
                     Divider(height: 1, color: colorScheme.outlineVariant),
@@ -605,62 +642,94 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
                     const SizedBox(height: 12),
 
                     // Section 5 — Locations
+                    //
+                    // A search box rather than a list: the landmark names this
+                    // section used to enumerate are written only when the
+                    // vision model recognises something famous, so for most
+                    // libraries it was permanently empty. The EXIF coordinates
+                    // it searches instead are already there.
                     DrawerSection(
                       title: 'Locations',
                       icon: Icons.place_outlined,
                       initiallyExpanded: false,
-                      child:
-                          _locationCounts.isEmpty
-                              ? Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12.0,
-                                  vertical: 6.0,
-                                ),
-                                child: Text(
-                                  'No locations',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              )
-                              : Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children:
-                                    _locationCounts.entries.map((entry) {
-                                      final loc = entry.key;
-                                      final count = entry.value;
-                                      final isActive =
-                                          _activeFilter.location == loc;
-                                      return Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 2.0,
-                                        ),
-                                        child: DrawerNavItem(
-                                          label: loc,
-                                          icon: Icons.location_on,
-                                          count: count > 0 ? count : null,
-                                          isActive: isActive,
-                                          onTap: () {
-                                            final newFilter =
-                                                isActive
-                                                    ? const PhotoFilter()
-                                                    : PhotoFilter(
-                                                      location: loc,
-                                                    );
-                                            ViewStateService.instance
-                                                .setActiveNav(
-                                                  isActive ? 'all' : 'loc_$loc',
-                                                );
-                                            ViewStateService.instance
-                                                .updateFilter(newFilter);
-                                            PhotosService.instance.invoke(
-                                              PhotosServiceCommand(newFilter),
-                                            );
-                                          },
-                                        ),
-                                      );
-                                    }).toList(),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          LocationSearchField(
+                            // Keyed on the active filter so choosing any other
+                            // one — an album, a source, All Photos — rebuilds
+                            // this with empty state. The place filter itself
+                            // is already dropped by those (they replace the
+                            // filter outright), but the text typed here and
+                            // the suggestions under it live in the widget and
+                            // would otherwise sit there afterwards, reading as
+                            // a location filter that refused to clear.
+                            // Typing does not change the active nav, so an
+                            // in-progress search is left alone.
+                            key: ValueKey('location-search-$_activeNav'),
+                            selected: _activeFilter.place,
+                            onSelected: _selectPlace,
+                            onCleared: _clearPlace,
+                          ),
+                          // Headed separately because the two are not variants
+                          // of one thing. Above searches coordinates and takes
+                          // a radius; below matches a name the image analysis
+                          // recognised, on photos that largely carry no
+                          // coordinates at all. Presented as one list, the
+                          // missing radius on these reads as a bug.
+                          if (_locationCounts.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                left: 12.0,
+                                bottom: 4.0,
                               ),
+                              child: Text(
+                                'Recognised in photos',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                          if (_locationCounts.isNotEmpty)
+                            ..._locationCounts.entries.map((entry) {
+                              final loc = entry.key;
+                              final count = entry.value;
+                              final isActive = _activeFilter.location == loc;
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 2.0),
+                                child: DrawerNavItem(
+                                  label: loc,
+                                  icon: Icons.location_on,
+                                  count: count > 0 ? count : null,
+                                  isActive: isActive,
+                                  onTap: () {
+                                    // Replaces the filter outright, which is
+                                    // also what drops any searched place —
+                                    // see _selectPlace for why the two cannot
+                                    // both be applied.
+                                    final newFilter = isActive
+                                        ? const PhotoFilter()
+                                        : PhotoFilter(location: loc);
+                                    ViewStateService.instance.setActiveNav(
+                                      isActive ? 'all' : 'loc_$loc',
+                                    );
+                                    ViewStateService.instance.updateFilter(
+                                      newFilter,
+                                    );
+                                    PhotosService.instance.invoke(
+                                      PhotosServiceCommand(newFilter),
+                                    );
+                                  },
+                                ),
+                              );
+                            }),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 16),
 

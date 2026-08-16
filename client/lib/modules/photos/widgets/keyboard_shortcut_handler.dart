@@ -49,7 +49,8 @@ class KeyboardShortcutHandler extends StatefulWidget {
   });
 
   @override
-  State<KeyboardShortcutHandler> createState() => _KeyboardShortcutHandlerState();
+  State<KeyboardShortcutHandler> createState() =>
+      _KeyboardShortcutHandlerState();
 }
 
 class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
@@ -90,9 +91,9 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
     final selectedIds = SelectionService.instance.selectedIds.value;
     if (selectedIds.isNotEmpty) {
       final selectedFile = files.cast<File?>().firstWhere(
-            (f) => f != null && selectedIds.contains(f.id),
-            orElse: () => null,
-          );
+        (f) => f != null && selectedIds.contains(f.id),
+        orElse: () => null,
+      );
       if (selectedFile != null) {
         ViewStateService.instance.openLightbox(selectedFile);
         return;
@@ -100,7 +101,9 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
     }
 
     if (ViewStateService.instance.infoMedia.value != null) {
-      ViewStateService.instance.openLightbox(ViewStateService.instance.infoMedia.value!);
+      ViewStateService.instance.openLightbox(
+        ViewStateService.instance.infoMedia.value!,
+      );
       return;
     }
 
@@ -176,7 +179,8 @@ class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
         LogicalKeySet(LogicalKeyboardKey.escape): const EscapeIntent(),
         LogicalKeySet(LogicalKeyboardKey.keyF): const ToggleFavoriteIntent(),
         LogicalKeySet(LogicalKeyboardKey.delete): const DeleteSelectedIntent(),
-        LogicalKeySet(LogicalKeyboardKey.backspace): const DeleteSelectedIntent(),
+        LogicalKeySet(LogicalKeyboardKey.backspace):
+            const DeleteSelectedIntent(),
         LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyA):
             const SelectAllIntent(),
         LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyA):

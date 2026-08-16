@@ -11,11 +11,13 @@ import 'package:mydatastudio/modules/files/widgets/file_drawer.dart';
 import 'package:mydatastudio/modules/photos/pages/album_detail_page.dart';
 import 'package:mydatastudio/modules/photos/pages/photos_app.dart';
 import 'package:mydatastudio/modules/photos/widgets/photo_drawer.dart';
+import 'package:mydatastudio/modules/search/pages/search_page.dart';
 import 'package:mydatastudio/modules/social/pages/facebook_page.dart';
 import 'package:mydatastudio/modules/social/pages/instagram_page.dart';
 import 'package:mydatastudio/modules/social/pages/new_social_page.dart';
 import 'package:mydatastudio/modules/social/pages/twitter_page.dart';
 import 'package:mydatastudio/modules/social/widgets/social_drawer.dart';
+import 'package:mydatastudio/pages/credits_page.dart';
 import 'package:mydatastudio/pages/home.dart';
 import 'package:mydatastudio/pages/login.dart';
 import 'package:mydatastudio/modules/aichat/pages/aichat_models_settings_page.dart';
@@ -128,6 +130,15 @@ class AppRouter {
                   ),
                 ),
               ),
+              GoRoute(
+                path: 'credits',
+                pageBuilder: (context, state) => const RoutePage(
+                  body: NavigationWrapper(
+                    body: CreditsPage(),
+                    drawer: SettingsDrawer(),
+                  ),
+                ),
+              ),
             ],
           ),
 
@@ -135,6 +146,25 @@ class AppRouter {
             path: '/',
             pageBuilder: (context, state) {
               return const RoutePage(body: NavigationWrapper(body: HomePage()));
+            },
+          ),
+
+          /// Global Search
+          ///
+          /// Deliberately not a module route with its own drawer: search reads
+          /// across every collection, so scoping it under one module's
+          /// navigation would misrepresent what it covers.
+          GoRoute(
+            path: '/search',
+            pageBuilder: (context, state) {
+              return RoutePage(
+                key: ValueKey(state.uri.queryParameters['q'] ?? ''),
+                body: NavigationWrapper(
+                  body: SearchPage(
+                    initialQuery: state.uri.queryParameters['q'] ?? '',
+                  ),
+                ),
+              );
             },
           ),
 

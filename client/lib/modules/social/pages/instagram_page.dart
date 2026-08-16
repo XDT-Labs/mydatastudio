@@ -16,8 +16,6 @@ class InstagramPage extends StatelessWidget {
     //bool isDesktop = !kIsWeb;
     //(defaultTargetPlatform == TargetPlatform.macOS) || (defaultTargetPlatform == TargetPlatform.linux) || (defaultTargetPlatform == TargetPlatform.windows);
 
-    return const Column(children: [
-      Text("Instagram Page"),
-    ]);
+    return const Column(children: [Text("Instagram Page")]);
   }
 }

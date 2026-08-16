@@ -26,15 +26,14 @@ class TagChip extends StatelessWidget {
     final formattedTag = tag.startsWith('#') ? tag : '#$tag';
     final labelText = count != null ? '$formattedTag ($count)' : formattedTag;
 
-    final backgroundColor = isActive
-        ? colorScheme.primaryContainer
-        : colorScheme.surfaceContainer;
-    final textColor = isActive
-        ? colorScheme.onPrimaryContainer
-        : colorScheme.onSurface;
-    final iconColor = isActive
-        ? colorScheme.onPrimaryContainer
-        : colorScheme.onSurfaceVariant;
+    final backgroundColor =
+        isActive ? colorScheme.primaryContainer : colorScheme.surfaceContainer;
+    final textColor =
+        isActive ? colorScheme.onPrimaryContainer : colorScheme.onSurface;
+    final iconColor =
+        isActive
+            ? colorScheme.onPrimaryContainer
+            : colorScheme.onSurfaceVariant;
 
     return Material(
       color: backgroundColor,
@@ -68,11 +67,7 @@ class TagChip extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                     child: Padding(
                       padding: const EdgeInsets.all(4.0),
-                      child: Icon(
-                        Icons.close,
-                        size: 16,
-                        color: iconColor,
-                      ),
+                      child: Icon(Icons.close, size: 16, color: iconColor),
                     ),
                   ),
                 ),

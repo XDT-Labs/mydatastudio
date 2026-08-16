@@ -17,9 +17,9 @@ import 'package:path/path.dart' as p;
 class BatchActionService {
   static final BatchActionService _instance = BatchActionService._();
   static BatchActionService get instance => _instance;
-  
+
   BatchActionService._();
-  
+
   final PhotosRepository _repo = PhotosRepository();
   final AppLogger _logger = AppLogger(null);
 
@@ -40,7 +40,10 @@ class BatchActionService {
     if (fileIds.isEmpty) return;
     if (fileIds.length == 1) {
       final allFiles = PhotosService.instance.sink.valueOrNull ?? [];
-      final target = allFiles.cast<File?>().firstWhere((f) => f?.id == fileIds.first, orElse: () => null);
+      final target = allFiles.cast<File?>().firstWhere(
+        (f) => f?.id == fileIds.first,
+        orElse: () => null,
+      );
       if (target != null) {
         await downloadSingle(target);
         return;
@@ -197,7 +200,10 @@ class BatchActionService {
     final db = DatabaseManager.instance.database;
     if (db != null) {
       final paramSets = fileIds.map((id) => [id]).toList();
-      await db.executeBatch("UPDATE files SET is_hidden = 1 WHERE id = ?", paramSets);
+      await db.executeBatch(
+        "UPDATE files SET is_hidden = 1 WHERE id = ?",
+        paramSets,
+      );
       await PhotosService.instance.refresh();
     }
     SelectionService.instance.deselectAll();
@@ -208,7 +214,10 @@ class BatchActionService {
     final db = DatabaseManager.instance.database;
     if (db != null) {
       final paramSets = fileIds.map((id) => [id]).toList();
-      await db.executeBatch("UPDATE files SET is_favorite = 1 WHERE id = ?", paramSets);
+      await db.executeBatch(
+        "UPDATE files SET is_favorite = 1 WHERE id = ?",
+        paramSets,
+      );
       await PhotosService.instance.refresh();
     }
   }

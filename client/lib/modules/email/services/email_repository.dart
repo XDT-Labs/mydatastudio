@@ -6,6 +6,32 @@ import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/modules/email/services/searchable_body.dart';
+
+/// Selects a folder id and every folder beneath it. Takes two parameters, in
+/// order: the folder id to start from, and the collection id.
+///
+/// Opening a folder shows its whole subtree because that is what the folder's
+/// own count already promises: `email_folders.messages_total` is recursive —
+/// summing it over an archive's top-level folders reproduces the archive's
+/// total exactly. A mailbox with nested folders therefore advertised a count
+/// it could not show. Outlook archives are where this bites: their trees run
+/// several levels deep, and the Inbox of a real one held 1,318 messages by
+/// that count and zero of its own, so opening it looked like the import had
+/// failed. Flat mailboxes like Gmail and Yahoo never showed it.
+///
+/// `depth` bounds the walk. A parent chain is only as trustworthy as the
+/// importer that wrote it, and a cycle would otherwise spin here forever.
+const String folderSubtreeSql = '''
+WITH RECURSIVE subtree(id, depth) AS (
+  SELECT ?, 0
+  UNION ALL
+  SELECT f.id, s.depth + 1
+  FROM email_folders f
+  JOIN subtree s ON f.parent_id = s.id
+  WHERE f.collection_id = ? AND s.depth < 32
+)
+SELECT id FROM subtree''';
 
 class EmailRepository {
   final AppDatabase database;
@@ -40,8 +66,11 @@ class EmailRepository {
       // instr(), not LIKE: Gmail label ids routinely contain '_' (Label_12),
       // which LIKE reads as "any single character" — so a folder filter could
       // match a different label differing only at that position.
-      query += "AND (folder_id = ? OR instr(',' || labels || ',', ?) > 0) ";
+      query +=
+          "AND (folder_id IN ($folderSubtreeSql)"
+          " OR instr(',' || labels || ',', ?) > 0) ";
       args.add(folderId);
+      args.add(collectionId);
       args.add(',$folderId,');
     }
 
@@ -123,9 +152,9 @@ class EmailRepository {
       for (final e in emails) {
         await tx.execute(
           "INSERT INTO emails (id, collection_id, date, [from], [to], cc, subject, snippet, "
-          "html_body, plain_body, labels, headers, folder_id, message_id, thread_id, uid, "
+          "html_body, plain_body, body_text, labels, headers, folder_id, message_id, thread_id, uid, "
           "is_read, has_attachments, is_deleted) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
           "ON CONFLICT(id) DO UPDATE SET "
           "collection_id = excluded.collection_id, "
           "date = excluded.date, "
@@ -136,6 +165,7 @@ class EmailRepository {
           "snippet = excluded.snippet, "
           "html_body = excluded.html_body, "
           "plain_body = excluded.plain_body, "
+          "body_text = excluded.body_text, "
           "labels = excluded.labels, "
           "headers = excluded.headers, "
           "folder_id = excluded.folder_id, "
@@ -156,6 +186,7 @@ class EmailRepository {
             e.snippet,
             e.htmlBody,
             e.plainBody,
+            searchableBodyText(e),
             (e.labels ?? []).join(','),
             e.headers,
             e.folderId,

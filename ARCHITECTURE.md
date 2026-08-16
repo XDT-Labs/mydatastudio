@@ -645,6 +645,84 @@ When creating a new scanner (e.g., `SocialScanner` — currently unimplemented, 
 
 ---
 
+## Search Architecture
+
+Unified search across files, photos, and email lives in `modules/search/`. It is
+**hybrid retrieval**: a lexical pass and a semantic pass run independently and
+are merged by Reciprocal Rank Fusion, then re-scored by multipliers.
+
+`SEARCH_PLAN.md` §15 ("As-built") is the detailed reference — every constant,
+its measured justification, the known limits, and a symptom-to-file table.
+What follows is the shape.
+
+```
+raw query
+  │
+  ├─ QueryParser ......... filters (type: tag: from: after: near: is:),
+  │                        modality words stripped -> preferredTypes
+  │
+  ├─ Bm25Retriever ....... files_fts + emails_fts (FTS5, implicit AND)
+  │                        one merged list, files and emails interleaved
+  │
+  ├─ VectorRetriever ..... POST /util/embedding (Qwen3-VL, 2048-d) then
+  │                        Mode A or Mode B; per-modality similarity floor
+  │
+  ├─ HybridRanker ........ RRF over 3 lists: bm25, vector_file, vector_email
+  │                        then tier x recency x modality multipliers
+  │
+  └─ SearchService ....... holds the fused list; pages *within* it
+```
+
+### Load-bearing properties
+
+These are the ones that break things quietly when violated:
+
+1. **Filters constrain, never rank.** A row failing a filter is *absent*, not
+   lower. Shared by both retrievers via `SearchFilters`. `is_inline` and
+   `is_deleted` are excluded everywhere — including inside Mode B's post-scan
+   `WHERE`, because `vector_full_scan` cannot be pre-filtered.
+
+2. **`vector_full_scan` cannot be pre-filtered.** It scores every row, then the
+   surrounding `WHERE` filters the *result*. A selective filter would leave a
+   near-empty top-N. This forces the two-mode split: **Mode A** (filters
+   present) reads the filtered blobs and computes cosine in Dart; **Mode B**
+   (no filters) lets the extension rank inside SQLite.
+
+3. **Mail and photos are fused as separate ranked lists.** Cross-modal
+   (text→image) similarity is structurally lower than same-modal (text→text) —
+   ~0.36 versus ~0.51 on the dev archive. In one list sorted by raw similarity,
+   mail displaces photos regardless of relevance. RRF consumes only ranks, so
+   splitting them lets the best photo and the best email arrive as equals.
+
+4. **Anything a retriever drops is unreachable.** `SearchService` pages within
+   the fused list, so retriever limits bound total recall, not page size.
+
+5. **Every vector records the pipeline that built it** (`model_version` /
+   `EmbeddingModel.current`). The embedding isolates rebuild anything stamped
+   otherwise, so adding the column *is* the migration. Bump
+   `EmbeddingModel.revision` whenever a change alters what a vector means —
+   cosine over two incompatible embedding spaces returns plausible numbers
+   rather than an error, so nothing downstream can detect the mistake.
+
+### Supporting pieces
+
+| File | Role |
+|---|---|
+| `services/query_parser.dart` | Deterministic parse. No model call. |
+| `services/search_filters.dart` | The one place filter SQL is built, shared by both retrievers. |
+| `services/rank_fusion.dart` | RRF, `k = 60`, 1-based ranks. |
+| `services/result_ranking.dart` | Tier, recency, modality multipliers. |
+| `services/query_embedder.dart` | Query → vector via the Python service; fails soft to lexical-only. |
+| `services/email_contact_repository.dart` | `from:` name → address, a DB lookup rather than a model call. |
+| `services/near_resolver.dart`, `place_repository.dart`, `geo.dart` | `near:` — bundled GeoNames gazetteer, bounding box then haversine. No R-Tree in this build. |
+
+Search degrades rather than fails: if the AI subprocess is down the vector pass
+returns empty and lexical search carries the query, and `near:` disables itself
+if the gazetteer asset is missing. Both fail **open**, which means a silent
+capability loss — check the logs before concluding a feature is broken.
+
+---
+
 ## Technology Stack
 
 **Frontend:**

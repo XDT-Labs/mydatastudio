@@ -45,18 +45,54 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/aiserver",
             "justMyCode": true,
-            "python": "${workspaceFolder}/aiserver/.venv/bin/python",
+            // No "python"/"pythonPath" override on purpose. Pinning the
+            // interpreter to ${workspaceFolder} breaks in a git worktree: pdm
+            // keeps one shared .venv in the main checkout, and the Python
+            // extension resolves a launch interpreter only against environments
+            // its discovery found — which skips hidden directories, so anything
+            // under .claude/worktrees/ is invisible to it. It then builds an
+            // empty command and the session dies as "Debug Stopped". Falling
+            // through to python.defaultInterpreterPath lets each window point at
+            // the one real venv. main.py adds its own directory to sys.path, so
+            // the worktree's source is what runs regardless of interpreter.
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/aiserver/src",
                 "AICHAT_PORT": "8000",
                 "APP_SUPPORT_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev",
-                // Must match PythonManager.modelsDirFor, which the packaged app
-                // passes as AICHAT_MODELS_DIR. Without it the server falls back
-                // to the legacy <support>/aichat/models, which on this machine
-                // still holds a 362 MB truncated gemma-4-12B download — so the
-                // dev server starts, fails to load the model, and every chat,
-                // description, and cluster-label request fails against a server
-                // that looks healthy.
+                // Must match PythonManager.modelsDirFor — a sibling of aiserver/,
+                // not a child. Without this the service falls back to
+                // APP_SUPPORT_DIR/aichat/models, so a debug-launched server
+                // downloads its own second copy of every multi-GB model and
+                // then disagrees with the bundled app about what is installed.
+                // The fallback is not merely a second copy: the legacy
+                // path still holds a 362 MB truncated gemma-4-12B, so the
+                // dev server starts, fails to load, and every chat,
+                // description and cluster-label request fails against a
+                // server that looks healthy.
+                "AICHAT_MODELS_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev/models"
+            }
+        },
+        {
+            "name": "aichat server (python type)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/aiserver/main.py",
+            "console": "internalConsole",
+            "cwd": "${workspaceFolder}/aiserver",
+            "justMyCode": true,
+            // No "python"/"pythonPath" override on purpose. Pinning the
+            // interpreter to ${workspaceFolder} breaks in a git worktree: pdm
+            // keeps one shared .venv in the main checkout, and the Python
+            // extension resolves a launch interpreter only against environments
+            // its discovery found — which skips hidden directories, so anything
+            // under .claude/worktrees/ is invisible to it. It then builds an
+            // empty command and the session dies as "Debug Stopped". Falling
+            // through to python.defaultInterpreterPath lets each window point at
+            // the one real venv. main.py adds its own directory to sys.path, so
+            // the worktree's source is what runs regardless of interpreter.
+            "env": {
+                "AICHAT_PORT": "8000",
+                "APP_SUPPORT_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev",
                 "AICHAT_MODELS_DIR": "${env:HOME}/Library/Application Support/com.xdtlabs.mydatastudio.dev/models"
             }
         },

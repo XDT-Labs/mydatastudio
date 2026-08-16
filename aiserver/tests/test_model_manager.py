@@ -331,6 +331,18 @@ class TestMtmdLogFilter:
         # A model that fails to encode an image still has to be able to say so.
         assert log_filter.should_emit(GGML_LOG_LEVEL_ERROR)
 
+    # develop's own reason for silencing this logger, kept as a case against
+    # the surviving implementation: mtmd echoes every tokenized text chunk at
+    # INFO with its full contents, and one document description put 62k
+    # characters of prompt into the log.
+    def test_the_prompt_echo_is_dropped(self):
+        log_filter = MtmdLogFilter(keep_chatter=False)
+
+        assert not log_filter.should_emit(GGML_LOG_LEVEL_INFO)
+        # And its continuation, which would otherwise print orphaned fragments
+        # of that same prompt.
+        assert not log_filter.should_emit(GGML_LOG_LEVEL_CONT)
+
     def test_debug_runs_keep_everything(self):
         """Someone debugging the vision path is asking for exactly these lines."""
         log_filter = MtmdLogFilter(keep_chatter=True)

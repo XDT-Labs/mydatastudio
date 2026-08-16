@@ -73,10 +73,7 @@ class LocalFilesTabView extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: onCancel,
-                    child: const Text('Cancel'),
-                  ),
+                  TextButton(onPressed: onCancel, child: const Text('Cancel')),
                   const SizedBox(width: 12),
                   ElevatedButton(
                     onPressed: onSave,

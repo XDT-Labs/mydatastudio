@@ -75,13 +75,16 @@ class _VideoFilePreviewState extends State<VideoFilePreview> {
         _logger.d('VideoFilePreview: Downloading GDrive file...');
         final bytes = await widget.onDownloadGDrive!();
         if (bytes == null || bytes.isEmpty) {
-          throw Exception('Failed to download video from Google Drive (empty response)');
+          throw Exception(
+            'Failed to download video from Google Drive (empty response)',
+          );
         }
         _logger.d('VideoFilePreview: Downloaded ${bytes.length} bytes');
         final tempDir = await getTemporaryDirectory();
-        final ext = p.extension(widget.path).isNotEmpty
-            ? p.extension(widget.path)
-            : '.mp4';
+        final ext =
+            p.extension(widget.path).isNotEmpty
+                ? p.extension(widget.path)
+                : '.mp4';
         final fileName = 'video_preview_${widget.path.hashCode}$ext';
         _tempFile = File(p.join(tempDir.path, fileName));
         await _tempFile!.writeAsBytes(bytes, flush: true);

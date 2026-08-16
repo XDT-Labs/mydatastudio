@@ -218,10 +218,9 @@ void main() {
           'With attachments',
         ],
       );
-      await DatabaseRepository(db).upsertEmailEmbedding(
-        emailId,
+      await DatabaseRepository(db).replaceEmailEmbeddings(emailId, [
         List<double>.filled(2048, 0.25),
-      );
+      ]);
 
       final (attachment, attachmentBytes, attachmentThumb) =
           await makeFileWithArtifacts(
@@ -292,10 +291,9 @@ void main() {
           'Subject',
         ],
       );
-      await DatabaseRepository(db).upsertEmailEmbedding(
-        emailId,
+      await DatabaseRepository(db).replaceEmailEmbeddings(emailId, [
         List<double>.filled(2048, 0.75),
-      );
+      ]);
 
       await CollectionRepository(db).deleteCollection(col.id);
 

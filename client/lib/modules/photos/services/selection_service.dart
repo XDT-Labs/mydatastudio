@@ -5,11 +5,14 @@ import 'package:rxdart/rxdart.dart';
 class SelectionService {
   static final SelectionService _instance = SelectionService._();
   static SelectionService get instance => _instance;
-  
+
   SelectionService._();
 
-  final BehaviorSubject<Set<String>> selectedIds = BehaviorSubject<Set<String>>.seeded({});
-  final BehaviorSubject<bool> isSelectionMode = BehaviorSubject<bool>.seeded(false);
+  final BehaviorSubject<Set<String>> selectedIds =
+      BehaviorSubject<Set<String>>.seeded({});
+  final BehaviorSubject<bool> isSelectionMode = BehaviorSubject<bool>.seeded(
+    false,
+  );
 
   String? _lastSelectedId;
   String? get lastSelectedId => _lastSelectedId;
@@ -58,7 +61,7 @@ class SelectionService {
   void selectRange(String fromId, String toId, List<File> orderedFiles) {
     final fromIndex = orderedFiles.indexWhere((f) => f.id == fromId);
     final toIndex = orderedFiles.indexWhere((f) => f.id == toId);
-    
+
     if (fromIndex == -1 || toIndex == -1) {
       selectSingle(toId);
       return;
@@ -83,7 +86,9 @@ class SelectionService {
   /// - `Shift`: Selects all files in [orderedFiles] between the last selected file and [file].
   /// - Normal click: Clears previous selection and selects [file].
   void handleTap(File file, List<File> orderedFiles) {
-    final isCmdOrCtrl = HardwareKeyboard.instance.isMetaPressed || HardwareKeyboard.instance.isControlPressed;
+    final isCmdOrCtrl =
+        HardwareKeyboard.instance.isMetaPressed ||
+        HardwareKeyboard.instance.isControlPressed;
     final isShift = HardwareKeyboard.instance.isShiftPressed;
 
     if (isShift && _lastSelectedId != null) {

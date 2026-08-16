@@ -64,9 +64,15 @@ class EmbeddingV1Request(BaseModel):
 # ── Util endpoint models (/util/*) ───────────────────────────────────────────
 
 class EmbeddingRequest(BaseModel):
-    """Multimodal embedding (text or image). Used by /util/embedding."""
-    text: Optional[str] = Field(None, description="Text content to embed")
-    image_base64: Optional[str] = Field(None, description="Base64-encoded image data")
+    """Multimodal embedding (text or images). Used by /util/embedding.
+
+    Both inputs are lists so there is exactly one request shape and one
+    response shape; a caller with a single item sends a list of one. Text is
+    embedded as a true batch in one forward pass, which is what makes bulk
+    work (an email's body chunks) affordable.
+    """
+    texts: Optional[List[str]] = Field(None, description="Text content to embed, one vector returned per entry")
+    images_base64: Optional[List[str]] = Field(None, description="Base64-encoded images, one vector returned per entry")
     model_name: str = Field(
         default=DEFAULT_LOCAL_MODEL,
         description="Hugging Face model identifier"
@@ -126,6 +132,44 @@ class ThumbnailRequest(BaseModel):
     is_raw: bool = Field(
         default=False,
         description="Decode with rawpy (camera RAW: NEF/CR2/ARW/DNG/…) instead of PIL",
+    )
+
+
+class ExtractTextRequest(BaseModel):
+    """Request to extract and chunk a document supplied as raw bytes.
+
+    Bytes rather than a path, for the same reason as ``ThumbnailRequest``: the
+    server never opens a caller-named file, so the endpoint cannot be used as a
+    local-file read oracle (AUDIT H2). It also keeps cloud-file resolution on
+    the client, where ``local_path``/``download_url`` already live
+    (SEARCH_PLAN §18i).
+
+    ``filename`` is a *hint*, not a routing decision — the server sniffs the
+    bytes, because this archive contains RTF files named ``.doc`` (§18a). The
+    hint only disambiguates what content cannot say for itself: which
+    application wrote an OLE2 container, and the text formats that have no
+    magic number.
+    """
+    file_base64: str = Field(..., description="Base64-encoded source document bytes")
+    filename: Optional[str] = Field(
+        None,
+        description="Original filename, used only as a format hint (never to open a file)",
+    )
+    chunk: bool = Field(
+        True,
+        description=(
+            "Chunk the document (the search path). False returns the markdown "
+            "itself and no chunks — how a description is sourced for formats "
+            "that are read but never chunked, such as spreadsheets (§18l)."
+        ),
+    )
+    max_chars: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Truncate returned markdown to this many characters; 0 means no "
+            "limit. Only meaningful with chunk=false."
+        ),
     )
 
 

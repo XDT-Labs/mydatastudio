@@ -386,7 +386,7 @@ class TestMultimodalEmbedding:
         with patch('aichat.routes.get_locks') as mock_locks:
             mock_locks.return_value = (AsyncMock(), AsyncMock())
             with pytest.raises(HTTPException) as exc_info:
-                await generate_embedding(EmbeddingRequest(text="A", image_base64="B"))
+                await generate_embedding(EmbeddingRequest(texts=["A"], images_base64=["B"]))
             assert exc_info.value.status_code == 400
 
     @pytest.mark.asyncio
@@ -399,15 +399,43 @@ class TestMultimodalEmbedding:
             embedding_lock = AsyncMock()
             mock_locks.return_value = (AsyncMock(), embedding_lock)
             mock_get_embed.return_value = (Mock(), Mock())
-            mock_gen_embed.return_value = [0.1, 0.2, 0.3]
+            mock_gen_embed.return_value = [[0.1, 0.2, 0.3]]
             mock_get_embed_id.return_value = "embed-model"
 
-            result = await generate_embedding(EmbeddingRequest(text="Hello world"))
+            result = await generate_embedding(EmbeddingRequest(texts=["Hello world"]))
 
-            assert result["embedding"] == [0.1, 0.2, 0.3]
+            assert result["embeddings"] == [[0.1, 0.2, 0.3]]
             assert result["input_type"] == "text"
             assert result["model_used"] == "embed-model"
             assert result["embedding_dimension"] == 3
+
+    @pytest.mark.asyncio
+    async def test_generate_embedding_batches_texts_in_one_call(self):
+        """A list of texts is one call to the model, not one call per text.
+
+        This is the whole reason the endpoint takes a list: at ~500 tokens a
+        chunk, per-call overhead costs more than the matmuls, so looping here
+        would give back exactly the throughput the batch was meant to buy.
+        """
+        with patch('aichat.routes.get_locks') as mock_locks, \
+             patch('aichat.routes.get_embedding_model') as mock_get_embed, \
+             patch('aichat.routes.gen_emb_fn') as mock_gen_embed, \
+             patch('aichat.routes.get_embedding_model_id') as mock_get_embed_id:
+
+            mock_locks.return_value = (AsyncMock(), AsyncMock())
+            mock_get_embed.return_value = (Mock(), Mock())
+            mock_gen_embed.return_value = [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+            mock_get_embed_id.return_value = "embed-model"
+
+            result = await generate_embedding(
+                EmbeddingRequest(texts=["one", "two", "three"])
+            )
+
+            assert mock_gen_embed.call_count == 1
+            assert mock_gen_embed.call_args.kwargs["texts"] == ["one", "two", "three"]
+            assert result["embeddings"] == [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+            assert result["input_count"] == 3
+            assert result["embedding_dimension"] == 2
 
     @pytest.mark.asyncio
     async def test_generate_embedding_image_llamacpp_raises(self):
@@ -422,7 +450,7 @@ class TestMultimodalEmbedding:
             mock_gen_embed.side_effect = ValueError("LlamaCpp does not support image embeddings in this implementation.")
 
             with pytest.raises(HTTPException) as exc_info:
-                await generate_embedding(EmbeddingRequest(image_base64="bad_base64"))
+                await generate_embedding(EmbeddingRequest(images_base64=["bad_base64"]))
 
             assert exc_info.value.status_code == 400
             assert "LlamaCpp does not support image embeddings" in str(exc_info.value.detail)
@@ -442,7 +470,7 @@ class TestMultimodalEmbedding:
             mock_get_embed.return_value = (None, None)
 
             with pytest.raises(HTTPException) as exc_info:
-                await generate_embedding(EmbeddingRequest(text="hi", model_name="Qwen/Qwen3-VL-Embedding-2B"))
+                await generate_embedding(EmbeddingRequest(texts=["hi"], model_name="Qwen/Qwen3-VL-Embedding-2B"))
 
             assert exc_info.value.status_code == 503
             mock_downloaded.assert_called_once()
@@ -638,7 +666,7 @@ class TestGenerateEmbedding:
 
         req = EmbeddingRequest(
             model_name="Qwen/Qwen3-VL-Embedding-2B",
-            image_base64="invalid_or_eps_base64_data",
+            images_base64=["invalid_or_eps_base64_data"],
             filename="Logo.mac"
         )
 
