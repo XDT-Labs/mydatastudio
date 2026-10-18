@@ -13,6 +13,7 @@ import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/modules/email/services/searchable_body.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/embedding_message_handler.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 import 'package:mydatastudio/services/sequential_write_queue.dart';
 
 class EmailEmbeddingIsolate {
@@ -363,7 +364,7 @@ class EmailEmbeddingIsolate {
               ...aiServerAuthHeaders(serviceToken),
             },
             body: jsonEncode({
-              'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+              'model_name': EmbeddingModel.modelName,
               'filename': null,
             }),
           )
@@ -506,8 +507,9 @@ class EmailEmbeddingIsolate {
           ...aiServerAuthHeaders(serviceToken),
         },
         body: jsonEncode({
-          'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+          'model_name': EmbeddingModel.modelName,
           'texts': texts,
+          'task': 'document',
         }),
       );
 

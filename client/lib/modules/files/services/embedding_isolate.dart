@@ -455,7 +455,7 @@ class EmbeddingIsolate {
               ...aiServerAuthHeaders(serviceToken),
             },
             body: jsonEncode({
-              'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+              'model_name': EmbeddingModel.modelName,
               'filename': null,
             }),
           )
@@ -487,6 +487,7 @@ class EmbeddingIsolate {
         body: jsonEncode({
           'model_name': EmbeddingModel.modelName,
           'texts': [text],
+          'task': 'document',
         }),
       );
       if (response.statusCode != 200) {
@@ -542,7 +543,7 @@ class EmbeddingIsolate {
               ...aiServerAuthHeaders(serviceToken),
             },
             body: jsonEncode({
-              'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+              'model_name': EmbeddingModel.modelName,
               'filename': filename,
               // A list of one: images are not batched — two photos of different
               // dimensions expand to different numbers of vision tokens — but the

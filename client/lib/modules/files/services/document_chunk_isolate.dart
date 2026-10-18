@@ -441,6 +441,7 @@ class DocumentChunkIsolate {
         body: jsonEncode({
           'model_name': EmbeddingModel.modelName,
           'texts': [text],
+          'task': 'document',
         }),
       );
       if (response.statusCode != 200) {

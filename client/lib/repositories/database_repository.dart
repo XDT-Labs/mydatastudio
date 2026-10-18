@@ -27,7 +27,7 @@ class DatabaseRepository {
   // Embedding Methods (sqlite_vector API)
   // ---------------------------------------------------------------------------
 
-  /// Upserts the Qwen3-VL embedding for [fileId] into the `files_embeddings`
+  /// Upserts the EmbeddingGemma 2 embedding for [fileId] into the `files_embeddings`
   /// table, storing values as a packed Float32 BLOB via `vector_as_f32()`.
   ///
   /// Writes only when the `files` row still exists. The embedding isolates run
@@ -59,11 +59,11 @@ class DatabaseRepository {
         final result = await tx.execute(
           '''
           INSERT INTO files_embeddings
-            (file_id, type, qwen3_vl_embedding, model_version)
+            (file_id, type, embeddinggemma2_embedding, model_version)
           SELECT ?, ?, vector_as_f32(?), ?
           WHERE EXISTS (SELECT 1 FROM files WHERE id = ?)
           ON CONFLICT(file_id, type, sequence) DO UPDATE SET
-            qwen3_vl_embedding = excluded.qwen3_vl_embedding,
+            embeddinggemma2_embedding = excluded.embeddinggemma2_embedding,
             model_version = excluded.model_version
           ''',
           [fileId, type, jsonArray, EmbeddingModel.current, fileId],
@@ -78,11 +78,11 @@ class DatabaseRepository {
         final result = await tx.execute(
           '''
           INSERT INTO files_embeddings
-            (file_id, type, qwen3_vl_embedding, model_version)
+            (file_id, type, embeddinggemma2_embedding, model_version)
           SELECT ?, ?, ?, ?
           WHERE EXISTS (SELECT 1 FROM files WHERE id = ?)
           ON CONFLICT(file_id, type, sequence) DO UPDATE SET
-            qwen3_vl_embedding = excluded.qwen3_vl_embedding,
+            embeddinggemma2_embedding = excluded.embeddinggemma2_embedding,
             model_version = excluded.model_version
           ''',
           [fileId, type, blob, EmbeddingModel.current, fileId],
@@ -172,7 +172,7 @@ class DatabaseRepository {
   /// sqlite_vector ANN index (smallest distance = most similar).
   ///
   /// Uses `vector_full_scan()` with the `vector_as_f32()` helper.
-  /// [queryEmbedding] must be 2048-dimensional.
+  /// [queryEmbedding] must be 768-dimensional (matches [EmbeddingModel.dimension]).
   ///
   /// Throws when the sqlite_vector extension is not loaded.
   Future<List<({String fileId, double distance})>> findSimilarFiles(
@@ -195,7 +195,7 @@ class DatabaseRepository {
         FROM files_embeddings AS e
         JOIN vector_full_scan(
           'files_embeddings',
-          'qwen3_vl_embedding',
+          'embeddinggemma2_embedding',
           vector_as_f32(?),
           ?
         ) AS v ON e.rowid = v.rowid
@@ -225,15 +225,15 @@ class DatabaseRepository {
     String type = 'file',
   }) async {
     final rows = await db.select(
-      'SELECT qwen3_vl_embedding FROM files_embeddings WHERE file_id = ? AND type = ? LIMIT 1',
+      'SELECT embeddinggemma2_embedding FROM files_embeddings WHERE file_id = ? AND type = ? LIMIT 1',
       [fileId, type],
     );
-    if (rows.isEmpty || rows.first['qwen3_vl_embedding'] == null) return null;
-    final blob = rows.first['qwen3_vl_embedding'] as Uint8List;
+    if (rows.isEmpty || rows.first['embeddinggemma2_embedding'] == null) return null;
+    final blob = rows.first['embeddinggemma2_embedding'] as Uint8List;
     return Float32List.view(blob.buffer).toList();
   }
 
-  /// Returns files visually similar to [queryEmbedding] using the Qwen3-VL index.
+  /// Returns files visually similar to [queryEmbedding] using the EmbeddingGemma 2 index.
   /// [excludeFileId] removes the source file from results.
   /// Similarity is (1 − L2distance/2)×100 assuming L2-normalised unit vectors.
   Future<List<({File file, double similarity})>> findSimilarImages(
@@ -258,7 +258,7 @@ class DatabaseRepository {
       JOIN files AS f ON f.id = e.file_id
       JOIN vector_full_scan(
         'files_embeddings',
-        'qwen3_vl_embedding',
+        'embeddinggemma2_embedding',
         vector_as_f32(?),
         ?
       ) AS v ON e.rowid = v.rowid
@@ -308,7 +308,7 @@ class DatabaseRepository {
         ON fe.file_id = f.id AND fe.type = 'file'
       INNER JOIN collections c ON c.id = f.collection_id
       WHERE (fe.file_id IS NULL
-             OR fe.qwen3_vl_embedding IS NULL
+             OR fe.embeddinggemma2_embedding IS NULL
              OR IFNULL(fe.model_version, '') <> ?)
         AND (f.content_type = 'application/image' OR f.content_type LIKE 'image/%')
         AND f.is_deleted = 0
@@ -668,10 +668,10 @@ class DatabaseRepository {
           await tx.execute(
             '''
             INSERT INTO files_embeddings
-              (file_id, type, qwen3_vl_embedding, model_version)
+              (file_id, type, embeddinggemma2_embedding, model_version)
             VALUES (?, 'description', vector_as_f32(?), ?)
             ON CONFLICT(file_id, type, sequence) DO UPDATE SET
-              qwen3_vl_embedding = excluded.qwen3_vl_embedding,
+              embeddinggemma2_embedding = excluded.embeddinggemma2_embedding,
               model_version = excluded.model_version
             ''',
             [fileId, jsonArray, EmbeddingModel.current],
@@ -682,10 +682,10 @@ class DatabaseRepository {
           await tx.execute(
             '''
             INSERT INTO files_embeddings
-              (file_id, type, qwen3_vl_embedding, model_version)
+              (file_id, type, embeddinggemma2_embedding, model_version)
             VALUES (?, 'description', ?, ?)
             ON CONFLICT(file_id, type, sequence) DO UPDATE SET
-              qwen3_vl_embedding = excluded.qwen3_vl_embedding,
+              embeddinggemma2_embedding = excluded.embeddinggemma2_embedding,
               model_version = excluded.model_version
             ''',
             [fileId, blob, EmbeddingModel.current],
@@ -791,7 +791,7 @@ class DatabaseRepository {
           final result = await tx.execute(
             '''
             INSERT INTO emails_embeddings
-              (email_id, chunk_index, qwen3_vl_embedding, model_version)
+              (email_id, chunk_index, embeddinggemma2_embedding, model_version)
             VALUES (?, ?, vector_as_f32(?), ?)
             ''',
             [
@@ -808,7 +808,7 @@ class DatabaseRepository {
           final result = await tx.execute(
             '''
             INSERT INTO emails_embeddings
-              (email_id, chunk_index, qwen3_vl_embedding, model_version)
+              (email_id, chunk_index, embeddinggemma2_embedding, model_version)
             VALUES (?, ?, ?, ?)
             ''',
             [emailId, index, blob, EmbeddingModel.current],
@@ -913,7 +913,7 @@ class DatabaseRepository {
           await tx.execute(
             '''
             INSERT INTO files_embeddings
-              (file_id, type, sequence, qwen3_vl_embedding, model_version)
+              (file_id, type, sequence, embeddinggemma2_embedding, model_version)
             VALUES (?, 'chunk', ?, vector_as_f32(?), ?)
             ''',
             [
@@ -929,7 +929,7 @@ class DatabaseRepository {
           await tx.execute(
             '''
             INSERT INTO files_embeddings
-              (file_id, type, sequence, qwen3_vl_embedding, model_version)
+              (file_id, type, sequence, embeddinggemma2_embedding, model_version)
             VALUES (?, 'chunk', ?, ?, ?)
             ''',
             [fileId, sequence, blob, EmbeddingModel.current],
@@ -963,17 +963,17 @@ class DatabaseRepository {
     logger.d('deleteEmailEmbedding: emailId=$emailId');
   }
 
-  /// Fetches the Qwen3-VL chunk embeddings for [emailId], in chunk order.
+  /// Fetches the EmbeddingGemma 2 chunk embeddings for [emailId], in chunk order.
   /// Returns an empty list if the email has no embedding.
   Future<List<List<double>>> getEmailEmbeddings(String emailId) async {
     final rows = await db.select(
-      'SELECT qwen3_vl_embedding FROM emails_embeddings '
+      'SELECT embeddinggemma2_embedding FROM emails_embeddings '
       'WHERE email_id = ? ORDER BY chunk_index',
       [emailId],
     );
     return [
       for (final row in rows)
-        if (row['qwen3_vl_embedding'] case final Uint8List blob)
+        if (row['embeddinggemma2_embedding'] case final Uint8List blob)
           Float32List.view(
             blob.buffer,
             blob.offsetInBytes,
@@ -1012,7 +1012,7 @@ class DatabaseRepository {
       WHERE NOT EXISTS (
               SELECT 1 FROM emails_embeddings ee
               WHERE ee.email_id = e.id
-                AND ee.qwen3_vl_embedding IS NOT NULL
+                AND ee.embeddinggemma2_embedding IS NOT NULL
                 AND IFNULL(ee.model_version, '') = ?
             )
         AND e.is_deleted = 0

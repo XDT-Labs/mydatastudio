@@ -16,6 +16,7 @@ import 'package:mydatastudio/modules/files/services/repositories/folder_reposito
 
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -221,17 +222,17 @@ void main() {
         equals('/photos/test_img.png'),
       );
 
-      // Upsert a 2048-dimension embedding (Qwen3-VL)
-      final embedding = List<double>.filled(2048, 0.5);
+      // Upsert a 768-dimension embedding (EmbeddingGemma 2)
+      final embedding = List<double>.filled(EmbeddingModel.dimension, 0.5);
       await dbRepo.upsertFileEmbedding(fileId, embedding);
 
-      // Check database to ensure qwen3_vl_embedding is populated
+      // Check database to ensure embeddinggemma2_embedding is populated
       var rows = await db.select(
-        'SELECT qwen3_vl_embedding FROM files_embeddings WHERE file_id = ?',
+        'SELECT embeddinggemma2_embedding FROM files_embeddings WHERE file_id = ?',
         [fileId],
       );
       expect(rows, isNotEmpty);
-      expect(rows.first['qwen3_vl_embedding'], isNotNull);
+      expect(rows.first['embeddinggemma2_embedding'], isNotNull);
 
       // Now the embedding is present, so getFilesWithMissingEmbeddings should NOT return it
       missing = await dbRepo.getFilesWithMissingEmbeddings(limit: 10);
@@ -320,7 +321,7 @@ void main() {
         }
         await dbRepo.upsertFileEmbedding(
           fileId,
-          List<double>.filled(2048, 0.5),
+          List<double>.filled(EmbeddingModel.dimension, 0.5),
         );
 
         final rows = await databaseManager.database!.select(
@@ -388,10 +389,10 @@ void main() {
 
         // The file also has a 'file'-type image embedding already, as it
         // would once the embedding isolate reaches it first.
-        final fileEmbedding = List<double>.filled(2048, 0.25);
+        final fileEmbedding = List<double>.filled(EmbeddingModel.dimension, 0.25);
         await dbRepo.upsertFileEmbedding(fileId, fileEmbedding);
 
-        final descriptionEmbedding = List<double>.filled(2048, 0.75);
+        final descriptionEmbedding = List<double>.filled(EmbeddingModel.dimension, 0.75);
         await dbRepo.saveFileDescription(
           fileId,
           description: 'The Eiffel Tower at sunset with a clear sky.',
@@ -486,7 +487,7 @@ void main() {
           description: 'The Eiffel Tower at sunset.',
           tags: const ['sunset', 'landmark'],
           landmarks: const ['Eiffel Tower'],
-          embedding: List<double>.filled(2048, 0.5),
+          embedding: List<double>.filled(EmbeddingModel.dimension, 0.5),
         );
 
         expect(await dbRepo.getFileTags(fileId), ['landmark', 'sunset']);
@@ -535,16 +536,16 @@ void main() {
       expect(missing.any((e) => e.id == emailId), isTrue);
 
       // Write the chunk embeddings
-      final embedding = List<double>.filled(2048, 0.1);
+      final embedding = List<double>.filled(EmbeddingModel.dimension, 0.1);
       await dbRepo.replaceEmailEmbeddings(emailId, [embedding]);
 
-      // Check database to ensure qwen3_vl_embedding is populated
+      // Check database to ensure embeddinggemma2_embedding is populated
       var rows = await db.select(
-        'SELECT qwen3_vl_embedding FROM emails_embeddings WHERE email_id = ?',
+        'SELECT embeddinggemma2_embedding FROM emails_embeddings WHERE email_id = ?',
         [emailId],
       );
       expect(rows, isNotEmpty);
-      expect(rows.first['qwen3_vl_embedding'], isNotNull);
+      expect(rows.first['embeddinggemma2_embedding'], isNotNull);
 
       // Now the embedding is present, so getEmailsWithMissingEmbeddings should NOT return it
       missing = await dbRepo.getEmailsWithMissingEmbeddings(limit: 10);
@@ -553,7 +554,7 @@ void main() {
       // Get email embedding back
       final retrieved = await dbRepo.getEmailEmbeddings(emailId);
       expect(retrieved, hasLength(1));
-      expect(retrieved.first.length, equals(2048));
+      expect(retrieved.first.length, equals(EmbeddingModel.dimension));
 
       // Clean up/delete email embedding
       await dbRepo.deleteEmailEmbedding(emailId);
@@ -596,9 +597,9 @@ void main() {
       for (var i = 0; i < 5; i++) {
         await db.execute(
           'INSERT INTO emails_embeddings '
-          '(email_id, chunk_index, qwen3_vl_embedding, model_version) '
+          '(email_id, chunk_index, embeddinggemma2_embedding, model_version) '
           'VALUES (?, ?, ?, ?)',
-          [emailId, i, Uint8List(8192), 'older-pipeline@1'],
+          [emailId, i, Uint8List(EmbeddingModel.dimension * 4), 'older-pipeline@1'],
         );
       }
 
@@ -635,12 +636,12 @@ void main() {
       );
 
       await dbRepo.replaceEmailEmbeddings(emailId, [
-        for (var i = 0; i < 10; i++) List<double>.filled(2048, i / 10),
+        for (var i = 0; i < 10; i++) List<double>.filled(EmbeddingModel.dimension, i / 10),
       ]);
       expect(await dbRepo.getEmailEmbeddings(emailId), hasLength(10));
 
       await dbRepo.replaceEmailEmbeddings(emailId, [
-        for (var i = 0; i < 3; i++) List<double>.filled(2048, 0.5),
+        for (var i = 0; i < 3; i++) List<double>.filled(EmbeddingModel.dimension, 0.5),
       ]);
 
       final rows = await db.select(

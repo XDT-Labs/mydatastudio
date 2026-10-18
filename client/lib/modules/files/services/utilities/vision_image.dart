@@ -12,19 +12,19 @@ import 'package:path/path.dart' as p;
 /// model — by decoding it to JPEG and bounding its resolution.
 ///
 /// **The resolution bound is the point, but not for the reason it first
-/// appears.** Qwen-VL's own processor already caps input at `max_pixels`
-/// (1,310,720 — about 1.3 MP), so a 20 MP photo was never costing the vision
-/// tower 20 MP of work; it was being downsampled on arrival. What full-size
-/// bytes actually cost is everything *before* that: base64-encoding a 12 MB
-/// JPEG, pushing it through a JSON body, and decoding it again.
+/// appears.** EmbeddingGemma 2 encodes an image at a fixed default budget of
+/// 280 vision tokens, so the full-resolution bytes still buy nothing; they
+/// were being downsampled on arrival. What full-size bytes actually cost is
+/// everything *before* that: base64-encoding a 12 MB JPEG, pushing it through
+/// a JSON body, and decoding it again.
 ///
 /// Measured on this archive, six real photos: 10.9 s each at full size versus
 /// 3.8 s bounded — 2.9x — and the payload fell from 47,964 KB to 912 KB, a 53x
 /// reduction in what crosses the HTTP boundary. Across a 2,373-image library
 /// that is roughly 7.2 hours against 2.5.
 ///
-/// [maxEdge] sits just under the processor's own ceiling rather than above it,
-/// so the bound throws away detail the model would have discarded anyway.
+/// [maxEdge] bounds image dimensions so transport costs remain small without
+/// losing detail the model's token budget would preserve.
 ///
 /// RAW and HEIC additionally *have* to be converted: llama.cpp's image loader
 /// only handles what Pillow's default opener understands and fails outright on

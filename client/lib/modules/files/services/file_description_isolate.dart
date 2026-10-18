@@ -16,6 +16,7 @@ import 'package:mydatastudio/modules/files/services/utilities/vision_image.dart'
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 import 'package:mydatastudio/services/file_description_message_handler.dart';
 import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
@@ -790,8 +791,9 @@ class FileDescriptionIsolate {
               ...aiServerAuthHeaders(serviceToken),
             },
             body: jsonEncode({
-              'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+              'model_name': EmbeddingModel.modelName,
               'texts': [text],
+              'task': 'document',
             }),
           )
           .timeout(const Duration(seconds: 60));

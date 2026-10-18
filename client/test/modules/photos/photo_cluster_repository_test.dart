@@ -211,13 +211,31 @@ void main() {
       final vector = Float32List(dim);
       vector[0] = 1.0;
       await db.execute(
-        'INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding) '
+        'INSERT INTO files_embeddings (file_id, type, embeddinggemma2_embedding) '
         'VALUES (?, ?, ?)',
         [fileId, type, vector.buffer.asUint8List()],
       );
     }
 
     group('loadEmbeddingsForScope', () {
+      test(
+        'skips legacy 2048-d embedding and loads valid 768-d embedding',
+        () async {
+          final seeded = await seedPhotos(2);
+          final legacyId = seeded.$2[0];
+          final currentId = seeded.$2[1];
+
+          // Write a 2048-d legacy vector for photo 1 and a 768-d vector for photo 2
+          await seedEmbedding(legacyId, dim: 2048);
+          await seedEmbedding(currentId, dim: kClusterEmbeddingDim);
+
+          final loaded =
+              await repo.loadEmbeddingsForScope(const ClusterScope.all());
+          expect(loaded.fileIds, [currentId]);
+          expect(loaded.vectors.length, 1 * kClusterEmbeddingDim);
+        },
+      );
+
       test('returns one row per embedded image, packed contiguously', () async {
         final seeded = await seedPhotos(3);
         for (final id in seeded.$2) {

@@ -14,6 +14,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/embedding_message_handler.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -67,8 +68,8 @@ void main() {
       'id': 'f1',
       'chunks': [chunkMap(0, 'first passage', page: 4), chunkMap(1, 'second')],
       'embeddings': [
-        List<double>.filled(2048, 0.1),
-        List<double>.filled(2048, 0.2),
+        List<double>.filled(EmbeddingModel.dimension, 0.1),
+        List<double>.filled(EmbeddingModel.dimension, 0.2),
       ],
     }, logger);
 
@@ -118,7 +119,7 @@ void main() {
       'table': 'file_chunks',
       'id': 'f1',
       'chunks': [chunkMap(0, 'a'), chunkMap(1, 'b'), chunkMap(2, 'c')],
-      'embeddings': [List<double>.filled(2048, 0.1)],
+      'embeddings': [List<double>.filled(EmbeddingModel.dimension, 0.1)],
     }, logger);
 
     final chunks = await db.rawDb.select(

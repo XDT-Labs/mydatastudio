@@ -120,7 +120,7 @@ def _repo_folder(path):
 
 class TestStreamDownloadSnapshot:
     """Covers the multi-file repo download path used for Transformers models
-    like Qwen3-VL-Embedding-2B, which can't be fetched as a single GGUF file."""
+    like google/embeddinggemma-2, which can't be fetched as a single GGUF file."""
 
     def test_skips_download_when_all_files_already_present_with_matching_size(self, tmp_path):
         (tmp_path / "config.json").write_text("{}")  # 2 bytes
