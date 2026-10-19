@@ -1,4 +1,4 @@
-"""Document → markdown → chunks, for search Phase 7 (SEARCH_PLAN §18).
+"""Document → markdown → chunks, for search Phase 7 (docs/plans/unified-search.md §18).
 
 Extraction runs through ``docling-rs``, the Rust port of IBM's docling. Three
 things about it are non-obvious enough that the code would look arbitrary

@@ -142,7 +142,7 @@ class ExtractTextRequest(BaseModel):
     server never opens a caller-named file, so the endpoint cannot be used as a
     local-file read oracle (AUDIT H2). It also keeps cloud-file resolution on
     the client, where ``local_path``/``download_url`` already live
-    (SEARCH_PLAN §18i).
+    (docs/plans/unified-search.md §18i).
 
     ``filename`` is a *hint*, not a routing decision — the server sniffs the
     bytes, because this archive contains RTF files named ``.doc`` (§18a). The

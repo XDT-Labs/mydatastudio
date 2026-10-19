@@ -1,3 +1,9 @@
+---
+status: in-progress
+adr: none
+remaining: [verify-real-library, phase-5, C3]
+---
+
 # Plan: Cluster photos by similarity, label groups with AI
 
 **Status:** phases 1–4 built and tested — clustering core, persistence, cluster view with slider, and AI group labels. Not yet exercised against the real library in the running app. Remaining: phase 5 (incremental assignment and regroup) and the cleanup track's undo step (C3).

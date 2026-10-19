@@ -29,7 +29,7 @@ class ReleaseUpdate {
 /// Checks the project's GitHub releases for a newer version and reports it, so
 /// the user can download the new DMG themselves. It never downloads or
 /// installs anything — replacing the running `.app` in place is Sparkle's job
-/// and is tracked separately in TODO.md.
+/// and is tracked separately in docs/plans/sparkle-auto-update.md.
 ///
 /// Every failure path returns null: an update check is a convenience, and a
 /// rate limit or a flaky network must never interrupt startup or produce a

@@ -9,7 +9,7 @@ import FlutterMacOS
 ///
 /// The channel name is shared with `lib/modules/files/services/utilities/system_trash.dart`.
 /// A platform without this channel gets a `MissingPluginException` there, which
-/// is handled by leaving the file alone rather than deleting it — see TODO.md
+/// is handled by leaving the file alone rather than deleting it — see docs/plans/windows-recycle-bin.md
 /// for the Windows Recycle Bin equivalent.
 enum SystemTrashChannel {
   static let name = "mydatastudio/system_trash"

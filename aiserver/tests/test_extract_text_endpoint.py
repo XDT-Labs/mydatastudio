@@ -8,7 +8,7 @@ upgrade would break silently.
 Only formats that need no model download are used here (txt/csv/rtf), so the
 suite stays runnable on a machine that has never fetched docling's 2 GB pack.
 PDF is deliberately absent: it additionally needs a vendored macOS pdfium
-(SEARCH_PLAN §18d-1) and belongs with the step-5 work.
+(docs/plans/unified-search.md §18d-1) and belongs with the step-5 work.
 """
 import base64
 

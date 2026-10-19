@@ -651,7 +651,7 @@ Unified search across files, photos, and email lives in `modules/search/`. It is
 **hybrid retrieval**: a lexical pass and a semantic pass run independently and
 are merged by Reciprocal Rank Fusion, then re-scored by multipliers.
 
-`SEARCH_PLAN.md` §15 ("As-built") is the detailed reference — every constant,
+`docs/plans/unified-search.md` §15 ("As-built") is the detailed reference — every constant,
 its measured justification, the known limits, and a symptom-to-file table.
 What follows is the shape.
 
