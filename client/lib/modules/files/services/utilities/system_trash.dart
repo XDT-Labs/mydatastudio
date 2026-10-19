@@ -6,7 +6,7 @@ import 'package:mydatastudio/app_logger.dart';
 /// Dart has no cross-platform API for this and `io.File.delete()` is a
 /// permanent unlink, so the actual move happens in native code behind a method
 /// channel. macOS is implemented (`NSFileManager.trashItem`); Windows and Linux
-/// are not — see TODO.md.
+/// are not — see docs/plans/windows-recycle-bin.md.
 ///
 /// On a platform with no implementation this returns false and **leaves the
 /// file alone**. It deliberately does not fall back to deleting: the user was

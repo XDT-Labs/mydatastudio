@@ -1,3 +1,9 @@
+---
+status: in-progress
+adr: none
+remaining: [confirm-timeline-view, confirm-trip-playback, integration-tests]
+---
+
 # Photos Module — Flutter Migration Plan
 
 > **Source:** React "Lumina Gallery" app (`/Users/mikenimer/Development/github/aistudio/photo-gallery/`)
@@ -789,7 +795,7 @@ Verify all new widgets use **only** the app's theme tokens:
 
 ### Task 13.2 — Glassmorphism (Stretch Goal)
 
-Per the existing `TODO.md`, extract the glass treatment into a reusable `GlassPanel` widget and apply it to:
+Per `docs/plans/glassmorphism-elevation.md`, extract the glass treatment into a reusable `GlassPanel` widget and apply it to:
 - Info sidebar background
 - Filter dropdown overlay
 - Lightbox top/bottom bars

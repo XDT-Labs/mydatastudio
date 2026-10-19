@@ -1,3 +1,9 @@
+---
+status: in-progress
+adr: none
+remaining: [phase-7-document-extraction]
+---
+
 # Unified Search — Implementation Plan
 
 Status: **Phases 1–6 implemented, plus §13 field autocomplete.** Phase 1 — query parser, address parser, FTS5 indexes + triggers + backfill, `emails_contacts` index, and **§2b person resolution** (`emails from mike nimer` → the same hard sender filter as `from:`; `with`/`between` → `participant:`, which matches sender, recipients and copies). Phase 2 — BM25 retriever, search service, search page wired to the global app-bar field. Phase 3 — `places` gazetteer + haversine `near:`, vector retriever (Mode A/B), RRF fusion, tier and recency multipliers. Phase 5 — `ResultSetSummarizer`: map-reduce over the whole filtered set, a coverage claim that never says "all" unless it read all of it, and the handoff into `aichat`. Phase 6 — email chunking, per §16. Phase 4 — `QueryPlanner`: one constrained-JSON call for modality intent, off the critical path, failing open to the order the search already produced (§17). §13 — `field:` value autocomplete over contacts, tags, landmarks, collections and the fixed vocabularies, per §13f. **Phase 7 is designed but unbuilt — §18. Its gating spike has been run and passed (§18a-1, §18a-2, §18d-1):** the `docling-rs` sdist builds on macOS, PDFs convert with full page provenance once a macOS `libpdfium.dylib` is vendored, and ~71% of the archive's non-PDF documents parse. Three constants changed — a 300k-character chunking gate, `HybridChunker` over `HierarchicalChunker`, and provenance by ref-resolution.
@@ -24,11 +30,11 @@ Before designing anything, here is the ground truth I found. Everything below is
 | AI image descriptions + tags + landmarks | **Working** | `files.description`, `file_tags`, `file_landmarks`, written by `FileDescriptionIsolate` |
 | Description-text embeddings | **Working** | `files_embeddings` rows with `type='description'` |
 | Email embeddings | **Working, but whole-email** | `emails_embeddings`, one vector per message |
-| Vector KNN | **Working, brute force** | `vector_full_scan()` — [database_repository.dart:121](client/lib/repositories/database_repository.dart:121) |
+| Vector KNN | **Working, brute force** | `vector_full_scan()` — [database_repository.dart:121](../../client/lib/repositories/database_repository.dart:121) |
 | Photo lat/long | **Present** | `files.latitude` / `files.longitude` |
 | FTS5 / `bm25()` | **Available, unused** | Compiled into resqlite's bundled SQLite (`resqlite` README, "Built in \| FTS5") |
 | Vector quantization (`vector_quantize_scan`) | **Available, unused** | Present in the bundled `vector_*.dylib` |
-| A global search box | **Present but dead** | [adaptive_app_bar.dart:44](client/lib/widgets/adaptive_app_bar.dart:44) — a `TextField` with no handler |
+| A global search box | **Present but dead** | [adaptive_app_bar.dart:44](../../client/lib/widgets/adaptive_app_bar.dart:44) — a `TextField` with no handler |
 | PDF / document text chunks | **Does not exist** | No table, no extractor, no isolate. `type='chunk'` is only anticipated in a comment |
 | Any cross-module search | **Does not exist** | Photos has `searchQuery` → four `LIKE '%…%'` clauses; that's it |
 
@@ -337,7 +343,7 @@ The real cost of (b) is the one this section already named — a photo query pay
 
 Two factual notes: (b) alters a table holding live rows — 5,576 today (2,808 `file`, 2,768 `description`) — so it needs the rebuild `_migrateFilesEmbeddingsKey` already performs, though `sequence INTEGER NOT NULL DEFAULT 0` keeps `upsertFileEmbedding` and `saveFileDescription` working untouched. And the two traps from §16d apply verbatim to chunks: the backfill queue must not be an outer join over the embedding table, and a write must *replace* an item's chunk set rather than upsert into it.
 
-*(Either way, this is the "silently overwrite" failure the existing `_migrateFilesEmbeddingsKey` comment at [database_manager.dart:660](client/lib/database_manager.dart:660) already warns about — worth not repeating.)*
+*(Either way, this is the "silently overwrite" failure the existing `_migrateFilesEmbeddingsKey` comment at [database_manager.dart:660](../../client/lib/database_manager.dart:660) already warns about — worth not repeating.)*
 
 ---
 
@@ -401,13 +407,13 @@ Item 1 is built; items 2–4 do not exist yet. Ordered by value-per-unit-effort:
 
 1. **Email chunking — evaluated, adopted and shipped. See §16 for the measurement and §16d for what it took.**
 
-   One vector currently represents an entire message, including a 40-message quoted thread ([email_embedding_isolate.dart:123](client/lib/modules/email/services/email_embedding_isolate.dart:123)). This was flagged as a *predicted* dilution risk, deliberately not acted on until measured: chunking means re-embedding every message, and that cost should be paid against evidence.
+   One vector currently represents an entire message, including a 40-message quoted thread ([email_embedding_isolate.dart:123](../../client/lib/modules/email/services/email_embedding_isolate.dart:123)). This was flagged as a *predicted* dilution risk, deliberately not acted on until measured: chunking means re-embedding every message, and that cost should be paid against evidence.
 
    **The evaluation ran on 2026-08-11 (§16). Chunking wins, and Phase 6 is no longer conditional.** Against the shipping single-vector approach, chunking improves overall MRR by +0.081 (95% CI [+0.047, +0.117]) on a 235-probe known-item benchmark, with the gain concentrated exactly where it was predicted — +0.119 on text buried late in a quoted chain. It is also the only variant tested that improves on the status quo at all; both truncation strategies score *worse* overall.
 
    The original stopping rule was "if neither signal shows up, single-vector is fine and Phase 6 drops entirely." Signal 1 showed up and is the whole result. Signal 2 (a general skew toward short emails) was not tested directly and did not need to be.
 
-   One correction to the reasoning above, worth keeping because it inverted the cost argument: chunking was assumed to be *more* expensive. It is cheaper on this corpus. Nothing truncates before the model ([model_manager.py:305](aiserver/src/aichat/model_manager.py:305) passes no `max_length`), so attention runs quadratic over the full body — a 60k-character email costs 145s whole and 75s chunked. Chunking is roughly 2× cheaper across the corpus; see §16c for why the absolute hour figures there are not to be quoted.
+   One correction to the reasoning above, worth keeping because it inverted the cost argument: chunking was assumed to be *more* expensive. It is cheaper on this corpus. Nothing truncates before the model ([model_manager.py:305](../../aiserver/src/aichat/model_manager.py:305) passes no `max_length`), so attention runs quadratic over the full body — a 60k-character email costs 145s whole and 75s chunked. Chunking is roughly 2× cheaper across the corpus; see §16c for why the absolute hour figures there are not to be quoted.
 2. **Text extraction** for PDF/DOCX/TXT. Belongs in `aiserver` (Python has real libraries; `pdfx` on the Flutter side renders pages, it doesn't extract text reliably). New endpoint `POST /util/extract-text` returning per-page text, mirroring the existing `/util/thumbnail` shape.
 3. **A `DocumentChunkIsolate`** following the exact `EmbeddingIsolate` pattern — control port, write relay, pause-during-scan, `SequentialWriteQueue`. That shape is well-established here; don't invent a new one. **Specified in §18j**, including the one place it cannot follow the pattern: it writes metadata *and* vectors, across two tables, in one transaction.
 4. Chunking: ~512 tokens, ~64 overlap, prefer paragraph boundaries. Persist `page` so a result can deep-link into the PDF viewer.
@@ -1059,7 +1065,7 @@ content. p75 is 15.9%. A long email really is mostly somebody else's older
 message.
 
 **A mechanism makes this worse than it looks.** The checkpoint pools with
-`lasttoken` (`1_Pooling/config.json`, and [model_manager.py](aiserver/src/aichat/model_manager.py) matches it).
+`lasttoken` (`1_Pooling/config.json`, and [model_manager.py](../../aiserver/src/aichat/model_manager.py) matches it).
 Under causal attention the final hidden state is most influenced by what sits
 nearest the end — and for a reply chain the end is the *oldest* quoted message.
 The single vector is not merely diluted by quoted text, it is weighted toward it.
@@ -1112,7 +1118,7 @@ all — and no query style changes that.
 ### 16c. Cost — the argument that inverted
 
 §8 assumed chunking would be more expensive. On this corpus it is cheaper,
-because nothing truncates before the model: [model_manager.py](aiserver/src/aichat/model_manager.py)
+because nothing truncates before the model: [model_manager.py](../../aiserver/src/aichat/model_manager.py)
 calls the processor with no `truncation` or `max_length`, and the model's window
 is 262k tokens, so a 243k-character body goes through whole with quadratic
 attention. Measured end-to-end against the running server:
@@ -1742,7 +1748,7 @@ two:
   query is about instead of on a diluted whole. A higher ceiling walks back
   toward the dilution that finding is about.
 - **Embedding cost roughly doubles.** Attention is quadratic and nothing
-  truncates before the model ([model_manager.py:305](aiserver/src/aichat/model_manager.py:305)
+  truncates before the model ([model_manager.py:305](../../aiserver/src/aichat/model_manager.py:305)
   passes no `max_length`) — §16c measured a 60k-character email at 145s whole
   against 75s chunked. Half as many chunks at ~4× the cost each is ~2× overall.
   On ~470 documents that is affordable (§18g); it should still be a knowing
@@ -2035,7 +2041,7 @@ Only `text` is indexed; `heading_path` is display metadata, not a search field.
 #### 18e-1. The cost of one table, and the lever that pays it
 
 **`type` cannot be filtered out of a Mode B scan.** This is the trap, and the
-class doc at [vector_retriever.dart:44](client/lib/modules/search/services/retrievers/vector_retriever.dart:44)
+class doc at [vector_retriever.dart:44](../../client/lib/modules/search/services/retrievers/vector_retriever.dart:44)
 already states it: `vector_full_scan` **cannot be pre-filtered** — it computes a
 distance against every row in the table and returns the best N, and a `WHERE` on
 the surrounding query filters *that result, not the scan*. Mode B already
@@ -2046,7 +2052,7 @@ query like `sunset` takes exactly this path.
 
 **The lever is the over-fetch multiplier, and it is precedented twice.** Mode B
 for files already fetches `limit * 5`, and the comment at
-[vector_retriever.dart:324](client/lib/modules/search/services/retrievers/vector_retriever.dart:324)
+[vector_retriever.dart:324](../../client/lib/modules/search/services/retrievers/vector_retriever.dart:324)
 gives the reason: a file carries up to two vectors, image and description, and
 both compete for slots before dedup collapses them. §16d item 3 raised mail's
 multiplier from 2× to 5× for the same reason when chunking landed. Raising it is
@@ -2951,7 +2957,7 @@ solution everywhere except the part that does the work.
 `GoogleDriveProvider.downloadFile` throws `UnsupportedError` with the comment
 *"those must be exported instead"*; `isGoogleNativeFormat()` is defined twice;
 and the scanner filters these files out of its download queue
-([google_file_scanner.dart:510](client/lib/modules/files/services/scanners/google_file_scanner.dart:510)).
+([google_file_scanner.dart:510](../../client/lib/modules/files/services/scanners/google_file_scanner.dart:510)).
 Every piece reads as though export were handled elsewhere. `grep` for
 `.export(` across `lib/` returns nothing. So these files are catalogued with a
 null `local_path`, nothing ever fetched them, and `DocumentChunkIsolate` is
@@ -2972,7 +2978,7 @@ simply the first code to try.
 
 2. **The queue trusts the extension over the content type.** The file that
    triggered this is named `Civic_Voice_Launch_Plan.md` and is a Google Doc,
-   not markdown, so it matched `%.md` in [documentExtensions](client/lib/repositories/database_repository.dart).
+   not markdown, so it matched `%.md` in [documentExtensions](../../client/lib/repositories/database_repository.dart).
    §18a's "extension is not format" lesson was applied to the *extractor*,
    which sniffs bytes, and not to the *queue*, which cannot — it has no bytes
    yet. The queue should exclude `application/vnd.google-apps.*` by content

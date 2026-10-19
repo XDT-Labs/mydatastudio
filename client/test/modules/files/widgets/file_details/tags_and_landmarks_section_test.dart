@@ -55,7 +55,7 @@ void main() {
 
     testWidgets(
       'loads and shows real tags and landmarks from the database '
-      '(SKIPPED — see TODO.md: hangs for minutes in this environment, '
+      '(SKIPPED — see docs/plans/fix-tags-landmarks-widget-test.md: hangs for minutes in this environment, '
       'cause unresolved)',
       skip: true,
       (tester) async {
