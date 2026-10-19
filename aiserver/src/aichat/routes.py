@@ -633,6 +633,12 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
     """
     _, embedding_lock = get_locks()
 
+    # Normalize legacy single inputs for backwards compatibility
+    if not request.texts and request.text:
+        request.texts = [request.text]
+    if not request.images_base64 and request.image_base64:
+        request.images_base64 = [request.image_base64]
+
     modalities = [
         ("texts", request.texts),
         ("images_base64", request.images_base64),

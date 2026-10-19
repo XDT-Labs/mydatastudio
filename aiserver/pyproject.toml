@@ -16,7 +16,7 @@ dependencies = [
     "fastapi==0.120.4",
     "langchain-core==0.3.79",
     "langchain==0.3.27",
-    "huggingface-hub==0.36.0",
+    "huggingface-hub>=0.36.0",
     "langchain-google-genai",
     "langchain-openai>=0.3.35",
     "langchain-anthropic>=0.3.22",

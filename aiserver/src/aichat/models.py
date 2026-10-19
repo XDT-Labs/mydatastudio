@@ -71,7 +71,9 @@ class EmbeddingRequest(BaseModel):
     according to `task` ('query' or 'document') before embedding.
     """
     texts: Optional[List[str]] = Field(None, description="Text content to embed, one vector returned per entry")
+    text: Optional[str] = Field(None, description="Legacy single text field for backwards compatibility")
     images_base64: Optional[List[str]] = Field(None, description="Base64-encoded images, one vector returned per entry")
+    image_base64: Optional[str] = Field(None, description="Legacy single image field for backwards compatibility")
     audios_base64: Optional[List[str]] = Field(None, description="Base64-encoded audios, one vector returned per entry")
     videos_base64: Optional[List[str]] = Field(None, description="Base64-encoded videos, one vector returned per entry")
     task: Literal["query", "document"] = Field(
