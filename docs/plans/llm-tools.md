@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: in-progress
 adr: 0001
-remaining: [phase-0-spike, phase-1-aiserver, phase-2-archive-search, phase-3-registry, phase-4-agent-loop, phase-5-ui]
+remaining: [phase-2-archive-search, phase-3-registry, phase-4-agent-loop, phase-5-ui]
 ---
 
 # Plan: Give the local LLM tools to search the archive
@@ -59,8 +59,9 @@ Answer "is Gemma 4 12B reliable enough at calling tools in our setup?" before bu
    - "photos from Banff"
    - a few that should call **no** tool ("what's 2+2", "rewrite this paragraph")
    
-   Stored as `aiserver/tests/evals/tool_calls.jsonl` and run by a script that is **not** part of
-   the default pytest run, since it needs a model on disk.
+   Stored as `aiserver/evals/tool_calls.jsonl` (tools in `aiserver/evals/tools.json`) and run by
+   `aiserver/evals/run_tool_eval.py`, which is **not** part of the default pytest run, since it
+   needs a model on disk.
 3. **Measure three modes:**
    - (a) `tool_choice: "auto"`;
    - (b) forced `tool_choice` with the right function, as an argument-quality ceiling;
@@ -76,6 +77,41 @@ Answer "is Gemma 4 12B reliable enough at calling tools in our setup?" before bu
 
 **Done when:** the format is recorded, the eval runs with one command, and the results table and
 the auto/router decision are written here.
+
+#### Phase 0 results (2026-10-25) ✅
+
+Format recorded in [llm-tools/gemma4-tool-format.md](llm-tools/gemma4-tool-format.md). Eval: 30
+cases (22 need a tool, 8 don't), `gemma-4-12B-it-Q4_0` + mmproj via the production loader,
+`temperature=0`. Re-run with
+`cd aiserver && PYTHONPATH=src .venv/bin/python evals/run_tool_eval.py`.
+
+| Mode | Cases | Right tool | Valid args | Args match | Median s | Max s | Gate |
+|---|---|---|---|---|---|---|---|
+| **auto** | 30 | **97%** | **100%** | 95% | 3.9 | 11.2 | **pass** |
+| forced | 22 | 100% (by construction) | 91% | 82% | 4.2 | 6.1 | n/a |
+| router | 30 | 97% | 95% | 100% | 5.1 | 15.6 | pass |
+
+**Decision: ship `auto` mode** with the native-syntax parser. It clears the gate with room to
+spare, needs one generation per step (the router needs the same, but with a much longer prompt),
+and never broke the schema. The router stays documented as the fallback.
+
+What the numbers hide:
+
+- **The one wrong tool in auto** was "which newsletters emailed me most this month": it chose
+  `search(query: "newsletter")` over `list_items`. That's arguably a reasonable choice, and it's
+  the eval's expectation that's debatable.
+- **Argument misses in auto** (1 of 22): "Did GitHub send me a security alert" put GitHub in
+  `query` instead of `from`. Retrieval still finds it; the hard filter just isn't applied.
+- **`query: "*"`**: for "everything billing@comcast.net sent me this year", auto sent `"*"` as the
+  query. **Phase 3 must treat `*` or an empty query as "no free text"** (filters only) instead of
+  searching for a literal asterisk.
+- **Forced mode is worse at arguments, not better:** it set `limit` to 100 and 1000 (schema
+  max 20), and twice put `from:` inside `query`. JSON grammar constraining loses what the
+  native format gets right.
+- **No-tool questions:** 8 of 8 correct in auto. The slowest cases (6–11s) were long free-text
+  answers hitting `max_tokens`, not tool calls. Tool-call turns took 2.5–4s.
+- The parser (`aiserver/src/aichat/tool_calls.py`, Phase 1 item 3) was built in this phase,
+  because the eval needs it. It reported zero parse errors across all 22 auto-mode calls.
 
 ### Phase 1: aiserver tool pass-through and parsing
 
@@ -116,6 +152,35 @@ the auto/router decision are written here.
 
 **Done when:** a curl with `tools` against the running aiserver returns a structured `tool_calls`
 reply, both streaming and non-streaming, and all of the above tests pass.
+
+#### Phase 1 results (2026-10-25) ✅
+
+Built as specified: `tools` / `tool_choice` on the request; `tool` role, optional `content`,
+`tool_calls` and `tool_call_id` on messages; native-syntax parsing (non-streaming) and
+`ToolCallStreamFilter` hold-back (streaming) in `aiserver/src/aichat/tool_calls.py`; history
+arguments converted to mappings (a bad one is a 400); forced `tool_choice` passed through as
+llama.cpp structures it; 400 for tools sent to a cloud model.
+
+Differences from the plan, and things worth knowing:
+
+- **Thinking blocks are stripped from every local reply,** with or without tools, since
+  Gemma can open any answer with `<|channel>thought…<channel|>`.
+- **Streamed chunks are rebuilt, not forwarded.** The local stream now emits its own
+  `chat.completion.chunk` objects (same `id`, `model`, `delta.content` fields the client
+  reads), and the finish chunk is held until the end, because a parsed call changes it to
+  `finish_reason: "tool_calls"`. When the user presses stop, any parsed call is dropped rather
+  than sent.
+- **Without `tools` in the request, call syntax is never parsed.** If the model emits one
+  anyway, it stays visible as text. Nothing that wasn't offered can run.
+- **Cloud adapters** now treat a `None` content (a tool-calling turn in local history) as
+  `""` instead of failing.
+
+Tests: `tests/test_tool_calls.py` (parser and stream filter, 28) and `tests/test_chat_tools.py`
+(route behaviour, 10). Full aiserver suite: 283 passed.
+
+Live check against the real model through a separate dev aiserver: a tool call came back
+structured in both modes (`finish_reason: "tool_calls"`), and the follow-up answer after a
+`role: "tool"` result streamed with no marker text (62 events, thinking stripped).
 
 ### Phase 2: A stateless `ArchiveSearch` core
 

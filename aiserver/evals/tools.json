@@ -1,0 +1,80 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "search",
+      "description": "Search the user's archived emails and files by keyword and meaning. Returns matching items with id, title, sender, date and a short snippet, plus the total number of matches.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "description": "What to look for, in plain words. Do not put sender names or dates here; use the other arguments."},
+          "sources": {"type": "array", "items": {"type": "string", "enum": ["email", "file"]}, "description": "Limit to these archives. Omit to search everything."},
+          "from": {"type": "string", "description": "Sender name or email address."},
+          "to": {"type": "string", "description": "Recipient name or email address."},
+          "after": {"type": "string", "description": "Only items on or after this date, YYYY-MM-DD."},
+          "before": {"type": "string", "description": "Only items before this date, YYYY-MM-DD."},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 20, "description": "Maximum results, default 8."}
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_item",
+      "description": "Get the full text and details of one email or file, by the id a search returned.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "description": "Item id from a search result."}
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_email_thread",
+      "description": "Get every message in the conversation an email belongs to, oldest first.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "description": "Id of any email in the thread."}
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_items",
+      "description": "List emails or files by date, without a search query. Use for 'what came in last week' style questions.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source": {"type": "string", "enum": ["email", "file"]},
+          "after": {"type": "string", "description": "YYYY-MM-DD"},
+          "before": {"type": "string", "description": "YYYY-MM-DD"},
+          "sort": {"type": "string", "enum": ["newest", "oldest"]},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 20}
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_collections",
+      "description": "List the archives the user has imported (email accounts, drives, folders), with item counts.",
+      "parameters": {"type": "object", "properties": {}, "additionalProperties": false}
+    }
+  }
+]
