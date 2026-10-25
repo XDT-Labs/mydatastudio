@@ -14,6 +14,18 @@ and how to keep this file current are explained in [README.md](README.md).
 | Instagram sync (scheduled export) | `proposed` | [social-instagram-sync.md](plans/social-instagram-sync.md) | — | Export-first: a daily scheduled JSON export to Google Drive, picked up by the Drive scanner. Works for personal accounts, no App Review. API sync deferred. Spike first. |
 | TikTok archive | `proposed` | [social-tiktok-archive.md](plans/social-tiktok-archive.md) | — | **Not ready: testing required.** In-app JSON export for everyone (video links only, verify they download); Data Portability API for automatic sync with media, EEA/UK users only. |
 | LinkedIn archive | `proposed` | [social-linkedin-archive.md](plans/social-linkedin-archive.md) | — | **Needs a real export first.** CSV data export (`Shares.csv`, articles) imported via on-page instructions and a file picker; no scheduling, so a re-export reminder. APIs ignored (EEA/Swiss only). |
+| Email: shared IMAP engine | `proposed` | [email-imap-engine.md](plans/email-imap-engine.md) | — | Merge the ~90%-identical Yahoo/Outlook isolates into one `ImapScanner` + provider registry; UID/CONDSTORE incremental sync; one setup flow with autodetect. Prerequisite for the provider rows below. |
+| Email: Gmail | `proposed` | [email-gmail.md](plans/email-gmail.md) | — | Existing Gmail API sync needs Google verification + yearly CASA to ship. Proposal: IMAP + app password and Takeout import first. |
+| Email: Outlook / Microsoft 365 | `proposed` | [email-outlook.md](plans/email-outlook.md) | — | Existing IMAP + OAuth2. Ship our own Entra app as a public PKCE client (no secret); publisher verification. |
+| Email: Yahoo (+ AT&T) | `proposed` | [email-yahoo.md](plans/email-yahoo.md) | — | Existing; reference provider for the IMAP engine. Add AT&T's Yahoo-hosted mail. |
+| Email: AOL (+ Verizon.net) | `proposed` | [email-aol.md](plans/email-aol.md) | — | IMAP + app password. Registry entry only. |
+| Email: iCloud | `proposed` | [email-icloud.md](plans/email-icloud.md) | — | IMAP + app-specific password; handle revocation on Apple Account password change. |
+| Email: Proton | `proposed` | [email-proton.md](plans/email-proton.md) | — | Paid: IMAP via Proton Mail Bridge on localhost (pinned self-signed cert). Free: export, then file import. |
+| Email: Fastmail | `proposed` | [email-fastmail.md](plans/email-fastmail.md) | — | IMAP + app password; JMAP later if needed. |
+| Email: Zoho | `proposed` | [email-zoho.md](plans/email-zoho.md) | — | IMAP per data-centre region; free plan may lack IMAP (verify). |
+| Email: GMX / mail.com / WEB.DE | `proposed` | [email-gmx.md](plans/email-gmx.md) | — | IMAP must be switched on and turns itself off after inactivity. |
+| Email: Yandex | `proposed` | [email-yandex.md](plans/email-yandex.md) | — | IMAP + app password (can take hours to activate). |
+| Email: file imports (MBOX, EML; Tuta) | `proposed` | [email-file-imports.md](plans/email-file-imports.md) | — | Streaming MBOX/EML import next to the existing PST import: Takeout, Apple Mail, Thunderbird, Proton/Tuta exports. |
 | Dropbox file source | `idea` | — | — | Constant only; provider commented out in `client/lib/file_sources/file_source_registry.dart`. |
 | OneDrive file source | `idea` | — | — | Constant only; no provider or scanner. |
 | Glassmorphism elevation model | `ready` | [glassmorphism-elevation.md](plans/glassmorphism-elevation.md) | — | Decision made 2026-08-01 to build out `DESIGN.md`'s spec. |
