@@ -1,7 +1,9 @@
 # Roadmap
 
 Every feature in flight or planned, with its status and where its details live. Status values
-and how to keep this file current are explained in [README.md](README.md).
+and how to keep this file current are explained in [README.md](README.md). The order the social
+and email sources are built in, by wave, with dependencies and checklists, is in
+[RELEASE-PLAN.md](RELEASE-PLAN.md).
 
 | Feature | Status | Plan | ADR | Notes |
 |---|---|---|---|---|
