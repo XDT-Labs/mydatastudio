@@ -2,11 +2,9 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/search/models/search_query.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
+import 'package:mydatastudio/modules/search/services/archive_search.dart';
 import 'package:mydatastudio/modules/search/services/hybrid_ranker.dart';
-import 'package:mydatastudio/modules/search/services/near_resolver.dart';
-import 'package:mydatastudio/modules/search/services/person_resolver.dart';
 import 'package:mydatastudio/modules/search/services/query_embedder.dart';
-import 'package:mydatastudio/modules/search/services/query_parser.dart';
 import 'package:mydatastudio/modules/search/services/query_planner.dart';
 import 'package:mydatastudio/modules/search/services/result_ranking.dart';
 import 'package:mydatastudio/modules/search/services/retrievers/bm25_retriever.dart';
@@ -34,12 +32,8 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
 
   final AppLogger logger = AppLogger(null);
 
-  /// Lexical rows fetched per source before fusion.
-  ///
-  /// Wider than a page because RRF ranks a list against a list: a document the
-  /// vector pass ranked 12th can only be placed correctly if the lexical list
-  /// is deep enough to say where *it* put that document.
-  static const fusionWindow = 500;
+  /// Lexical rows fetched per source before fusion; see [ArchiveSearch].
+  static const fusionWindow = ArchiveSearch.fusionWindow;
 
   /// Overridable so tests can supply a deterministic embedder — and so a build
   /// with no AI subprocess can turn the semantic pass off entirely.
@@ -101,7 +95,6 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
   Future<SearchResults> invoke(SearchCommand command) async {
     isLoading.add(true);
     try {
-      final parsed = QueryParser.parse(command.rawQuery);
       _database = command.database;
       _sourceFilter = command.sourceFilter;
       _ranked = null;
@@ -109,75 +102,28 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
       _emitted.clear();
       final generation = ++_generation;
 
-      // Nothing to constrain and nothing to rank is not an empty result, it is
-      // the absence of a query — returning "no results found" for it reads as
-      // a failure rather than a blank slate.
-      if (!parsed.hasFilters && !parsed.hasFreeText) {
-        lastQuery = parsed;
-        return _publish(SearchResults.empty);
-      }
-
-      // Two things parsing cannot finish on its own, both database lookups and
-      // both resolved before anything is retrieved.
-      //
-      // People first: `emails from mike nimer` has to become the same hard
-      // sender filter as `from:mike@x.com` (§2b). Left as free text it would go
-      // to the vector pass, which encodes meaning rather than identity and so
-      // returns mail *about* Mike while missing mail *from* him.
-      //
-      // Then `near:`, where a place name only becomes a constraint once the
-      // gazetteer has turned it into a point, and a name nothing recognises
-      // falls back to free text instead of constraining the query to zero rows.
-      final withPeople = await PersonResolver(command.database).resolve(parsed);
-      final resolved = await NearResolver(command.database).resolve(withPeople);
-      lastQuery = resolved;
-
-      final retriever = Bm25Retriever(command.database);
-      final hits = await VectorRetriever(
+      final retrieval = await ArchiveSearch(
         command.database,
         embedder,
-      ).search(resolved, onlySource: command.sourceFilter);
-
-      if (hits.isEmpty) {
-        // No semantic signal — either the query is a pure browse or the AI
-        // subprocess is unavailable. Either way lexical paging is both correct
-        // and cheaper, so there is nothing to fuse and nothing to hold in
-        // memory.
-        return _publish(
-          await retriever.search(
-            resolved,
-            limit: command.limit,
-            onlySource: command.sourceFilter,
-          ),
-        );
-      }
-
-      final lexical = await retriever.search(
-        resolved,
-        limit: fusionWindow,
+      ).retrieve(
+        command.rawQuery,
+        limit: command.limit,
         onlySource: command.sourceFilter,
       );
-      final ranked = await HybridRanker.fuse(
-        lexical: lexical.results,
-        vector: hits,
-        loader: retriever,
-        query: resolved,
-      );
-      _ranked = ranked;
+      lastQuery = retrieval.query;
 
-      final additions = await _semanticAdditions(
-        retriever,
-        resolved,
-        lexical,
-        ranked,
-      );
+      if (retrieval.isBlank) return _publish(SearchResults.empty);
+
+      final ranked = retrieval.ranked;
+      if (ranked == null) return _publish(retrieval.lexical);
+      _ranked = ranked;
 
       final published = _publish(
         _sliceRanked(
-          lexical: lexical,
+          lexical: retrieval.lexical,
           limit: command.limit,
-          extraEmails: additions.emails,
-          extraFiles: additions.files,
+          extraEmails: retrieval.semanticEmails,
+          extraFiles: retrieval.semanticFiles,
         ),
       );
 
@@ -185,7 +131,7 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
       // model takes about a second to answer; blocking on it would trade a
       // search that is fast and sometimes ordered slightly worse for one that
       // is always a second slower.
-      refinement = _refine(resolved, generation);
+      refinement = _refine(retrieval.query, generation);
       return published;
     } catch (e, stackTrace) {
       // A malformed query must not leave the page spinning forever. Parsing
@@ -390,58 +336,6 @@ class SearchService extends RxService<SearchCommand, SearchResults> {
           lexical == null ? _accumulated.emailSemanticOnly : extraEmails,
       fileSemanticOnly:
           lexical == null ? _accumulated.fileSemanticOnly : extraFiles,
-    );
-  }
-
-  /// How many results the semantic pass added that no keyword would have found.
-  ///
-  /// Checked against the lexical index rather than assumed, because a hit both
-  /// retrievers found is already inside the lexical total. Counting it twice
-  /// would report a number the user cannot reach by scrolling — and a total
-  /// that does not match the list is the failure people notice first.
-  Future<({int emails, int files})> _semanticAdditions(
-    Bm25Retriever retriever,
-    ParsedQuery query,
-    SearchResults lexical,
-    List<SearchResult> ranked,
-  ) async {
-    final lexicalKeys = {for (final r in lexical.results) r.key};
-    final newEmails = <String>[];
-    final newFiles = <String>[];
-    for (final result in ranked) {
-      if (lexicalKeys.contains(result.key)) continue;
-      if (result.isEmail) {
-        newEmails.add(result.id);
-      } else {
-        newFiles.add(result.id);
-      }
-    }
-
-    // Only rows past the lexical window can be ambiguous — inside it, absence
-    // from `lexical.results` already proves the keywords missed them.
-    final emailAmbiguous = lexical.emailTotal > lexical.emailOffset;
-    final fileAmbiguous = lexical.fileTotal > lexical.fileOffset;
-
-    final alsoLexicalEmails =
-        emailAmbiguous
-            ? await retriever.matchingIds(
-              query,
-              SearchResultType.email,
-              newEmails,
-            )
-            : const <String>{};
-    final alsoLexicalFiles =
-        fileAmbiguous
-            ? await retriever.matchingIds(
-              query,
-              SearchResultType.file,
-              newFiles,
-            )
-            : const <String>{};
-
-    return (
-      emails: newEmails.where((id) => !alsoLexicalEmails.contains(id)).length,
-      files: newFiles.where((id) => !alsoLexicalFiles.contains(id)).length,
     );
   }
 

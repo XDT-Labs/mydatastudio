@@ -1,0 +1,179 @@
+import 'dart:convert';
+
+import 'package:mydatastudio/modules/aichat/services/agent_loop.dart';
+
+/// Stored role for an assistant turn that only called tools.
+///
+/// Not `assistant`: code that predates tools reads every `assistant` row as a
+/// reply to show, and a tool call has no text to show.
+const storedToolCallRole = 'tool_call';
+const storedToolResultRole = 'tool';
+
+/// How many cited items are listed under one answer.
+const maxSourcesShown = 8;
+
+/// A tool-loop message as a row for `aichat_conversation_history`
+/// (`role`, `content`). No schema change: the JSON goes in `content`.
+({String role, String content}) toStoredToolMessage(Map<String, dynamic> m) {
+  if (m['tool_calls'] != null) {
+    return (
+      role: storedToolCallRole,
+      content: jsonEncode({'content': m['content'], 'tool_calls': m['tool_calls']}),
+    );
+  }
+  return (
+    role: storedToolResultRole,
+    content: jsonEncode({'tool_call_id': m['tool_call_id'], 'content': m['content']}),
+  );
+}
+
+/// The history message for a stored tool row, or null if [role] isn't one
+/// (or the row can't be read, which skips it rather than failing the load).
+Map<String, dynamic>? fromStoredToolMessage(String role, String content) {
+  if (role != storedToolCallRole && role != storedToolResultRole) return null;
+  try {
+    final data = jsonDecode(content) as Map<String, dynamic>;
+    if (role == storedToolCallRole) {
+      return {
+        'role': 'assistant',
+        'content': data['content'],
+        'tool_calls': data['tool_calls'],
+      };
+    }
+    return {
+      'role': 'tool',
+      'tool_call_id': data['tool_call_id'],
+      'content': data['content'],
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+/// An archive item a tool returned, listed under the answer that used it.
+class ToolSource {
+  const ToolSource({required this.id, required this.title, this.date});
+
+  /// `email:<id>` or `file:<id>`, as the tools return it.
+  final String id;
+  final String title;
+  final String? date;
+
+  bool get isEmail => id.startsWith('email:');
+  String get rowId => id.substring(id.indexOf(':') + 1);
+}
+
+/// Every item the tool results in [steps] returned, first seen first.
+///
+/// "Returned" rather than "cited": a small model's answer can't be relied on
+/// to name ids, but every item it was shown is something the user can check.
+List<ToolSource> sourcesFromToolTurn(List<Map<String, dynamic>> steps) {
+  final seen = <String>{};
+  final sources = <ToolSource>[];
+  void add(Object? item) {
+    if (item is! Map || sources.length >= maxSourcesShown) return;
+    final id = item['id'];
+    if (id is! String || !id.contains(':') || !seen.add(id)) return;
+    final title = item['title'] ?? item['subject'] ?? item['name'] ?? id;
+    sources.add(ToolSource(id: id, title: '$title', date: item['date'] as String?));
+  }
+
+  for (final m in steps) {
+    if (m['role'] != 'tool') continue;
+    final Object? data;
+    try {
+      data = jsonDecode(m['content'] as String? ?? '');
+    } catch (_) {
+      continue;
+    }
+    if (data is! Map || data.containsKey('error')) continue;
+    for (final key in const ['results', 'items', 'messages']) {
+      final list = data[key];
+      if (list is List) list.forEach(add);
+    }
+    add(data); // get_item returns the item itself
+  }
+  return sources;
+}
+
+/// The one-line status for a tool call: "Searching emails for “lease”…" while
+/// it runs, or "Searched emails for “lease”" once [done].
+String describeActivity(ToolActivity activity, {bool done = false}) {
+  Map<String, dynamic> args;
+  try {
+    args = jsonDecode(activity.argumentsJson) as Map<String, dynamic>;
+  } catch (_) {
+    args = const {};
+  }
+  String verb(String running, String finished) => done ? finished : running;
+  final String text;
+  switch (activity.name) {
+    case 'search':
+      final sources = (args['sources'] as List?)?.cast<String>() ?? const [];
+      final where = switch (sources) {
+        ['email'] => 'emails',
+        ['file'] => 'files',
+        _ => 'your archive',
+      };
+      final query = (args['query'] as String?)?.trim();
+      text = [
+        '${verb('Searching', 'Searched')} $where',
+        if (query != null && query.isNotEmpty && query != '*') 'for “$query”',
+        if (args['from'] case final String from when from.isNotEmpty) 'from $from',
+      ].join(' ');
+    case 'get_item':
+      text = verb('Opening an item', 'Opened an item');
+    case 'get_email_thread':
+      text = verb('Reading the email thread', 'Read the email thread');
+    case 'list_items':
+      final what = args['source'] == 'file' ? 'files' : 'emails';
+      text = '${verb('Listing', 'Listed')} $what';
+    case 'list_collections':
+      text = verb('Checking your archives', 'Checked your archives');
+    default:
+      text = '${verb('Using', 'Used')} ${activity.name}';
+  }
+  return done ? text : '$text…';
+}
+
+/// One finished tool call, as listed above the answer while it's produced.
+class ProgressStep {
+  const ProgressStep(this.text, {this.failed = false});
+  final String text;
+  final bool failed;
+}
+
+/// What the chat shows in place of the answer until its text arrives.
+///
+/// A local model can take many seconds before the first token (loading,
+/// prompt processing, each tool round), and without this the page looks
+/// frozen. The label says what is happening now; [steps] lists the tool
+/// calls already done, so the user can see the work progress.
+class ReplyProgress {
+  bool active = false;
+  String label = '';
+  final List<ProgressStep> steps = [];
+
+  void start() {
+    active = true;
+    label = 'Thinking…';
+    steps.clear();
+  }
+
+  void toolStarted(ToolActivity activity) {
+    label = describeActivity(activity);
+  }
+
+  void toolFinished(ToolActivity activity) {
+    steps.add(
+      ProgressStep(describeActivity(activity, done: true), failed: activity.isError),
+    );
+    label = 'Reading results…';
+  }
+
+  void finish() {
+    active = false;
+    label = '';
+    steps.clear();
+  }
+}

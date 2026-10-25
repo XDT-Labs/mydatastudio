@@ -29,6 +29,7 @@ from .models import (
     ExtractTextRequest,
 )
 from .skills import apply_skill, list_skills
+from .tool_calls import ToolCallFormatError, ToolCallStreamFilter, arguments_to_mappings, parse_reply, strip_thinking
 from .config import DEFAULT_MODEL_ALIAS
 from . import model_registry
 from . import document_extractor
@@ -181,12 +182,13 @@ async def _handle_cloud_request(provider: str, request: "ChatCompletionRequest")
 
     lc_messages = []
     for m in request.messages:
+        # content is None on a tool-calling assistant turn from local history.
         if m.role == "system":
-            lc_messages.append(SystemMessage(content=m.content))
+            lc_messages.append(SystemMessage(content=m.content or ""))
         elif m.role == "user":
-            lc_messages.append(HumanMessage(content=m.content))
+            lc_messages.append(HumanMessage(content=m.content or ""))
         elif m.role == "assistant":
-            lc_messages.append(AIMessage(content=m.content))
+            lc_messages.append(AIMessage(content=m.content or ""))
 
     if request.stream:
         def _cloud_sse_stream() -> Generator[str, None, None]:
@@ -307,6 +309,41 @@ def _strip_image_content(messages: list) -> list:
     return result
 
 
+def _template_message(m: "ChatMessage") -> Dict[str, Any]:
+    """A request message as the chat template expects it.
+
+    Tool fields are only included when set: the Gemma template branches on
+    their presence. A tool-calling assistant turn has no content; the template
+    wants a string there.
+    """
+    msg: Dict[str, Any] = {"role": m.role, "content": m.content if m.content is not None else ""}
+    if m.tool_calls:
+        msg["tool_calls"] = m.tool_calls
+    if m.tool_call_id:
+        msg["tool_call_id"] = m.tool_call_id
+    return msg
+
+
+def _apply_tool_parsing(result: Dict[str, Any], parse_calls: bool) -> None:
+    """Rewrite a non-streaming local result in place: strip thinking, and turn
+    Gemma's native call syntax into OpenAI ``tool_calls`` when tools were offered."""
+    for choice in result.get("choices") or []:
+        message = choice.get("message") or {}
+        content = message.get("content")
+        if not isinstance(content, str) or message.get("tool_calls"):
+            continue  # forced tool_choice: already structured
+        if not parse_calls:
+            message["content"] = strip_thinking(content)
+            continue
+        reply = parse_reply(content)
+        for err in reply.errors:
+            print(f"[TOOLS] unparseable tool call shown as text: {err}")
+        message["content"] = reply.content
+        if reply.tool_calls:
+            message["tool_calls"] = reply.tool_calls
+            choice["finish_reason"] = "tool_calls"
+
+
 async def generate_chat_completion(request: ChatCompletionRequest):
     """
     OpenAI-compatible chat completion. Auto-loads the requested model if it
@@ -333,6 +370,15 @@ async def generate_chat_completion(request: ChatCompletionRequest):
             provider = 'grok'
         else:
             provider = None
+
+    # Cloud adapters build LangChain messages and would silently drop tools,
+    # leaving the model to answer "I can't access your files" with no sign
+    # anything went wrong (docs/plans/llm-tools.md, Phase 6).
+    if provider and request.tools:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tools are not yet supported for {_CLOUD_LABELS[provider]} models.",
+        )
 
     if provider == 'gemini':
         return await _handle_gemini_request(request)
@@ -458,8 +504,14 @@ async def generate_chat_completion(request: ChatCompletionRequest):
         )
 
     try:
-        messages = [{"role": m.role, "content": m.content} for m in request.messages]
+        messages = [_template_message(m) for m in request.messages]
         messages = apply_skill(messages)
+        # The Gemma template refuses tool-call arguments as a JSON string,
+        # which is what every OpenAI-style client sends.
+        try:
+            messages = arguments_to_mappings(messages)
+        except ToolCallFormatError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         # If the model has no vision handler, strip image_url parts so raw base64
         # doesn't get tokenized as text (which would consume hundreds of thousands of tokens).
@@ -474,6 +526,12 @@ async def generate_chat_completion(request: ChatCompletionRequest):
             kwargs["max_tokens"] = request.max_tokens
         if request.response_format is not None:
             kwargs["response_format"] = request.response_format
+        if request.tools:
+            kwargs["tools"] = request.tools
+            kwargs["tool_choice"] = request.tool_choice or "auto"
+        # In "auto" mode llama.cpp returns Gemma's call as plain content and we
+        # parse it. A forced tool_choice comes back already structured.
+        parse_calls = bool(request.tools) and not isinstance(request.tool_choice, dict)
 
         if request.stream:
             current_model = get_current_model_id()
@@ -494,16 +552,56 @@ async def generate_chat_completion(request: ChatCompletionRequest):
                 # the sole release point (it also runs on GeneratorExit when the
                 # client disconnects mid-stream).
                 register_stream(stop_id)
+                # Holds back thinking and tool-call text so neither reaches the
+                # client as visible content; the finish chunk is held too,
+                # because a parsed call changes it to "tool_calls".
+                filt = ToolCallStreamFilter(parse_calls=parse_calls)
+                finish_reason = None
+                stopped = False
+
+                def emit(delta: Dict[str, Any], finish: Optional[str] = None) -> str:
+                    # Stable id the client echoes back to target /v1/chat/stop.
+                    return "data: " + json.dumps({
+                        "id": stop_id, "object": "chat.completion.chunk",
+                        "created": created_at, "model": current_model,
+                        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+                    }) + "\n\n"
+
                 try:
                     for chunk in llm_instance.create_chat_completion(
                         stream=True, **kwargs
                     ):
                         if is_stop_requested(stop_id):
+                            stopped = True
                             break
-                        # Stable id the client echoes back to target /v1/chat/stop.
-                        chunk["id"] = stop_id
-                        chunk["model"] = current_model
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                        choices = chunk.get("choices") or []
+                        delta = (choices[0].get("delta") or {}) if choices else {}
+                        if not choices or delta.get("tool_calls"):
+                            # Forced tool_choice: llama.cpp already structured it.
+                            chunk["id"] = stop_id
+                            chunk["model"] = current_model
+                            yield f"data: {json.dumps(chunk)}\n\n"
+                            continue
+                        finish_reason = choices[0].get("finish_reason") or finish_reason
+                        text = delta.get("content")
+                        if text:
+                            visible = filt.feed(text)
+                            if visible:
+                                yield emit({"content": visible})
+                        elif delta.get("role"):
+                            yield emit({"role": delta["role"]})
+                    tail, calls, errors = filt.finish()
+                    for err in errors:
+                        print(f"[TOOLS] unparseable tool call shown as text: {err}")
+                    if tail:
+                        yield emit({"content": tail})
+                    if calls and not stopped:
+                        yield emit(
+                            {"tool_calls": [{**c, "index": i} for i, c in enumerate(calls)]},
+                            "tool_calls",
+                        )
+                    elif finish_reason:
+                        yield emit({}, finish_reason)
                     yield "data: [DONE]\n\n"
                 except Exception as e:
                     # Same contract as the cloud path: the client always gets a
@@ -539,6 +637,7 @@ async def generate_chat_completion(request: ChatCompletionRequest):
         finally:
             lock.release()
         result["model"] = get_current_model_id() or result.get("model", "unknown")
+        _apply_tool_parsing(result, parse_calls)
         return result
 
     except HTTPException:

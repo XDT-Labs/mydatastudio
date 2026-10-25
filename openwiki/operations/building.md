@@ -482,9 +482,35 @@ xcrun altool --notarization-history <history-id>
 
 ## CI/CD (GitHub Actions)
 
-The project includes GitHub Actions workflows (`.github/workflows/`):
+### Release Workflow (`build_and_release.yml`)
 
-- `build_and_release.yml` — Builds on every push, notarizes on release tags
+Releases are triggered by **pushing a version tag** (`v*`):
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+The workflow:
+
+1. **Validates the tag** — Must match `vX.Y.Z` or `vX.Y.Z-suffix` format
+2. **Extracts version** — Numeric part (`X.Y.Z`) becomes the app version in `pubspec.prod.yaml`
+3. **Builds release** — Python binary (PyInstaller, Metal GPU), Flutter client, DMG installer
+4. **Notarizes** — macOS Gatekeeper compliance
+5. **Creates GitHub Release** — Tags pre-releases if suffix present (e.g., `v1.0.0-beta.1`)
+
+**Version Tag Examples:**
+
+```bash
+v1.0.0              # → Full release (version 1.0.0+<run>)
+v1.0.0-beta.1       # → Pre-release (version 1.0.0+<run>, marked as pre-release on GitHub)
+v2.1.0-rc.1         # → Release candidate
+```
+
+The `+<build>` suffix is always appended from `github.run_number`, ensuring each release has a unique build number. Tags can be cut from any branch (e.g. a beta from `develop`); pushing to `main` alone no longer triggers a release.
+
+### Other Workflows
+
 - `build_python.yml` — Builds Python service (for testing)
 
 These workflows run `make` targets in a CI environment.

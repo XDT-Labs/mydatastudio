@@ -174,6 +174,21 @@ class TestModelManager:
         # Text-only unless an mmproj path is supplied.
         assert init_kwargs["chat_handler"] is None
 
+    @patch('llama_cpp.Llama')
+    def test_load_local_model_sizes_sliding_window_cache_to_the_window(self, mock_llamacpp):
+        """swa_full must be False.
+
+        Gemma 4 12B has 40 sliding-window layers (1,024-token window) and 8
+        global ones. With swa_full=True llama.cpp gives the window layers a
+        full n_ctx cache anyway: 10,240 MiB at n_ctx=32768 that those layers
+        can never attend to. Measured 2026-10-25: peak RSS 20.1 GB vs 9.8 GB,
+        identical answers on a 6k-token, four-turn recall test (the 8 global
+        layers keep full context), and no speed cost, because the vision chat
+        handler re-reads the whole prompt each request either way.
+        """
+        load_local_model("bartowski/gemma", "/fake/path/model.gguf")
+        assert mock_llamacpp.call_args[1]["swa_full"] is False
+
     @patch('llama_cpp.llama_chat_format')
     @patch('llama_cpp.Llama')
     def test_load_local_model_vision_uses_chat_handler(

@@ -9,9 +9,18 @@ from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, DEFAULT_MODEL_ALIAS
 # ── OpenAI-compatible: /v1/chat/completions ──────────────────────────────────
 
 class ChatMessage(BaseModel):
-    role: str = Field(..., description="Message role: 'system', 'user', or 'assistant'")
-    # OpenAI multimodal format: string for text-only, list of content parts for vision
-    content: Union[str, List[Dict[str, Any]]] = Field(..., description="Message content")
+    role: str = Field(..., description="Message role: 'system', 'user', 'assistant', or 'tool'")
+    # OpenAI multimodal format: string for text-only, list of content parts for vision.
+    # None for an assistant turn that only calls tools.
+    content: Optional[Union[str, List[Dict[str, Any]]]] = Field(None, description="Message content")
+    tool_calls: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Assistant turn only: OpenAI-style tool calls the model made "
+                    "(function.arguments as a JSON string).",
+    )
+    tool_call_id: Optional[str] = Field(
+        None, description="Tool turn only: the id of the call this message answers."
+    )
 
 
 class ChatCompletionRequest(BaseModel):
@@ -39,6 +48,18 @@ class ChatCompletionRequest(BaseModel):
             "{\"type\": \"json_object\", \"schema\": {...}} — llama.cpp grammar-"
             "constrains generation to the given JSON schema."
         ),
+    )
+    tools: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description=(
+            "Local GGUF models only (cloud models get a 400). OpenAI-style tool "
+            "definitions; calls come back as message.tool_calls."
+        ),
+    )
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(
+        None,
+        description="'auto' (default when tools are given), 'none', or "
+                    "{\"type\": \"function\", \"function\": {\"name\": ...}} to force one tool.",
     )
 
     model_config = ConfigDict(
