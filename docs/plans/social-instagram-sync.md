@@ -1,234 +1,310 @@
 ---
 status: proposed
 adr: none
-remaining: [meta-app-instagram-product, token-service-instagram, app-review, ig-graph-client, backfill, incremental-sync, stories-capture, archive-import, media, embeddings, search, grid-ui]
+remaining: [scheduled-export-spike, sample-export, export-parser, import-isolate, setup-import-ui, drive-handoff, downloads-watcher, schedule-lifecycle, media, embeddings, search, grid-ui]
 ---
 
-# Plan: Sync Instagram through the Instagram API (plus archive import)
+# Plan: Keep an Instagram archive in sync with scheduled exports
 
 `client/lib/modules/social/pages/instagram_page.dart` is a placeholder label, and
 `new_social_page.dart` shows a disabled "Login with Instagram" button.
 
-This plan is the Instagram twin of [social-facebook-sync.md](social-facebook-sync.md). It
-reuses the same Meta app, token service, schema, sync machinery and feed widgets. Read that plan
-first. This one only describes what's **different** for Instagram.
+This plan replaces it with an Instagram archive that **stays up to date by itself**. The user
+sets up a **scheduled JSON export** in Meta's Export Your Information (EYI) tool, delivered to
+their Google Drive. Meta then sends a fresh export every day for up to three years. We pick each
+one up and merge it into the local archive. It works for **every account type, personal
+included**, and needs no Instagram App Review.
 
 **Scope: an archive of what the user posted, not an Instagram client.** That means the user's
-own feed posts, carousels, reels and stories, with their captions. Out of scope: DMs, other
-people's posts and comments, comments the user left elsewhere, likes, followers, and engagement
-counts (`like_count`, `comments_count` and the rest). Same rule as Facebook: if the user didn't
-post it, we don't fetch it.
+own feed posts, carousels, reels and stories, with their captions and any location metadata.
+Out of scope: DMs, other people's posts and comments, comments the user left elsewhere, likes,
+followers and engagement counts. If the user didn't post it, we don't import it.
 
-> Facts below were checked against Meta's Instagram Platform docs on 2026-10-25. Items marked
-> **(verify)** need a test against a real account.
+> Facts below were checked against Meta's docs on 2026-10-25. Items marked **(verify)** need a
+> test against a real account. The spike below exists to answer them.
 
-## Reuse from the Facebook plan
+## Why export-first, and API later (maybe never)
 
-Meta's API for Instagram is the same **Graph API** style as Facebook (REST + field selection +
-cursor paging; it isn't GraphQL), on a different host. So most of the Facebook work carries
-over:
+The Instagram API (Instagram Login) only serves **professional accounts** (business or creator).
+Meta shut down the Basic Display API that personal accounts used. We can't assume everyday users
+will convert their accounts, so the API can't be the main path. The export:
+- works for **every account**;
+- includes things the API never returns:
+  - **location** (`exif_data` coordinates);
+  - **expired stories** (when the user's story archive is on, which is the default);
+  - **reels with licensed audio** (the API withholds their `media_url`, even from the owner);
+- can be **scheduled**, so it covers ongoing sync too, not just backfill;
+- needs no App Review, no OAuth with Instagram, and no token service endpoint. Meta delivers
+  the files to the user's own Drive.
 
-| Facebook piece | Reused for Instagram? |
-|---|---|
-| Meta app, business verification, privacy/terms/deletion pages on xdtlabs.com | **Yes, as is.** Add the *Instagram* product to the same app. One business verification covers both. |
-| App Review process (recordings, reviewer account, 30-day API calls) | **Yes.** One more permission in the same, or a later, submission. |
-| Token service on Cloud Run (Python FastAPI) | **Yes.** Add `POST /instagram/exchange`. Same secret handling, same abuse controls. |
-| `social_posts`, `social_posts_embeddings`, media in `files` with `social_post_id` | **Yes.** `platform = 'instagram'`. |
-| Graph client patterns: pinned version, field lists, `paging.next`, rate-limit headers, error → `needs_re_auth` | **Yes.** Share a base `MetaGraphClient` (host + token + paging + backoff). Facebook and Instagram become thin subclasses. |
-| `FacebookScanner` backfill / incremental / edits / reconcile, `social_sync_state` | **Yes.** Same phases, generalized to `MetaSocialScanner` with a per-platform fetcher. |
-| Periodic trigger in `ScannerManager` | **Yes.** Built once for Facebook. |
-| `SocialPostCard`, feed paging, search, `type:` filters, LLM `sources` | **Yes.** Instagram adds a grid view (below). |
-| Check-ins → geo points for `near:` | **No.** The Instagram API has no location field. See *Location*. |
-| Webview login on `login_success.html` | **No.** Instagram uses a code flow. See *Auth*. |
+API sync is **deferred** (see the end). Build it only if real users need something the export
+can't give them.
 
-**Implication for build order:** build the Facebook plan's shared pieces generically from the
-start (`MetaGraphClient`, `MetaSocialScanner`, platform-agnostic `SocialPostCard`). Then
-Instagram is mostly configuration plus the differences below.
+## Setup and import UI (on the Instagram page)
 
-## The big constraint: professional accounts only
+`instagram_page.dart` shows this until the first import finishes. After that, it lives in a
+"Sync settings" panel. It's the same `MetaExportSetupPanel` widget as the Facebook page
+([social-facebook-sync.md](social-facebook-sync.md)), parameterised for Instagram. Whichever
+plan is built first builds it.
 
-Meta shut down the Instagram Basic Display API, which was how personal accounts read their own
-media. The **Instagram API with Instagram Login** only serves **professional accounts**
-(business or creator). A personal account can't authorize the app at all.
+**1. "Export your Instagram data": step-by-step instructions**, numbered, with Meta's UI words in
+bold:
+1. Click **Open Instagram export page**. This opens the EYI deep link in the user's browser,
+   pre-filled for a one-time full export to their device:
+   `https://accountscenter.instagram.com/info_and_permissions/dyi?source=external&account_type=1&format=JSON&date_range=ALL_TIME&quality=HIGH&locale_override=en_US&sections[0]=IG_YOUR_ACTIVITY`
+   **(verify which `import_service` value means "to device")**. Recommend doing this in a
+   desktop browser, not the phone app, so the zip lands on this computer.
+2. If you're asked to log in, use your Instagram account. If anything isn't pre-filled, choose:
+   **Export to device** · your **Instagram** profile · **Format: JSON** (not HTML) · **Date
+   range: All time** · **Media quality: High** · **Your Instagram activity** (posts, reels and
+   stories).
+3. Click **Start export**. Meta emails you when it's ready. That takes minutes for small
+   accounts and can take a few days for large ones.
+4. Download the file(s) from **Available downloads** within 4 days. Large accounts get several
+   zips; download them all.
 
-Options for a personal-account user:
-1. **Switch to a creator account.** Free, in Instagram's settings, and reversible. But it
-   changes how the account looks to others (category label, insights, contact options), and
-   professional accounts may not be able to stay private **(verify the current rule for
-   creator accounts)**. We can explain this, but must never push it.
-2. **Archive import** (Accounts Center › Export your information, JSON): works for every account
-   type.
+Next to the steps: a "What gets imported" list (posts, carousels, reels, stories, photo
+locations) and the out-of-scope list (DMs, likes, comments, followers).
 
-So this plan has **two paths into the same tables**:
-- **API sync** for professional accounts: backfill plus ongoing sync, as with Facebook.
-- **Archive import** for everyone: the only path for personal accounts, and a one-time
-  enrichment for professional ones. It fills gaps the API can't: location, expired stories,
-  and reels whose `media_url` is withheld.
+**2. "Choose your export": the file field**
+- A read-only text field showing the chosen path(s), with a **Choose file…** button
+  (`FilePicker.platform.pickFiles(allowMultiple: true, type: FileType.custom,
+  allowedExtensions: ['zip'])`) and a secondary **Choose folder…** link for an already-unzipped
+  export.
+- **Validate before importing:**
+  - an Instagram export (`your_instagram_activity/` inside) → "Instagram export · @handle ·
+    Jun 2012 – Oct 2026 · 4.8 GB · 2 of 2 parts";
+  - HTML → "Request it again with Format: JSON";
+  - a Facebook export → "This looks like a Facebook export", with a button to switch pages;
+  - missing parts → list them, but allow importing anyway.
+- An **Import** button, then inline progress (posts, media). The import keeps running in its
+  isolate if the user leaves the page. The Downloads watcher can fill the field when an
+  `instagram-*.zip` appears in `~/Downloads`.
 
-Both upsert on `(platform, external_id)`, so they merge rather than duplicate **(verify that
-the export's media ids match the API's `id`; if not, match on `timestamp` + caption hash)**.
+**3. "Keep it up to date automatically"** (after the first import): explains that Instagram
+will send a new export to Google Drive every day for 3 years. It shows Google Drive's
+connection status (**Connect Google Drive** first if needed), then a **Set up automatic
+export** button that opens the scheduled deep link below. There are fallback steps if the
+pre-fill doesn't apply: **Transfer to destination › Google Drive** · **Daily** · **3 years** ·
+**JSON** · **Last week**. An **"I've set it up"** confirmation stores the start date, so we can
+warn before the schedule ends.
 
-## Auth
+**4. Sync status:** last export imported, new items, next expected, schedule end date, plus
+**Import another export…** and **Renew schedule**.
 
-Business Login for Instagram is an **authorization-code** flow:
-1. Open a webview at `https://www.instagram.com/oauth/authorize?client_id=…&redirect_uri=…&
-   response_type=code&scope=instagram_business_basic`.
-2. `redirect_uri` must exactly match a registered URI. Register
-   `https://auth.xdtlabs.com/instagram/callback`. The webview **intercepts** that navigation
-   before it loads and reads `code` from the query string, the same trick as Facebook's
-   `login_success.html`. Codes are valid for 1 hour, single use.
-3. The app POSTs the code to the token service's `POST /instagram/exchange`. The service:
-   - exchanges the code at `https://api.instagram.com/oauth/access_token` (needs the app
-     secret) for a 1-hour token;
-   - immediately exchanges that at `https://graph.instagram.com/access_token?
-     grant_type=ig_exchange_token` (also needs the secret) for a **60-day** token;
-   - returns the long-lived token and its expiry. It stores nothing.
-4. **Refresh is client-side and needs no secret:**
-   `GET https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=…`
-   works once the token is at least 24 hours old and still valid, and each refresh restarts the
-   60-day clock. The scanner refreshes on any run where the token is more than 30 days old.
-   **So an Instagram connection never expires as long as the app syncs at least once every
-   60 days.** That's better than Facebook, which needs a re-login every ~60 days.
-5. If the token does lapse (the app wasn't opened for 60 days), it can't be refreshed:
-   `needs_re_auth` → "Reconnect Instagram" banner, same as Facebook.
+## How the scheduled export works
 
-Permission: **`instagram_business_basic` only.** It reads the profile and media. The other
-`instagram_business_*` scopes (publish, comments, messages) are out of scope. App Review needs
-**Advanced Access** for it, because we serve accounts we don't own. Same recording rules as
-Facebook: show the consent screen, then the grid.
+Meta documents a deep link into EYI that pre-fills every choice, so the user only has to confirm
+([Deeplinking Guide](https://developers.facebook.com/documentation/data-portability/deep-link-guide)):
 
-## The Instagram client
+```text
+https://accountscenter.instagram.com/info_and_permissions/dyi
+  ?source=external&account_type=1
+  &import_service=GoogleDrive
+  &format=JSON&locale_override=en_US&quality=HIGH
+  &sections[0]=IG_YOUR_ACTIVITY
+  &date_range=LAST_WEEK
+  &schedule_frequency=ONCE_A_DAY_FOR_THREE_YEARS
+```
 
-`IgGraphClient extends MetaGraphClient`, host `graph.instagram.com`, pinned version.
+- `account_type=1` is Instagram (`0` is Facebook). The same tool and the same parameters serve
+  both.
+- `schedule_frequency`: daily, weekly or monthly for 1, 2 or 3 years (yearly for 2 or 3).
+  There's no "forever" and no hourly. Default to **daily for 3 years**
+  (`ONCE_A_DAY_FOR_THREE_YEARS`).
+- `date_range=LAST_WEEK` on a daily schedule makes each export overlap the previous week. The
+  idempotent upsert absorbs the duplicates, and a missed or failed day leaves no gap.
+- `locale_override=en_US` keeps field names English, so the parser handles one locale.
+- `quality=HIGH` gets the best media Meta offers in exports.
+- `sections`: `IG_YOUR_ACTIVITY` is the documented Instagram activity section. Whether it
+  includes posts, reels and stories, or whether they need further values, is a spike question.
 
-- **Profile:** `GET /me?fields=user_id,username,name,account_type,profile_picture_url,media_count`.
-  Check `account_type` on login, and explain clearly if it isn't professional.
-- **Media:** `GET /me/media?fields=id,caption,media_type,media_product_type,media_url,
-  thumbnail_url,permalink,shortcode,timestamp,alt_text,is_shared_to_feed,
-  children{id,media_type,media_url,thumbnail_url,alt_text}&limit=100`, following `paging.next`.
-- `media_type`: `IMAGE`, `VIDEO`, `CAROUSEL_ALBUM`. `media_product_type`: `FEED`, `REELS`,
-  `STORY` (`AD` is skipped). This maps to `social_posts.kind`: `post`, `carousel`, `reel`,
-  `story`.
-- **Carousels:** one `social_posts` row; each `children` item becomes a `files` row with
-  `position`. Child media has no caption or permalink of its own.
-- **`media_url` is optional.** Meta withholds it for videos with copyrighted or licensed audio
-  (including Instagram's own music library) *even for the owner*. Then store `thumbnail_url` as
-  a poster image, mark the file `media_unavailable = 'licensed_audio'`, and let a later archive
-  import fill in the video.
-- **Download immediately.** Treat CDN URLs as expiring, as on Facebook **(verify the lifetime)**.
-- **Edits and deletes:** captions can be edited, and there's no `updated_time`. The daily
-  re-fetch of the last 30 days compares captions. The weekly id-only reconcile marks
-  `deleted_on_source_at`, the same as Facebook.
+## The user's flow
 
-## Stories: the one place sync frequency matters
+1. **First run: full backfill.** One `ALL_TIME` export. The user either:
+   - downloads it and drags the zip(s) onto the Instagram page (or the Downloads watcher picks
+     up `instagram-*.zip`), or
+   - sends it to Drive like the scheduled ones.
 
-`GET /me/stories` returns only **currently live** stories, i.e. the last 24 hours **(verify)**.
-A daily sync would miss stories posted and expired between runs. So:
-- Poll `/me/stories` **every 6 hours** while the app is running (a cheap call: usually 0–5
-  items). Feed media stays on the daily schedule.
-- Stories that expired while the app wasn't running are only recoverable from the archive
-  export. Say so in the UI: "Stories are captured while My Data Studio is running. Import your
-  Instagram export to fill gaps."
-- Highlights aren't exposed by this API **(verify)**. They come only from the export.
+   Large accounts get several zips. Import them in any order; the upsert doesn't care.
+2. **"Keep Instagram in sync" button:** opens the scheduled deep link in the user's browser. If
+   Google Drive isn't connected in My Data Studio yet, connect it first. It's the delivery
+   channel.
+3. **Every day after that:** Meta drops an export into the user's Drive. The Google Drive scanner
+   (`modules/files/services/scanners/google_file_scanner.dart`) recognises Meta export zips in
+   EYI's folder, downloads them, and hands them to the Instagram import isolate rather than
+   indexing them as plain files. Imported zips can then be deleted from Drive (opt-in setting)
+   to save the user's Drive quota.
+4. **Before the schedule ends:** store the schedule's end date (set-up date + chosen duration).
+   30 days before, show "Your Instagram sync ends on <date> — renew", which reopens the deep
+   link. Also flag Instagram **stale** if no export has arrived in 3× the scheduled interval
+   (the schedule might have been cancelled in Accounts Center, or Drive disconnected).
 
-## Location
+**Fallback without Google Drive:** a weekly reminder to request a delta export
+(`date_range=CUSTOM&start=<last imported timestamp>`) to the device, plus the Downloads watcher.
+Never drive Meta's pages with browser automation: it breaks Meta's terms on automated access,
+it breaks whenever their UI changes, and it risks getting the user's account flagged.
 
-The Instagram API has **no** location, place or coordinate field. Meta's docs list the old
-`location` / `latitude` / `longitude` fields as unsupported. So:
-- API-synced posts have no geo point. Don't fake one from the caption.
-- The **archive import** carries `media_metadata.photo_metadata.exif_data` with latitude and
-  longitude on some media, even though the image file's own EXIF is stripped. When imported, it
-  sets `files.latitude`/`longitude` (and the post's), which lights up `near:` and the map.
-- Recommend a one-time archive import to professional-account users too, for exactly this
-  reason. It's the only way their Instagram photos get onto the map.
+**What the user sees:** "Last export imported: today, 06:12 · 3 new posts · next expected
+tomorrow · schedule ends 14 Oct 2029."
 
-## Archive import (all account types)
+## Spike first (needs a real account; blocks everything below)
 
-Kept from the earlier plan, now as the second path:
+- Does the deep link work for a site that isn't registered with Meta as a destination?
+  `import_service=GoogleDrive` is Meta's own destination; `source=external` is required. If it's
+  refused, fall back to step-by-step instructions with screenshots. The schedule still exists in
+  the EYI UI, the user just sets it by hand.
+- Does a **scheduled Drive transfer** deliver the same JSON zip as a device download (same
+  layout, captions, stories, `exif_data`), or only media? Some third-party guides say partner
+  transfers cover only photos and videos. **This decides whether the plan works.** If transfers
+  are media-only, captions need a periodic device export, and we redesign around that.
+- Which `sections` values cover posts, reels and stories?
+- Is a relative `date_range` re-evaluated on each scheduled run, or fixed at request time?
+  (If fixed, every scheduled run re-sends the same window, and we need `ALL_TIME` instead. That
+  works, but each export is large.)
+- Folder and file names EYI writes in Drive; how multi-part exports are named.
+- How long a daily export takes to arrive, and what happens when one fails.
+- The same answers for Facebook (`account_type=0`). See *Facebook* below.
+
+Record the answers in this plan before building the Drive handoff.
+
+## Parsing the export
+
 1. **Sample export first** (JSON, `locale_override=en_US`). Known shape **(verify)**:
-   `your_instagram_activity/content/posts_1.json`, `stories.json`, `reels.json`; media under
-   `media/posts/<YYYYMM>/…`; `creation_timestamp` in Unix seconds; optional
-   `exif_data` coordinates. Commit a trimmed fixture.
-2. **Text decoding:** Meta's exporter escapes UTF-8 as Latin-1 code points (`â\u0080\u0099` for
-   `’`). Fix by re-encoding to Latin-1 bytes and decoding as UTF-8, in a shared
-   `meta_export_text.dart` helper. Fixture test with emoji and accents.
-3. **Parser** (pure Dart): posts and carousels, stories, reels → the same models the API path
-   produces.
-4. **Import isolate:** PST-style one-time isolate, writes via `writeViaMain()`. The UI offers it
-   on the Instagram page ("Import Instagram export (.zip)"), and the Downloads watcher can pick
-   up an `instagram-*.zip`.
+   - `your_instagram_activity/content/posts_1.json` (numbered for large accounts),
+     `stories.json`, `reels.json`;
+   - media under `media/posts/<YYYYMM>/…`, `media/stories/…`, referenced by relative `uri`;
+   - `creation_timestamp` in Unix seconds;
+   - some media carry `media_metadata.photo_metadata.exif_data` with `latitude`/`longitude`
+     (and sometimes the original capture time), even though the image file's own EXIF is
+     stripped.
+
+   Commit a trimmed fixture under `client/test/fixtures/`.
+2. **Text decoding:** Meta's exporter escapes UTF-8 bytes as Latin-1 code points
+   (`â\u0080\u0099` instead of `’`). Re-encode such strings to Latin-1 bytes and decode as UTF-8,
+   in a shared `meta_export_text.dart` helper (Facebook exports need it too). Fixture test with
+   emoji and accents.
+3. **Parser** (pure Dart, no I/O). Locate files by pattern, not hard-coded paths, so a layout
+   change fails loudly instead of silently importing nothing.
+   - **Posts and carousels:** one `social_posts` row (`kind = post` or `carousel`) linked to N
+     `files` rows in order (`position`).
+   - **Reels:** `kind = reel`, one video file.
+   - **Stories:** `kind = story`, one media file each.
+   - **Caption** → `text`; `title` on multi-media posts → `text` when the per-item captions are
+     empty.
+   - **Identity:** the export has no Graph ids **(verify)**. Derive `external_id` from a stable
+     hash of `(kind, creation_timestamp, first media uri basename)`. Basenames stay the same
+     across exports **(verify across two exports)**; if not, use `(kind, creation_timestamp,
+     caption hash)`. The upsert keys on `(platform, external_id)`.
+4. **Import isolate:** one-time isolate in the style of the PST import, started by the UI (drag
+   and drop, Downloads watcher) or by the Drive scanner's handoff. Writes go through
+   `writeViaMain()` (single-writer rule). Unzip into a temp dir; copy media into the app's
+   storage; record the zip's hash in an `imported_exports` table so the same zip is never
+   imported twice.
+
+## Storage
+
+Uses the **shared social foundation** ([social-twitter-archive.md](social-twitter-archive.md),
+ADR 0002), with `platform = 'instagram'`:
+- `social_posts`: `kind`, `text`, `created_at`, `latitude`/`longitude` (from the first media
+  item that has `exif_data`), `raw_json`.
+- **Media into `files`**, with `social_post_id` and `position` (columns added by the Facebook
+  plan). `date_created` = the capture time from `exif_data` when present, else
+  `creation_timestamp`. `latitude`/`longitude` from `exif_data`. The photos then show up in
+  Photos, on the map and in `near:`, with thumbnails, descriptions, image embeddings and
+  clustering at no extra cost.
+- **No `deleted_on_source_at` from exports alone:** a post missing from a `LAST_WEEK` export
+  just wasn't in that window. Deletion can only be inferred by comparing a full `ALL_TIME`
+  export, so don't infer it. The archive keeps everything, which is the point.
 
 ## Embeddings
 
-- Instagram is media-first, so **images carry most of the search value**. They're in `files`,
-  so the existing `EmbeddingIsolate` already embeds and describes them.
-- Post text embedding: `caption` + `alt_text` with the same prefix style as Facebook
-  ("Instagram post, 2021-08-02: …"). Strip a trailing hashtag block before embedding, but keep
-  hashtags in the FTS index, so `#banff` still matches by keyword.
-- Posts with no caption get no text embedding. They're found through their images.
+- Images carry most of the search value. They're in `files`, so the existing `EmbeddingIsolate`
+  already embeds and describes them.
+- Post text embedding: caption with a short prefix ("Instagram post, 2021-08-02: …"). Strip a
+  trailing hashtag block before embedding, but keep hashtags in the FTS index, so `#banff`
+  matches by keyword.
+- Caption-less posts get no text embedding. They're found through their images.
+
+## Search
+
+Shared foundation: `SearchResultType.social`, `type:social` and `type:instagram` filters, FTS5
+over captions, a vector retriever over `social_posts_embeddings`, `HybridRanker`, and `social`
+as an LLM `search` source (ADR 0001). `near:` works for posts whose media had `exif_data`.
 
 ## The UI
 
-Instagram is visual, so `InstagramPage` gets **two views** over the same data, with a toggle:
-- **Grid** (default): 3-column square thumbnails, newest first, with month headers, sharing
-  the Photos module's tile and thumbnail code. Carousel and reel badges in the corner. Tapping
-  opens the post detail.
-- **Feed:** the shared `SocialPostCard` (header, caption with linkified hashtags and mentions,
-  media, "Open on Instagram"). No like or comment counts.
-- **Post detail:** a carousel swiper over the post's files, using the Photos viewer. Caption
-  below. Location chip when the archive supplied coordinates.
-- **Stories strip** above the grid: past stories grouped by day, played back from local files.
+`InstagramPage`, two views over the same data:
+- **Grid** (default): 3-column square thumbnails, newest first, with month headers, sharing the
+  Photos module's tile and thumbnail code. Carousel and reel badges.
+- **Feed:** the shared `SocialPostCard` (caption with linkified hashtags and @mentions, media,
+  location chip, "Open on Instagram" when a permalink is known). No like or comment counts.
+- **Post detail:** a carousel swiper over the post's files in the Photos viewer, caption below.
+- **Stories strip:** past stories grouped by day, played from local files.
 - **Toolbar:** search scoped to `type:instagram`; filters for Reels, Carousels, Stories, a year
   picker; **On this day**.
-- **States:** "Connect Instagram" (with the professional-account explanation),
-  "Import export instead", backfill progress, "Reconnect Instagram", and "Video unavailable
-  via API (licensed audio): import your export to fill it in".
+- **Empty state and sync settings:** the setup and import panel above. A gear icon in the
+  toolbar reopens it, along with the stale and renew warnings.
 
-## Dedupe with the camera roll (open question carried over)
+## Dedupe with the camera roll
 
 Many Instagram photos are already in the library from the phone's camera roll or Google Drive,
-in higher quality. Default: **link, don't delete**. When a perceptual hash or image-embedding
-match is above a threshold, record `files.duplicate_of`, and have Photos show the original with
-an "Also posted to Instagram" badge. Decide the threshold with real data. Out of scope for v1
-if it slows delivery.
+at higher quality. Default: **link, don't delete**. When a perceptual hash or image-embedding
+match is above a threshold, set `files.duplicate_of`, and have Photos show the original with an
+"Also posted to Instagram" badge. **Not in v1** unless the spike shows duplicates swamp the
+Photos timeline.
 
-## Prerequisites (on top of Facebook's)
+## Facebook
 
-The Facebook plan's prerequisites (business verification, the Meta app, legal pages, the token
-service) all apply and are done once. Instagram adds:
-- [ ] Add the **Instagram** product (Business Login for Instagram) to the existing Meta app
-- [ ] Register `https://auth.xdtlabs.com/instagram/callback` as a valid OAuth redirect URI
-- [ ] Add `POST /instagram/exchange` to the token service. The Instagram app secret goes into
-      Secret Manager next to the Facebook one (it may be a separate Instagram App Secret in the
-      dashboard; **verify**)
-- [ ] A professional (creator) test account with feed posts, a carousel, a reel and a live story,
-      added as an Instagram tester in the dashboard
-- [ ] Privacy policy updated to name Instagram
-- [ ] App Review: `instagram_business_basic` Advanced Access, with its own recording
+[social-facebook-sync.md](social-facebook-sync.md) uses the same approach: the same EYI tool and
+deep link, with `account_type=0`. Its Graph API path is likewise deferred, until business
+verification. Run the spike for both platforms at once. Written once and shared:
+`MetaExportSetupPanel`, the Drive handoff, `imported_exports`, the Downloads watcher, the
+schedule lifecycle, `meta_export_text.dart` and `SocialPostCard`.
+
+## Deferred: API sync for professional accounts
+
+Not planned for v1. Kept here so the research isn't lost. Build it only if real users need what
+the export can't do: a backfill without Drive, or stories captured within hours.
+- Instagram API with Instagram Login, host `graph.instagram.com`, scope
+  `instagram_business_basic` (Advanced Access via App Review). Professional accounts only.
+- Code flow: webview intercepts `https://auth.xdtlabs.com/instagram/callback`. The token service
+  (Facebook plan, Cloud Run) exchanges the code and then the short-lived token (both need the
+  app secret) for a 60-day token. Refresh (`ig_refresh_token`) needs no secret and works once
+  the token is 24h old, so the client can keep a connection alive indefinitely.
+- `GET /me/media` with `children`; `/me/stories` returns only live stories (poll every 6h).
+  There's **no location field**, and no `media_url` for licensed-audio reels.
+- Reuses `MetaGraphClient` / `MetaSocialScanner` from the Facebook plan. API-synced and exported
+  items must merge, but the API's media ids and the export's identity hash differ, so they need
+  a matching rule on `(timestamp, caption)`.
 
 ## Tests
 
-- IG client against recorded fixtures: paging, a carousel with children, a reel without
-  `media_url`, a story, `account_type = PERSONAL` rejected cleanly.
-- Token refresh: refreshed when older than 30 days; not attempted before 24 hours; a lapsed
-  token → `needs_re_auth`.
-- Archive parser: carousel mapping, `exif_data` → lat/lng, mojibake decoding.
-- Merge: the same post via API, then archive (and the reverse) gives one row, with location
-  added by the archive and nothing duplicated.
+- Parser against the fixture: carousel order, a reel, a story, `exif_data` → lat/lng and capture
+  date, numbered `posts_N.json`, mojibake decoding.
+- Identity: the same post in two different exports (`LAST_WEEK` then `ALL_TIME`) gives one row.
+- File-field validation: HTML export rejected, Facebook export detected, missing parts listed.
+- Idempotency: importing the same zip twice is a no-op (`imported_exports`); overlapping
+  windows add no duplicates.
+- Drive handoff: a Meta export zip in the EYI folder goes to the importer, not the file index.
+  Other zips are indexed as normal.
+- Schedule lifecycle: the renew warning appears 30 days before the end; the stale flag appears
+  after 3× the interval with no export.
 
 ## Done when
 
-- A professional account connects, backfills every feed post, reel and carousel, and keeps
-  syncing daily without the user doing anything. The token refreshes itself.
-- Stories posted while the app is running are captured before they expire.
-- A personal account can import its export and gets the same grid, feed and search.
-- Archive-imported photos with coordinates appear on the map and match `near:`.
-- Every photo and video appears in Photos with the post's date, carousels in order.
-- A known caption is found by keyword, by hashtag and by `type:instagram`. A photo is found by a
-  semantic query.
+- A **personal** account user imports a full export and gets the grid, feed, stories and search,
+  with captions decoded correctly.
+- After a one-click schedule setup, new posts appear in the app within about a day, with nobody
+  doing anything, for the life of the schedule. Overlapping exports add no duplicates.
+- Photos with `exif_data` appear on the map and match `near:`. Every photo and video sits in
+  Photos at its real date, carousels in order.
+- A lapsed, cancelled or stalled schedule shows a visible state ("Instagram sync stopped" /
+  "renew"), never silence.
 
 ## Open questions
 
-- Professional accounts and privacy: can a creator account stay private? This decides how hard
-  we should point personal users at the API path versus the archive.
-- Dedupe with the camera roll: in v1, or later?
+- Delete imported zips from the user's Drive automatically, or keep them (they count against
+  the user's Drive quota)? Default proposal: opt-in delete.
+- Daily vs weekly default: daily gives freshness, weekly is gentler on Drive storage. Default
+  proposal: daily, with overlapping windows.
