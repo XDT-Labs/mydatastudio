@@ -11,7 +11,7 @@ and how to keep this file current are explained in [README.md](README.md).
 | LLM tool access to the archive (Gemma) | `in-progress` | [llm-tools.md](plans/llm-tools.md) | [0001](adr/0001-llm-tool-registry.md) | Phases 0–5 built 2026-10-25; verified end to end against the real model. Left: a visual check of the chat UI in the running app. Phase 6 (cloud models, scoped tool sets, MCP) not scheduled. |
 | Twitter / X archive import | `proposed` | [social-twitter-archive.md](plans/social-twitter-archive.md) | — | Build first: it defines the shared social foundation (schema, import isolate, search) the other two reuse. Likely ADR 0002. |
 | Facebook sync (Graph API) | `proposed` | [social-facebook-sync.md](plans/social-facebook-sync.md) | — | Archive of the user's own posts, photos and check-ins. Needs Meta App Review + a token-exchange service on Cloud Run. Builds the shared social foundation. |
-| Instagram archive import | `proposed` | [social-instagram-archive.md](plans/social-instagram-archive.md) | — | Depends on the shared social foundation. Mostly media, which lands in Photos. |
+| Instagram sync (API + archive import) | `proposed` | [social-instagram-sync.md](plans/social-instagram-sync.md) | — | Reuses the Facebook Meta app, token service and sync machinery. API needs a professional account; personal accounts use archive import. No location via API. |
 | Dropbox file source | `idea` | — | — | Constant only; provider commented out in `client/lib/file_sources/file_source_registry.dart`. |
 | OneDrive file source | `idea` | — | — | Constant only; no provider or scanner. |
 | Glassmorphism elevation model | `ready` | [glassmorphism-elevation.md](plans/glassmorphism-elevation.md) | — | Decision made 2026-08-01 to build out `DESIGN.md`'s spec. |
