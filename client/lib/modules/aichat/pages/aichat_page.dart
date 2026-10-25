@@ -9,7 +9,13 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/app_router.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/modules/aichat/services/chat_tool_support.dart';
 import 'package:mydatastudio/modules/aichat/services/local_llm_content_generator.dart';
+import 'package:mydatastudio/modules/aichat/services/tools/tool_registry.dart';
+import 'package:mydatastudio/modules/aichat/widgets/tool_sources.dart';
+import 'package:mydatastudio/modules/email/services/tools/email_tools.dart';
+import 'package:mydatastudio/modules/search/services/query_embedder.dart';
+import 'package:mydatastudio/modules/search/services/tools/search_tools.dart';
 import 'package:mydatastudio/python_manager.dart';
 import 'package:mydatastudio/services/model_download_manager.dart';
 import 'package:mydatastudio/models/tables/aichat_message.dart';
@@ -44,12 +50,16 @@ class TextMessageItem extends ChatItem {
   final String? model;
   final List<Uint8List> images;
   final Map<String, int>? usage;
+
+  /// Archive items the tools returned while producing this answer.
+  final List<ToolSource> sources;
   TextMessageItem({
     required this.role,
     required this.text,
     this.model,
     this.images = const [],
     this.usage,
+    this.sources = const [],
   });
 }
 
@@ -71,16 +81,34 @@ class GenUiSurfaceItem extends ChatItem {
 splitConversation(List<AichatMessage> messages) {
   final transcript = <TextMessageItem>[];
   final history = <Map<String, dynamic>>[];
+  // Tool turns since the last reply: history for the model, sources for the
+  // answer that follows them, and nothing on screen themselves.
+  final toolSteps = <Map<String, dynamic>>[];
 
   for (final m in messages) {
+    if (m.role == storedToolCallRole || m.role == storedToolResultRole) {
+      final restored = fromStoredToolMessage(m.role, m.content);
+      if (restored != null) {
+        history.add(restored);
+        toolSteps.add(restored);
+      }
+      continue;
+    }
     final usage =
         (m.tokenCount != null && m.tokenCount! > 0)
             ? {'total_tokens': m.tokenCount!}
             : null;
     if (m.role != 'system') {
       transcript.add(
-        TextMessageItem(role: m.role, text: m.content, usage: usage),
+        TextMessageItem(
+          role: m.role,
+          text: m.content,
+          usage: usage,
+          sources:
+              m.role == 'assistant' ? sourcesFromToolTurn(toolSteps) : const [],
+        ),
       );
+      toolSteps.clear();
     }
     history.add({'role': m.role, 'content': m.content});
   }
@@ -127,6 +155,21 @@ class _AichatPage extends State<AichatPage> with RouteAware {
 
   // Accumulates streaming tokens; null when idle.
   String? _streamingText;
+
+  /// What the current tool call is doing ("Searching emails for …"), or null.
+  String? _toolActivity;
+
+  /// Sources from this turn's tool results, attached to the answer when it lands.
+  List<ToolSource> _pendingSources = const [];
+
+  /// Whether chat may search the archive. Local models only; see [_toolsFor].
+  bool _archiveSearchOn = true;
+
+  ToolRegistry? _registry;
+
+  /// Serialises history writes: tool rows must land before the answer they
+  /// led to, and stream listeners don't wait for each other.
+  Future<void> _persistQueue = Future.value();
 
   // Files staged for the next message (cleared after send).
   final List<PlatformFile> _pendingFiles = [];
@@ -194,6 +237,21 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       }
     });
 
+    _contentGenerator.toolActivityStream.listen((activity) {
+      if (!mounted || activity.finished) return;
+      setState(() {
+        _toolActivity = describeActivity(activity);
+        // Text streamed before a tool call ("Let me look…") is not the answer.
+        _streamingText = null;
+      });
+      _scrollToBottom();
+    });
+
+    _contentGenerator.toolTurnStream.listen((steps) {
+      _pendingSources = sourcesFromToolTurn(steps);
+      _persistToolSteps(steps);
+    });
+
     _contentGenerator.textResponseStream.listen((text) {
       if (mounted) {
         setState(() {
@@ -203,8 +261,11 @@ class _AichatPage extends State<AichatPage> with RouteAware {
               text: text,
               model: _contentGenerator.lastResponseModel,
               usage: _contentGenerator.lastUsage,
+              sources: _pendingSources,
             ),
           );
+          _pendingSources = const [];
+          _toolActivity = null;
           _streamingText = null;
         });
         AichatPage.isStreaming.value = false;
@@ -226,7 +287,12 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       onError: (error) {
         logger.e('GenUiConversation error: ${error.error}');
         AichatPage.isStreaming.value = false;
-        if (mounted) setState(() => _streamingText = null);
+        if (mounted) {
+          setState(() {
+            _streamingText = null;
+            _toolActivity = null;
+          });
+        }
       },
     );
   }
@@ -423,7 +489,45 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     }
   }
 
-  Future<void> _persistAssistantMessage(String text) async {
+  void _persistToolSteps(List<Map<String, dynamic>> steps) {
+    final id = _conversationId;
+    final repo = _repo;
+    if (id == null || repo == null) return;
+    _persistQueue = _persistQueue.then((_) async {
+      for (final step in steps) {
+        final stored = toStoredToolMessage(step);
+        await repo.addMessage(
+          conversationId: id,
+          role: stored.role,
+          content: stored.content,
+        );
+      }
+    }).catchError((Object e) => logger.e('Could not save tool turn: $e'));
+  }
+
+  /// The tool registry for this send, or null for a plain chat.
+  ///
+  /// Only local models: cloud adapters refuse tools (aiserver returns 400),
+  /// and sending archive contents to a cloud model needs its own opt-in
+  /// (docs/plans/llm-tools.md, Phase 6). Never for a skill, whose prompt is
+  /// written for a plain completion.
+  ToolRegistry? _toolsFor(String? group, {required bool usingSkill}) {
+    if (!_archiveSearchOn || group != 'local' || usingSkill) return null;
+    final db = DatabaseManager.instance.database;
+    if (db == null) return null;
+    return _registry ??= ToolRegistry([
+      SearchToolProvider(db, AiServerQueryEmbedder.instance),
+      EmailToolProvider(db),
+    ]);
+  }
+
+  Future<void> _persistAssistantMessage(String text) {
+    return _persistQueue = _persistQueue.then(
+      (_) => _writeAssistantMessage(text),
+    ).catchError((Object e) => logger.e('Could not save reply: $e'));
+  }
+
+  Future<void> _writeAssistantMessage(String text) async {
     final id = _conversationId;
     final repo = _repo;
     if (id == null || repo == null) return;
@@ -579,6 +683,10 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       }
     }
     _contentGenerator.apiKey = apiKey;
+    _contentGenerator.toolRegistry = _toolsFor(
+      group,
+      usingSkill: _contentGenerator.skillSystemPrompt != null,
+    );
 
     _genUiConversation.sendRequest(
       UserMessage.text(llmMessage.isEmpty ? message : llmMessage),
@@ -658,10 +766,32 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     );
   }
 
+  Widget _buildToolActivity(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(strokeWidth: 1.5, color: _mutedColor),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(color: _mutedColor),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAssistantBubble(
     String text, {
     bool streaming = false,
     String? model,
+    List<ToolSource> sources = const [],
   }) {
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
@@ -742,6 +872,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                 ),
               ),
             ),
+            if (sources.isNotEmpty) ToolSourcesRow(sources: sources),
           ],
         ),
       ),
@@ -944,7 +1075,8 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       return _buildModelDownloadGate();
     }
 
-    final itemCount = _chatItems.length + (_streamingText != null ? 1 : 0);
+    final inFlight = _streamingText != null || _toolActivity != null;
+    final itemCount = _chatItems.length + (inFlight ? 1 : 0);
 
     return Scaffold(
       backgroundColor: _bgColor,
@@ -963,10 +1095,14 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                 ),
                 itemCount: itemCount,
                 itemBuilder: (context, index) {
-                  if (index == _chatItems.length && _streamingText != null) {
-                    return _buildAssistantBubble(
-                      _streamingText!,
-                      streaming: true,
+                  if (index == _chatItems.length && inFlight) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_toolActivity != null) _buildToolActivity(_toolActivity!),
+                        if (_streamingText != null)
+                          _buildAssistantBubble(_streamingText!, streaming: true),
+                      ],
                     );
                   }
 
@@ -975,7 +1111,11 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                   if (item is TextMessageItem) {
                     return item.role == 'user'
                         ? _buildUserBubble(item.text, images: item.images)
-                        : _buildAssistantBubble(item.text, model: item.model);
+                        : _buildAssistantBubble(
+                          item.text,
+                          model: item.model,
+                          sources: item.sources,
+                        );
                   }
 
                   if (item is GenUiSurfaceItem) {
@@ -1105,6 +1245,28 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                                   );
                                 }
                               },
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 24,
+                                minHeight: 24,
+                              ),
+                              tooltip:
+                                  _archiveSearchOn
+                                      ? 'Archive search on (local models): chat can search your emails and files'
+                                      : 'Archive search off',
+                              isSelected: _archiveSearchOn,
+                              icon: Icon(
+                                Icons.manage_search,
+                                color: _archiveSearchOn ? _cs.primary : _mutedColor,
+                                size: 20,
+                              ),
+                              onPressed:
+                                  () => setState(
+                                    () => _archiveSearchOn = !_archiveSearchOn,
+                                  ),
                             ),
                             const SizedBox(width: 12),
                             Theme(

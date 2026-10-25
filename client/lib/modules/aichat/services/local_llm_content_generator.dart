@@ -5,6 +5,8 @@ import 'package:genui/genui.dart';
 import 'package:http/http.dart' as http;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/modules/aichat/services/agent_loop.dart';
+import 'package:mydatastudio/modules/aichat/services/tools/tool_registry.dart';
 
 class LocalLlmContentGenerator implements ContentGenerator {
   final String systemInstruction;
@@ -16,6 +18,9 @@ class LocalLlmContentGenerator implements ContentGenerator {
   final _textResponseController = StreamController<String>.broadcast();
   final _errorController = StreamController<ContentGeneratorError>.broadcast();
   final _streamingChunkController = StreamController<String>.broadcast();
+  final _toolActivityController = StreamController<ToolActivity>.broadcast();
+  final _toolTurnController =
+      StreamController<List<Map<String, dynamic>>>.broadcast();
   final _isProcessing = ValueNotifier<bool>(false);
 
   String? model;
@@ -46,6 +51,11 @@ class LocalLlmContentGenerator implements ContentGenerator {
   /// Cleared automatically after each send.
   String? skillSystemPrompt;
 
+  /// Tools offered to the model on the next request, or null for none.
+  /// The page sets this per send: only local models, only when the
+  /// conversation has archive search on, never for a skill.
+  ToolRegistry? toolRegistry;
+
   // Client-side conversation history in OpenAI format (content may be string or list).
   final List<Map<String, dynamic>> _messages = [];
 
@@ -71,6 +81,14 @@ class LocalLlmContentGenerator implements ContentGenerator {
 
   /// Emits individual token chunks as they stream from the server.
   Stream<String> get streamingChunkStream => _streamingChunkController.stream;
+
+  /// A tool starting or finishing during the current turn.
+  Stream<ToolActivity> get toolActivityStream => _toolActivityController.stream;
+
+  /// The tool-call and tool-result messages a turn produced, emitted once
+  /// before its final answer so the page can persist them in order.
+  Stream<List<Map<String, dynamic>>> get toolTurnStream =>
+      _toolTurnController.stream;
 
   /// Cancel the active stream: closes the HTTP connection and signals the
   /// server to stop. Whatever was already received is committed.
@@ -112,6 +130,8 @@ class LocalLlmContentGenerator implements ContentGenerator {
     _textResponseController.close();
     _errorController.close();
     _streamingChunkController.close();
+    _toolActivityController.close();
+    _toolTurnController.close();
     _isProcessing.dispose();
   }
 
@@ -160,107 +180,45 @@ class LocalLlmContentGenerator implements ContentGenerator {
 
       final activeSystemPrompt = skillSystemPrompt ?? systemInstruction;
       skillSystemPrompt = null; // consume — applies to this request only
+      final registry = toolRegistry;
+      final systemPrompt =
+          registry == null
+              ? activeSystemPrompt
+              : '$activeSystemPrompt\n\n${archiveToolsPrompt(DateTime.now())}';
       final List<Map<String, dynamic>> requestMessages = [
-        if (activeSystemPrompt.isNotEmpty)
-          {'role': 'system', 'content': activeSystemPrompt},
+        if (systemPrompt.isNotEmpty) {'role': 'system', 'content': systemPrompt},
         ..._messages,
       ];
 
-      final request = http.Request(
-        'POST',
-        Uri.parse('$llmServiceUrl/v1/chat/completions'),
-      );
-      request.headers['Content-Type'] = 'application/json; charset=UTF-8';
-      request.headers.addAll(
-        aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
-      );
-      request.body = jsonEncode({
-        'model': model ?? '',
-        if (modelPath != null && modelPath!.isNotEmpty) 'model_path': modelPath,
-        if (mmprojPath != null && mmprojPath!.isNotEmpty)
-          'mmproj_path': mmprojPath,
-        if (apiKey != null && apiKey!.isNotEmpty) 'api_key': apiKey,
-        'messages': requestMessages,
-        'stream': true,
-      });
-
       lastResponseModel = null;
       lastUsage = null;
-      final client = http.Client();
-      _activeClient = client;
-      try {
-        final streamedResponse = await client.send(request);
 
-        if (streamedResponse.statusCode != 200) {
-          final body = await streamedResponse.stream.bytesToString();
-          // 409 means the server's single generation slot is taken. The UI
-          // already guards this via isProcessing, so reaching it means two
-          // senders raced — say so plainly rather than dumping the JSON body.
-          _errorController.add(
-            ContentGeneratorError(
-              streamedResponse.statusCode == 409
-                  ? 'The model is already generating a response. '
-                      'Wait for it to finish, or press stop.'
-                  : 'Failed to get response: ${streamedResponse.statusCode} — $body',
-              StackTrace.current,
-            ),
-          );
-          return;
+      if (registry == null) {
+        final turn = await _streamTurn(llmServiceUrl, requestMessages, null);
+        if (turn != null && turn.content.isNotEmpty) {
+          _messages.add({'role': 'assistant', 'content': turn.content});
+          _textResponseController.add(turn.content);
         }
-
-        final buffer = StringBuffer();
-
-        // Wrap the stream loop so that any interruption (cancel or server
-        // disconnect) falls through to the commit step below.
-        try {
-          await for (final line in streamedResponse.stream
-              .transform(utf8.decoder)
-              .transform(const LineSplitter())) {
-            if (!line.startsWith('data: ')) continue;
-            final data = line.substring(6).trim();
-            if (data == '[DONE]') break;
-            try {
-              final parsed = jsonDecode(data) as Map<String, dynamic>;
-              lastResponseModel ??= parsed['model'] as String?;
-              _activeCompletionId ??= parsed['id'] as String?;
-              final choices = parsed['choices'] as List?;
-              if (choices != null && choices.isNotEmpty) {
-                final delta =
-                    (choices[0] as Map<String, dynamic>)['delta']
-                        as Map<String, dynamic>?;
-                final content = delta?['content'] as String?;
-                if (content != null && content.isNotEmpty) {
-                  buffer.write(content);
-                  _streamingChunkController.add(content);
-                }
-              }
-              // Capture token usage from the final SSE chunk (Gemini / cloud models)
-              final usage = parsed['usage'] as Map<String, dynamic>?;
-              if (usage != null) {
-                lastUsage = {
-                  'prompt_tokens':
-                      (usage['prompt_tokens'] as num?)?.toInt() ?? 0,
-                  'completion_tokens':
-                      (usage['completion_tokens'] as num?)?.toInt() ?? 0,
-                  'total_tokens': (usage['total_tokens'] as num?)?.toInt() ?? 0,
-                };
-              }
-            } catch (_) {}
-          }
-        } catch (_) {
-          // Stream was interrupted (user cancel or server disconnect).
-          // Fall through to commit whatever is in the buffer.
-        }
-
-        final fullContent = buffer.toString();
-        if (fullContent.isNotEmpty) {
-          _messages.add({'role': 'assistant', 'content': fullContent});
-          _textResponseController.add(fullContent);
-        }
-      } finally {
-        _activeClient = null;
-        client.close();
+        return;
       }
+
+      final result = await AgentLoop(
+        registry: registry,
+        transport: (messages, tools) => _streamTurn(llmServiceUrl, messages, tools),
+        onActivity: _toolActivityController.add,
+        isCancelled: () => _cancelled,
+      ).run(requestMessages);
+
+      // Everything the loop added goes into the history, so a follow-up
+      // ("open the second one") can see the results it refers to.
+      _messages.addAll(result.added);
+      final steps = [
+        for (final m in result.added)
+          if (m['role'] == 'tool' || m['tool_calls'] != null) m,
+      ];
+      if (steps.isNotEmpty) _toolTurnController.add(steps);
+      final text = result.finalText;
+      if (text != null && text.isNotEmpty) _textResponseController.add(text);
     } catch (e, stackTrace) {
       if (!_cancelled) {
         _errorController.add(ContentGeneratorError(e.toString(), stackTrace));
@@ -268,6 +226,141 @@ class LocalLlmContentGenerator implements ContentGenerator {
     } finally {
       _cancelled = false;
       _isProcessing.value = false;
+    }
+  }
+
+  /// Sends one completion request and streams its text to the UI.
+  ///
+  /// Returns the reply, including whatever text arrived before a cancel or a
+  /// dropped connection (kept, as before tool support), or null when the
+  /// request failed outright.
+  Future<AssistantTurn?> _streamTurn(
+    String llmServiceUrl,
+    List<Map<String, dynamic>> messages,
+    List<Map<String, Object?>>? tools,
+  ) async {
+    final request = http.Request(
+      'POST',
+      Uri.parse('$llmServiceUrl/v1/chat/completions'),
+    );
+    request.headers['Content-Type'] = 'application/json; charset=UTF-8';
+    request.headers.addAll(
+      aiServerAuthHeaders(MainApp.llmServiceToken.valueOrNull),
+    );
+    request.body = jsonEncode({
+      'model': model ?? '',
+      if (modelPath != null && modelPath!.isNotEmpty) 'model_path': modelPath,
+      if (mmprojPath != null && mmprojPath!.isNotEmpty)
+        'mmproj_path': mmprojPath,
+      if (apiKey != null && apiKey!.isNotEmpty) 'api_key': apiKey,
+      'messages': messages,
+      if (tools != null) 'tools': tools,
+      'stream': true,
+    });
+
+    final client = http.Client();
+    _activeClient = client;
+    _activeCompletionId = null;
+    try {
+      final streamedResponse = await client.send(request);
+
+      if (streamedResponse.statusCode != 200) {
+        final body = await streamedResponse.stream.bytesToString();
+        // 409 means the server's single generation slot is taken. The UI
+        // already guards this via isProcessing, so reaching it means two
+        // senders raced — say so plainly rather than dumping the JSON body.
+        _errorController.add(
+          ContentGeneratorError(
+            streamedResponse.statusCode == 409
+                ? 'The model is already generating a response. '
+                    'Wait for it to finish, or press stop.'
+                : 'Failed to get response: ${streamedResponse.statusCode} — $body',
+            StackTrace.current,
+          ),
+        );
+        return null;
+      }
+
+      final buffer = StringBuffer();
+      // Streamed tool calls arrive as fragments keyed by index.
+      final calls = <int, Map<String, dynamic>>{};
+
+      // Wrap the stream loop so that any interruption (cancel or server
+      // disconnect) falls through to the commit step below.
+      try {
+        await for (final line in streamedResponse.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())) {
+          if (!line.startsWith('data: ')) continue;
+          final data = line.substring(6).trim();
+          if (data == '[DONE]') break;
+          try {
+            final parsed = jsonDecode(data) as Map<String, dynamic>;
+            lastResponseModel ??= parsed['model'] as String?;
+            _activeCompletionId ??= parsed['id'] as String?;
+            final choices = parsed['choices'] as List?;
+            if (choices != null && choices.isNotEmpty) {
+              final delta =
+                  (choices[0] as Map<String, dynamic>)['delta']
+                      as Map<String, dynamic>?;
+              final content = delta?['content'] as String?;
+              if (content != null && content.isNotEmpty) {
+                buffer.write(content);
+                _streamingChunkController.add(content);
+              }
+              for (final fragment in (delta?['tool_calls'] as List?) ?? const []) {
+                _mergeToolCallFragment(calls, fragment as Map<String, dynamic>);
+              }
+            }
+            // Capture token usage from the final SSE chunk (Gemini / cloud models)
+            final usage = parsed['usage'] as Map<String, dynamic>?;
+            if (usage != null) {
+              lastUsage = {
+                'prompt_tokens': (usage['prompt_tokens'] as num?)?.toInt() ?? 0,
+                'completion_tokens':
+                    (usage['completion_tokens'] as num?)?.toInt() ?? 0,
+                'total_tokens': (usage['total_tokens'] as num?)?.toInt() ?? 0,
+              };
+            }
+          } catch (_) {}
+        }
+      } catch (_) {
+        // Stream was interrupted (user cancel or server disconnect).
+        // Fall through to commit whatever is in the buffer.
+      }
+
+      final ordered = calls.keys.toList()..sort();
+      return AssistantTurn(
+        content: buffer.toString(),
+        toolCalls: [for (final i in ordered) calls[i]!],
+      );
+    } finally {
+      _activeClient = null;
+      client.close();
+    }
+  }
+
+  static void _mergeToolCallFragment(
+    Map<int, Map<String, dynamic>> calls,
+    Map<String, dynamic> fragment,
+  ) {
+    final index = (fragment['index'] as num?)?.toInt() ?? calls.length;
+    final call = calls.putIfAbsent(
+      index,
+      () => {
+        'id': '',
+        'type': 'function',
+        'function': <String, dynamic>{'name': '', 'arguments': ''},
+      },
+    );
+    if (fragment['id'] case final String id) call['id'] = id;
+    final function = fragment['function'] as Map<String, dynamic>?;
+    final target = call['function'] as Map<String, dynamic>;
+    if (function?['name'] case final String name) {
+      target['name'] = (target['name'] as String) + name;
+    }
+    if (function?['arguments'] case final String args) {
+      target['arguments'] = (target['arguments'] as String) + args;
     }
   }
 
