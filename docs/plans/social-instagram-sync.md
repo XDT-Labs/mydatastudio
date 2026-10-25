@@ -204,7 +204,7 @@ Record the answers in this plan before building the Drive handoff.
 
 ## Storage
 
-Uses the **shared social foundation** ([social-twitter-archive.md](social-twitter-archive.md),
+Uses the **shared social foundation** ([social-x-sync.md](social-x-sync.md),
 ADR 0002), with `platform = 'instagram'`:
 - `social_posts`: `kind`, `text`, `created_at`, `latitude`/`longitude` (from the first media
   item that has `exif_data`), `raw_json`.

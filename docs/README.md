@@ -15,7 +15,7 @@ A plan is the brief handed to whoever builds the feature, including a sub-agent.
 on its own: someone with only the plan and the repo should be able to build it and tell when
 they're finished.
 
-- **Name:** `plans/<feature>.md`, in kebab-case (`social-twitter-archive.md`).
+- **Name:** `plans/<feature>.md`, in kebab-case (`social-x-sync.md`).
 - **Contents:** context (what exists today), scope, design, phases, open questions, and a
   **Done when** section with checkable criteria.
 - **It changes as the work does.** Tick off phases, record what was built and what turned out

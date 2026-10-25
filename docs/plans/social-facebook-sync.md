@@ -188,7 +188,7 @@ The one-time import (setup UI steps 1–2) doesn't depend on the spike. Build it
 ## Storage
 
 This plan builds the **shared social foundation** described in
-[social-twitter-archive.md](social-twitter-archive.md), if Facebook goes first. Record the
+[social-x-sync.md](social-x-sync.md), if Facebook goes first. Record the
 schema in **ADR 0002** before writing it.
 
 **`social_posts`** (shared table; Facebook values shown)
