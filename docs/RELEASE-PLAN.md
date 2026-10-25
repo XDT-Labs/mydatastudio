@@ -1,6 +1,6 @@
-# Release plan: social and email sources
+# Release plan: social, email and file sources
 
-The order we build the social and email plans in, what each wave depends on, and a checklist
+The order we build the social, email and file-storage plans in, what each wave depends on, and a checklist
 per wave. [ROADMAP.md](ROADMAP.md) stays the status table (one row per feature). This file is
 the **sequence**. Each plan in [`plans/`](plans/) holds the detail.
 
@@ -29,14 +29,14 @@ flowchart TD
   W0 -.-> D
 ```
 
-| Wave | Social | Email | Social release no.* |
-|---|---|---|---|
-| 0 | Shared social foundation, setup panel, spikes | IMAP engine | — |
-| 1 | Bluesky, Mastodon | Yahoo (migrate), AOL, iCloud, Fastmail, Yandex, GMX, Zoho, Outlook, Gmail over IMAP | 1 |
-| 2 | Facebook, Instagram, Threads | MBOX/EML file imports (Takeout, Apple Mail, Thunderbird), Proton, Tuta | 2 |
-| 3 | Snapchat Memories, Flickr, YouTube, X | — | 3–4 |
-| 4 | Reddit, Pinterest, Tumblr, LinkedIn, TikTok | — | 5 |
-| 5 | Strava, Goodreads / Letterboxd / Medium / Substack | — | 6 |
+| Wave | Social | Email | Files | Social release no.* |
+|---|---|---|---|---|
+| 0 | Shared social foundation, setup panel, spikes | IMAP engine | `CloudFileScanner`, change cursors, sync-folder connector, dataless detection | — |
+| 1 | Bluesky, Mastodon | Yahoo (migrate), AOL, iCloud, Fastmail, Yandex, GMX, Zoho, Outlook, Gmail over IMAP | Sync folders (iCloud Drive, Dropbox, OneDrive, Google Drive, Box Drive, Proton Drive, MEGA, Sync.com, pCloud Drive); Dropbox API; OneDrive API | 1 |
+| 2 | Facebook, Instagram, Threads | MBOX/EML file imports (Takeout, Apple Mail, Thunderbird), Proton, Tuta | Google Drive: Changes API + scope decision | 2 |
+| 3 | Snapchat Memories, Flickr, YouTube, X | — | Google Photos via Takeout | 3–4 |
+| 4 | Reddit, Pinterest, Tumblr, LinkedIn, TikTok | — | Box API, pCloud API, WebDAV/Nextcloud/NAS | 5 |
+| 5 | Strava, Goodreads / Letterboxd / Medium / Substack | — | — | 6 |
 
 \* The release numbers recorded in the roadmap for the later social plans. Facebook, Instagram,
 X, LinkedIn and TikTok are placed by dependency: X shares Flickr's OAuth 1.0a signer, and
@@ -85,6 +85,23 @@ Defined in [social-x-sync.md](plans/social-x-sync.md), *Shared social foundation
   - [ ] one setup flow with autodetect, plus "Other (IMAP)";
   - [ ] a Docker IMAP test server.
 
+### File-source foundation
+
+From [files-sources-foundation.md](plans/files-sources-foundation.md):
+- [ ] **`CloudFileScanner`** + `CloudFileApi` adapter interface (Google Drive moved onto it
+      first, unchanged behaviour)
+- [ ] **Change-cursor sync** with `file_source_sync_state`: moves and deletes, cursor-expiry
+      re-list, the "keep deleted files" setting
+- [ ] **Content policy** (metadata always; thumbnails and photos; documents for text up to a
+      limit; the estimate before the first sync)
+- [ ] **Sync-folder connector**: detect `~/Library/CloudStorage/*`, iCloud Drive and legacy
+      folders; `providerHint`; **dataless (`SF_DATALESS`) detection via FFI `stat`**; legacy
+      `.icloud` stubs; the bounded "download for indexing" option
+- [ ] **OAuth:** relax `DesktopOAuthManager`'s "secret required" check per provider (PKCE
+      public clients)
+- [ ] **`files.content_hash`** + cross-source dedupe
+- [ ] **New file source page:** "Found on this Mac" / "Connect an account" / "Other"
+
 ### Spikes (real accounts; record the answers in each plan)
 
 - [ ] **Meta scheduled export** (Facebook, Instagram, Threads): does the EYI deep link work for
@@ -102,6 +119,14 @@ Defined in [social-x-sync.md](plans/social-x-sync.md), *Shared social foundation
       live field names → gates Wave 3
 - [ ] **Gmail:** are app passwords still offered? Is there a CASA exemption for an on-device
       app? → decides Wave 1's Gmail path and the deferred Gmail API
+- [ ] **Google restricted scopes (Gmail + Drive together):** one verification and CASA
+      assessment covering `gmail.readonly` and `drive.readonly`? Cost and timeline → decides
+      Wave 2's Google Drive path
+- [ ] **Sync folders:** real folder names under `~/Library/CloudStorage/` for each provider app
+      (Box Drive, Proton Drive, pCloud Drive, MEGA); whether our entitlements can read
+      `~/Library/Mobile Documents` → gates Wave 1's sync-folder cards
+- [ ] **Box and pCloud:** does token exchange require a client secret (→ token service)? →
+      gates Wave 4's Box and pCloud APIs
 
 ---
 
@@ -132,6 +157,20 @@ Real ongoing sync for the most people, with no platform approval needed.
 - [ ] **GMX / mail.com / WEB.DE** ([email-gmx.md](plans/email-gmx.md))
 - [ ] **Zoho** (per-region hosts; free-plan handling) ([email-zoho.md](plans/email-zoho.md))
 
+### Files
+Depends on the file-source foundation and the sync-folder spike.
+- [ ] **Sync-folder cards** (no sign-in) for each detected app:
+  - [ ] **iCloud Drive**, including app containers and legacy stubs
+        ([files-icloud-drive.md](plans/files-icloud-drive.md));
+  - [ ] **Dropbox**, **OneDrive**, **Google Drive**, **Box Drive** and **pCloud Drive** folders;
+  - [ ] **Proton Drive** ([files-proton-drive.md](plans/files-proton-drive.md));
+  - [ ] **MEGA** ([files-mega.md](plans/files-mega.md));
+  - [ ] **Sync.com** ([files-sync-com.md](plans/files-sync-com.md)).
+- [ ] **Dropbox API**: PKCE app, `list_folder` cursor, batch thumbnails; **production approval
+      before 50 linked users** ([files-dropbox.md](plans/files-dropbox.md))
+- [ ] **OneDrive API**: the Outlook Entra app plus `Files.Read`, Graph `delta`, personal and
+      work accounts ([files-onedrive.md](plans/files-onedrive.md))
+
 ---
 
 ## Wave 2: Meta exports and mail file imports
@@ -160,6 +199,11 @@ Meta sync also depends on the Meta spike. One-time imports can ship first.
       handling), plus the free-plan export path ([email-proton.md](plans/email-proton.md))
 - [ ] **Tuta**: export steps and EML import ([email-file-imports.md](plans/email-file-imports.md))
 
+### Files
+- [ ] **Google Drive:** move to the Changes API (deletes and moves), narrow to `drive.readonly`,
+      export Google-native files for text, shared drives. The public-release path follows the
+      restricted-scope spike; until then, the sync folder ([files-google-drive.md](plans/files-google-drive.md))
+
 ---
 
 ## Wave 3: Photo sources and bring-your-own-key
@@ -180,14 +224,28 @@ the Snapchat, YouTube and X spikes.
       ([social-youtube-archive.md](plans/social-youtube-archive.md))
 - [ ] **X**: bring-your-own keys, cost estimate, timeline + optional full-archive search, X
       archive import ([social-x-sync.md](plans/social-x-sync.md))
+- [ ] **Google Photos via Takeout**: JSON sidecar merge (capture dates, geo), albums, scheduled
+      Takeout to Drive, dedupe ([files-google-photos.md](plans/files-google-photos.md))
 
 ---
 
-## Wave 4: Export-only social
+## Wave 4: Export-only social and the remaining file APIs
 
-Simple imports, each with a re-export reminder, since none of these can be scheduled.
+Simple social imports, each with a re-export reminder since none can be scheduled, plus the
+remaining storage APIs.
 
-**Depends on:** Wave 0 (`csv`, setup panel); the LinkedIn and TikTok spikes for those two.
+**Depends on:** Wave 0 (`csv`, setup panel, file-source foundation); the LinkedIn and TikTok
+spikes for those two; the Box/pCloud secret spike for those two.
+
+### Files
+- [ ] **Box API**: Events API cursor; token service if a secret is required
+      ([files-box.md](plans/files-box.md))
+- [ ] **pCloud API**: US/EU hosts, `diff` cursor ([files-pcloud.md](plans/files-pcloud.md))
+- [ ] **WebDAV / Nextcloud / Synology / NAS**: Nextcloud Login Flow v2, ETag walk, pinned
+      self-signed certificates, offline volumes not treated as deleted (this also fixes external
+      drives) ([files-webdav-nas.md](plans/files-webdav-nas.md))
+
+### Social
 
 - [ ] **Reddit**: posts, comments opt-in ([social-reddit-archive.md](plans/social-reddit-archive.md))
 - [ ] **Pinterest**: boards → albums ([social-pinterest-archive.md](plans/social-pinterest-archive.md))
@@ -227,3 +285,9 @@ Built only when the gate opens, and only if users need what the shipped path can
 | YouTube Data API | Need for faster metadata | [social-youtube-archive.md](plans/social-youtube-archive.md) |
 | Fastmail JMAP | IMAP proving slow | [email-fastmail.md](plans/email-fastmail.md) |
 | IMAP `IDLE` push | After 15-minute polling is stable | [email-imap-engine.md](plans/email-imap-engine.md) |
+| Google Drive API for public release | Google verification + CASA (shared with Gmail) | [files-google-drive.md](plans/files-google-drive.md) |
+| SharePoint sites | Users asking; may need tenant admin consent | [files-onedrive.md](plans/files-onedrive.md) |
+| Proton Drive SDK | Proton supporting third-party auth | [files-proton-drive.md](plans/files-proton-drive.md) |
+| MEGAcmd for cloud-only MEGA content | Users asking; SDK licence check | [files-mega.md](plans/files-mega.md) |
+| Dropbox long-poll / instant sync | After 30-minute polling is stable | [files-dropbox.md](plans/files-dropbox.md) |
+| Amazon Photos / Amazon Drive | No public API (Drive API shut down) | [files-sources-foundation.md](plans/files-sources-foundation.md) |

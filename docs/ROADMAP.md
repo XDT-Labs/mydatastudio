@@ -1,8 +1,8 @@
 # Roadmap
 
 Every feature in flight or planned, with its status and where its details live. Status values
-and how to keep this file current are explained in [README.md](README.md). The order the social
-and email sources are built in, by wave, with dependencies and checklists, is in
+and how to keep this file current are explained in [README.md](README.md). The order the social,
+email and file sources are built in, by wave, with dependencies and checklists, is in
 [RELEASE-PLAN.md](RELEASE-PLAN.md).
 
 | Feature | Status | Plan | ADR | Notes |
@@ -39,8 +39,18 @@ and email sources are built in, by wave, with dependencies and checklists, is in
 | Email: GMX / mail.com / WEB.DE | `proposed` | [email-gmx.md](plans/email-gmx.md) | — | IMAP must be switched on and turns itself off after inactivity. |
 | Email: Yandex | `proposed` | [email-yandex.md](plans/email-yandex.md) | — | IMAP + app password (can take hours to activate). |
 | Email: file imports (MBOX, EML; Tuta) | `proposed` | [email-file-imports.md](plans/email-file-imports.md) | — | Streaming MBOX/EML import next to the existing PST import: Takeout, Apple Mail, Thunderbird, Proton/Tuta exports. |
-| Dropbox file source | `idea` | — | — | Constant only; provider commented out in `client/lib/file_sources/file_source_registry.dart`. |
-| OneDrive file source | `idea` | — | — | Constant only; no provider or scanner. |
+| Files: shared foundation | `proposed` | [files-sources-foundation.md](plans/files-sources-foundation.md) | — | `CloudFileScanner` + per-provider adapters, change-cursor sync (moves and deletes), a content policy, a sync-folder connector with dataless (online-only) detection, content-hash dedupe. Prerequisite for the rows below. |
+| Files: Google Drive | `proposed` | [files-google-drive.md](plans/files-google-drive.md) | — | Existing. Switch to the Changes API; `drive.readonly` is still restricted (verification + CASA, shared with Gmail); sync folder as the no-review path. |
+| Files: Dropbox | `proposed` | [files-dropbox.md](plans/files-dropbox.md) | — | PKCE app, `list_folder` cursor, batch thumbnails; production approval needed before 50 linked users. Plus the sync folder. |
+| Files: OneDrive / SharePoint | `proposed` | [files-onedrive.md](plans/files-onedrive.md) | — | Reuses the Outlook Entra app + `Files.Read`; Graph `delta`; personal and work. Plus the sync folder. |
+| Files: iCloud Drive | `proposed` | [files-icloud-drive.md](plans/files-icloud-drive.md) | — | Sync folder only (no public API); dataless files and legacy `.icloud` stubs. |
+| Files: Box | `proposed` | [files-box.md](plans/files-box.md) | — | Box Drive folder first; API via the Events cursor (token service if a secret is required). |
+| Files: pCloud | `proposed` | [files-pcloud.md](plans/files-pcloud.md) | — | US/EU API hosts, `diff` cursor; pCloud Drive volume. |
+| Files: Proton Drive | `proposed` | [files-proton-drive.md](plans/files-proton-drive.md) | — | Sync folder; the SDK doesn't yet support third-party auth. |
+| Files: MEGA | `proposed` | [files-mega.md](plans/files-mega.md) | — | Sync folder; MEGAcmd later. |
+| Files: Sync.com | `proposed` | [files-sync-com.md](plans/files-sync-com.md) | — | Sync folder only (no API). |
+| Files: Google Photos | `proposed` | [files-google-photos.md](plans/files-google-photos.md) | — | Takeout only: the Library API stopped reading user libraries on 31 March 2025. JSON sidecar merge for dates and geo. |
+| Files: WebDAV / Nextcloud / NAS / SMB | `proposed` | [files-webdav-nas.md](plans/files-webdav-nas.md) | — | Nextcloud Login Flow v2, ETag walk, pinned self-signed certificates; offline volumes not treated as deleted. |
 | Glassmorphism elevation model | `ready` | [glassmorphism-elevation.md](plans/glassmorphism-elevation.md) | — | Decision made 2026-08-01 to build out `DESIGN.md`'s spec. |
 | Tier 2 auto-update (Sparkle) | `proposed` | [sparkle-auto-update.md](plans/sparkle-auto-update.md) | — | Probably needs an ADR (EdDSA key custody, appcast hosting). |
 | Fix hanging `TagsAndLandmarksSection` widget test | `proposed` | [fix-tags-landmarks-widget-test.md](plans/fix-tags-landmarks-widget-test.md) | — | Test is `skip: true`; investigation notes in the plan. |

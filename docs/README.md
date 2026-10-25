@@ -5,7 +5,7 @@ How feature work is planned, decided and tracked in this repo, plus operational 
 | Where | What it holds | Changes over time? |
 |---|---|---|
 | [`ROADMAP.md`](ROADMAP.md) | One row per feature: status, plan, ADR, notes | Yes, whenever a status changes |
-| [`RELEASE-PLAN.md`](RELEASE-PLAN.md) | Build order for the social and email sources: waves, dependencies, spikes, a checklist per wave | Yes, when an item is done or moves between waves |
+| [`RELEASE-PLAN.md`](RELEASE-PLAN.md) | Build order for the social, email and file sources: waves, dependencies, spikes, a checklist per wave | Yes, when an item is done or moves between waves |
 | [`plans/`](plans/) | One plan per feature: *what* we're building and *how* | Yes, as the work moves along |
 | [`adr/`](adr/) | Architecture Decision Records: *why* we made a lasting choice | No, once accepted |
 | [`runbooks/`](runbooks/) | Step-by-step operational procedures | Yes, when the code they depend on changes |
