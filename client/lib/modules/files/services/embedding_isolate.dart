@@ -228,6 +228,7 @@ class EmbeddingIsolate {
     // just got drained, so it's fine to back off.
     const kBatchSize = 10;
     var lastBatchLength = 0;
+    var lastBatchSuccessCount = 0;
 
     // Lives for the isolate's lifetime and is never persisted — a restart
     // retries everything, which is the property that makes an outage
@@ -269,6 +270,7 @@ class EmbeddingIsolate {
             'Re-embedding ${staleDescriptions.length} descriptions written by '
             'an older pipeline',
           );
+          var successCount = 0;
           for (final row in staleDescriptions) {
             if (isPaused) break;
             final embedding = await _generateTextEmbedding(
@@ -283,6 +285,7 @@ class EmbeddingIsolate {
               // would retire the work permanently.
               continue;
             }
+            successCount++;
             replyTo.send({
               'type': 'embedding',
               'table': 'files_embeddings',
@@ -290,6 +293,15 @@ class EmbeddingIsolate {
               'id': row.fileId,
               'embedding': embedding,
             });
+          }
+          if (successCount == 0) {
+            // When none in the batch could be embedded (service down or erroring),
+            // pause before retrying to prevent an unbounded tight loop that pegs the CPU.
+            logger.w(
+              'Failed to embed any descriptions in batch; backing off 15 seconds.',
+            );
+            await Future.delayed(const Duration(seconds: 15));
+            continue;
           }
           // Straight back round: there may be thousands, and they are cheap.
           continue;
@@ -310,6 +322,7 @@ class EmbeddingIsolate {
 
         logger.i("Processing ${files.length} files for embeddings");
 
+        lastBatchSuccessCount = 0;
         for (final file in files) {
           if (isPaused) {
             logger.d("Pause requested; abandoning remaining batch");
@@ -370,6 +383,7 @@ class EmbeddingIsolate {
             // would then be permanently excluded from retry instead of
             // picked up again next pass.
             if (embedding != null) {
+              lastBatchSuccessCount++;
               replyTo.send({
                 'type': 'embedding',
                 'table': 'files_embeddings',
@@ -429,10 +443,10 @@ class EmbeddingIsolate {
         await Future.delayed(const Duration(seconds: 30));
       }
 
-      // Heartbeat sleep — short when the last batch was full (more backlog
-      // likely waiting), otherwise the usual pace.
+      // Heartbeat sleep — short when the last batch was full and at least one
+      // item succeeded (more backlog likely waiting), otherwise back off.
       await Future.delayed(
-        lastBatchLength >= kBatchSize
+        (lastBatchLength >= kBatchSize && lastBatchSuccessCount > 0)
             ? const Duration(seconds: 1)
             : const Duration(seconds: 10),
       );
@@ -455,7 +469,7 @@ class EmbeddingIsolate {
               ...aiServerAuthHeaders(serviceToken),
             },
             body: jsonEncode({
-              'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+              'model_name': EmbeddingModel.modelName,
               'filename': null,
             }),
           )
@@ -487,6 +501,7 @@ class EmbeddingIsolate {
         body: jsonEncode({
           'model_name': EmbeddingModel.modelName,
           'texts': [text],
+          'task': 'document',
         }),
       );
       if (response.statusCode != 200) {
@@ -542,7 +557,7 @@ class EmbeddingIsolate {
               ...aiServerAuthHeaders(serviceToken),
             },
             body: jsonEncode({
-              'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+              'model_name': EmbeddingModel.modelName,
               'filename': filename,
               // A list of one: images are not batched — two photos of different
               // dimensions expand to different numbers of vision tokens — but the
@@ -570,10 +585,18 @@ class EmbeddingIsolate {
       logger.e("Python service error: ${response.statusCode} ${response.body}");
       // 400 is the endpoint's answer for an image it could not decode — it
       // maps the parse ValueError to a 400 — so that is a verdict on this
-      // file. 503 (model still downloading) and 5xx are about the service.
+      // file. However, if the 400 is a request validation/schema error (e.g.
+      // version skew between client and server), it is a service error and
+      // must NOT spend the file's attempt budget.
+      final isImageParseError = response.statusCode == 400 &&
+          (response.body.contains("Invalid image_base64") ||
+           response.body.contains("Ghostscript") ||
+           response.body.contains("cannot identify image") ||
+           response.body.contains("unidentified image"));
+
       return (
         outcome:
-            response.statusCode == 400
+            isImageParseError
                 ? EmbeddingOutcome.unusable
                 : EmbeddingOutcome.unreachable,
         embedding: null,

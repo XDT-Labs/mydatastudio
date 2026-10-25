@@ -416,7 +416,7 @@ def stream_download_snapshot(model_id: str, local_path: str, hf_token: Optional[
     Generator that streams an entire HuggingFace repo snapshot (all files) into
     `local_path`, yielding SSE-formatted aggregate progress events.
 
-    Used for multi-file Transformers models (e.g. Qwen3-VL-Embedding-2B) that
+    Used for multi-file Transformers models (e.g. google/embeddinggemma-2) that
     can't be downloaded as a single GGUF file via stream_download_gguf(). Files
     already present locally with the correct size are skipped; anything
     missing or truncated (e.g. from a prior interrupted download) is

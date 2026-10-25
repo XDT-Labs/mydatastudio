@@ -65,7 +65,7 @@ CHUNK_MAX_TOKENS = 512
 # The embedding model whose tokenizer decides what "512 tokens" means. Counting
 # against docling's bundled all-MiniLM tokenizer would budget for a different
 # model than the one that embeds the text.
-EMBEDDING_MODEL_DIR = "Qwen-Qwen3-VL-Embedding-2B-local"
+EMBEDDING_MODEL_DIR = "google-embeddinggemma-2-local"
 
 
 class UnsupportedFormat(Exception):

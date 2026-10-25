@@ -1,7 +1,7 @@
 """
 Pydantic models for request/response validation.
 """
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, ConfigDict
 from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, DEFAULT_MODEL_ALIAS
 
@@ -85,15 +85,22 @@ class EmbeddingV1Request(BaseModel):
 # ── Util endpoint models (/util/*) ───────────────────────────────────────────
 
 class EmbeddingRequest(BaseModel):
-    """Multimodal embedding (text or images). Used by /util/embedding.
+    """Multimodal embedding (text, image, audio, or video). Used by /util/embedding.
 
-    Both inputs are lists so there is exactly one request shape and one
-    response shape; a caller with a single item sends a list of one. Text is
-    embedded as a true batch in one forward pass, which is what makes bulk
-    work (an email's body chunks) affordable.
+    Inputs are lists so there is a consistent request and response shape; a
+    caller with a single item sends a list of one. Text inputs are prefixed
+    according to `task` ('query' or 'document') before embedding.
     """
     texts: Optional[List[str]] = Field(None, description="Text content to embed, one vector returned per entry")
+    text: Optional[str] = Field(None, description="Legacy single text field for backwards compatibility")
     images_base64: Optional[List[str]] = Field(None, description="Base64-encoded images, one vector returned per entry")
+    image_base64: Optional[str] = Field(None, description="Legacy single image field for backwards compatibility")
+    audios_base64: Optional[List[str]] = Field(None, description="Base64-encoded audios, one vector returned per entry")
+    videos_base64: Optional[List[str]] = Field(None, description="Base64-encoded videos, one vector returned per entry")
+    task: Literal["query", "document"] = Field(
+        "document",
+        description="Task type for text prompt prefixes ('query' for search queries, 'document' for indexed content)"
+    )
     model_name: str = Field(
         default=DEFAULT_LOCAL_MODEL,
         description="Hugging Face model identifier"
@@ -106,8 +113,9 @@ class EmbeddingRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "image_base64": "iVBORw0KGgo...",
-                "model_name": "Qwen/Qwen3-VL-Embedding-2B"
+                "texts": ["Sample text to embed"],
+                "model_name": "google/embeddinggemma-2",
+                "task": "document"
             }
         }
     )
@@ -118,7 +126,7 @@ class DownloadModelRequest(BaseModel):
 
     When `filename` is omitted or explicitly null, the entire repo snapshot is
     downloaded instead of a single GGUF file — used for multi-file Transformers
-    models like Qwen3-VL-Embedding-2B.
+    models like google/embeddinggemma-2.
     """
     model_name: str = Field(
         default=DEFAULT_LOCAL_MODEL,

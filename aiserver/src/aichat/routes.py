@@ -38,6 +38,7 @@ from .model_manager import (
     load_local_model,
     load_embedding_model,
     generate_embeddings as gen_emb_fn,
+    is_transformers_embedding_model,
     load_gemini_model,
     load_claude_model,
     load_openai_model,
@@ -83,7 +84,7 @@ def _resolve_embedding_model(alias: str) -> tuple:
 
 def _embedding_model_downloaded(model_id: str, filename: Optional[str]) -> bool:
     """Local-disk-only check mirroring load_embedding_model()'s own routing
-    (Transformers snapshot for VL models, single GGUF file otherwise).
+    (Transformers snapshot for EmbeddingGemma models, single GGUF file otherwise).
 
     Callers must check this before invoking load_embedding_model() — without
     it, an embedding request for a model that isn't downloaded yet falls
@@ -93,7 +94,7 @@ def _embedding_model_downloaded(model_id: str, filename: Optional[str]) -> bool:
     /util/download-model (which the client already drives with progress UI).
     """
     local_path = get_local_path(model_id)
-    if filename is None or "vl" in model_id.lower():
+    if filename is None or is_transformers_embedding_model(model_id):
         return is_snapshot_downloaded(model_id, local_path)
     return find_local_model(filename, local_path) is not None
 
@@ -727,18 +728,38 @@ async def generate_embedding_v1(request: EmbeddingV1Request) -> Dict[str, Any]:
 
 async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
     """
-    Multimodal embedding (text or image). Used by /util/embedding.
+    Multimodal embedding (text, image, audio, or video). Used by /util/embedding.
     """
     _, embedding_lock = get_locks()
 
-    if not request.texts and not request.images_base64:
-        raise HTTPException(status_code=400, detail="Either 'texts' or 'images_base64' must be provided.")
-    if request.texts and request.images_base64:
-        raise HTTPException(status_code=400, detail="Only one of 'texts' or 'images_base64' can be provided.")
+    # Normalize legacy single inputs for backwards compatibility
+    if not request.texts and request.text:
+        request.texts = [request.text]
+    if not request.images_base64 and request.image_base64:
+        request.images_base64 = [request.image_base64]
+
+    modalities = [
+        ("texts", request.texts),
+        ("images_base64", request.images_base64),
+        ("audios_base64", request.audios_base64),
+        ("videos_base64", request.videos_base64),
+    ]
+    active = [name for name, val in modalities if val]
+
+    if not active:
+        raise HTTPException(
+            status_code=400,
+            detail="Either 'texts', 'images_base64', 'audios_base64', or 'videos_base64' must be provided."
+        )
+    if len(active) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Only one of 'texts', 'images_base64', 'audios_base64', or 'videos_base64' can be provided."
+        )
 
     async with embedding_lock:
         embedding_model, embedding_processor = get_embedding_model()
-        if embedding_model is None or embedding_processor is None:
+        if embedding_model is None:
             model_id = request.model_name
             filename = request.filename
             if not _embedding_model_downloaded(model_id, filename):
@@ -757,8 +778,19 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
 
     try:
         embedding_model, embedding_processor = get_embedding_model()
-        input_type = "text" if request.texts else "image"
-        count = len(request.texts or request.images_base64)
+        if request.texts:
+            input_type = "text"
+            count = len(request.texts)
+        elif request.images_base64:
+            input_type = "image"
+            count = len(request.images_base64)
+        elif request.audios_base64:
+            input_type = "audio"
+            count = len(request.audios_base64)
+        else:
+            input_type = "video"
+            count = len(request.videos_base64)
+
         # The forward pass is synchronous and holds the GIL through Python-level
         # work, so running it inline would block uvicorn's event loop for its
         # whole duration — the next request would not even be read off the
@@ -771,6 +803,9 @@ async def generate_embedding(request: EmbeddingRequest) -> Dict[str, Any]:
             texts=request.texts,
             images_base64=request.images_base64,
             filename=request.filename,
+            audios_base64=request.audios_base64,
+            videos_base64=request.videos_base64,
+            task=request.task,
         )
         return {
             "embeddings": embeddings,

@@ -10,7 +10,7 @@ class FileEmbedding {
   });
 
   factory FileEmbedding.fromDbMap(Map<String, dynamic> map) {
-    final rawBlob = map['qwen3_vl_embedding'] as Uint8List;
+    final rawBlob = map['embeddinggemma2_embedding'] as Uint8List;
     return FileEmbedding(
       fileId: map['file_id'] as String,
       embedding: Float32List.view(rawBlob.buffer).toList(),
@@ -20,7 +20,7 @@ class FileEmbedding {
   Map<String, dynamic> toDbMap() {
     return {
       'file_id': fileId,
-      'qwen3_vl_embedding': Float32List.fromList(embedding).buffer.asUint8List(),
+      'embeddinggemma2_embedding': Float32List.fromList(embedding).buffer.asUint8List(),
     };
   }
 }

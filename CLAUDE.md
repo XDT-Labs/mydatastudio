@@ -121,7 +121,7 @@ Concurrency: one shared model instance at a time; a `threading.Lock` (`state.gen
 
 ### Database Schema
 
-Tables (raw `CREATE TABLE` DDL in `database_manager.dart`): `apps`, `app_users`, `collections`, `files`, `folders`, `emails`, `email_folders`, `albums`, `providers`, `files_embeddings`, `emails_embeddings`, `aichat_conversations`, `aichat_conversation_history`, `aichat_models`, `aichat_skills`. Collections own Files/Folders/Emails. `files_embeddings`/`emails_embeddings` store float vectors (Qwen3-VL-Embedding-2B, dim 2048) via resqlite_vector for semantic search.
+Tables (raw `CREATE TABLE` DDL in `database_manager.dart`): `apps`, `app_users`, `collections`, `files`, `folders`, `emails`, `email_folders`, `albums`, `providers`, `files_embeddings`, `emails_embeddings`, `aichat_conversations`, `aichat_conversation_history`, `aichat_models`, `aichat_skills`. Collections own Files/Folders/Emails. `files_embeddings`/`emails_embeddings` store float vectors (EmbeddingGemma 2 / google/embeddinggemma-2, dim 768) via resqlite_vector for semantic search.
 
 ### macOS Bundle IDs
 
