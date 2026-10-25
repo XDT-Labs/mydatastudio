@@ -115,4 +115,47 @@ void main() {
       expect(describeActivity(ToolActivity('mystery', 'garbage')), 'Using mystery…');
     });
   });
+
+  group('reply progress', () {
+    // While a local model works there is nothing on screen unless we put it
+    // there: prompt processing alone can take seconds. The progress state is
+    // what the chat shows in place of the answer until text arrives.
+    test('a sent message shows a spinner and a label at once', () {
+      final p = ReplyProgress()..start();
+      expect(p.active, isTrue);
+      expect(p.label, 'Thinking…');
+      expect(p.steps, isEmpty);
+    });
+
+    test('a tool call changes the label, then becomes a finished step', () {
+      final p = ReplyProgress()..start();
+      final call = ToolActivity('search', '{"query": "lease", "sources": ["email"]}');
+      p.toolStarted(call);
+      expect(p.label, 'Searching emails for “lease”…');
+
+      p.toolFinished(ToolActivity(call.name, call.argumentsJson, finished: true));
+      expect(p.steps.single.text, 'Searched emails for “lease”');
+      expect(p.steps.single.failed, isFalse);
+      // Between a tool and the answer the model is still working.
+      expect(p.label, 'Reading results…');
+    });
+
+    test('a failed tool call is listed as failed', () {
+      final p = ReplyProgress()..start();
+      final call = ToolActivity('get_item', '{"id": "email:1"}');
+      p.toolStarted(call);
+      p.toolFinished(ToolActivity(call.name, call.argumentsJson, finished: true, isError: true));
+      expect(p.steps.single.failed, isTrue);
+    });
+
+    test('finishing clears everything for the next message', () {
+      final p = ReplyProgress()..start();
+      p.toolStarted(ToolActivity('list_collections', '{}'));
+      p.finish();
+      expect(p.active, isFalse);
+      expect(p.steps, isEmpty);
+      p.start();
+      expect(p.label, 'Thinking…');
+    });
+  });
 }

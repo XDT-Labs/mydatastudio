@@ -156,8 +156,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
   // Accumulates streaming tokens; null when idle.
   String? _streamingText;
 
-  /// What the current tool call is doing ("Searching emails for …"), or null.
-  String? _toolActivity;
+  /// What the model is doing until its answer arrives: a spinner, a label
+  /// ("Thinking…", "Searching emails for “lease”…") and finished tool steps.
+  final ReplyProgress _progress = ReplyProgress();
 
   /// Sources from this turn's tool results, attached to the answer when it lands.
   List<ToolSource> _pendingSources = const [];
@@ -238,14 +239,22 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     });
 
     _contentGenerator.toolActivityStream.listen((activity) {
-      if (!mounted || activity.finished) return;
+      if (!mounted) return;
       setState(() {
-        _toolActivity = describeActivity(activity);
-        // Text streamed before a tool call ("Let me look…") is not the answer.
-        _streamingText = null;
+        if (activity.finished) {
+          _progress.toolFinished(activity);
+        } else {
+          _progress.toolStarted(activity);
+          // Text streamed before a tool call ("Let me look…") is not the answer.
+          _streamingText = null;
+        }
       });
       _scrollToBottom();
     });
+
+    // Covers every way a reply ends without an answer arriving: stop, an
+    // error, or an empty reply. Without it the spinner would never go away.
+    _contentGenerator.isProcessing.addListener(_onProcessingChanged);
 
     _contentGenerator.toolTurnStream.listen((steps) {
       _pendingSources = sourcesFromToolTurn(steps);
@@ -265,7 +274,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
             ),
           );
           _pendingSources = const [];
-          _toolActivity = null;
+          _progress.finish();
           _streamingText = null;
         });
         AichatPage.isStreaming.value = false;
@@ -290,7 +299,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
         if (mounted) {
           setState(() {
             _streamingText = null;
-            _toolActivity = null;
+            _progress.finish();
           });
         }
       },
@@ -331,8 +340,15 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     if (mounted) setState(() => _dbModels = models);
   }
 
+  void _onProcessingChanged() {
+    if (!_contentGenerator.isProcessing.value && _progress.active && mounted) {
+      setState(_progress.finish);
+    }
+  }
+
   @override
   void dispose() {
+    _contentGenerator.isProcessing.removeListener(_onProcessingChanged);
     AppRouter.routeObserver.unsubscribe(this);
     _modelsSub?.cancel();
     ModelDownloadManager.isReady.removeListener(_onModelsReadyChanged);
@@ -688,6 +704,9 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       usingSkill: _contentGenerator.skillSystemPrompt != null,
     );
 
+    // Feedback from the moment of sending: a local model can be silent for
+    // many seconds before its first token.
+    setState(_progress.start);
     _genUiConversation.sendRequest(
       UserMessage.text(llmMessage.isEmpty ? message : llmMessage),
     );
@@ -766,22 +785,48 @@ class _AichatPage extends State<AichatPage> with RouteAware {
     );
   }
 
-  Widget _buildToolActivity(String text) {
+  /// The in-progress reply: finished tool steps, then a spinner with what's
+  /// happening now. Replaced by the streaming answer once its text arrives.
+  Widget _buildReplyProgress({required bool showSpinner}) {
+    final style = Theme.of(context).textTheme.labelMedium?.copyWith(color: _mutedColor);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 12,
-            height: 12,
-            child: CircularProgressIndicator(strokeWidth: 1.5, color: _mutedColor),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            text,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(color: _mutedColor),
-          ),
+          for (final step in _progress.steps)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    step.failed ? Icons.error_outline : Icons.check_circle_outline,
+                    size: 14,
+                    color: step.failed ? _cs.error : _mutedColor,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(step.text, style: style),
+                ],
+              ),
+            ),
+          if (showSpinner)
+            Semantics(
+              liveRegion: true,
+              label: _progress.label,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 1.8, color: _cs.primary),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(_progress.label, style: style),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -1075,7 +1120,7 @@ class _AichatPage extends State<AichatPage> with RouteAware {
       return _buildModelDownloadGate();
     }
 
-    final inFlight = _streamingText != null || _toolActivity != null;
+    final inFlight = _streamingText != null || _progress.active;
     final itemCount = _chatItems.length + (inFlight ? 1 : 0);
 
     return Scaffold(
@@ -1099,7 +1144,8 @@ class _AichatPage extends State<AichatPage> with RouteAware {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (_toolActivity != null) _buildToolActivity(_toolActivity!),
+                        if (_progress.active)
+                          _buildReplyProgress(showSpinner: _streamingText == null),
                         if (_streamingText != null)
                           _buildAssistantBubble(_streamingText!, streaming: true),
                       ],

@@ -96,14 +96,17 @@ List<ToolSource> sourcesFromToolTurn(List<Map<String, dynamic>> steps) {
   return sources;
 }
 
-/// The one-line status shown while a tool runs.
-String describeActivity(ToolActivity activity) {
+/// The one-line status for a tool call: "Searching emails for “lease”…" while
+/// it runs, or "Searched emails for “lease”" once [done].
+String describeActivity(ToolActivity activity, {bool done = false}) {
   Map<String, dynamic> args;
   try {
     args = jsonDecode(activity.argumentsJson) as Map<String, dynamic>;
   } catch (_) {
     args = const {};
   }
+  String verb(String running, String finished) => done ? finished : running;
+  final String text;
   switch (activity.name) {
     case 'search':
       final sources = (args['sources'] as List?)?.cast<String>() ?? const [];
@@ -113,21 +116,64 @@ String describeActivity(ToolActivity activity) {
         _ => 'your archive',
       };
       final query = (args['query'] as String?)?.trim();
-      final parts = [
-        'Searching $where',
+      text = [
+        '${verb('Searching', 'Searched')} $where',
         if (query != null && query.isNotEmpty && query != '*') 'for “$query”',
         if (args['from'] case final String from when from.isNotEmpty) 'from $from',
-      ];
-      return '${parts.join(' ')}…';
+      ].join(' ');
     case 'get_item':
-      return 'Opening an item…';
+      text = verb('Opening an item', 'Opened an item');
     case 'get_email_thread':
-      return 'Reading the email thread…';
+      text = verb('Reading the email thread', 'Read the email thread');
     case 'list_items':
-      return args['source'] == 'file' ? 'Listing files…' : 'Listing emails…';
+      final what = args['source'] == 'file' ? 'files' : 'emails';
+      text = '${verb('Listing', 'Listed')} $what';
     case 'list_collections':
-      return 'Checking your archives…';
+      text = verb('Checking your archives', 'Checked your archives');
     default:
-      return 'Using ${activity.name}…';
+      text = '${verb('Using', 'Used')} ${activity.name}';
+  }
+  return done ? text : '$text…';
+}
+
+/// One finished tool call, as listed above the answer while it's produced.
+class ProgressStep {
+  const ProgressStep(this.text, {this.failed = false});
+  final String text;
+  final bool failed;
+}
+
+/// What the chat shows in place of the answer until its text arrives.
+///
+/// A local model can take many seconds before the first token (loading,
+/// prompt processing, each tool round), and without this the page looks
+/// frozen. The label says what is happening now; [steps] lists the tool
+/// calls already done, so the user can see the work progress.
+class ReplyProgress {
+  bool active = false;
+  String label = '';
+  final List<ProgressStep> steps = [];
+
+  void start() {
+    active = true;
+    label = 'Thinking…';
+    steps.clear();
+  }
+
+  void toolStarted(ToolActivity activity) {
+    label = describeActivity(activity);
+  }
+
+  void toolFinished(ToolActivity activity) {
+    steps.add(
+      ProgressStep(describeActivity(activity, done: true), failed: activity.isError),
+    );
+    label = 'Reading results…';
+  }
+
+  void finish() {
+    active = false;
+    label = '';
+    steps.clear();
   }
 }
