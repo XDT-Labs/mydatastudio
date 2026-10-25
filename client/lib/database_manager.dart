@@ -968,6 +968,19 @@ class AppDatabase {
     await _db.execute('PRAGMA user_version = $docRecoveryVersion');
   }
 
+  /// Runs the PDF recovery step alone, for tests.
+  ///
+  /// Opening a database runs every upgrade step through the latest version,
+  /// and [_switchToEmbeddingGemma2] (version 6) resets every file's attempts,
+  /// which hides what this step did. Tests set `user_version` just below this
+  /// step's version and call it directly.
+  @visibleForTesting
+  Future<void> runPdfRecoveryStep() => _unretirePdfsRetiredByMissingPdfium();
+
+  /// Runs the `.doc` recovery step alone, for tests. See [runPdfRecoveryStep].
+  @visibleForTesting
+  Future<void> runDocRecoveryStep() => _unretireDocsRetiredByAnIncompleteReader();
+
   /// Migrates stored embeddings to Google's EmbeddingGemma 2.
   ///
   /// Replaces legacy Qwen3-VL embeddings (2048-d) with EmbeddingGemma 2

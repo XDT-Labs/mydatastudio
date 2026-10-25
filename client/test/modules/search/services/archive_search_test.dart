@@ -6,6 +6,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
 import 'package:mydatastudio/modules/search/services/archive_search.dart';
 import 'package:mydatastudio/modules/search/services/search_service.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -15,7 +16,7 @@ import 'package:path_provider/path_provider.dart';
 /// went through [SearchService] would reset the user's search page — its
 /// cursors, its loading flag, and the results stream it is rendering.
 
-const _dim = 2048;
+const _dim = EmbeddingModel.dimension;
 final _createdDbs = <String>[];
 
 Future<AppDatabase> _freshDb(String dbName) async {
@@ -53,7 +54,7 @@ Future<void> _addFile(
   );
   if (vector != null) {
     await db.rawDb.execute(
-      'INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding) '
+      'INSERT INTO files_embeddings (file_id, type, embeddinggemma2_embedding) '
       "VALUES (?, 'file', vector_as_f32(?))",
       [id, '[${vector.join(',')}]'],
     );
