@@ -1,19 +1,14 @@
 name: Build and Release
 
+# Releases are cut by pushing a version tag, e.g.:
+#   git tag v1.2.3 && git push origin v1.2.3
+# The tag is the version: the app is built as 1.2.3 and published to the
+# GitHub release named after the tag. A tag with a pre-release suffix
+# (v1.2.3-beta.1) is published as a pre-release, which the in-app update
+# checker ignores.
 on:
   push:
-    branches: ["main", "feature/actions"]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (e.g. 1.2.3). Reads from pubspec.yaml if empty.'
-        required: false
-        type: string
-      prerelease:
-        description: 'Mark as pre-release'
-        required: false
-        type: boolean
-        default: false
+    tags: ["v*"]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -23,9 +18,29 @@ jobs:
     name: Build macOS Release
     runs-on: macos-latest
     outputs:
-      version_tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
 
     steps:
+      # Validate the tag first so a malformed one fails in seconds, not after
+      # a full build.
+      - name: Resolve Version from Tag
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Error: tag '$TAG' is not a version tag (expected vX.Y.Z or vX.Y.Z-suffix)"
+            exit 1
+          fi
+          # macOS wants CFBundleShortVersionString to be plain X.Y.Z, so the
+          # pre-release suffix stays on the tag/release name only.
+          echo "version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+          if [ -n "${BASH_REMATCH[2]}" ]; then
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -86,42 +101,20 @@ jobs:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
 
+      # Build number is the workflow run number: always increasing, so each
+      # release gets a fresh CFBundleVersion and PythonManager's
+      # `<version>+<build>` stamp re-extracts the bundled aiserver.
       - name: Update Version in pubspec.prod.yaml
         env:
-          INPUT_VERSION: ${{ inputs.version }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          python3 -c "
-          import re, os
-          input_version = os.environ.get('INPUT_VERSION')
-          run_number = os.environ.get('GITHUB_RUN_NUMBER', '1')
-          with open('client/pubspec.prod.yaml', 'r') as f:
-              content = f.read()
-          pattern = r'^version:\s*(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?'
-          match = re.search(pattern, content, re.MULTILINE)
-          if not match:
-              print('Error: Could not find version line in pubspec.prod.yaml')
-              exit(1)
-          if input_version:
-              input_match = re.match(r'^(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$', input_version)
-              if input_match:
-                  major = input_match.group(1)
-                  minor = input_match.group(2)
-                  patch = input_match.group(3)
-                  build = input_match.group(4) or run_number
-                  new_version = f'version: {major}.{minor}.{patch}+{build}'
-              else:
-                  print(f'Error: Invalid input version format: {input_version}')
-                  exit(1)
-          else:
-              major = match.group(1)
-              minor = match.group(2)
-              new_version = f'version: {major}.{minor}.{run_number}+{run_number}'
-          new_content = re.sub(pattern, new_version, content, flags=re.MULTILINE)
-          with open('client/pubspec.prod.yaml', 'w') as f:
-              f.write(new_content)
-          print(f'Updated pubspec.prod.yaml version to: {new_version}')
-          "
+          if ! grep -qE '^version:' client/pubspec.prod.yaml; then
+            echo "Error: Could not find version line in pubspec.prod.yaml"
+            exit 1
+          fi
+          sed -i '' -E "s/^version:.*/version: ${VERSION}+${BUILD_NUMBER}/" client/pubspec.prod.yaml
+          grep '^version:' client/pubspec.prod.yaml
 
       # ------------------------------------------
       # 1. Set up Python + PDM (shared by models and Python service build)
@@ -251,21 +244,6 @@ jobs:
         run: appdmg installers/dmg_creator/config.json build/macos/Build/Products/Release/MyDataStudio.dmg
 
       # ------------------------------------------
-      # 7. Resolve version tag
-      # ------------------------------------------
-      - name: Resolve Version Tag
-        id: version
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          if [ -n "$INPUT_VERSION" ]; then
-            echo "tag=v${INPUT_VERSION}" >> $GITHUB_OUTPUT
-          else
-            VERSION=$(grep '^version:' client/pubspec.yaml | sed 's/version: //' | cut -d'+' -f1 | tr -d '[:space:]')
-            echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
-          fi
-
-      # ------------------------------------------
       # 8. Upload artifacts
       # ------------------------------------------
       - name: Upload DMG Artifact
@@ -301,12 +279,12 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.build.outputs.version_tag }}
-          name: MyDataStudio ${{ needs.build.outputs.version_tag }}
+          tag_name: ${{ github.ref_name }}
+          name: MyDataStudio ${{ github.ref_name }}
           files: |
             artifacts/macos-dmg/*.dmg
             artifacts/aiserver-macos/*.zip
-          prerelease: ${{ inputs.prerelease || false }}
+          prerelease: ${{ needs.build.outputs.prerelease == 'true' }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

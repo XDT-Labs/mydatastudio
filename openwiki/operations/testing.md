@@ -364,17 +364,29 @@ GitHub Actions workflows in `/.github/workflows/`:
 
 ### `build_and_release.yml`
 
-Runs on every push:
+Triggers **only on version tags** (`v*`, e.g., `v1.2.3` or `v1.2.3-beta.1`):
 
-1. **Build Flutter client** (`flutter build macos`)
-2. **Build Python service** (`make build-python`)
-3. **Run Flutter tests** (`flutter test`)
-4. **Run Python tests** (`PYTHONPATH=src pdm run pytest`)
-
-On release tags, also:
-
+1. **Validate tag** — Ensures format matches `vX.Y.Z` or `vX.Y.Z-suffix`
+2. **Extract version** — Numeric part (`X.Y.Z`) becomes app version
+3. **Build Flutter client** (`flutter build macos`)
+4. **Build Python service** (`make build-python`)
 5. **Notarize macOS app** (requires secrets)
-6. **Upload to release** (GitHub Releases)
+6. **Create DMG installer**
+7. **Create GitHub Release** — Marks as pre-release if tag has suffix (e.g., `-beta.1`)
+
+**To trigger a release:**
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+Tests **do not** run automatically in the release workflow; run them locally before tagging:
+
+```bash
+cd client && flutter test
+cd aiserver && PYTHONPATH=src pdm run pytest
+```
 
 ### `build_python.yml`
 
