@@ -20,5 +20,6 @@
             "database": "/Users/mikenimer/Library/Application Support/com.xdtlabs.mydatastudio.dev/data/mydata.db",
             "name": "app support db"
         }
-    ]
+    ],
+    "sqltools.useNodeRuntime": true
 }
