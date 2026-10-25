@@ -263,6 +263,11 @@ def load_local_model(
         n_gpu_layers=-1,
         verbose=False,
         chat_handler=chat_handler,
+        # Size sliding-window layers' KV cache to their window, not to n_ctx.
+        # For Gemma 4 12B that is 480 MiB instead of 10,240 MiB, with the same
+        # answers and speed (measured; see test_model_manager). Models without
+        # sliding-window attention are unaffected.
+        swa_full=False,
     )
 
 
