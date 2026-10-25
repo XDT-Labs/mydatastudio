@@ -164,8 +164,13 @@ endpoints:
    policy.
 
 Cloud Run setup:
-- **Code:** a small stateless HTTP service in a new top-level `tokenservice/` directory (Python
-  FastAPI, to match `aiserver/`, or Dart `shelf`; one container image either way). No database.
+- **Code:** a small stateless **Python FastAPI** service in a new top-level `tokenservice/`
+  directory, matching `aiserver/` (PDM, pytest, the same Python version range). It ships as one
+  container image, with no database and no shared code with `aiserver/`. It's a separate
+  deployable, not a module of the desktop app's server.
+- **Pages:** the service serves **only** the JSON endpoints. The privacy policy, terms and
+  data-deletion status pages are static pages on **xdtlabs.com**, so the `data-deletion`
+  callback returns a status URL there (e.g. `https://xdtlabs.com/facebook/deletion?code=<code>`).
 - **Deploy:** one Cloud Run service in a dedicated GCP project (e.g. `mydatastudio-auth`), in a
   US region. `--allow-unauthenticated` is required: the desktop app and Meta's callbacks have no
   GCP identity. Map a custom domain (`auth.xdtlabs.com`) so the URLs in Meta's settings don't
@@ -412,6 +417,5 @@ Things to watch:
 
 ## Open questions
 
-- Token service language: Python FastAPI (matches `aiserver/`) or Dart `shelf`?
-- Where the privacy policy and data-deletion pages live: static pages on xdtlabs.com, or served
-  by the same Cloud Run service under `auth.xdtlabs.com`?
+None blocking. Decided on 2026-10-25: the token service is Python FastAPI on Cloud Run, and the
+privacy policy, terms and data-deletion pages are static pages on xdtlabs.com.
