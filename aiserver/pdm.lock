@@ -5,7 +5,7 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:45b1bc8907b79beaa806f1748edc69ee1959ed6c9ef8cf6ec4e9c0b2d07f1a23"
+content_hash = "sha256:bdb835c2a61a4c5eedf612fe549fe0a6a9b92c1e675bdb32637b89b01f557f09"
 
 [[metadata.targets]]
 requires_python = ">=3.11,<3.14"
@@ -675,20 +675,20 @@ files = [
 
 [[package]]
 name = "docling-rs"
-version = "2.42.0"
+version = "1.104.3"
 requires_python = ">=3.9"
-summary = "Fast, local document-to-Markdown for LLMs and RAG: docling in Rust, with docling's and MarkItDown's Python APIs. PDF (layout, tables, OCR), DOCX, PPTX, XLSX, HTML, EPUB, email and more."
+summary = "Rust port of docling (docling.rs): convert PDF/DOCX/HTML/... to Markdown or docling JSON. Python bindings."
 groups = ["default"]
 marker = "python_version >= \"3.11\" and python_version < \"3.14\""
 dependencies = [
     "docling-core>=2.0",
 ]
 files = [
-    {file = "docling_rs-2.42.0-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:8f9b7737bb8240b4f2b3b9ef17ebc152bbb7ba3876dddb161f74d46f2daa64ff"},
-    {file = "docling_rs-2.42.0-cp39-abi3-manylinux_2_28_s390x.whl", hash = "sha256:6817d9bda91a9a8a8857d1e5f900a27f5dd71fafe78c0b3e456efcbca30b8465"},
-    {file = "docling_rs-2.42.0-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:8755435b24b73fc6c3cec7f541aea79a472f57b2e5de93d6307395fd85244123"},
-    {file = "docling_rs-2.42.0-cp39-abi3-win_amd64.whl", hash = "sha256:086355ffa0a5349f4c322e117a499b3489b955552299ad39f28496c88a263f50"},
-    {file = "docling_rs-2.42.0.tar.gz", hash = "sha256:2d31b88d5babc95c50038bccc80c5ee9863e057c7db1e3e8621d8d44c22ffc17"},
+    {file = "docling_rs-1.104.3-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:7d312c7451eb3b0ca17cd16d5483781e961f91f272ccf4053e9b9ebf26e29f40"},
+    {file = "docling_rs-1.104.3-cp39-abi3-manylinux_2_28_s390x.whl", hash = "sha256:d72b4680b5c7fa427803d8359b21f25bb4a8e38163167cec3cc049c340385f36"},
+    {file = "docling_rs-1.104.3-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:0e725ff6c089abbed80c6099e632cdb84be18b460da90e569b15d2474aa416bc"},
+    {file = "docling_rs-1.104.3-cp39-abi3-win_amd64.whl", hash = "sha256:8b9f4454d7d17bf32f353336c476dbb51fe64eb0358ae5b8478f571051a60a21"},
+    {file = "docling_rs-1.104.3.tar.gz", hash = "sha256:68adb62d83afb82d9a3b8797c260a28d43a6eabc07a4fc6b071210f204d358ff"},
 ]
 
 [[package]]
