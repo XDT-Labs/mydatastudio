@@ -19,6 +19,8 @@ flowchart TD
   W3["Wave 3: Photo sources + bring-your-own-key"]
   W4["Wave 4: Export-only social"]
   W5["Wave 5: Activity + small imports"]
+  W6["Wave 6: NAS container"]
+  LX["Linux desktop build (any time)"]
   D["Deferred: gated on verification, region or demand"]
   W0 --> W1
   W0 --> W2
@@ -26,6 +28,8 @@ flowchart TD
   W1 --> W3
   W3 --> W4
   W4 --> W5
+  W5 --> W6
+  LX --> W6
   W0 -.-> D
 ```
 
@@ -37,6 +41,13 @@ flowchart TD
 | 3 | Snapchat Memories, Flickr, YouTube, X | — | Google Photos via Takeout | 3–4 |
 | 4 | Reddit, Pinterest, Tumblr, LinkedIn, TikTok | — | Box API, pCloud API, WebDAV/Nextcloud/NAS | 5 |
 | 5 | Strava, Goodreads / Letterboxd / Medium / Substack | — | — | 6 |
+| 6 | NAS container (the whole app on a Synology, in the browser) | — | NAS shares as read-only local mounts | — |
+
+The **Windows** and **Linux desktop builds** in GitHub Actions
+([core-ci-windows-build.md](plans/core-ci-windows-build.md),
+[core-ci-linux-build.md](plans/core-ci-linux-build.md)) aren't tied to a wave. They can start at
+any time, and doing them early keeps new source work from adding macOS-only assumptions. The
+Linux build must be done before Wave 6.
 
 \* The release numbers recorded in the roadmap for the later social plans. Facebook, Instagram,
 X, LinkedIn and TikTok are placed by dependency: X shares Flickr's OAuth 1.0a signer, and
@@ -265,6 +276,32 @@ spikes for those two; the Box/pCloud secret spike for those two.
       ([social-strava-archive.md](plans/social-strava-archive.md))
 - [ ] **Goodreads, Letterboxd, Medium, Substack**
       ([social-csv-exports.md](plans/social-csv-exports.md))
+
+---
+
+## Wave 6: NAS container
+
+Near the end of feature development: the whole app, running 24/7 on a Synology NAS and used
+from a browser.
+
+**Depends on:** the Linux desktop build (including its `xvfb-run` smoke test, and the
+`webview_flutter`/`pdfx` replacements); Waves 0–5 as far as they've shipped. Everything that
+works in the Linux build works in the container.
+
+- [ ] **Spike** on a real Synology: base-image choice (jlesage vs LinuxServer KasmVNC/Selkies);
+      memory and CPU at idle, while scanning and while embedding; OAuth through the
+      in-container browser; a 100k-file share scan
+- [ ] **Image**: base + GTK3/Mesa/libmpv/fonts/zenity/Firefox ESR; `NAS_MODE` (maximised, no
+      Quit); `/config` (local volume) and `/nas` (read-only share mounts)
+- [ ] **Security**: web login + HTTPS from the base image; docs for Tailscale/VPN remote
+      access; no port forwarding
+- [ ] **AI workload**: a runtime **remote aiserver** setting (today `PYTHON_SERVER_URL` is a
+      build-time dart-define), throttled CPU indexing, the documented minimum RAM
+- [ ] **Synology excludes** (`@eaDir`, `#recycle`, `#snapshot`, `.SynologyWorkingDirectory`) in
+      the scanner, plus read-only collections hiding Delete
+- [ ] **CI**: multi-arch (amd64 + arm64) image to GHCR on tagged releases; a compose example and
+      a Container Manager guide
+- Plan: [core-nas-docker.md](plans/core-nas-docker.md)
 
 ---
 

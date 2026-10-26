@@ -5,8 +5,9 @@ and how to keep this file current are explained in [README.md](README.md). The o
 email and file sources are built in, by wave, with dependencies and checklists, is in
 [RELEASE-PLAN.md](RELEASE-PLAN.md).
 
-**Wave** is the [release plan](RELEASE-PLAN.md) wave an item is built in (`0`–`5`), `deferred`
-when it's waiting on a gate, or `—` for work outside the release plan. An item that ships in
+**Wave** is the [release plan](RELEASE-PLAN.md) wave an item is built in (`0`–`6`), `deferred`
+when it's waiting on a gate, `any` for work that can start at any time, or `—` for work
+outside the release plan. An item that ships in
 parts lists each wave (`1, 4`). Within each section, rows are ordered by wave.
 
 ## In progress
@@ -25,6 +26,9 @@ parts lists each wave (`1, 4`). Within each section, rows are ordered by wave.
 | Glassmorphism elevation model | `ready` | — | [glassmorphism-elevation.md](plans/glassmorphism-elevation.md) | — | Decision made 2026-08-01 to build out `DESIGN.md`'s spec. |
 | Tier 2 auto-update (Sparkle) | `proposed` | — | [sparkle-auto-update.md](plans/sparkle-auto-update.md) | — | Probably needs an ADR (EdDSA key custody, appcast hosting). |
 | Fix hanging `TagsAndLandmarksSection` widget test | `proposed` | — | [fix-tags-landmarks-widget-test.md](plans/fix-tags-landmarks-widget-test.md) | — | Test is `skip: true`; investigation notes in the plan. |
+| Windows desktop build in GitHub Actions | `proposed` | any | [core-ci-windows-build.md](plans/core-ci-windows-build.md) | — | No `client/windows/` yet; Windows commented out in `build_python.yml`. Replace `webview_flutter` for email HTML, Recycle Bin (unparks the row below), aiserver CPU/GPU builds, MSIX or Inno installer, code signing. |
+| Linux desktop build in GitHub Actions | `proposed` | any (before 6) | [core-ci-linux-build.md](plans/core-ci-linux-build.md) | — | No `client/linux/` yet. Replace `webview_flutter` and `pdfx` (no Linux support), freedesktop Trash, build on an old glibc base, AppImage, x86_64 + arm64, an `xvfb-run` smoke test. Prerequisite for the NAS container. |
+| Synology NAS container (Linux desktop in the browser) | `proposed` | 6 | [core-nas-docker.md](plans/core-nas-docker.md) | — | The Linux bundle on a maintained GUI-in-browser base image (jlesage or LinuxServer); NAS shares bind-mounted read-only. Web auth + TLS, in-container browser for OAuth, the AI workload (local CPU vs remote aiserver), Synology `@eaDir`/`#recycle` excludes, multi-arch GHCR image. |
 
 ## Shared foundations
 
@@ -96,4 +100,4 @@ deferred work.
 
 | Feature | Status | Wave | Plan | ADR | Notes |
 |---|---|---|---|---|---|
-| Windows Recycle Bin for photo delete | `parked` | — | [windows-recycle-bin.md](plans/windows-recycle-bin.md) | — | Waiting on Windows becoming a build target. |
+| Windows Recycle Bin for photo delete | `parked` | any | [windows-recycle-bin.md](plans/windows-recycle-bin.md) | — | Waiting on Windows becoming a build target. Unparks with [core-ci-windows-build.md](plans/core-ci-windows-build.md). |
