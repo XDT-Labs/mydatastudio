@@ -96,6 +96,15 @@ deferred work.
 | Files: Google Photos | `proposed` | 3 | [files-google-photos.md](plans/files-google-photos.md) | — | Takeout only: the Library API stopped reading user libraries on 31 March 2025. JSON sidecar merge for dates and geo. |
 | Files: WebDAV / Nextcloud / NAS / SMB | `proposed` | 4 | [files-webdav-nas.md](plans/files-webdav-nas.md) | — | Nextcloud Login Flow v2, ETag walk, pinned self-signed certificates; offline volumes not treated as deleted. |
 
+## Apps
+
+Built-in application modules (rail group `app`), ported from the React prototypes in
+`mockups/`. Each plan breaks its app into phases with their own checklists.
+
+| Feature | Status | Wave | Plan | ADR | Notes |
+|---|---|---|---|---|---|
+| Tasks app: kanban boards (from `mockups/kanban-board`) | `proposed` | any | [app-tasks.md](plans/app-tasks.md) | — | Single-user, multiple boards, no assignees; inherits the app theme (one `TaskColors` extension). Six tables: `tasks` plus five `task_*`. Phases: T0 schema + repository, T1 boards drawer + read-only board, T2 task editor, T3 drag/drop + reorder + keyboard, T4 search/filter + auto-hide completed (7 days, per-board setting), T5 custom columns, T6 links to emails/files/photos, T7 unified search + an embedding per task, T8 later (LLM tools, calendar, activity log). |
+
 ## Other
 
 | Feature | Status | Wave | Plan | ADR | Notes |
