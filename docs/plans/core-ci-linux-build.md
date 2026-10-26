@@ -1,7 +1,7 @@
 ---
 status: proposed
 adr: none
-remaining: [linux-runner-scaffold, plugin-audit, webview-replacement, pdf-viewer, system-trash, aiserver-linux, ci-job, packaging, arm64]
+remaining: [linux-runner-scaffold, plugin-audit, html-widget-email-view, html-widget-spike, pdfrx-migration, system-trash, aiserver-linux, ci-job, packaging, arm64]
 ---
 
 # Plan: Build the Linux desktop app in GitHub Actions
@@ -16,13 +16,23 @@ bundle.
 1. **Scaffold the runner:** `flutter create --platforms=linux .`; commit `client/linux/`. Set
    the binary name, `.desktop` entry and icon from the realm.
 2. **Plugin audit** (Linux support):
-   - **`webview_flutter`**: **no Linux support**. Use the same replacement as Windows
-     ([core-ci-windows-build.md](core-ci-windows-build.md)): a sanitised Flutter HTML renderer
-     for email bodies (WebKitGTK webviews are fragile under software rendering, which matters for
-     the NAS container).
-   - **`pdfx`**: **no Linux implementation** (Android, iOS, macOS, Windows, web only). Options:
-     `pdfrx` (pdfium, supports Linux), or render PDF pages in the aiserver (PyMuPDF) as images
-     **(decide)**.
+   - **Email HTML (decided 2026-10-26).** `webview_flutter` has **no Linux support**. The
+     Linux implementation of the shared **`EmailBodyView`** interface (defined in
+     [core-ci-windows-build.md](core-ci-windows-build.md)) is **`flutter_widget_from_html`**:
+     pure Dart, so it runs anywhere, including the NAS container under software rendering. It
+     needs no browser engine and runs no scripts. It's fed the same sanitised, `cid:`-inlined
+     HTML as the other platforms.
+     - **Open in browser** button: writes the sanitised HTML to a temp file and opens it with
+       `xdg-open` (on the NAS, that's the in-container Firefox). It's for the occasional
+       newsletter the widget renders poorly (nested tables, floats, media queries).
+     - **Rejected:** `webview_all_linux` (WebKitGTK; fragile and heavy under Xvfb), `webview_cef`
+       (bundles Chromium, 100+ MB, software path on Linux), and `webview_win_floating` (the
+       native view floats above Flutter, so menus can't draw over it).
+     - **Spike:** render a sample of real messages (plain personal mail, receipts, two or three
+       newsletters) and record what breaks. Remote images keep the existing CSP rules.
+   - **PDF (decided 2026-10-26):** `pdfx` has **no Linux implementation**. Replace it with
+     **`pdfrx`** (pdfium; Linux x64/ARM64/ARM/x86, bundled through Dart native assets) **on
+     every platform**, as the Windows plan does. Upgrade Flutter if pdfrx needs it.
    - `media_kit`: ✓ (needs `libmpv` on the system, or bundled via `media_kit_libs_linux`).
      `file_picker`: ✓, using **zenity**/kdialog or the XDG portal at runtime.
      `flutter_secure_storage`: ✓, but needs **libsecret and a running Secret Service keyring**.
@@ -46,6 +56,8 @@ bundle.
    - **Build on an old-enough base** so the binary runs on most distros: glibc is
      forward-compatible but not backward. Build on `ubuntu-22.04`, or inside a Debian 12
      container. Match the NAS image's base.
+   - Flutter at the **latest stable** version (the project tracks the latest; upgrade for
+     library compatibility when needed).
    - Install the build dependencies (`clang cmake ninja-build pkg-config libgtk-3-dev
      liblzma-dev libmpv-dev`, …), then
      `flutter build linux --release --dart-define=REALM_NAME=…`, and bundle `aiserver-linux.zip`.

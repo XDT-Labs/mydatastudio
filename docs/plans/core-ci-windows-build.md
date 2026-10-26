@@ -1,7 +1,7 @@
 ---
 status: proposed
 adr: none
-remaining: [windows-runner-scaffold, plugin-audit, webview-replacement, system-trash, aiserver-windows, ci-job, installer, signing]
+remaining: [windows-runner-scaffold, plugin-audit, email-body-view, webview-flutter-windows-spike, pdfrx-migration, system-trash, aiserver-windows, ci-job, installer, signing]
 ---
 
 # Plan: Build the Windows desktop app in GitHub Actions
@@ -17,11 +17,27 @@ remaining: [windows-runner-scaffold, plugin-audit, webview-replacement, system-t
    `client/windows/`. Set the app name, icon and version resource (`Runner.rc`) from the realm,
    as `REALM_NAME` does on macOS.
 2. **Plugin audit:** every dependency must have a Windows implementation, or be guarded.
-   - **`webview_flutter`** (email HTML rendering in `email_details.dart`, `email_page.dart`,
-     `search_email_sidebar.dart`) has **no Windows support**. Replace it behind an interface:
-     `webview_windows` (WebView2) on Windows, or render sanitised HTML with a Flutter HTML
-     widget on every non-Apple platform **(decide; the HTML widget also serves Linux)**.
-   - `pdfx`: Windows ✓ (pdfium). `media_kit`: ✓ (bundles libmpv). `window_manager`,
+   - **Email HTML (decided 2026-10-26).** `webview_flutter` (used in `email_details.dart`,
+     `email_page.dart`, `search_email_sidebar.dart`) has **no Windows support**. Put an
+     **`EmailBodyView`** interface in front of the body renderer, with one implementation per
+     platform. The existing sanitising, CSP and `cid:` → data-URI inlining stay shared, in front
+     of every implementation:
+
+     | Platform | Renderer |
+     |---|---|
+     | macOS | `webview_flutter` (WKWebView), unchanged |
+     | **Windows** | **`webview_flutter_windows`** (WebView2): a Windows implementation of the same `webview_flutter` API, so `EmailDetails` barely changes. WebView2 ships with Windows 10/11. |
+     | Linux / NAS | `flutter_widget_from_html` + **Open in browser** (see [core-ci-linux-build.md](core-ci-linux-build.md)) |
+
+     Also add the **Open in browser** button on Windows (sanitised HTML to a temp file, opened
+     in the system browser) as an escape hatch. **Spike:** confirm `webview_flutter_windows` is
+     maintained and passes our CSP and data-URI images. If it fails, fall back to
+     `flutter_widget_from_html` on Windows too.
+   - **PDF (decided 2026-10-26):** replace `pdfx` with **`pdfrx`** (pdfium) **on every
+     platform**, macOS included, so there's one code path (`pdf_preview_widget.dart` and its
+     test controller). **The Windows build needs Developer Mode enabled** on the CI runner
+     (pdfrx requirement). Upgrade Flutter if pdfrx needs it.
+   - `media_kit`: ✓ (bundles libmpv). `window_manager`,
      `screen_retriever`, `desktop_window`, `window_to_front`, `url_launcher`, `file_picker`,
      `flutter_secure_storage`, `package_info_plus`: ✓.
    - `native_exif` and `flutter_file_dialog` are **mobile-only** and unused in `lib/`. Remove
@@ -47,8 +63,9 @@ remaining: [windows-runner-scaffold, plugin-audit, webview-replacement, system-t
    - **`pypff`/libpff:** PST import must build on Windows (MSVC), or PST import is disabled there
      until it does.
    - PyInstaller output → `aiserver-windows.zip` artifact.
-5. **CI job** (`build_and_release.yml`): a `windows-latest` job with Flutter at the pinned
-   version, the Windows aiserver artifact,
+5. **CI job** (`build_and_release.yml`): a `windows-latest` job with Flutter at the **latest
+   stable** version (the project tracks the latest; upgrading for library compatibility is
+   expected), **Developer Mode** enabled for pdfrx, the Windows aiserver artifact,
    `flutter build windows --release --dart-define=REALM_NAME=…`, and the bundle zipped as an
    artifact.
 6. **Installer:** **MSIX** (`msix` package; clean install/uninstall, Store-ready) or Inno Setup
