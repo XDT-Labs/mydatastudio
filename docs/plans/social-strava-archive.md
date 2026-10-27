@@ -29,9 +29,12 @@ segments, clubs.
   - each activity → `social_posts` (`platform = 'strava'`, `kind = activity`: name + description
     in `text`, stats in `raw_json`, `created_at` = the start time, start point in
     `latitude`/`longitude`);
-  - plus a new `activity_tracks` table `(post_id, polyline, bbox, distance_m, …)`. The track is
-    simplified to a few hundred points (Douglas–Peucker) for display, with the original file kept
-    in `files`.
+  - plus a row in the **shared `tracks` table** defined in [app-timeline.md](app-timeline.md) L6
+    (`source = 'strava'`, `social_post_id` = the activity's post), which GPX files from any
+    collection also use. It replaces the `activity_tracks` table this plan first proposed
+    (decided 2026-10-27). The track keeps every point with its time (for playback on the
+    Timeline) plus an overview simplified to a few hundred points (Douglas–Peucker) for display,
+    with the original file kept in `files`.
 - **`near:` and the map:**
   - `near:banff` matches activities whose **bbox** intersects the place's radius, then confirms
     against the polyline, not just the start point;
