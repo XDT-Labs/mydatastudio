@@ -23,6 +23,7 @@ archive. It's a `group: 'app'` rail entry like Photos and AI Chat, not a collect
 | Semantic search | **Every task gets an embedding** (T7) |
 | Completed tasks | **Hidden 7 days after completion**, configurable **per board** in Board settings (7 / 14 / 30 days / never) with a "Show completed" toggle on the board |
 | Look and feel | **Inherit the current app theme and shell** (§4). The prototype's Tailwind colours are not ported. |
+| Colours | **`TaskColors` maps onto the shared `AccentPalette`** (§4), which Calendar uses too |
 
 Sections: [1](#1-prototype-inventory) inventories every element and behaviour of the prototype,
 [2](#2-what-changes-in-the-port) says what we drop or change, [3](#3-data-model) is the
@@ -287,13 +288,20 @@ file/folder metaphors (`DESIGN.md`), so priorities and column accents need named
 | Key | Used for | Dark value (derived from) |
 |---|---|---|
 | `danger` | High priority, overdue chip | `colorScheme.error` / `errorContainer` |
-| `warning` | Medium priority | an amber tuned for contrast on `surfaceContainerLowest` |
-| `success` | Low priority, done check, Done column accent | a muted green, same tuning |
-| `primary` / `info` / `neutral` | column accents | `colorScheme.primary`, `secondary`, `onSurfaceVariant` |
+| `warning` | Medium priority | `AccentPalette.amber` |
+| `success` | Low priority, done check, Done column accent | `AccentPalette.green` |
+| `info` | column accent | `AccentPalette.blue` |
+| `primary` / `neutral` | column accents | `colorScheme.primary`, `onSurfaceVariant` |
 
 Each key is a `(foreground, container)` pair, with container badges in the M3 style
 (`…Container` fill, `on…Container` text). Badge text must pass **WCAG AA**; a widget test checks
-the contrast ratios. This is the app's first `ThemeExtension`, kept deliberately small.
+the contrast ratios.
+
+**`TaskColors` is a thin semantic layer over the shared `AccentPalette`** (decided 2026-10-26).
+`AccentPalette` is the 12-hue `ThemeExtension` in `lib/theme/accent_palette.dart`, defined in
+[app-calendar.md](app-calendar.md) §4, and Calendar uses it for calendar colours. **Whichever
+app is built first creates it.** `TaskColors` only gives hues task meanings, so the two apps'
+greens and ambers are always the same colours, and no amber or green is tuned twice.
 
 **Motion** follows the app: modest, 150–200 ms, `Curves.easeOutCubic`. No `motion`-style
 spring layouts.
@@ -385,7 +393,8 @@ services. Widget tests cover each phase's UI. `flutter analyze` must be clean an
 - [ ] **`TasksDrawer`:** boards (selected state, task counts), an Archived section (collapsed),
       **New board** (name prompt → three default columns), and a per-board menu: Rename,
       Settings, Archive / Unarchive, Delete (confirm with the task count).
-- [ ] **`TaskColors`** extension registered in `_buildTheme`, with the contrast test.
+- [ ] **`AccentPalette`** (unless Calendar created it first) and **`TaskColors`** on top of it,
+      both registered in `_buildTheme`, with the contrast test.
 - [ ] Toolbar shell: board name; other controls inert until their phase.
 - [ ] `TaskColumn`: accent dot, name, count, "+" (inert), scrolling list, empty state.
 - [ ] `TaskCard`, every state:
