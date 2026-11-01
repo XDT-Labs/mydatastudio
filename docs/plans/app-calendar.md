@@ -43,6 +43,44 @@ says what we drop or change, [3](#3-data-model) is the schema and the date rules
 [5](#5-calendar-sources) the import sources, [6](#6-flutter-architecture) the code layout, and
 [7](#7-phases) the phases.
 
+## Screens
+
+Target designs, drawn in the app's theme and shell (§4) with sample data and "now" set to
+Wed, Nov 18 2026, 2:40 PM. The source is the "Calendar app screens" design canvas. They show
+intent; spacing and colour values come from §4, and the calendar colours stand in for the shared
+`AccentPalette`.
+
+**Month** (C1): the drawer with New event, the mini month, My calendar and one section per
+source (a Google account, a PST file that is switched off, a subscribed calendar), and Add
+calendar. The toolbar has Today, ‹ / ›, the range title and the Day | Week | Month switch. The
+grid shows all-day and multi-day bars, chips in time order, quieter past events, "+3 more", and
+dimmed days outside the month.
+
+![Calendar month view](images/calendar-month.png)
+
+**Week** (C2): the all-day band, the time grid scrolled to 7 AM, today's shaded column with the
+current-time line, overlapping events side by side, and tile text that grows with the tile's
+height.
+
+![Calendar week view](images/calendar-week.png)
+
+**Imported event details** (C1, C7): a read-only Google event with its repeat rule, location,
+guests and their replies, description and attachments, and **Open in Google** instead of Edit
+and Delete.
+
+![Details of an imported event](images/calendar-event-details.png)
+
+**New event** (C3): title, All day, start and end date and time (length kept when the start
+changes), location and description. Events always go to My calendar, so there is no calendar
+picker. Repeat and reminders arrive in C10.
+
+![New event dialog over the week view](images/calendar-new-event.png)
+
+**Add a calendar** (C5–C9): `/calendar/add` with one tab per source, showing the Import file tab,
+the file types it accepts, and an import in progress.
+
+![Add a calendar, Import file tab](images/calendar-add.png)
+
 ## 1. Prototype inventory
 
 ### 1.1 Screen layout (`App.tsx`)
