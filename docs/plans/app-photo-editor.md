@@ -52,6 +52,38 @@ Sections: [1](#1-prototype-inventory) inventories the prototype,
 [5](#5-image-pipeline) the rendering and AI pipeline, [6](#6-flutter-architecture) the code
 layout, and [7](#7-phases) the phases.
 
+## Screens
+
+Target designs, drawn in the app's theme and shell (§4) with sample data. The source is the
+"Photo Editor screens" design canvas. They show intent; spacing and colour values come from §4.
+The photo is a drawn stand-in, and presets and adjustments are approximated with CSS filters, so
+the effects only roughly match the real shader (§5.1).
+
+**Adjust** (E1, E2): the editor with no drawer, its tool rail (Adjust, Crop, AI, Import), the top
+bar (Undo, Redo, Compare, zoom, Export…, Save), the preset strip, and the Light, Color and Effects
+sliders. Bipolar sliders fill from the centre, exposure is in stops, and a reset icon appears on
+changed values.
+
+![Photo Editor, Adjust tab](images/photo-editor-adjust.png)
+
+**Crop and straighten** (E3): a 16:9 crop with the rule-of-thirds grid, handles and output size;
+the aspect ratios, rotate and flip, and the Straighten slider.
+
+![Photo Editor, Crop tab](images/photo-editor-crop.png)
+
+**AI edit with a selection** (E6): an ellipse selection with marching ants and a floating
+Deselect bar; the model picker, selection tools, prompt and quick actions; and a note that only
+the selection and a margin around it are sent.
+
+![Photo Editor, AI tab with a selection](images/photo-editor-ai-edit.png)
+
+**Start: import or generate** (E1, E7): open a photo from disk or the archive, recent edits, and
+Generate with a prompt, the generate-capable models (one disabled until its provider has a key),
+and the chosen model's aspect ratios and sizes. The models are shown as a list here rather than
+the `MenuAnchor` picker, so a missing key is visible without opening a menu.
+
+![Photo Editor start screen](images/photo-editor-start.png)
+
 ## 1. Prototype inventory
 
 ### 1.1 Screen layout (`App.tsx`)
