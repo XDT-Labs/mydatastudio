@@ -43,6 +43,40 @@ Sections: [1](#1-prototype-inventory) inventories the prototype,
 [5](#5-playback) the playback engine, [6](#6-flutter-architecture) the code layout, and
 [7](#7-phases) the phases.
 
+## Screens
+
+Target designs, drawn in the app's theme and shell (§4) with sample data. The source is the
+"Timeline app screens" design canvas. They show intent; spacing and colour values come from §4.
+The map is a drawn stand-in for the CARTO `dark_all` tiles, the photos are drawn, and the lane
+colours stand in for the `AccentPalette` keys.
+
+**Playback, drawing a track** (L1, L3, L6): the "Alps 2024" story mid-hike. The camera fits the
+track while it draws itself, with a moving head; photo pins sit along it, and the photo taken
+mid-hike shows without stopping the draw (§5.1, Overlaps). Now playing shows the track's stats,
+its elevation profile with a marker, and an "Also now" photo (§5.4). Above the lanes, a floating
+transport bar holds reverse, previous, pause, next, the speed and window pickers, and loop. In
+the timeline, the toolbar has the story menu and the playhead readout, and the 6-hour active
+window is shaded. Items outside the window drop to 40%, and the current item has a `primary`
+outline.
+
+![Timeline, playback drawing a GPS track](images/timeline-playback.png)
+
+**Playback, photo dwell** (L3): the camera has flown in to Chamonix, and a burst of 6 photos
+plays as one dwell (a slideshow, 3 of 6). The morning Strava run is drawn, and the previous
+day's hike has faded.
+
+![Timeline, dwelling on a photo burst](images/timeline-dwell.png)
+
+**Add lane** (L2): Type, then Collections (Strava left out because it already has its default
+lane), then Filters for GPS tracks (activity, minimum distance), then Name and Colour (§3.3).
+
+![Timeline, Add lane dialog](images/timeline-add-lane.png)
+
+**Save as story** (L5): the in and out points shaded on the timeline with I/O flags, and the
+dialog with name, description, range, cover photo and the lanes to hide.
+
+![Timeline, Save as story dialog](images/timeline-save-story.png)
+
 ## 1. Prototype inventory
 
 ### 1.1 Screen layout (`App.tsx`)
