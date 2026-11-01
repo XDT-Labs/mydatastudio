@@ -30,6 +30,36 @@ Sections: [1](#1-prototype-inventory) inventories every element and behaviour of
 schema, [4](#4-theme-and-styling-inherited-from-the-app) the theming, [5](#5-flutter-architecture)
 the code layout, and [6](#6-phases) the phases.
 
+## Screens
+
+Target designs, drawn in the app's theme and shell (§4) with sample data. The source is the
+"Tasks app screens" design canvas. They show intent; spacing and colour values come from §4.
+
+**Board** (T1, T4): the Boards drawer, toolbar with progress, search, priority filter, "Show
+completed" and Board settings, and the three default columns. Cards show priority, key, subtasks,
+tags, link count, due date (one overdue), and hover actions. Done ends with the hidden-completed
+strip.
+
+![Tasks board](images/tasks-board.png)
+
+**Moving a task** (T3): the lifted card, its placeholder in the old column, the highlighted target
+column with the insertion line, and the Esc hint.
+
+![Moving a task between columns](images/tasks-drag.png)
+
+**Task editor** (T2, T6): title, description, priority, column, due date, subtasks, tags, and
+links, including one to an item no longer in the archive. The dialog scrolls in a 900 px window;
+the second image shows all of it.
+
+![Task editor dialog over the board](images/tasks-editor.png)
+
+<img src="images/tasks-editor-full.png" alt="Task editor dialog, full height" width="420">
+
+**Board settings** (T1, T4): name, task prefix, icon, the hide-completed choice (7 / 14 / 30 days
+/ Never), and Archive or Delete board.
+
+![Board settings dialog](images/tasks-settings.png)
+
 ## 1. Prototype inventory
 
 ### 1.1 Screen layout (`App.tsx`)
