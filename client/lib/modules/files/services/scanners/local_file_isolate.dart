@@ -11,6 +11,7 @@ import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
@@ -518,7 +519,9 @@ class LocalFileIsolateWorker {
         if (validation['isCacheHit'] == true) cacheHits++;
 
         if (file != null) {
+          // An online-only file has no content on disk to thumbnail.
           if (validation['isCacheHit'] == false &&
+              validation['contentReadable'] == true &&
               file.contentType == FilesConstants.mimeTypeImage) {
             _enqueueThumbnailJob(
               file.collectionId,
@@ -675,6 +678,13 @@ class LocalFileIsolateWorker {
     );
   }
 
+  @visibleForTesting
+  Future<Map<String, dynamic>> validateFileForTest(
+    String collectionId,
+    io.File file,
+    String rootPath,
+  ) => _validateFile(collectionId, file, rootPath, DateTime.now());
+
   /// Validate files. Compute relative path for storage.
   Future<Map<String, dynamic>> _validateFile(
     String collectionId_,
@@ -695,9 +705,15 @@ class LocalFileIsolateWorker {
     if (absPath.length > 1 && absPath.endsWith('/')) {
       absPath = absPath.substring(0, absPath.length - 1);
     }
+    // A legacy iCloud stub (`.foo.pdf.icloud`) is listed under its real name
+    // and path. The stub itself is what gets stat'ed; the real file is never
+    // opened, so nothing is downloaded.
+    final stubRealPath = iCloudPlaceholderRealPath(absPath);
+    final String statPath = absPath;
+    if (stubRealPath != null) absPath = stubRealPath;
     String name = p.basename(absPath);
 
-    bool hidden = name.startsWith('.');
+    bool hidden = isHiddenFileName(p.basename(statPath));
     bool skipFolder = skipFolderRegex.hasMatch(file_.path);
 
     if (hidden || skipFolder) {
@@ -707,8 +723,14 @@ class LocalFileIsolateWorker {
       return result;
     }
 
-    final stat = file_.statSync();
+    final stat = io.File(statPath).statSync();
     final DateTime lmDate = stat.modified;
+
+    // Reading an online-only file (a legacy stub or an `SF_DATALESS` file)
+    // makes macOS download it, so EXIF, hashing and thumbnails all skip it.
+    final bool contentReadable =
+        stubRealPath == null && !onlineOnlyChecker.isOnlineOnly(statPath);
+    result['contentReadable'] = contentReadable;
 
     // Compute relative path for storage via the shared helper.
     final relPath = ScannerPathHelper.relativePath(absPath, rootPath);
@@ -731,12 +753,13 @@ class LocalFileIsolateWorker {
               _thumbnailCache.existsForKey(cachedThumb));
       final bool isImage = getMimeType(name) == FilesConstants.mimeTypeImage;
 
-      final bool unchanged = !contentHashStale(
-        cachedSize: cached.size,
-        cachedModified: cached.dateLastModified,
-        size: stat.size,
-        modified: lmDate,
-      );
+      final bool unchanged =
+          !contentHashStale(
+            cachedSize: cached.size,
+            cachedModified: cached.dateLastModified,
+            size: stat.size,
+            modified: lmDate,
+          );
 
       if (unchanged && (!isImage || hasThumbnail)) {
         // A cached row with no GPS coordinates is ambiguous: it may genuinely
@@ -745,7 +768,10 @@ class LocalFileIsolateWorker {
         // the non-null result is trusted from then on.
         double? latitude = cached.latitude;
         double? longitude = cached.longitude;
-        if (isImage && latitude == null && longitude == null) {
+        if (isImage &&
+            contentReadable &&
+            latitude == null &&
+            longitude == null) {
           final gps = await ExifExtractor().extractLatLng(
             absPath,
             cached.contentType,
@@ -784,7 +810,7 @@ class LocalFileIsolateWorker {
 
     double? latitude;
     double? longitude;
-    if (mimeType == FilesConstants.mimeTypeImage) {
+    if (mimeType == FilesConstants.mimeTypeImage && contentReadable) {
       final gps = await ExifExtractor().extractLatLng(absPath, mimeType);
       latitude = gps['latitude'] as double?;
       longitude = gps['longitude'] as double?;

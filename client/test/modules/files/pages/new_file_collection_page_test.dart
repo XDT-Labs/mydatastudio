@@ -1,3 +1,5 @@
+import 'dart:io' as io;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
@@ -79,6 +81,52 @@ void main() {
       }
     });
 
+    testWidgets('Dropbox is available and opens its sign-in form', (
+      tester,
+    ) async {
+      await pump(tester);
+      final dropbox = find.byKey(const ValueKey('source-dropbox'));
+      expect(
+        find.descendant(of: dropbox, matching: find.text('Soon')),
+        findsNothing,
+      );
+      expect(
+        FileSource.catalog.firstWhere((s) => s.id == 'dropbox').available,
+        isTrue,
+      );
+
+      await tester.tap(_tile('Dropbox'));
+      await tester.pump();
+      expect(find.text('All sources'), findsOneWidget);
+      // No app key configured yet: asks for the key only, never a secret.
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Configure Dropbox'), findsOneWidget);
+      expect(find.text('App key'), findsOneWidget);
+      expect(find.text('Client Secret'), findsNothing);
+    });
+
+    testWidgets('OneDrive is available and opens its sign-in form', (
+      tester,
+    ) async {
+      await pump(tester);
+      final onedrive = find.byKey(const ValueKey('source-onedrive'));
+      expect(
+        find.descendant(of: onedrive, matching: find.text('Soon')),
+        findsNothing,
+      );
+      expect(
+        FileSource.catalog.firstWhere((s) => s.id == 'onedrive').available,
+        isTrue,
+      );
+
+      await tester.tap(_tile('OneDrive'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Configure OneDrive'), findsOneWidget);
+      expect(find.text('Application (client) ID'), findsOneWidget);
+      expect(find.text('Client Secret'), findsNothing);
+    });
+
     testWidgets('detected sync folders appear as Found tiles', (tester) async {
       await pump(tester, found: [_icloud, _dropboxFolder]);
       expect(_tile('iCloud Drive'), findsOneWidget);
@@ -123,6 +171,30 @@ void main() {
       expect(_tile('Dropbox folder'), findsOneWidget);
     });
 
+    testWidgets('a collection added through a symlink counts as added', (
+      tester,
+    ) async {
+      // `~/Dropbox` often links to the CloudStorage folder the detector
+      // reports; adding it again would scan the same files twice.
+      final home = io.Directory.systemTemp.createTempSync('home');
+      addTearDown(() => home.deleteSync(recursive: true));
+      final real = io.Directory('${home.path}/CloudStorage/Dropbox')
+        ..createSync(recursive: true);
+      io.Link('${home.path}/Dropbox').createSync(real.path);
+      await pump(
+        tester,
+        found: [
+          DetectedSyncFolder(
+            provider: SyncProvider.dropbox,
+            displayName: 'Dropbox folder',
+            path: real.path,
+          ),
+        ],
+        existing: {'${home.path}/Dropbox'},
+      );
+      expect(find.text('Added'), findsOneWidget);
+    });
+
     testWidgets('a failed lookup still leaves the manual sources usable', (
       tester,
     ) async {
@@ -152,8 +224,8 @@ void main() {
       tester,
     ) async {
       await pump(tester);
-      expect(find.text('Soon'), findsNWidgets(3));
-      await tester.tap(_tile('Dropbox'));
+      expect(find.text('Soon'), findsOneWidget); // Box
+      await tester.tap(_tile('Box'));
       await tester.pump();
       expect(find.text('All sources'), findsNothing);
       expect(_macHeader, findsOneWidget);

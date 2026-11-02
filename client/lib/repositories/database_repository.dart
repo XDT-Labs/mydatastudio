@@ -139,7 +139,7 @@ class DatabaseRepository {
         ON fe.file_id = f.id AND fe.type = 'file' AND fe.sequence = 0
       WHERE f.content_hash = ? AND f.id <> ?
         AND f.is_deleted = 0 AND f.is_user_deleted = 0
-        AND fe.qwen3_vl_embedding IS NOT NULL
+        AND fe.embeddinggemma2_embedding IS NOT NULL
         AND fe.model_version = ?
       ORDER BY f.id LIMIT 1
       ''',
@@ -149,21 +149,21 @@ class DatabaseRepository {
   }
 
   /// Copies [fromFileId]'s whole-file vector onto [toFileId] inside SQL, so the
-  /// 2048-float blob never crosses an isolate boundary. Returns whether a row
+  /// vector blob never crosses an isolate boundary. Returns whether a row
   /// was written (false if the donor lost its vector or [toFileId] is gone).
   Future<bool> copyFileEmbedding(String fromFileId, String toFileId) async {
     final result = await db.execute(
       '''
       INSERT INTO files_embeddings
-        (file_id, type, sequence, qwen3_vl_embedding, model_version)
-      SELECT ?, 'file', 0, fe.qwen3_vl_embedding, fe.model_version
+        (file_id, type, sequence, embeddinggemma2_embedding, model_version)
+      SELECT ?, 'file', 0, fe.embeddinggemma2_embedding, fe.model_version
       FROM files_embeddings fe
       WHERE fe.file_id = ? AND fe.type = 'file' AND fe.sequence = 0
-        AND fe.qwen3_vl_embedding IS NOT NULL
+        AND fe.embeddinggemma2_embedding IS NOT NULL
         AND fe.model_version = ?
         AND EXISTS (SELECT 1 FROM files WHERE id = ?)
       ON CONFLICT(file_id, type, sequence) DO UPDATE SET
-        qwen3_vl_embedding = excluded.qwen3_vl_embedding,
+        embeddinggemma2_embedding = excluded.embeddinggemma2_embedding,
         model_version = excluded.model_version
       ''',
       [toFileId, fromFileId, EmbeddingModel.current, toFileId],

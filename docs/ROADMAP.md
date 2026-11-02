@@ -39,7 +39,7 @@ deferred work.
 |---|---|---|---|---|---|
 | Social: shared foundation | `proposed` | 0 | [social-x-sync.md](plans/social-x-sync.md) §Shared social foundation | 0002 (to write) | **ADR 0002** (`social_posts`, embeddings, `imported_exports`, `social_sync_state`, `files.social_post_id`); `archive` + `csv` packages; `ScannerManager` periodic trigger; shared setup panel + file picker + Downloads watcher; `SocialPostCard` + feed; search integration; text-row embedding isolate. Prerequisite for every Social row. |
 | Email: shared IMAP engine | `proposed` | 0 | [email-imap-engine.md](plans/email-imap-engine.md) | — | Merge the ~90%-identical Yahoo/Outlook isolates into one `ImapScanner` + provider registry; UID/CONDSTORE incremental sync; one setup flow with autodetect. Prerequisite for the Email rows. |
-| Files: shared foundation | `proposed` | 0 | [files-sources-foundation.md](plans/files-sources-foundation.md) | — | `CloudFileScanner` + per-provider adapters, change-cursor sync (moves and deletes), a content policy, a sync-folder connector with dataless (online-only) detection, content-hash dedupe. Prerequisite for the Files rows. |
+| Files: shared foundation | `in-progress` | 0 | [files-sources-foundation.md](plans/files-sources-foundation.md) | — | Merged in #40: `CloudFileScanner`, change-cursor sync, content policy, PKCE, content hash, the add-source catalog, sync-folder detection with online-only checks. Left: `providerHint`, "download for indexing". |
 | Google restricted-scope verification (Gmail + Drive) | `proposed` | 0 (spike), deferred | [email-gmail.md](plans/email-gmail.md) §A, [files-google-drive.md](plans/files-google-drive.md) | — | Decide whether to fund one Google OAuth verification + yearly CASA assessment covering `gmail.readonly` and `drive.readonly`, or ship IMAP/app passwords, Takeout and sync folders instead. Weeks of lead time. |
 | Meta business verification + App Review | `proposed` | deferred | [social-facebook-sync.md](plans/social-facebook-sync.md) §Deferred | — | Owner action (xdtlabs). Unblocks the Facebook Graph API, Instagram API and Threads API paths and the Cloud Run token service. Days to weeks for verification; review after a working build. |
 
@@ -84,15 +84,15 @@ deferred work.
 
 | Feature | Status | Wave | Plan | ADR | Notes |
 |---|---|---|---|---|---|
-| Files: Dropbox | `proposed` | 1 | [files-dropbox.md](plans/files-dropbox.md) | — | PKCE app, `list_folder` cursor, batch thumbnails; production approval needed before 50 linked users. Plus the sync folder. |
-| Files: OneDrive / SharePoint | `proposed` | 1 | [files-onedrive.md](plans/files-onedrive.md) | — | Reuses the Outlook Entra app + `Files.Read`; Graph `delta`; personal and work. Plus the sync folder. |
-| Files: iCloud Drive | `proposed` | 1 | [files-icloud-drive.md](plans/files-icloud-drive.md) | — | Sync folder only (no public API); dataless files and legacy `.icloud` stubs. |
-| Files: Proton Drive | `proposed` | 1 | [files-proton-drive.md](plans/files-proton-drive.md) | — | Sync folder; the SDK doesn't yet support third-party auth. |
-| Files: MEGA | `proposed` | 1 | [files-mega.md](plans/files-mega.md) | — | Sync folder; MEGAcmd later. |
-| Files: Sync.com | `proposed` | 1 | [files-sync-com.md](plans/files-sync-com.md) | — | Sync folder only (no API). |
-| Files: Google Drive | `proposed` | 1, 2 | [files-google-drive.md](plans/files-google-drive.md) | — | Existing. Sync folder in Wave 1 (no review); switch to the Changes API in Wave 2. `drive.readonly` is still restricted (verification + CASA, shared with Gmail). |
-| Files: Box | `proposed` | 1, 4 | [files-box.md](plans/files-box.md) | — | Box Drive folder in Wave 1; API via the Events cursor in Wave 4 (token service if a secret is required). |
-| Files: pCloud | `proposed` | 1, 4 | [files-pcloud.md](plans/files-pcloud.md) | — | pCloud Drive volume in Wave 1; US/EU API hosts with a `diff` cursor in Wave 4. |
+| Files: Dropbox | `in-progress` | 1 | [files-dropbox.md](plans/files-dropbox.md) | — | Built in #42 (in review): PKCE sign-in, `list_folder` cursor sync, sync-folder card. Left: thumbnails, app registration, production approval before 50 linked users, live test. |
+| Files: OneDrive / SharePoint | `in-progress` | 1 | [files-onedrive.md](plans/files-onedrive.md) | — | Built in #42 (in review): Graph `delta` sync on the Outlook Entra app, sync-folder card. Left: thumbnails, Entra app setup, work and SharePoint accounts, live test. |
+| Files: iCloud Drive | `in-progress` | 1 | [files-icloud-drive.md](plans/files-icloud-drive.md) | — | Built in #42 (in review): one card for `com~apple~CloudDocs` (app containers left out by decision), dataless files, legacy `.icloud` stubs. Left: "download for indexing", Full Disk Access check. |
+| Files: Proton Drive | `in-progress` | 1 | [files-proton-drive.md](plans/files-proton-drive.md) | — | Sync-folder card built in #42 (in review); folder name unverified. The SDK doesn't yet support third-party auth. |
+| Files: MEGA | `in-progress` | 1 | [files-mega.md](plans/files-mega.md) | — | Sync-folder card built in #42 (in review); folder name unverified. MEGAcmd later. |
+| Files: Sync.com | `in-progress` | 1 | [files-sync-com.md](plans/files-sync-com.md) | — | Sync-folder card for `~/Sync` built in #42 (in review); not tested on a real install. |
+| Files: Google Drive | `in-progress` | 1, 2 | [files-google-drive.md](plans/files-google-drive.md) | — | Existing; now on `CloudFileScanner` with change-cursor sync (#40), and the Drive app folder is a sync-folder card. Switch to the Changes API in Wave 2. `drive.readonly` is still restricted (verification + CASA, shared with Gmail). |
+| Files: Box | `in-progress` | 1, 4 | [files-box.md](plans/files-box.md) | — | Box Drive folder card built in #42 (in review). API via the Events cursor in Wave 4 (token service if a secret is required). |
+| Files: pCloud | `in-progress` | 1, 4 | [files-pcloud.md](plans/files-pcloud.md) | — | pCloud Drive card built in #42 (in review); folder name unverified. US/EU API hosts with a `diff` cursor in Wave 4. |
 | Files: Google Photos | `proposed` | 3 | [files-google-photos.md](plans/files-google-photos.md) | — | Takeout only: the Library API stopped reading user libraries on 31 March 2025. JSON sidecar merge for dates and geo. |
 | Files: WebDAV / Nextcloud / NAS / SMB | `proposed` | 4 | [files-webdav-nas.md](plans/files-webdav-nas.md) | — | Nextcloud Login Flow v2, ETag walk, pinned self-signed certificates; offline volumes not treated as deleted. |
 

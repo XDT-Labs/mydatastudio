@@ -68,9 +68,13 @@ void main() {
     expect(m.login(), throwsA(isA<ProviderConfigurationException>()));
   });
 
-  test('every built-in provider keeps requiring a secret by default', () {
+  test('every built-in provider except PKCE-only Dropbox/OneDrive requires a secret', () {
     for (final p in LoginProviders.values) {
-      expect(p.requiresClientSecret, isTrue, reason: p.name);
+      expect(
+        p.requiresClientSecret,
+        p != LoginProviders.dropbox && p != LoginProviders.oneDrive,
+        reason: p.name,
+      );
     }
   });
 
