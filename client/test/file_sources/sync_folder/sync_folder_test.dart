@@ -59,9 +59,113 @@ void main() {
       mk('Library/CloudStorage/GoogleDrive-a@b.com');
       expect(SyncFolderDetector(homeDir: home.path).detect(), isEmpty);
     });
+
+    test('pCloud, Proton Drive and MEGA match case-insensitively', () {
+      mk('Library/CloudStorage/pCloud Drive');
+      mk('Library/CloudStorage/ProtonDrive-me@proton.me');
+      mk('Library/CloudStorage/MEGA-me');
+      final found = SyncFolderDetector(homeDir: home.path).detect();
+      expect(found.map((f) => f.provider).toSet(), {
+        SyncProvider.pCloud,
+        SyncProvider.proton,
+        SyncProvider.mega,
+      });
+      final proton = found.firstWhere((f) => f.provider == SyncProvider.proton);
+      expect(proton.account, 'me@proton.me');
+      expect(proton.note, contains('end-to-end encrypted'));
+    });
+
+    test('"Proton Drive" with a space is recognised', () {
+      mk('Library/CloudStorage/Proton Drive');
+      final found = SyncFolderDetector(homeDir: home.path).detect();
+      expect(found.single.provider, SyncProvider.proton);
+    });
+
+    test('legacy ~/Dropbox, ~/MEGA and ~/Sync are reported if directories', () {
+      mk('Dropbox');
+      mk('MEGA');
+      mk('Sync');
+      final found = SyncFolderDetector(homeDir: home.path).detect();
+      expect(found.map((f) => f.provider), [
+        SyncProvider.dropbox,
+        SyncProvider.mega,
+        SyncProvider.syncCom,
+      ]);
+      expect(found.last.note, contains('Vault'));
+    });
+
+    test('a legacy name that is a plain file is ignored', () {
+      File(p.join(home.path, 'Sync')).writeAsStringSync('x');
+      expect(SyncFolderDetector(homeDir: home.path).detect(), isEmpty);
+    });
+
+    test('~/Dropbox symlinked to the CloudStorage root is reported once', () {
+      mk('Library/CloudStorage/Dropbox');
+      Link(
+        p.join(home.path, 'Dropbox'),
+      ).createSync(p.join(home.path, 'Library/CloudStorage/Dropbox'));
+      final found = SyncFolderDetector(homeDir: home.path).detect();
+      expect(
+        found.where((f) => f.provider == SyncProvider.dropbox),
+        hasLength(1),
+      );
+    });
+
+    test(
+      'iCloud app containers get a readable name; empty ones are skipped',
+      () {
+        const md = 'Library/Mobile Documents';
+        mk('$md/com~apple~CloudDocs');
+        mk('$md/com~apple~Pages/Documents');
+        File(
+          p.join(home.path, '$md/com~apple~Pages/Documents/a.pages'),
+        ).createSync();
+        mk('$md/iCloud~md~obsidian');
+        File(p.join(home.path, '$md/iCloud~md~obsidian/n.md')).createSync();
+        mk('$md/com~apple~Numbers'); // empty
+        mk('$md/com~apple~Keynote');
+        File(p.join(home.path, '$md/com~apple~Keynote/.DS_Store')).createSync();
+
+        final found = SyncFolderDetector(homeDir: home.path).detect();
+        expect(found.map((f) => f.displayName), [
+          'iCloud Drive',
+          'iCloud - Pages',
+          'iCloud - Obsidian',
+        ]);
+        expect(found.first.note, contains('Online-only'));
+      },
+    );
+
+    test('a container holding only legacy .icloud stubs is non-empty', () {
+      const md = 'Library/Mobile Documents/iCloud~md~obsidian';
+      mk(md);
+      File(p.join(home.path, md, '.n.md.icloud')).createSync();
+      final found = SyncFolderDetector(homeDir: home.path).detect();
+      expect(found.single.displayName, 'iCloud - Obsidian');
+    });
+
+    test('an unreadable Mobile Documents is skipped without throwing', () {
+      mk('Library/Mobile Documents/com~apple~Pages/x');
+      final dir = p.join(home.path, 'Library/Mobile Documents');
+      Process.runSync('chmod', ['000', dir]);
+      addTearDown(() => Process.runSync('chmod', ['755', dir]));
+      var readable = true;
+      try {
+        Directory(dir).listSync();
+      } on FileSystemException {
+        readable = false;
+      }
+      if (readable) return; // running as root: nothing to assert
+      expect(SyncFolderDetector(homeDir: home.path).detect(), isEmpty);
+    });
   });
 
   group('iCloud placeholder mapping', () {
+    test('isHiddenFileName spares placeholders only', () {
+      expect(isHiddenFileName('.foo.pdf.icloud'), isFalse);
+      expect(isHiddenFileName('.DS_Store'), isTrue);
+      expect(isHiddenFileName('foo.pdf'), isFalse);
+    });
     test('maps .foo.pdf.icloud to foo.pdf', () {
       expect(iCloudPlaceholderRealName('.foo.pdf.icloud'), 'foo.pdf');
       expect(iCloudPlaceholderRealPath('/a/b/.foo.pdf.icloud'), '/a/b/foo.pdf');
