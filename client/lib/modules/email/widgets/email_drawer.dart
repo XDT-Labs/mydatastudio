@@ -4,6 +4,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
+import 'package:mydatastudio/modules/email/widgets/email_account_settings_dialog.dart';
 import 'package:mydatastudio/modules/email/widgets/email_drawer/email_folder_tile_widget.dart';
 import 'package:mydatastudio/modules/email/widgets/email_drawer/email_folder_tree.dart';
 import 'package:mydatastudio/modules/email/pages/email_page.dart';
@@ -357,6 +358,10 @@ class _EmailDrawer extends State<EmailDrawer> {
           // for it; re-importing means delete the collection and re-add the file.
           showSync: col.scanner != AppConstants.scannerEmailOutlookPst,
           onSync: () => _syncAccount(context, col),
+          onSettings:
+              supportsEmailDeletePolicy(col.scanner)
+                  ? () => showEmailAccountSettingsDialog(context, collection: col)
+                  : null,
           onDelete: () => _showDeleteConfirmationDialog(context, col),
         ),
         if (isAccountSelected)

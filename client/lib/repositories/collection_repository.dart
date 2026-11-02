@@ -3,6 +3,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/models/tables/email_delete_policy.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/services/sqlite_retry.dart';
@@ -155,6 +156,21 @@ class CollectionRepository {
         [status, lastScanDate.millisecondsSinceEpoch, id],
       );
     }, label: 'CollectionRepository.updateScanStatus');
+  }
+
+  /// Sets only `email_delete_policy` for [collectionId]. A targeted UPDATE, so
+  /// a settings dialog holding a stale Collection cannot overwrite tokens or
+  /// other columns a scanner changed meanwhile.
+  Future<void> updateEmailDeletePolicy(
+    String collectionId,
+    EmailDeletePolicy policy,
+  ) async {
+    return retryOnLock(() async {
+      await db.execute(
+        'UPDATE collections SET email_delete_policy = ? WHERE id = ?',
+        [policy.dbValue, collectionId],
+      );
+    }, label: 'CollectionRepository.updateEmailDeletePolicy');
   }
 
   /// Flags [id] as needing reconnection — the single implementation for the
