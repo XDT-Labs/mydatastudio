@@ -50,7 +50,8 @@ class ImapScanner extends CollectionScanner {
     bool force,
   ) async {
     // We no longer skip scanning if lastScanDate is not null.
-    // The underlying isolate will handle incremental sync logic based on the date.
+    // `force` is only the run gate: the worker syncs incrementally per folder
+    // from stored UID state, whatever `force` is.
 
     // If scanning already, don't restart.
     if (!force) {

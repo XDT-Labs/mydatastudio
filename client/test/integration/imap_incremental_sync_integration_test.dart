@@ -98,7 +98,9 @@ void main() {
     return c;
   }
 
-  Future<void> sync(Collection collection, {bool force = false}) async {
+  /// Worker args as the app builds them: `force: true` is the run gate every
+  /// real sync passes; [fullResync] is the separate explicit flag.
+  Future<void> sync(Collection collection, {bool fullResync = false}) async {
     final port = ReceivePort();
     final queue = SequentialWriteQueue();
     port.listen((m) => tryHandleScanWrite(m, queue));
@@ -108,7 +110,8 @@ void main() {
         'port': port.sendPort,
         'collection': collection,
         'folderId': null,
-        'force': force,
+        'force': true,
+        'fullResync': fullResync,
         'appDir': tempDir.path,
         'dbDir': manager.databaseDirectoryPath!,
         'vaultDek': null,
@@ -212,6 +215,35 @@ void main() {
       // Nothing changed: still no churn and no duplicates.
       await sync(c);
       expect(await emails(), hasLength(3));
+    },
+  );
+
+  imapTest(
+    'the app path (force: true, no fullResync) is incremental, not a reset',
+    () async {
+      final c = await persisted(EmailDeletePolicy.keep);
+      await seedMessages(seeder!, 'INBOX', [msg('g1'), msg('g2')]);
+      await sync(c);
+      final before = await folderState('INBOX');
+      // Local edits survive only if nothing is re-fetched or re-matched.
+      await manager.database!.execute(
+        "UPDATE emails SET subject = 'LOCAL EDIT', is_read = 1",
+      );
+
+      final newUid = (await seedMessages(seeder!, 'INBOX', [msg('g3')])).single;
+      await sync(c);
+
+      final rows = await emails();
+      expect(rows, hasLength(3), reason: 'no duplicate inserts');
+      expect(
+        rows.where((e) => e['subject'] == 'LOCAL EDIT'),
+        hasLength(2),
+        reason: 'old messages were not re-fetched',
+      );
+      expect((await byMessageId('<incr-g3@test.local>'))['uid'], newUid);
+      final after = await folderState('INBOX');
+      expect(after['uid_validity'], before['uid_validity']);
+      expect(after['last_synced_uid'], newUid);
     },
   );
 
@@ -428,7 +460,7 @@ void main() {
     },
   );
 
-  imapTest('force ignores stored sync state and resyncs', () async {
+  imapTest('fullResync ignores stored sync state and resyncs', () async {
     final c = await persisted(EmailDeletePolicy.keep);
     await seedMessages(seeder!, 'INBOX', [msg('f1')]);
     await sync(c);
@@ -446,7 +478,7 @@ void main() {
       reason: 'incremental trusts the watermark',
     );
 
-    await sync(c, force: true);
+    await sync(c, fullResync: true);
     expect(await emails(), hasLength(2));
     expect(
       await emails().then((r) => r.map((e) => e['uid']).toSet()),

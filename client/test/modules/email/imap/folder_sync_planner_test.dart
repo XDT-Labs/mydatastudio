@@ -26,7 +26,7 @@ void main() {
       final plan = FolderSyncPlanner.plan(
         const StoredFolderSyncState(),
         _server(),
-        force: false,
+        fullResync: false,
       );
       expect(plan.reset, isTrue);
       expect(plan.skip, isFalse);
@@ -42,14 +42,14 @@ void main() {
       final plan = FolderSyncPlanner.plan(
         _stored,
         _server(uidValidity: 8),
-        force: false,
+        fullResync: false,
       );
       expect(plan.reset, isTrue);
       expect(plan.fetchAfterUid, 0);
     });
 
-    test('force ignores stored state', () {
-      final plan = FolderSyncPlanner.plan(_stored, _server(), force: true);
+    test('fullResync ignores stored state', () {
+      final plan = FolderSyncPlanner.plan(_stored, _server(), fullResync: true);
       expect(plan.reset, isTrue);
       expect(plan.skip, isFalse);
     });
@@ -58,13 +58,27 @@ void main() {
       final plan = FolderSyncPlanner.plan(
         _stored,
         _server(uidValidity: null),
-        force: false,
+        fullResync: false,
       );
       expect(plan.reset, isTrue);
     });
 
+    test('unchanged UIDVALIDITY without fullResync is never a reset', () {
+      final plan = FolderSyncPlanner.plan(
+        _stored,
+        _server(uidNext: 14, highestModseq: 53),
+        fullResync: false,
+      );
+      expect(plan.reset, isFalse);
+      expect(plan.fetchAfterUid, 10);
+    });
+
     test('unchanged UIDNEXT and MODSEQ skips the folder', () {
-      final plan = FolderSyncPlanner.plan(_stored, _server(), force: false);
+      final plan = FolderSyncPlanner.plan(
+        _stored,
+        _server(),
+        fullResync: false,
+      );
       expect(plan.skip, isTrue);
       expect(plan.reset, isFalse);
     });
@@ -73,7 +87,7 @@ void main() {
       final plan = FolderSyncPlanner.plan(
         _stored,
         _server(condstore: false, highestModseq: null),
-        force: false,
+        fullResync: false,
       );
       expect(plan.skip, isFalse);
       expect(plan.flagSync, FlagSync.full);
@@ -84,7 +98,7 @@ void main() {
       final plan = FolderSyncPlanner.plan(
         _stored,
         _server(uidNext: 14, highestModseq: 53),
-        force: false,
+        fullResync: false,
       );
       expect(plan.reset, isFalse);
       expect(plan.fetchAfterUid, 10);
@@ -102,7 +116,7 @@ void main() {
             lastSyncedUid: 10,
           ),
           _server(highestModseq: 60),
-          force: false,
+          fullResync: false,
         );
         expect(plan.flagSync, FlagSync.full);
       },
@@ -114,7 +128,7 @@ void main() {
         final plan = FolderSyncPlanner.plan(
           const StoredFolderSyncState(uidValidity: 7, lastSyncedUid: 40),
           _server(),
-          force: false,
+          fullResync: false,
         );
         expect(plan.skip, isFalse);
         expect(plan.fetchAfterUid, 40);

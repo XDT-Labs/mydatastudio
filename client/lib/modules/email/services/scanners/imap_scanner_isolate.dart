@@ -62,12 +62,17 @@ class ImapScannerIsolate {
   ///   - If NULL: **Full Sync**. Synchronizes all folders.
   ///   - If NOT NULL: **Targeted Scan**. Focuses ONLY on the specified folder ID
   ///     (e.g., 'INBOX', 'Sent').
-  /// [force] If false, returns immediately (Rule 2).
+  /// [force] The run gate only: if false, returns immediately (Rule 2). Every
+  ///   real sync passes true, so it must NOT influence what is synced.
+  /// [fullResync] Explicitly ignore stored per-folder sync state and re-fetch
+  ///   and re-match every folder. Independent of [force]; nothing in the app
+  ///   sets it today.
   /// [statusPort] Optional port to receive status/heartbeat messages.
   Future<void> start(
     Collection collection, {
     String? folderId,
     bool force = false,
+    bool fullResync = false,
     SendPort? statusPort,
   }) async {
     if (!force) {
@@ -84,6 +89,7 @@ class ImapScannerIsolate {
       'folderId': folderId,
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'force': force,
+      'fullResync': fullResync,
       'appDir': appDir,
       'dbDir': dbDir,
       // DEK so the worker can decrypt/encrypt collection tokens (AUDIT M2 ph4).
@@ -201,7 +207,7 @@ class ImapScannerIsolateWorker {
     final Collection collection = args['collection'];
     final String? folderId = args['folderId'];
     final String type = args['type'] ?? 'sync';
-    final bool force = args['force'] ?? false;
+    final bool fullResync = args['fullResync'] ?? false;
     final String appDir = args['appDir'] as String;
     final String dbDir = args['dbDir'] as String? ?? appDir;
 
@@ -281,7 +287,7 @@ class ImapScannerIsolateWorker {
             collection: collection,
             providerId: config.provider.id,
             targetFolder: target,
-            force: force,
+            fullResync: fullResync,
             appDir: appDir,
             clientPort: clientPort,
             logger: logger,
@@ -563,7 +569,7 @@ class ImapScannerIsolateWorker {
   /// Syncs one mailbox incrementally.
   ///
   /// State machine (see [FolderSyncPlanner]):
-  ///   reset       - no/changed UIDVALIDITY, or `force`: clear the folder's
+  ///   reset       - no/changed UIDVALIDITY, or `fullResync`: clear the folder's
   ///                 stored state and UIDs, re-fetch everything, re-match rows
   ///                 we already have by Message-ID.
   ///   skip        - CONDSTORE says UIDNEXT and HIGHESTMODSEQ are unchanged.
@@ -580,7 +586,7 @@ class ImapScannerIsolateWorker {
     required Collection collection,
     required String providerId,
     required String targetFolder,
-    required bool force,
+    required bool fullResync,
     required String appDir,
     required SendPort clientPort,
     required AppLogger logger,
@@ -620,7 +626,11 @@ class ImapScannerIsolateWorker {
               lastSyncedUid: storedRows.first['last_synced_uid'] as int?,
             );
 
-    final plan = FolderSyncPlanner.plan(stored, server, force: force);
+    final plan = FolderSyncPlanner.plan(
+      stored,
+      server,
+      fullResync: fullResync,
+    );
     if (plan.skip) {
       logger.s("$targetFolder unchanged since last sync.");
       return (found: 0, added: 0, skipped: 0, failed: 0);

@@ -67,18 +67,20 @@ class FolderSyncPlan {
 
 /// Pure decision: full vs incremental vs reset, from stored state and the
 /// server's SELECT response. No I/O so it can be unit-tested exhaustively.
+/// [fullResync] is NOT the scanner's `force` run gate (which every real sync
+/// passes as true); it is an explicit request to ignore stored state.
 class FolderSyncPlanner {
   FolderSyncPlanner._();
 
   static FolderSyncPlan plan(
     StoredFolderSyncState stored,
     ServerFolderState server, {
-    required bool force,
+    required bool fullResync,
   }) {
     // A UID is only meaningful within one UIDVALIDITY (RFC 3501 2.3.1.1). A
     // server that does not report one cannot be synced incrementally.
     final reset =
-        force ||
+        fullResync ||
         server.uidValidity == null ||
         stored.uidValidity == null ||
         stored.uidValidity != server.uidValidity;
