@@ -778,6 +778,14 @@ class AppDatabase {
       'ON files (is_deleted, is_inline, date_created);',
     );
 
+    // Message-ID dedupe lookups for IMAP sync. Here rather than in schemaDDL
+    // for the same reason as the index above: schemaDDL reaches fresh installs
+    // only.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS email_message_id_idx '
+      'ON emails (collection_id, message_id);',
+    );
+
     await _reapOrphanedArtifacts();
 
     // Strictly before _createSearchIndexes: that method creates
@@ -1509,6 +1517,20 @@ class AppDatabase {
       // the column leaves them NULL, which reads as "unknown pipeline", which
       // the embedding isolates treat as work to redo. The archive re-embeds
       // itself on the next launch with no hand-written DELETE.
+      'collections': {
+        // IMAP email config; see EmailProviderRegistry. imap_settings is JSON
+        // (host/port/security/username) and never holds a password.
+        'email_provider_id': 'TEXT',
+        'imap_settings': 'TEXT',
+        'email_delete_policy': "TEXT NOT NULL DEFAULT 'keep'",
+      },
+      'email_folders': {
+        'path': 'TEXT',
+        'uid_validity': 'INTEGER',
+        'uid_next': 'INTEGER',
+        'highest_modseq': 'INTEGER',
+        'last_synced_uid': 'INTEGER',
+      },
       'files_embeddings': {'model_version': 'TEXT'},
       'emails_embeddings': {'model_version': 'TEXT'},
       'emails': {
@@ -2033,7 +2055,10 @@ class AppDatabase {
       last_scan_date INTEGER,
       needs_re_auth INTEGER NOT NULL DEFAULT 0,
       download_local_copy INTEGER NOT NULL DEFAULT 0,
-      local_copy_path TEXT
+      local_copy_path TEXT,
+      email_provider_id TEXT,
+      imap_settings TEXT,
+      email_delete_policy TEXT NOT NULL DEFAULT 'keep'
     );
     ''',
     // emails
@@ -2076,6 +2101,11 @@ class AppDatabase {
       messages_total INTEGER NOT NULL,
       messages_unread INTEGER NOT NULL,
       parent_id TEXT,
+      path TEXT,
+      uid_validity INTEGER,
+      uid_next INTEGER,
+      highest_modseq INTEGER,
+      last_synced_uid INTEGER,
       PRIMARY KEY (id, collection_id),
       FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
     );

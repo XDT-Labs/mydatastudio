@@ -61,8 +61,9 @@ class CollectionRepository {
       await db.execute(
         "INSERT INTO collections (id, name, path, type, scanner, scan_status, oauth_service, "
         "access_token, refresh_token, id_token, user_id, expiration, last_scan_date, "
-        "needs_re_auth, download_local_copy, local_copy_path) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "needs_re_auth, download_local_copy, local_copy_path, "
+        "email_provider_id, imap_settings, email_delete_policy) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
           val.id,
           val.name,
@@ -80,6 +81,9 @@ class CollectionRepository {
           val.needsReAuth ? 1 : 0,
           val.downloadLocalCopy ? 1 : 0,
           val.localCopyPath,
+          val.emailProviderId,
+          val.imapSettings,
+          val.emailDeletePolicy.dbValue,
         ],
       );
       return val;
@@ -94,7 +98,8 @@ class CollectionRepository {
         "name = ?, path = ?, type = ?, scanner = ?, scan_status = ?, "
         "oauth_service = ?, access_token = ?, refresh_token = ?, id_token = ?, user_id = ?, "
         "expiration = ?, last_scan_date = ?, needs_re_auth = ?, "
-        "download_local_copy = ?, local_copy_path = ? "
+        "download_local_copy = ?, local_copy_path = ?, "
+        "email_provider_id = ?, imap_settings = ?, email_delete_policy = ? "
         "WHERE id = ?",
         [
           val.name,
@@ -112,6 +117,9 @@ class CollectionRepository {
           val.needsReAuth ? 1 : 0,
           val.downloadLocalCopy ? 1 : 0,
           val.localCopyPath,
+          val.emailProviderId,
+          val.imapSettings,
+          val.emailDeletePolicy.dbValue,
           val.id,
         ],
       );

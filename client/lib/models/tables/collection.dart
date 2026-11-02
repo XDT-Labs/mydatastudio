@@ -1,3 +1,5 @@
+import 'package:mydatastudio/models/tables/email_delete_policy.dart';
+
 class Collection {
   String id;
   String name;
@@ -16,6 +18,13 @@ class Collection {
   bool needsReAuth = false;
   bool downloadLocalCopy = false;
   String? localCopyPath;
+
+  /// IMAP email only. Id of an `EmailProviderRegistry` provider.
+  String? emailProviderId;
+
+  /// JSON host/port/security/username for the `other` provider. Never a password.
+  String? imapSettings;
+  EmailDeletePolicy emailDeletePolicy;
 
   // fields not in db
   String? status;
@@ -38,6 +47,9 @@ class Collection {
     required this.needsReAuth,
     this.downloadLocalCopy = false,
     this.localCopyPath,
+    this.emailProviderId,
+    this.imapSettings,
+    this.emailDeletePolicy = EmailDeletePolicy.keep,
   });
 
   factory Collection.fromDbMap(Map<String, dynamic> map) {
@@ -58,6 +70,11 @@ class Collection {
       needsReAuth: (map['needs_re_auth'] as int? ?? 0) != 0,
       downloadLocalCopy: (map['download_local_copy'] as int? ?? 0) != 0,
       localCopyPath: map['local_copy_path'] as String?,
+      emailProviderId: map['email_provider_id'] as String?,
+      imapSettings: map['imap_settings'] as String?,
+      emailDeletePolicy: EmailDeletePolicy.fromDb(
+        map['email_delete_policy'] as String?,
+      ),
     );
   }
 
@@ -79,6 +96,9 @@ class Collection {
       'needs_re_auth': needsReAuth ? 1 : 0,
       'download_local_copy': downloadLocalCopy ? 1 : 0,
       'local_copy_path': localCopyPath,
+      'email_provider_id': emailProviderId,
+      'imap_settings': imapSettings,
+      'email_delete_policy': emailDeletePolicy.dbValue,
     };
   }
 }

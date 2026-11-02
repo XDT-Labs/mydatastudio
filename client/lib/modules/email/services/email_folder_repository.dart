@@ -6,6 +6,24 @@ class EmailFolderRepository {
 
   EmailFolderRepository(this.database);
 
+  /// An upsert rather than INSERT OR REPLACE: REPLACE deletes the row first,
+  /// which would null the per-folder sync state on every folder-list refresh.
+  /// Null incoming sync state keeps what is stored.
+  static const _upsertSql =
+      "INSERT INTO email_folders (id, collection_id, name, type, messages_total, "
+      "messages_unread, parent_id, path, uid_validity, uid_next, highest_modseq, "
+      "last_synced_uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+      "ON CONFLICT(id, collection_id) DO UPDATE SET "
+      "name = excluded.name, type = excluded.type, "
+      "messages_total = excluded.messages_total, "
+      "messages_unread = excluded.messages_unread, "
+      "parent_id = excluded.parent_id, "
+      "path = COALESCE(excluded.path, path), "
+      "uid_validity = COALESCE(excluded.uid_validity, uid_validity), "
+      "uid_next = COALESCE(excluded.uid_next, uid_next), "
+      "highest_modseq = COALESCE(excluded.highest_modseq, highest_modseq), "
+      "last_synced_uid = COALESCE(excluded.last_synced_uid, last_synced_uid)";
+
   Future<List<EmailFolder>> byCollectionId(String collectionId) async {
     final rows = await database.select(
       "SELECT * FROM email_folders WHERE collection_id = ?",
@@ -16,8 +34,7 @@ class EmailFolderRepository {
 
   Future<void> upsertFolder(EmailFolder folder) async {
     await database.execute(
-      "INSERT OR REPLACE INTO email_folders (id, collection_id, name, type, messages_total, messages_unread, parent_id) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?)",
+      _upsertSql,
       [
         folder.id,
         folder.collectionId,
@@ -26,6 +43,11 @@ class EmailFolderRepository {
         folder.messagesTotal ?? 0,
         folder.messagesUnread ?? 0,
         folder.parentId,
+        folder.path,
+        folder.uidValidity,
+        folder.uidNext,
+        folder.highestModseq,
+        folder.lastSyncedUid,
       ],
     );
   }
@@ -35,8 +57,7 @@ class EmailFolderRepository {
     await database.transaction((tx) async {
       for (final folder in folders) {
         await tx.execute(
-          "INSERT OR REPLACE INTO email_folders (id, collection_id, name, type, messages_total, messages_unread, parent_id) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?)",
+          _upsertSql,
           [
             folder.id,
             folder.collectionId,
@@ -45,6 +66,11 @@ class EmailFolderRepository {
             folder.messagesTotal ?? 0,
             folder.messagesUnread ?? 0,
             folder.parentId,
+            folder.path,
+            folder.uidValidity,
+            folder.uidNext,
+            folder.highestModseq,
+            folder.lastSyncedUid,
           ],
         );
       }
