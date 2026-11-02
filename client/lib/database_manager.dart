@@ -777,6 +777,12 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_files_active_date '
       'ON files (is_deleted, is_inline, date_created);',
     );
+    // After _addMissingColumns for the same reason: an install that predates
+    // `content_hash` has no column to index until the ALTER has run.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_files_content_hash '
+      'ON files (content_hash);',
+    );
 
     await _reapOrphanedArtifacts();
 
@@ -1455,6 +1461,10 @@ class AppDatabase {
         // Inline images in an HTML email are referenced as `cid:<content id>`;
         // without this the client can't tell which attachment a cid names.
         'content_id': 'TEXT',
+        // Lowercase sha256 hex of the file's bytes. Lets the same photo held
+        // in two collections or sources be recognised as one, so it is
+        // embedded once. NULL until a scanner has hashed it.
+        'content_hash': 'TEXT',
         // Whether the attachment is part of the message body — a spacer, logo
         // or tracking pixel — rather than something the sender attached.
         'is_inline': 'INTEGER NOT NULL DEFAULT 0',
@@ -2103,7 +2113,8 @@ class AppDatabase {
       content_id TEXT,
       is_inline INTEGER NOT NULL DEFAULT 0,
       is_favorite INTEGER NOT NULL DEFAULT 0,
-      description TEXT
+      description TEXT,
+      content_hash TEXT
     );
     ''',
     // folders

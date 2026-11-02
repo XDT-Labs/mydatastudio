@@ -316,6 +316,22 @@ class EmbeddingIsolate {
             break;
           }
           try {
+            // Identical bytes embed identically: reuse a sibling's vector
+            // (any collection or source) instead of reading and re-embedding.
+            final hash = file.contentHash;
+            if (hash != null) {
+              final donorId = await repo.findEmbeddedDuplicate(file.id, hash);
+              if (donorId != null) {
+                replyTo.send({
+                  'type': 'embedding',
+                  'table': 'files_embeddings',
+                  'id': file.id,
+                  'copyFrom': donorId,
+                });
+                logger.d("Reused embedding of $donorId for: ${file.path}");
+                continue;
+              }
+            }
             final start = DateTime.now();
             final rawBytes = await FileBytesLoader.load(file, repo, logger);
 

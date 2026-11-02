@@ -246,8 +246,8 @@ class FileDesktopRepository {
           "INSERT INTO files (id, name, path, parent, date_created, date_last_modified, "
           "last_scanned_date, collection_id, content_type, size, is_deleted, thumbnail, "
           "download_url, email_id, latitude, longitude, local_path, content_id, is_inline, "
-          "is_hidden, is_user_deleted) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+          "is_hidden, is_user_deleted, content_hash) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
           // is_hidden and is_user_deleted are absent from the DO UPDATE clause
           // on purpose. The
           // importer sets it once to keep spacer GIFs and banners out of the
@@ -278,6 +278,10 @@ class FileDesktopRepository {
           "longitude = excluded.longitude, "
           "content_id = excluded.content_id, "
           "is_inline = excluded.is_inline, "
+          // COALESCE: a scanner that did not hash this time (cache hit on a
+          // row it loaded without the hash, or a source that cannot supply
+          // one) must not erase a hash an earlier scan computed.
+          "content_hash = COALESCE(excluded.content_hash, files.content_hash), "
           "is_deleted = 0",
           [
             f.id,
@@ -301,10 +305,40 @@ class FileDesktopRepository {
             f.isInline ? 1 : 0,
             f.isHidden ? 1 : 0,
             f.isUserDeleted ? 1 : 0,
+            f.contentHash,
           ],
         );
       }
     });
+  }
+
+  /// Other live files with the same bytes as [f] — in any collection.
+  /// Empty when [f] has not been hashed.
+  Future<List<File>> duplicatesOf(File f) async {
+    final hash = f.contentHash;
+    if (hash == null) return [];
+    final rows = await db.select(
+      "SELECT * FROM files WHERE content_hash = ? AND id <> ? "
+      "AND is_deleted = 0 AND is_user_deleted = 0 ORDER BY id",
+      [hash, f.id],
+    );
+    return rows.map((r) => File.fromDbMap(r)).toList();
+  }
+
+  /// Every set of two or more live files sharing a content hash, keyed by hash.
+  Future<Map<String, List<File>>> duplicateGroups() async {
+    final rows = await db.select(
+      "SELECT * FROM files WHERE is_deleted = 0 AND is_user_deleted = 0 "
+      "AND content_hash IN (SELECT content_hash FROM files "
+      "WHERE content_hash IS NOT NULL AND is_deleted = 0 AND is_user_deleted = 0 "
+      "GROUP BY content_hash HAVING COUNT(*) > 1) ORDER BY content_hash, id",
+    );
+    final groups = <String, List<File>>{};
+    for (final r in rows) {
+      final file = File.fromDbMap(r);
+      groups.putIfAbsent(file.contentHash!, () => []).add(file);
+    }
+    return groups;
   }
 
   Future<List<File>> getByEmailId(String emailId) async {

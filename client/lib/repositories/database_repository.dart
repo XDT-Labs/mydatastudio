@@ -116,6 +116,56 @@ class DatabaseRepository {
     }
   }
 
+  /// Id of another live file with the same [contentHash] that already holds a
+  /// current-model whole-file vector, or null. The vector is a function of the
+  /// bytes alone, so it can stand in for [fileId]'s own.
+  Future<String?> findEmbeddedDuplicate(
+    String fileId,
+    String contentHash,
+  ) async {
+    final rows = await db.select(
+      '''
+      SELECT f.id FROM files f
+      INNER JOIN files_embeddings fe
+        ON fe.file_id = f.id AND fe.type = 'file' AND fe.sequence = 0
+      WHERE f.content_hash = ? AND f.id <> ?
+        AND f.is_deleted = 0 AND f.is_user_deleted = 0
+        AND fe.qwen3_vl_embedding IS NOT NULL
+        AND fe.model_version = ?
+      ORDER BY f.id LIMIT 1
+      ''',
+      [contentHash, fileId, EmbeddingModel.current],
+    );
+    return rows.isEmpty ? null : rows.first['id'] as String;
+  }
+
+  /// Copies [fromFileId]'s whole-file vector onto [toFileId] inside SQL, so the
+  /// 2048-float blob never crosses an isolate boundary. Returns whether a row
+  /// was written (false if the donor lost its vector or [toFileId] is gone).
+  Future<bool> copyFileEmbedding(String fromFileId, String toFileId) async {
+    final result = await db.execute(
+      '''
+      INSERT INTO files_embeddings
+        (file_id, type, sequence, qwen3_vl_embedding, model_version)
+      SELECT ?, 'file', 0, fe.qwen3_vl_embedding, fe.model_version
+      FROM files_embeddings fe
+      WHERE fe.file_id = ? AND fe.type = 'file' AND fe.sequence = 0
+        AND fe.qwen3_vl_embedding IS NOT NULL
+        AND fe.model_version = ?
+        AND EXISTS (SELECT 1 FROM files WHERE id = ?)
+      ON CONFLICT(file_id, type, sequence) DO UPDATE SET
+        qwen3_vl_embedding = excluded.qwen3_vl_embedding,
+        model_version = excluded.model_version
+      ''',
+      [toFileId, fromFileId, EmbeddingModel.current, toFileId],
+    );
+    if (result.affectedRows == 0) return false;
+    await db.execute('UPDATE files SET embedding_attempts = 0 WHERE id = ?', [
+      toFileId,
+    ]);
+    return true;
+  }
+
   /// Deletes the embedding record for [fileId] from `files_embeddings`.
   ///
   /// Should be called when the corresponding file is permanently deleted.

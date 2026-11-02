@@ -192,6 +192,35 @@ void main() {
     );
 
     test(
+      'AppDatabase.create adds files.content_hash and its index to an older database',
+      () async {
+        // Dedupe lookups filter on content_hash; an upgraded install without
+        // the column (or index) would throw or full-scan on every embed pass.
+        final supportDir = await getApplicationSupportDirectory();
+        const dbName = 'content_hash_migration_test.db';
+        final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+        if (dbFile.existsSync()) dbFile.deleteSync();
+
+        var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        await appDb.rawDb.execute('DROP INDEX IF EXISTS idx_files_content_hash');
+        await appDb.rawDb.execute('ALTER TABLE files DROP COLUMN content_hash');
+        expect(await _fileColumns(appDb), isNot(contains('content_hash')));
+        await appDb.close();
+
+        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        expect(await _fileColumns(appDb), contains('content_hash'));
+        final idx = await appDb.rawDb.select(
+          "SELECT name FROM sqlite_master WHERE type = 'index' "
+          "AND name = 'idx_files_content_hash'",
+        );
+        expect(idx, isNotEmpty);
+
+        await appDb.close();
+        if (dbFile.existsSync()) dbFile.deleteSync();
+      },
+    );
+
+    test(
       'AppDatabase.create adds files.content_id to a database created before it existed',
       () async {
         // The DDL only runs for a brand-new database, so a column added later
