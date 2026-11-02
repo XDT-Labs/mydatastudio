@@ -1507,6 +1507,18 @@ class AppDatabase {
         // without a flag the scanner owns nothing and one Sync click would undo
         // every delete the user made.
         'is_user_deleted': 'INTEGER NOT NULL DEFAULT 0',
+        // When the source deleted a file we kept (collections.keep_deleted_files
+        // on). NULL while the source still has it. Distinct from is_deleted,
+        // which hides the row.
+        'source_deleted_date': 'INTEGER',
+      },
+      'collections': {
+        // Provider change-feed position (Drive page token etc.). NULL means
+        // "no baseline yet": the next sync is a full walk that stores one.
+        'change_cursor': 'TEXT',
+        // Keep rows and local copies of files the source deleted, instead of
+        // marking them is_deleted.
+        'keep_deleted_files': 'INTEGER NOT NULL DEFAULT 0',
       },
       'albums': {'description': 'TEXT', 'cover_file_id': 'TEXT'},
       // Which embedding pipeline produced the vector in this row. See
@@ -2043,7 +2055,9 @@ class AppDatabase {
       last_scan_date INTEGER,
       needs_re_auth INTEGER NOT NULL DEFAULT 0,
       download_local_copy INTEGER NOT NULL DEFAULT 0,
-      local_copy_path TEXT
+      local_copy_path TEXT,
+      change_cursor TEXT,
+      keep_deleted_files INTEGER NOT NULL DEFAULT 0
     );
     ''',
     // emails
@@ -2114,7 +2128,8 @@ class AppDatabase {
       is_inline INTEGER NOT NULL DEFAULT 0,
       is_favorite INTEGER NOT NULL DEFAULT 0,
       description TEXT,
-      content_hash TEXT
+      content_hash TEXT,
+      source_deleted_date INTEGER
     );
     ''',
     // folders

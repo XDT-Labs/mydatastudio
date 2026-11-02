@@ -207,6 +207,7 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
   String? _errorMessage;
   String? _connectedEmail;
   bool _saveLocalCopy = true;
+  bool _keepDeletedFiles = false;
 
   @override
   void initState() {
@@ -245,6 +246,7 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
       final collection = await LoginProviderExtension.handleGoogleDrive(
         context,
         downloadLocalCopy: _saveLocalCopy,
+        keepDeletedFiles: _keepDeletedFiles,
       );
 
       if (!mounted) return;
@@ -336,6 +338,12 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
                 onSaveLocalCopyChanged: (value) {
                   setState(() {
                     _saveLocalCopy = value ?? true;
+                  });
+                },
+                keepDeletedFiles: _keepDeletedFiles,
+                onKeepDeletedFilesChanged: (value) {
+                  setState(() {
+                    _keepDeletedFiles = value;
                   });
                 },
               ),

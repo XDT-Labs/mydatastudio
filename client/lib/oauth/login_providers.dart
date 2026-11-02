@@ -403,6 +403,7 @@ extension LoginProviderExtension on LoginProviders {
     Collection? existing,
     String rootFolderId = 'root',
     bool downloadLocalCopy = true,
+    bool keepDeletedFiles = false,
   }) async {
     if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -461,6 +462,7 @@ extension LoginProviderExtension on LoginProviders {
         expiration: client.credentials.expiration,
         needsReAuth: false,
         downloadLocalCopy: downloadLocalCopy,
+        keepDeletedFiles: keepDeletedFiles,
       );
 
       final repo = CollectionRepository(DatabaseManager.instance.database!);

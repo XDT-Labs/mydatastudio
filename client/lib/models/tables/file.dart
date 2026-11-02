@@ -55,6 +55,10 @@ class File implements FileAsset {
   /// rows came from.
   String? contentHash;
 
+  /// When the source deleted this file while the collection keeps deleted
+  /// files; null while the source still has it.
+  DateTime? sourceDeletedDate;
+
   File({
     required this.id,
     required this.name,
@@ -80,6 +84,7 @@ class File implements FileAsset {
     this.isFavorite = false,
     this.description,
     this.contentHash,
+    this.sourceDeletedDate,
   });
 
   factory File.fromDbMap(Map<String, dynamic> map) {
@@ -121,6 +126,12 @@ class File implements FileAsset {
       isFavorite: (map['is_favorite'] as int? ?? 0) != 0,
       description: map['description'] as String?,
       contentHash: map['content_hash'] as String?,
+      sourceDeletedDate:
+          map['source_deleted_date'] != null
+              ? DateTime.fromMillisecondsSinceEpoch(
+                map['source_deleted_date'] as int,
+              )
+              : null,
     );
   }
 
@@ -150,6 +161,7 @@ class File implements FileAsset {
       'is_favorite': isFavorite ? 1 : 0,
       'description': description,
       'content_hash': contentHash,
+      'source_deleted_date': sourceDeletedDate?.millisecondsSinceEpoch,
     };
   }
 }

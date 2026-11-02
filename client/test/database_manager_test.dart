@@ -221,6 +221,40 @@ void main() {
     );
 
     test(
+      'AppDatabase.create adds change-cursor columns to an older database',
+      () async {
+        // Existing installs only get these through the guarded ALTER; without
+        // them every cloud scan would throw reading collections.change_cursor.
+        final supportDir = await getApplicationSupportDirectory();
+        const dbName = 'change_cursor_migration_test.db';
+        final dbFile = io.File(p.join(supportDir.path, 'data', dbName));
+        if (dbFile.existsSync()) dbFile.deleteSync();
+
+        var appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        await appDb.rawDb.execute(
+          'ALTER TABLE collections DROP COLUMN change_cursor',
+        );
+        await appDb.rawDb.execute(
+          'ALTER TABLE collections DROP COLUMN keep_deleted_files',
+        );
+        await appDb.rawDb.execute(
+          'ALTER TABLE files DROP COLUMN source_deleted_date',
+        );
+        await appDb.close();
+
+        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        final cols = (await appDb.rawDb.select(
+          'PRAGMA table_info(collections)',
+        )).map((r) => r['name'] as String).toSet();
+        expect(cols, containsAll(['change_cursor', 'keep_deleted_files']));
+        expect(await _fileColumns(appDb), contains('source_deleted_date'));
+
+        await appDb.close();
+        if (dbFile.existsSync()) dbFile.deleteSync();
+      },
+    );
+
+    test(
       'AppDatabase.create adds files.content_id to a database created before it existed',
       () async {
         // The DDL only runs for a brand-new database, so a column added later

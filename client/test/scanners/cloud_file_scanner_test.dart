@@ -19,11 +19,21 @@ class FakeCloudFileApi implements CloudFileApi {
   final int pageSize;
   final List<String> listedFolders = [];
   final List<String> downloaded = [];
-  final List<CloudFileEntry> changed;
-  int changedCalls = 0;
+
+  /// Change pages served in order; cursor pN addresses page N, any other
+  /// cursor starts at page 0.
+  final List<List<CloudChange>> changePages;
+
+  /// Call order across the API: startCursor, list:FOLDER, changes.
+  final List<String> events = [];
+  bool cursorExpired = false;
   int failDownloadsLeft = 0;
 
-  FakeCloudFileApi(this.tree, {this.pageSize = 1000, this.changed = const []});
+  FakeCloudFileApi(
+    this.tree, {
+    this.pageSize = 1000,
+    this.changePages = const [],
+  });
 
   @override
   String get scheme => 'fake';
@@ -33,7 +43,10 @@ class FakeCloudFileApi implements CloudFileApi {
     String folderId, {
     String? pageToken,
   }) async {
-    if (pageToken == null) listedFolders.add(folderId);
+    if (pageToken == null) {
+      listedFolders.add(folderId);
+      events.add('list:$folderId');
+    }
     final all = tree[folderId] ?? const [];
     final start = int.parse(pageToken ?? '0');
     final end = (start + pageSize).clamp(0, all.length);
@@ -44,16 +57,28 @@ class FakeCloudFileApi implements CloudFileApi {
   }
 
   @override
-  Future<CloudFilePage> listChangedSince(
-    DateTime since, {
-    String? pageToken,
-  }) async {
-    changedCalls++;
-    return CloudFilePage(changed);
+  Future<String> startCursor() async {
+    events.add('startCursor');
+    return 'c-start';
   }
 
   @override
-  Future<CloudFileEntry?> getEntry(String id) async => null;
+  Future<CloudChangePage> listChanges(String cursor) async {
+    events.add('changes');
+    if (cursorExpired) throw const CloudCursorExpiredException();
+    final i = cursor.startsWith('p') ? int.parse(cursor.substring(1)) : 0;
+    final last = i + 1 >= changePages.length;
+    return CloudChangePage(
+      changePages.isEmpty ? const [] : changePages[i],
+      nextPageCursor: last ? null : 'p${i + 1}',
+      newStartCursor: last ? 'c-new' : null,
+    );
+  }
+
+  /// The real id behind the 'root' alias, as Drive reports it in `parents`.
+  @override
+  Future<CloudFileEntry?> getEntry(String id) async =>
+      id == 'root' ? _folder('REALROOT') : null;
 
   @override
   bool isDownloadableMimeType(String mimeType) =>
@@ -113,6 +138,8 @@ void main() {
     bool download = false,
     String? lastScan,
     String root = 'root',
+    String? cursor,
+    bool keepDeleted = false,
   }) => {
     'collectionId': 'c1',
     'collectionName': 'My Drive',
@@ -123,19 +150,24 @@ void main() {
     'recursive': recursive,
     'downloadLocalCopy': download,
     'lastScanDate': lastScan,
+    'changeCursor': cursor,
+    'keepDeletedFiles': keepDeleted,
     'appDir': tmp,
     'accessToken': 'a',
     'refreshToken': 'r',
   };
 
-  CloudFileScannerWorker worker({List<File> toDownload = const []}) =>
-      CloudFileScannerWorker(
-        _MockDb(),
-        null,
-        port.sendPort,
-        collectionExists: (_) async => true,
-        filesToDownload: (_) async => toDownload,
-      );
+  CloudFileScannerWorker worker({
+    List<File> toDownload = const [],
+    Map<String, String> knownFolders = const {},
+  }) => CloudFileScannerWorker(
+    _MockDb(),
+    null,
+    port.sendPort,
+    collectionExists: (_) async => true,
+    filesToDownload: (_) async => toDownload,
+    knownFolders: (_) async => knownFolders,
+  );
 
   Future<void> run(
     CloudFileScannerWorker w,
@@ -145,6 +177,14 @@ void main() {
 
   Iterable<Map> of(String service) =>
       writes.where((w) => w['service'] == service);
+
+  /// Cursor values relayed to main, in order (null = cleared).
+  List<String?> cursorWrites() =>
+      of(
+        'collectionChangeCursor',
+      ).map((w) => (w['payload'] as Map)['cursor'] as String?).toList();
+
+  Map removal() => of('cloudRemovals').single['payload'] as Map;
 
   test('carries the provider sha256 onto the relayed file row', () async {
     final api = FakeCloudFileApi({
@@ -226,6 +266,7 @@ void main() {
       expect(services, [
         'batchFile',
         'cleanupDeletedFiles',
+        'collectionChangeCursor',
         'collectionStatus',
       ]);
       final cleanup = of('cleanupDeletedFiles').single['payload'] as Map;
@@ -234,17 +275,397 @@ void main() {
     },
   );
 
-  test('incremental scan uses listChangedSince and never sweeps', () async {
-    final api = FakeCloudFileApi({}, changed: [_file('f9')]);
-    await run(
-      worker(),
-      api,
-      args(force: false, lastScan: DateTime(2024).toIso8601String()),
+  group('change-cursor sync', () {
+    test(
+      'full walk takes the start cursor before walking, persists it after',
+      () async {
+        final api = FakeCloudFileApi({
+          'root': [_file('f1')],
+        });
+        await run(worker(), api, args());
+        expect(api.events.first, 'startCursor');
+        expect(
+          api.events.indexOf('startCursor'),
+          lessThan(api.events.indexOf('list:root')),
+        );
+        expect(cursorWrites(), ['c-start']);
+        // Persisted only after the files were written.
+        final services = writes.map((w) => w['service']).toList();
+        expect(
+          services.indexOf('collectionChangeCursor'),
+          greaterThan(services.indexOf('batchFile')),
+        );
+      },
     );
-    expect(api.changedCalls, 1);
-    expect(api.listedFolders, isEmpty);
-    expect(of('cleanupDeletedFiles'), isEmpty);
-    expect(of('batchFile').single['payload'], hasLength(1));
+
+    test('a failed batch leaves the cursor unwritten', () async {
+      failService = 'batchFile';
+      final api = FakeCloudFileApi({
+        'root': [_file('f1')],
+      });
+      await run(worker(), api, args());
+      expect(cursorWrites(), isEmpty);
+    });
+
+    test('force ignores a stored cursor and walks', () async {
+      final api = FakeCloudFileApi({
+        'root': [_file('f1')],
+      });
+      await run(worker(), api, args(cursor: 'old'));
+      expect(api.events, isNot(contains('changes')));
+      expect(of('cleanupDeletedFiles'), hasLength(1));
+      expect(cursorWrites(), ['c-start']);
+    });
+
+    test(
+      'incremental upserts changes, never sweeps, stores the new cursor',
+      () async {
+        final api = FakeCloudFileApi(
+          {},
+          changePages: [
+            [
+              CloudChange(
+                'f9',
+                entry: const CloudFileEntry(
+                  id: 'f9',
+                  name: 'f9.txt',
+                  parentIds: ['REALROOT'],
+                ),
+              ),
+            ],
+          ],
+        );
+        await run(worker(), api, args(force: false, cursor: 'old'));
+        expect(api.listedFolders, isEmpty);
+        expect(of('cleanupDeletedFiles'), isEmpty);
+        final f = (of('batchFile').single['payload'] as List<File>).single;
+        expect(
+          f.parent,
+          '',
+          reason: 'real root id maps to the collection root',
+        );
+        expect(cursorWrites(), ['c-new']);
+      },
+    );
+
+    test('follows change pages', () async {
+      final api = FakeCloudFileApi(
+        {},
+        changePages: [
+          [
+            CloudChange(
+              'a',
+              entry: const CloudFileEntry(
+                id: 'a',
+                name: 'a',
+                parentIds: ['REALROOT'],
+              ),
+            ),
+          ],
+          [
+            CloudChange(
+              'b',
+              entry: const CloudFileEntry(
+                id: 'b',
+                name: 'b',
+                parentIds: ['REALROOT'],
+              ),
+            ),
+          ],
+        ],
+      );
+      await run(worker(), api, args(force: false, cursor: 'old'));
+      final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+      expect(files.map((f) => f.path), ['fake://a', 'fake://b']);
+      expect(cursorWrites(), ['c-new']);
+    });
+
+    test('removed item is relayed as a delete', () async {
+      final api = FakeCloudFileApi(
+        {},
+        changePages: [
+          [const CloudChange('gone', removed: true)],
+        ],
+      );
+      await run(worker(), api, args(force: false, cursor: 'old'));
+      expect(removal()['itemIds'], ['c1:gone']);
+      expect(removal()['keepDeleted'], false);
+      expect(of('batchFile'), isEmpty);
+    });
+
+    test(
+      'with keep_deleted_files the removal is flagged keepDeleted',
+      () async {
+        final api = FakeCloudFileApi(
+          {},
+          changePages: [
+            [const CloudChange('gone', removed: true)],
+          ],
+        );
+        await run(
+          worker(),
+          api,
+          args(force: false, cursor: 'old', keepDeleted: true),
+        );
+        expect(removal()['keepDeleted'], true);
+      },
+    );
+
+    test('a move within the collection updates the parent', () async {
+      final api = FakeCloudFileApi(
+        {},
+        changePages: [
+          [
+            CloudChange(
+              'f',
+              entry: const CloudFileEntry(
+                id: 'f',
+                name: 'f.txt',
+                parentIds: ['a'],
+              ),
+            ),
+          ],
+        ],
+      );
+      await run(
+        worker(knownFolders: {'a': ''}),
+        api,
+        args(force: false, cursor: 'old'),
+      );
+      final f = (of('batchFile').single['payload'] as List<File>).single;
+      expect(f.parent, 'a');
+    });
+
+    test('a moved folder is rewritten with its new parent', () async {
+      final api = FakeCloudFileApi(
+        {},
+        changePages: [
+          [
+            CloudChange(
+              'b',
+              entry: const CloudFileEntry(
+                id: 'b',
+                name: 'b',
+                isFolder: true,
+                parentIds: ['a'],
+              ),
+            ),
+          ],
+        ],
+      );
+      await run(
+        worker(knownFolders: {'a': '', 'b': ''}),
+        api,
+        args(force: false, cursor: 'old'),
+      );
+      final fo = of('folder').single['payload'] as Folder;
+      expect((fo.path, fo.parent), ('b', 'a'));
+      expect(api.listedFolders, isEmpty, reason: 'already known: no re-walk');
+    });
+
+    test('changes outside the collection subtree are ignored', () async {
+      final api = FakeCloudFileApi(
+        {},
+        changePages: [
+          [
+            CloudChange(
+              'x',
+              entry: const CloudFileEntry(
+                id: 'x',
+                name: 'x',
+                parentIds: ['elsewhere'],
+              ),
+            ),
+          ],
+        ],
+      );
+      await run(
+        worker(knownFolders: {'a': ''}),
+        api,
+        args(force: false, cursor: 'old', root: 'a'),
+      );
+      expect(of('batchFile'), isEmpty);
+      expect(of('folder'), isEmpty);
+    });
+
+    test('an item moved out of scope is removed', () async {
+      final api = FakeCloudFileApi(
+        {},
+        changePages: [
+          [
+            CloudChange(
+              'f',
+              entry: const CloudFileEntry(
+                id: 'f',
+                name: 'f',
+                parentIds: ['elsewhere'],
+              ),
+            ),
+            CloudChange(
+              'a',
+              entry: const CloudFileEntry(
+                id: 'a',
+                name: 'a',
+                isFolder: true,
+                parentIds: ['elsewhere'],
+              ),
+            ),
+          ],
+        ],
+      );
+      await run(
+        worker(knownFolders: {'a': '', 'b': 'a'}),
+        api,
+        args(force: false, cursor: 'old'),
+      );
+      expect(of('batchFile'), isEmpty);
+      final r = removal();
+      expect(r['itemIds'], containsAll(['c1:f', 'c1:a', 'c1:b']));
+      expect(
+        r['parentIds'],
+        containsAll(['a', 'b']),
+        reason: 'descendants go too',
+      );
+    });
+
+    test(
+      'removing the top of a 3-level tree removes every descendant folder',
+      () async {
+        final api = FakeCloudFileApi(
+          {},
+          changePages: [
+            [const CloudChange('a', removed: true)],
+          ],
+        );
+        await run(
+          worker(knownFolders: {'a': '', 'b': 'a', 'c': 'b', 'other': ''}),
+          api,
+          args(force: false, cursor: 'old'),
+        );
+        final r = removal();
+        expect(r['parentIds'], unorderedEquals(['a', 'b', 'c']));
+        expect(r['itemIds'], unorderedEquals(['c1:a', 'c1:b', 'c1:c']));
+      },
+    );
+
+    test('a folder moved into scope is walked', () async {
+      final api = FakeCloudFileApi(
+        {
+          'n': [_file('x')],
+        },
+        changePages: [
+          [
+            CloudChange(
+              'n',
+              entry: const CloudFileEntry(
+                id: 'n',
+                name: 'n',
+                isFolder: true,
+                parentIds: ['a'],
+              ),
+            ),
+          ],
+        ],
+      );
+      await run(
+        worker(knownFolders: {'a': ''}),
+        api,
+        args(force: false, cursor: 'old'),
+      );
+      expect(api.listedFolders, ['n']);
+      final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+      expect(files.map((f) => f.path), ['fake://x']);
+    });
+
+    test(
+      'a file created inside a folder created in the same batch is in scope',
+      () async {
+        final api = FakeCloudFileApi(
+          {'n': []},
+          changePages: [
+            [
+              CloudChange(
+                'f',
+                entry: const CloudFileEntry(
+                  id: 'f',
+                  name: 'f',
+                  parentIds: ['n'],
+                ),
+              ),
+              CloudChange(
+                'n',
+                entry: const CloudFileEntry(
+                  id: 'n',
+                  name: 'n',
+                  isFolder: true,
+                  parentIds: ['REALROOT'],
+                ),
+              ),
+            ],
+          ],
+        );
+        await run(worker(), api, args(force: false, cursor: 'old'));
+        final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+        expect(files.single.parent, 'n');
+      },
+    );
+
+    test(
+      'a failed write keeps the old cursor so the next run replays',
+      () async {
+        failService = 'batchFile';
+        final api = FakeCloudFileApi(
+          {},
+          changePages: [
+            [
+              CloudChange(
+                'f',
+                entry: const CloudFileEntry(
+                  id: 'f',
+                  name: 'f',
+                  parentIds: ['REALROOT'],
+                ),
+              ),
+            ],
+          ],
+        );
+        await run(worker(), api, args(force: false, cursor: 'old'));
+        expect(cursorWrites(), isEmpty);
+      },
+    );
+
+    test('a failed removal write keeps the old cursor', () async {
+      failService = 'cloudRemovals';
+      final api = FakeCloudFileApi(
+        {},
+        changePages: [
+          [const CloudChange('gone', removed: true)],
+        ],
+      );
+      await run(worker(), api, args(force: false, cursor: 'old'));
+      expect(cursorWrites(), isEmpty);
+    });
+
+    test(
+      'an expired cursor clears it, re-lists, sweeps, and stores a fresh one',
+      () async {
+        final api = FakeCloudFileApi({
+          'root': [_file('f1')],
+        })..cursorExpired = true;
+        await run(worker(), api, args(force: false, cursor: 'old'));
+        expect(api.listedFolders, ['root']);
+        expect(of('cleanupDeletedFiles'), hasLength(1));
+        expect(cursorWrites(), [null, 'c-start']);
+      },
+    );
+
+    test('the sweep honours keep_deleted_files', () async {
+      final api = FakeCloudFileApi({
+        'root': [_file('f1')],
+      });
+      await run(worker(), api, args(keepDeleted: true));
+      expect(of('cleanupDeletedFiles').single['payload']['keepDeleted'], true);
+    });
   });
 
   test('a failed batch write skips the deleted-file sweep', () async {

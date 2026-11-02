@@ -94,5 +94,29 @@ void main() {
 
       expect(lastValue, isFalse);
     });
+
+    testWidgets('keep-deleted switch defaults off and reports toggles',
+        (tester) async {
+      bool? changed;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GoogleDriveIdleView(
+              onConnect: () {},
+              saveLocalCopy: true,
+              onSaveLocalCopyChanged: (_) {},
+              onKeepDeletedFilesChanged: (v) => changed = v,
+            ),
+          ),
+        ),
+      );
+      final sw = find.widgetWithText(
+        SwitchListTile,
+        'Keep files deleted from Google Drive',
+      );
+      expect(tester.widget<SwitchListTile>(sw).value, isFalse);
+      await tester.tap(sw);
+      expect(changed, isTrue);
+    });
   });
 }

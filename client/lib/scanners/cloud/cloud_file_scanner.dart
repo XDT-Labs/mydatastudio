@@ -125,6 +125,8 @@ class CloudFileScanner extends CollectionScanner {
       'collectionPath': collection.path,
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'downloadLocalCopy': collection.downloadLocalCopy,
+      'changeCursor': collection.changeCursor,
+      'keepDeletedFiles': collection.keepDeletedFiles,
       // The root folder ID to start scanning from (e.g. 'root' or a specific folder ID)
       'rootFolderId': actualPath,
       'isFullScan': actualPath == collection.path,
@@ -267,6 +269,11 @@ class CloudFileScannerWorker {
   final Future<bool> Function(String collectionId) _collectionExists;
   final Future<List<File>> Function(String collectionId) _filesToDownload;
 
+  /// Folder rows already stored for a collection: provider folder id -> parent
+  /// provider folder id ('' = collection root). Defines which change-feed
+  /// items are inside the collection.
+  final Future<Map<String, String>> Function(String collectionId) _knownFolders;
+
   // Caches for path reconstruction
   final Map<String, String> _folderNames = {};
   final Map<String, String> _folderParents = {};
@@ -289,7 +296,17 @@ class CloudFileScannerWorker {
     this.port, {
     Future<bool> Function(String collectionId)? collectionExists,
     Future<List<File>> Function(String collectionId)? filesToDownload,
-  }) : _collectionExists =
+    Future<Map<String, String>> Function(String collectionId)? knownFolders,
+  }) : _knownFolders =
+           knownFolders ??
+           ((id) async => {
+             for (final r in await appDb.select(
+               'SELECT path, parent FROM folders WHERE collection_id = ?',
+               [id],
+             ))
+               r['path'] as String: r['parent'] as String,
+           }),
+       _collectionExists =
            collectionExists ??
            ((id) async =>
                await CollectionRepository(appDb).collectionById(id) != null),
@@ -356,9 +373,8 @@ class CloudFileScannerWorker {
     final collectionName = args['collectionName'] as String;
     final collectionPath = args['collectionPath'] as String? ?? 'root';
     final rootFolderId = args['rootFolderId'] as String? ?? 'root';
-    final lastScanDateStr = args['lastScanDate'] as String?;
-    final lastScanDate =
-        lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
+    final changeCursor = args['changeCursor'] as String?;
+    final keepDeleted = args['keepDeletedFiles'] as bool? ?? false;
     // Storage root for downloaded copies. `storagePath` in args is the database
     // directory and is only used to open the db — see [CloudFileScanner.appDir].
     final appDir = args['appDir'] as String? ?? args['storagePath'] as String?;
@@ -423,25 +439,53 @@ class CloudFileScannerWorker {
     try {
       int count = 0;
       bool skipCleanup = false;
+      // Position to store once this run has fully applied (see below).
+      String? cursorToStore;
 
-      // Rule Selection:
-      // If it's a full scan (root), and not forced, and we have a lastScanDate
-      // then we perform an incremental metadata sync using modifiedTime.
-      if (isFullScan && !force && lastScanDate != null) {
+      // Incremental = the collection has a change cursor (not lastScanDate,
+      // which only says a scan once finished). A forced sync or a targeted
+      // folder scan always lists.
+      var incremental = isFullScan && !force && changeCursor != null;
+      if (incremental) {
         logger.i(
-          'CloudFileIsolate: Performing INCREMENTAL sync for "$collectionName" (since $lastScanDate)',
+          'CloudFileIsolate: Performing INCREMENTAL sync for "$collectionName" (change cursor)',
         );
-        count = await _incrementalScan(
-          api: api,
-          collectionId: collectionId,
-          collectionPath: collectionPath,
-          lastScanDate: lastScanDate,
-          scanStartTime: scanStartTime,
-        );
-        // We skip cleanup_deleted because incremental sync only sees changes,
-        // and doesn't know about missing items.
-        skipCleanup = true;
-      } else {
+        try {
+          final result = await _incrementalScan(
+            api: api,
+            collectionId: collectionId,
+            collectionPath: collectionPath,
+            cursor: changeCursor,
+            keepDeleted: keepDeleted,
+            scanStartTime: scanStartTime,
+          );
+          count = result.count;
+          cursorToStore = result.newCursor;
+          // The change feed reports deletes, so no sweep is needed.
+          skipCleanup = true;
+        } on CloudCursorExpiredException catch (e) {
+          logger.w(
+            'CloudFileIsolate: change cursor rejected for "$collectionName" ($e) — '
+            'falling back to a full re-list',
+          );
+          incremental = false;
+          await _writeCursor(collectionId, null);
+        }
+      }
+
+      if (!incremental) {
+        // Take the feed position BEFORE walking, so changes made while the
+        // walk runs are replayed by the next incremental sync.
+        if (isFullScan) {
+          try {
+            cursorToStore = await _retryNetworkOp(() => api.startCursor());
+          } catch (e) {
+            logger.w(
+              'CloudFileIsolate: could not get a change cursor ($e) — '
+              'next sync will be a full walk again',
+            );
+          }
+        }
         logger.i(
           'CloudFileIsolate: Starting RECURSIVE scan of "$collectionName" from folder "$rootFolderId" (force=$force)',
         );
@@ -475,12 +519,22 @@ class CloudFileScannerWorker {
             'recursive': recursive,
             'isCloud': true,
             'isFullScan': isFullScan,
+            'keepDeleted': keepDeleted,
           });
         } catch (e) {
           // A transient relay failure here shouldn't skip the collection
           // status update below or the download queue after it.
+          // A missed sweep means deletes would never be noticed once the
+          // cursor moves past them, so don't advance it.
+          _failedBatches++;
           logger.e('CloudFileIsolate: cleanup-deleted-files write failed: $e');
         }
+      }
+
+      // Only a fully applied run may advance the cursor; otherwise the next
+      // run replays from the old position (all writes are idempotent upserts).
+      if (_failedBatches == 0 && cursorToStore != null) {
+        await _writeCursor(collectionId, cursorToStore);
       }
 
       // Update lastScanDate in the DB. The read stays on this isolate's own
@@ -552,62 +606,211 @@ class CloudFileScannerWorker {
     }
   }
 
-  /// Performs an incremental metadata sync of items modified since
-  /// [lastScanDate].
-  Future<int> _incrementalScan({
+  Future<void> _writeCursor(String collectionId, String? cursor) async {
+    try {
+      await writeViaMain(port, 'collectionChangeCursor', {
+        'collectionId': collectionId,
+        'cursor': cursor,
+      });
+    } catch (e) {
+      logger.e('CloudFileIsolate: failed to store change cursor: $e');
+    }
+  }
+
+  /// Relays source-side removals in chunks (SQLite bound-variable limit).
+  Future<void> _writeRemovals(
+    String collectionId,
+    Set<String> itemIds,
+    Set<String> parentIds,
+    bool keepDeleted,
+  ) async {
+    const chunk = 400;
+    final items = itemIds.toList();
+    final parents = parentIds.toList();
+    final rounds = [
+      items.length,
+      parents.length,
+    ].reduce((a, b) => a > b ? a : b);
+    for (var i = 0; i < rounds; i += chunk) {
+      try {
+        await writeViaMain(port, 'cloudRemovals', {
+          'collectionId': collectionId,
+          'itemIds': items.skip(i).take(chunk).toList(),
+          'parentIds': parents.skip(i).take(chunk).toList(),
+          'keepDeleted': keepDeleted,
+          'at': DateTime.now(),
+        });
+      } catch (e) {
+        _failedBatches++;
+        logger.e('CloudFileIsolate: removal write failed: $e');
+      }
+    }
+  }
+
+  /// Applies the provider change feed since [cursor] and returns the cursor to
+  /// store. Throws [CloudCursorExpiredException] if the provider rejects it.
+  ///
+  /// The feed is drive-wide, so every item is first checked against the
+  /// collection: it is in scope when its parent is the collection root or a
+  /// folder we already store (or one this same batch brings in). An item that
+  /// leaves scope is treated as removed, and a folder that enters scope is
+  /// walked because nothing under it has been stored yet.
+  Future<({int count, String? newCursor})> _incrementalScan({
     required CloudFileApi api,
     required String collectionId,
     required String collectionPath,
-    required DateTime lastScanDate,
+    required String cursor,
+    required bool keepDeleted,
     required DateTime scanStartTime,
   }) async {
-    int count = 0;
-    final fileBatch = <File>[];
-    String? pageToken;
+    // 1. Drain the feed. Nothing is applied until it has been read to the end,
+    // so an expired cursor mid-way leaves no half-applied state to reason about.
+    final changes = <String, CloudChange>{}; // last change per id wins
+    String? newCursor;
+    String? next = cursor;
+    while (next != null) {
+      final page = await _retryNetworkOp(() => api.listChanges(next!));
+      for (final c in page.changes) {
+        changes.remove(c.id); // keep arrival order of the latest change
+        changes[c.id] = c;
+      }
+      newCursor = page.newStartCursor ?? newCursor;
+      next = page.nextPageCursor;
+    }
+    if (changes.isEmpty) return (count: 0, newCursor: newCursor);
 
-    // Note: when the collection is a subfolder this may still return items
-    // outside it; cross-folder moves make a global catch-up safer, and the DB
-    // upsert logic handles the rest.
-    do {
-      final page = await _retryNetworkOp(
-        () => api.listChangedSince(lastScanDate, pageToken: pageToken),
-      );
+    // 2. Scope. Drive reports the real root id in `parents`, while the
+    // collection stores the 'root' alias.
+    final realRootId =
+        (await _retryNetworkOp(() => api.getEntry(collectionPath)))?.id;
+    bool isRoot(String id) => id == collectionPath || id == realRootId;
+    final known = await _knownFolders(collectionId);
+    final scope = <String>{...known.keys};
+    String? parentOf(CloudFileEntry e) =>
+        e.parentIds.isNotEmpty ? e.parentIds.first : null;
+    bool parentInScope(String? parent) =>
+        parent != null && (isRoot(parent) || scope.contains(parent));
 
-      for (final e in page.entries) {
-        count++;
-        final parentId = e.parentIds.isNotEmpty ? e.parentIds.first : 'root';
-
-        if (e.isFolder) {
-          await _writeFolder(
-            _toFolder(
-              entry: e,
-              collectionId: collectionId,
-              collectionPath: collectionPath,
-              parentId: parentId,
-              scanStartTime: scanStartTime,
-            ),
-          );
-          logger.i('Found NEW/CHANGED folder: ${e.name} (${e.id})');
+    // Folders first, to a fixpoint: a folder may arrive before its new parent.
+    final folderChanges = [
+      for (final c in changes.values)
+        if (c.entry != null && c.entry!.isFolder) c.entry!,
+    ];
+    final acceptedFolders = <CloudFileEntry>[];
+    var pending = folderChanges;
+    var progressed = true;
+    while (progressed && pending.isNotEmpty) {
+      progressed = false;
+      final still = <CloudFileEntry>[];
+      for (final e in pending) {
+        if (parentInScope(parentOf(e))) {
+          scope.add(e.id);
+          acceptedFolders.add(e);
+          progressed = true;
         } else {
-          fileBatch.add(
-            _toFile(
-              api: api,
-              entry: e,
-              collectionId: collectionId,
-              collectionPath: collectionPath,
-              parentId: parentId,
-              scanStartTime: scanStartTime,
-            ),
-          );
-          logger.i('Found NEW/CHANGED file: ${e.name} (${e.id})');
-          if (fileBatch.length >= _batchSize) await _flushBatch(fileBatch);
+          still.add(e);
         }
       }
-      pageToken = page.nextPageToken;
-    } while (pageToken != null);
+      pending = still;
+    }
 
+    final removedIds = <String>{}; // provider ids leaving the collection
+    for (final c in changes.values) {
+      if (c.removed) removedIds.add(c.id);
+    }
+    for (final e in pending) {
+      removedIds.add(e.id); // folder moved out of (or never in) scope
+    }
+
+    int count = 0;
+    final fileBatch = <File>[];
+    final walkRoots = <String>[];
+    final newlyInScope = <String>{
+      for (final e in acceptedFolders)
+        if (!known.containsKey(e.id)) e.id,
+    };
+
+    for (final e in acceptedFolders) {
+      count++;
+      final parent = parentOf(e)!;
+      _folderNames[e.id] = e.name;
+      _folderParents[e.id] = isRoot(parent) ? collectionPath : parent;
+      await _writeFolder(
+        _toFolder(
+          entry: e,
+          collectionId: collectionId,
+          collectionPath: collectionPath,
+          parentId: isRoot(parent) ? collectionPath : parent,
+          scanStartTime: scanStartTime,
+        ),
+      );
+      logger.i('Found NEW/CHANGED folder: ${e.name} (${e.id})');
+      // Walk only the top of a new subtree; the BFS reaches the rest.
+      if (newlyInScope.contains(e.id) && !newlyInScope.contains(parent)) {
+        walkRoots.add(e.id);
+      }
+    }
+
+    for (final c in changes.values) {
+      final e = c.entry;
+      if (c.removed || e == null || e.isFolder) continue;
+      final parent = parentOf(e);
+      if (!parentInScope(parent)) {
+        removedIds.add(e.id); // moved out of scope
+        continue;
+      }
+      count++;
+      fileBatch.add(
+        _toFile(
+          api: api,
+          entry: e,
+          collectionId: collectionId,
+          collectionPath: collectionPath,
+          parentId: isRoot(parent!) ? collectionPath : parent,
+          scanStartTime: scanStartTime,
+        ),
+      );
+      logger.i('Found NEW/CHANGED file: ${e.name} (${e.id})');
+      if (fileBatch.length >= _batchSize) await _flushBatch(fileBatch);
+    }
     await _flushBatch(fileBatch);
-    return count;
+
+    // 3. Removals. A removed folder takes everything stored beneath it.
+    if (removedIds.isNotEmpty) {
+      final goneFolders = <String>{
+        for (final id in removedIds)
+          if (known.containsKey(id)) id,
+      };
+      var grew = true;
+      while (grew) {
+        grew = false;
+        known.forEach((id, parent) {
+          if (goneFolders.contains(parent) && goneFolders.add(id)) grew = true;
+        });
+      }
+      await _writeRemovals(
+        collectionId,
+        {
+          for (final id in {...removedIds, ...goneFolders}) '$collectionId:$id',
+        },
+        goneFolders,
+        keepDeleted,
+      );
+    }
+
+    // 4. Folders that entered scope: nothing under them is stored yet.
+    for (final id in walkRoots) {
+      count += await _scanFolder(
+        api: api,
+        collectionId: collectionId,
+        collectionPath: collectionPath,
+        parentId: id,
+        recursive: true,
+        scanStartTime: scanStartTime,
+      );
+    }
+
+    return (count: count, newCursor: newCursor);
   }
 
   /// Scans a cloud folder: breadth-first when [recursive], otherwise just the

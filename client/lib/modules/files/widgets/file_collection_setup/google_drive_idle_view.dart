@@ -7,11 +7,17 @@ class GoogleDriveIdleView extends StatelessWidget {
     required this.onConnect,
     required this.saveLocalCopy,
     required this.onSaveLocalCopyChanged,
+    this.keepDeletedFiles = false,
+    this.onKeepDeletedFilesChanged,
   });
 
   final VoidCallback onConnect;
   final bool saveLocalCopy;
   final ValueChanged<bool?> onSaveLocalCopyChanged;
+
+  /// Keep files (and their local copies) after they are deleted from Drive.
+  final bool keepDeletedFiles;
+  final ValueChanged<bool>? onKeepDeletedFilesChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -68,6 +74,17 @@ class GoogleDriveIdleView extends StatelessWidget {
             style: TextStyle(fontSize: 13),
           ),
           controlAffinity: ListTileControlAffinity.leading,
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          visualDensity: VisualDensity.compact,
+        ),
+        SwitchListTile(
+          value: keepDeletedFiles,
+          onChanged: onKeepDeletedFilesChanged,
+          title: const Text(
+            'Keep files deleted from Google Drive',
+            style: TextStyle(fontSize: 13),
+          ),
           contentPadding: EdgeInsets.zero,
           dense: true,
           visualDensity: VisualDensity.compact,

@@ -58,15 +58,49 @@ class GoogleDriveFileApi implements CloudFileApi {
         orderBy: 'folder, name',
       );
 
+  static const _changeFields =
+      'nextPageToken, newStartPageToken, changes(fileId, removed, '
+      'file(id, name, mimeType, size, createdTime, modifiedTime, parents, '
+      'thumbnailLink, webContentLink, sha256Checksum, trashed))';
+
   @override
-  Future<CloudFilePage> listChangedSince(
-    DateTime since, {
-    String? pageToken,
-  }) => _list(
-    "modifiedTime > '${since.toUtc().toIso8601String()}' and trashed = false",
-    pageToken,
-    pageSize: 100,
-  );
+  Future<String> startCursor() async {
+    final t = await _drive.changes.getStartPageToken();
+    final token = t.startPageToken;
+    if (token == null) throw StateError('Drive returned no start page token');
+    return token;
+  }
+
+  @override
+  Future<CloudChangePage> listChanges(String cursor) async {
+    final drive.ChangeList r;
+    try {
+      r = await _drive.changes.list(
+        cursor,
+        includeRemoved: true,
+        pageSize: 100,
+        $fields: _changeFields,
+      );
+    } on drive.DetailedApiRequestError catch (e) {
+      // A page token Drive no longer recognises comes back as 400/404/410.
+      if (e.status == 400 || e.status == 404 || e.status == 410) {
+        throw CloudCursorExpiredException('HTTP ${e.status}: ${e.message}');
+      }
+      rethrow;
+    }
+    return CloudChangePage(
+      [
+        for (final c in r.changes ?? const <drive.Change>[])
+          if (c.fileId != null)
+            if (c.removed == true || c.file?.trashed == true || c.file == null)
+              CloudChange(c.fileId!, removed: true)
+            else if (_toEntry(c.file!) case final e?)
+              CloudChange(c.fileId!, entry: e),
+      ],
+      nextPageCursor: r.nextPageToken,
+      newStartCursor: r.newStartPageToken,
+    );
+  }
 
   Future<CloudFilePage> _list(
     String q,
