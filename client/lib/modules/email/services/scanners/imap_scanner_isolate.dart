@@ -14,10 +14,13 @@ import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/models/tables/file.dart' as db_file;
 import 'package:mydatastudio/models/tables/folder.dart' as db_folder;
 import 'package:mydatastudio/modules/email/services/email_decoding_helper.dart';
-import 'package:mydatastudio/modules/email/services/email_repository.dart';
+import 'package:mydatastudio/helpers/sql_chunks.dart';
+import 'package:mydatastudio/models/tables/email_delete_policy.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/email/services/imap/email_provider.dart';
 import 'package:mydatastudio/modules/email/services/imap/folder_role_mapper.dart';
+import 'package:mydatastudio/modules/email/services/imap/folder_sync_planner.dart';
+import 'package:mydatastudio/modules/email/services/imap/imap_removal_planner.dart';
 import 'package:mydatastudio/modules/email/services/imap/imap_connection_config.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
@@ -90,10 +93,9 @@ class ImapScannerIsolate {
     _isolate = await spawnIsolate(ImapScannerIsolateWorker.worker, args);
 
     bool isIsolateDone = false;
-    bool isCleanupInProgress = false;
 
     void checkDone() {
-      if (isIsolateDone && !isCleanupInProgress) {
+      if (isIsolateDone) {
         if (statusPort != null) {
           statusPort.send({'status': 'done'});
         }
@@ -116,25 +118,6 @@ class ImapScannerIsolate {
               folderId: folderId,
             ),
           );
-        } else if (message['type'] == 'cleanup_uids') {
-          isCleanupInProgress = true;
-          final db = DatabaseManager.instance.database!;
-          EmailRepository(db)
-              .cleanupDeletedImap(
-                collection,
-                message['folder'] as String,
-                (message['uids'] as List).cast<int>(),
-              )
-              .catchError((Object err) {
-                // `deleteEmails` throws now, and this future is unawaited: a
-                // failed cleanup must not leave `isCleanupInProgress` stuck
-                // true, which would hold the scan open forever.
-                logger.e("IMAP cleanup failed: $err");
-              })
-              .whenComplete(() {
-                isCleanupInProgress = false;
-                checkDone();
-              });
         }
 
         if (message['status'] == 'done') {
@@ -193,7 +176,7 @@ class ImapScannerIsolate {
 }
 
 /// Row counts from syncing one folder.
-typedef FolderSyncCounts = ({int found, int added, int skipped});
+typedef FolderSyncCounts = ({int found, int added, int skipped, int failed});
 
 class ImapScannerIsolateWorker {
   /// Isolate entry point. All the work is in [execute]; this only adds the
@@ -218,9 +201,6 @@ class ImapScannerIsolateWorker {
     final Collection collection = args['collection'];
     final String? folderId = args['folderId'];
     final String type = args['type'] ?? 'sync';
-    final String? lastScanDateStr = args['lastScanDate'];
-    final DateTime? lastScanDate =
-        lastScanDateStr != null ? DateTime.tryParse(lastScanDateStr) : null;
     final bool force = args['force'] ?? false;
     final String appDir = args['appDir'] as String;
     final String dbDir = args['dbDir'] as String? ?? appDir;
@@ -239,16 +219,7 @@ class ImapScannerIsolateWorker {
     } on ImapConfigException catch (e) {
       logger.e('IMAP scan aborted for ${collection.name}: ${e.message}');
       if (clientPort != null) {
-        try {
-          await writeViaMain(clientPort, 'collectionStatus', {
-            'collectionId': collection.id,
-            'scanStatus': 'error',
-            // null: leave last_scan_date as it is.
-            'lastScanDate': null,
-          });
-        } catch (err) {
-          logger.e('Could not record scan error status: $err');
-        }
+        await _recordScanError(clientPort, collection, logger);
       }
       return;
     }
@@ -290,26 +261,57 @@ class ImapScannerIsolateWorker {
 
       // 1. Sync Folders
       logger.s("Syncing ${config.provider.displayName} folders...");
-      await _syncFolderList(client, config, collection, clientPort);
-
-      // 2. Sync Emails
-      final targetFolder = folderId ?? 'INBOX';
-      final counts = await _syncFolder(
-        client: client,
-        collection: collection,
-        providerId: config.provider.id,
-        targetFolder: targetFolder,
-        force: force,
-        lastScanDate: lastScanDate,
-        appDir: appDir,
-        clientPort: clientPort,
-        logger: logger,
+      final mailboxes = await _syncFolderList(
+        client,
+        config,
+        collection,
+        clientPort,
       );
+
+      // 2. Sync Emails: every selectable folder, or just the targeted one.
+      final targets =
+          folderId != null ? [folderId] : selectableFolderPaths(mailboxes);
+      int found = 0, added = 0, skipped = 0;
+      final failedFolders = <String>[];
+      for (final target in targets) {
+        try {
+          final counts = await _syncFolder(
+            client: client,
+            appDb: appDb,
+            collection: collection,
+            providerId: config.provider.id,
+            targetFolder: target,
+            force: force,
+            appDir: appDir,
+            clientPort: clientPort,
+            logger: logger,
+          );
+          found += counts.found;
+          added += counts.added;
+          skipped += counts.skipped;
+          if (counts.failed > 0) failedFolders.add(target);
+        } catch (e, stack) {
+          failedFolders.add(target);
+          logger.e(
+            "IMAP sync of folder $target failed: $e",
+            error: e,
+            stackTrace: stack,
+          );
+        }
+      }
 
       logger.i(
-        "IMAP sync complete: ${counts.found} found, ${counts.added} new, "
-        "${counts.skipped} skipped.",
+        "IMAP sync complete: $found found, $added new, $skipped skipped.",
       );
+
+      if (failedFolders.isNotEmpty) {
+        // Fail loud: the folders that did sync keep their progress, but the
+        // collection must not claim to be up to date.
+        logger.e("IMAP sync incomplete; failed folders: $failedFolders");
+        await _recordScanError(clientPort, collection, logger);
+        clientPort.send({'type': 'refresh', 'status': 'done'});
+        return;
+      }
 
       // Update lastScanDate in the DB. The read stays on this isolate's own
       // connection; only the write goes back to main.
@@ -326,6 +328,11 @@ class ImapScannerIsolateWorker {
       clientPort.send({'type': 'refresh', 'status': 'done'});
     } catch (e, stack) {
       logger.e("Error in IMAP Isolate: $e", error: e, stackTrace: stack);
+      // Auth rejected, network down, ...: say so on the collection instead of
+      // leaving it looking healthy. (No port = the move_to_trash job.)
+      if (clientPort != null && type == 'sync') {
+        await _recordScanError(clientPort, collection, logger);
+      }
     } finally {
       // A dropped socket after a long sync makes logout throw; letting that
       // escape would skip the caller's exit, so the client never gets 'done'.
@@ -334,6 +341,24 @@ class ImapScannerIsolateWorker {
           await client.logout();
         } catch (_) {}
       }
+    }
+  }
+
+  /// Marks the collection's scan as failed, leaving `last_scan_date` alone.
+  static Future<void> _recordScanError(
+    SendPort clientPort,
+    Collection collection,
+    AppLogger logger,
+  ) async {
+    try {
+      await writeViaMain(clientPort, 'collectionStatus', {
+        'collectionId': collection.id,
+        'scanStatus': 'error',
+        // null: leave last_scan_date as it is.
+        'lastScanDate': null,
+      });
+    } catch (err) {
+      logger.e('Could not record scan error status: $err');
     }
   }
 
@@ -472,7 +497,7 @@ class ImapScannerIsolateWorker {
   /// flags / provider hints; the id is the full IMAP path. Only top-level
   /// mailboxes are listed (non-recursive LIST), for which the path equals the
   /// old leaf-name id, so existing `emails.folder_id` values still resolve.
-  static Future<void> _syncFolderList(
+  static Future<List<Mailbox>> _syncFolderList(
     ImapClient client,
     ImapConnectionConfig config,
     Collection collection,
@@ -495,168 +520,588 @@ class ImapScannerIsolateWorker {
       );
       await writeViaMain(clientPort, 'emailFolder', folder);
     }
+    return mailboxes;
   }
 
-  /// Syncs one mailbox: list UIDs, fetch + parse + write new messages, report
-  /// UIDs for local cleanup. This is the replaceable unit for incremental
-  /// (UID/CONDSTORE) sync.
+  /// Paths of the mailboxes that can be SELECTed (not `\\Noselect` /
+  /// `\\NonExistent` containers), INBOX first.
+  static List<String> selectableFolderPaths(List<Mailbox> mailboxes) {
+    final paths =
+        mailboxes
+            .where(
+              (m) =>
+                  !m.hasFlag(MailboxFlag.noSelect) &&
+                  !m.hasFlag(MailboxFlag.nonExistent),
+            )
+            .map((m) => m.path)
+            .toList();
+    paths.sort((a, b) {
+      if (a.toUpperCase() == 'INBOX') {
+        return b.toUpperCase() == 'INBOX' ? 0 : -1;
+      }
+      if (b.toUpperCase() == 'INBOX') return 1;
+      return 0;
+    });
+    return paths;
+  }
+
+  static const int _batchSize = 50;
+
+  static Future<void> _emailSync(
+    SendPort clientPort,
+    String op,
+    String collectionId,
+    String? folderId, [
+    Map<String, Object?> extra = const {},
+  ]) => writeViaMain(clientPort, 'emailSync', {
+    'op': op,
+    'collectionId': collectionId,
+    'folderId': folderId,
+    ...extra,
+  });
+
+  /// Syncs one mailbox incrementally.
+  ///
+  /// State machine (see [FolderSyncPlanner]):
+  ///   reset       - no/changed UIDVALIDITY, or `force`: clear the folder's
+  ///                 stored state and UIDs, re-fetch everything, re-match rows
+  ///                 we already have by Message-ID.
+  ///   skip        - CONDSTORE says UIDNEXT and HIGHESTMODSEQ are unchanged.
+  ///   incremental - fetch UIDs > lastSyncedUid, refresh flags (CHANGEDSINCE
+  ///                 or full), detect removals by UID-set diff.
+  ///
+  /// Crash safety: UIDVALIDITY/lastSyncedUid advance only after a batch's rows
+  /// are written; UIDNEXT/HIGHESTMODSEQ (which make a later sync skippable)
+  /// only after the whole folder is done. A crash therefore re-fetches
+  /// (writes are idempotent), it never leaves a gap.
   static Future<FolderSyncCounts> _syncFolder({
     required ImapClient client,
+    required AppDatabase appDb,
     required Collection collection,
     required String providerId,
     required String targetFolder,
     required bool force,
-    required DateTime? lastScanDate,
     required String appDir,
     required SendPort clientPort,
     required AppLogger logger,
   }) async {
-    int totalFound = 0;
     int newEmails = 0;
     int skipped = 0;
+    int failed = 0;
+    final cid = collection.id;
 
     logger.s("Syncing folder: $targetFolder");
-    await client.selectMailboxByPath(targetFolder);
+    final condstore =
+        client.serverInfo.supports('CONDSTORE') ||
+        client.serverInfo.supports('QRESYNC');
+    final mailbox = await client.selectMailboxByPath(
+      targetFolder,
+      enableCondStore: condstore,
+    );
+    final server = ServerFolderState(
+      uidValidity: mailbox.uidValidity,
+      uidNext: mailbox.uidNext,
+      highestModseq: mailbox.highestModSequence,
+      supportsCondstore: condstore,
+    );
 
-    // Fetch UIDs for the folder
-    List<int> allUids = [];
-    try {
-      // Build search criteria
-      String searchCriteria = 'ALL';
-      if (!force && lastScanDate != null) {
-        // IMAP SINCE query uses day-level precision (RFC 3501)
-        // We subtract 1 day to be safe around timezones/boundaries
-        final sinceDate = lastScanDate.subtract(const Duration(days: 1));
-        final monthNames = [
-          'Jan',
-          'Feb',
-          'Mar',
-          'Apr',
-          'May',
-          'Jun',
-          'Jul',
-          'Aug',
-          'Sep',
-          'Oct',
-          'Nov',
-          'Dec',
-        ];
-        final dateStr =
-            "${sinceDate.day}-${monthNames[sinceDate.month - 1]}-${sinceDate.year}";
-        searchCriteria = 'SINCE $dateStr';
-        logger.i("IMAP: Performing incremental sync SINCE $dateStr");
-      }
+    final storedRows = await appDb.select(
+      'SELECT uid_validity, uid_next, highest_modseq, last_synced_uid '
+      'FROM email_folders WHERE collection_id = ? AND id = ?',
+      [cid, targetFolder],
+    );
+    final stored =
+        storedRows.isEmpty
+            ? const StoredFolderSyncState()
+            : StoredFolderSyncState(
+              uidValidity: storedRows.first['uid_validity'] as int?,
+              uidNext: storedRows.first['uid_next'] as int?,
+              highestModseq: storedRows.first['highest_modseq'] as int?,
+              lastSyncedUid: storedRows.first['last_synced_uid'] as int?,
+            );
 
-      final searchResult = await client.uidSearchMessages(
-        searchCriteria: searchCriteria,
+    final plan = FolderSyncPlanner.plan(stored, server, force: force);
+    if (plan.skip) {
+      logger.s("$targetFolder unchanged since last sync.");
+      return (found: 0, added: 0, skipped: 0, failed: 0);
+    }
+    if (plan.reset) {
+      logger.i(
+        "$targetFolder: full resync (UIDVALIDITY ${server.uidValidity}).",
       );
-      allUids = searchResult.matchingSequence?.toList() ?? [];
-      totalFound = allUids.length;
-
-      if (searchCriteria == 'ALL') {
-        clientPort.send({
-          'type': 'cleanup_uids',
-          'folder': targetFolder,
-          'uids': allUids,
-        });
-      }
-    } catch (err) {
-      logger.e("Failed to fetch UIDs for folder: $err");
+      await _emailSync(clientPort, 'resetFolder', cid, targetFolder);
     }
 
-    if (allUids.isEmpty) {
-      logger.s("No new messages found in $targetFolder.");
-      return (found: totalFound, added: newEmails, skipped: skipped);
-    }
+    // The folder's full UID list serves three purposes: what is new, what
+    // vanished, and it sidesteps the `n:*` quirk (a range starting past the
+    // end still returns the last message).
+    final remoteResult = await client.uidSearchMessages(searchCriteria: 'ALL');
+    final remote = (remoteResult.matchingSequence?.toList() ?? <int>[])..sort();
+    final remoteSet = remote.toSet();
+    final newUids = remote.where((u) => u > plan.fetchAfterUid).toList();
+    int lastSynced = plan.fetchAfterUid;
+    logger.s(
+      "$targetFolder: ${remote.length} on server, ${newUids.length} new.",
+    );
 
-    const int batchSize = 50;
-    final reversedUids = allUids.reversed.toList();
-    logger.s("Processing ${reversedUids.length} messages in $targetFolder...");
+    for (int i = 0; i < newUids.length; i += _batchSize) {
+      final batchUids = newUids.sublist(
+        i,
+        i + _batchSize < newUids.length ? i + _batchSize : newUids.length,
+      );
+      final heads = await _fetchHeaderInfo(client, batchUids, logger);
 
-    for (int i = 0; i < reversedUids.length; i += batchSize) {
-      final end =
-          (i + batchSize < reversedUids.length)
-              ? i + batchSize
-              : reversedUids.length;
-      final batchUids = reversedUids.sublist(i, end);
-
-      final sequence = MessageSequence();
+      // Dedupe by Message-ID within the collection before downloading bodies.
+      final known = await _lookupByMessageId(appDb, cid, [
+        for (final h in heads.values)
+          if (h.messageId != null) h.messageId!,
+      ]);
+      final toFetch = <int>[];
+      final rematch = <Map<String, Object?>>[];
+      final alsoHere = <String>[];
+      final seenInBatch = <String>{};
       for (final uid in batchUids) {
-        sequence.add(uid);
-      }
-
-      FetchImapResult? fetchResult;
-      try {
-        fetchResult = await client.uidFetchMessages(sequence, 'BODY.PEEK[]');
-      } catch (e) {
-        logger.w(
-          "Batch fetch starting at $i failed ($e). Retrying UIDs individually...",
-        );
-      }
-
-      final List<MimeMessage> messagesToProcess = [];
-      if (fetchResult != null) {
-        messagesToProcess.addAll(fetchResult.messages);
-      } else {
-        for (final uid in batchUids) {
-          try {
-            final singleSeq = MessageSequence()..add(uid);
-            final singleResult = await client.uidFetchMessages(
-              singleSeq,
-              'BODY.PEEK[]',
-            );
-            messagesToProcess.addAll(singleResult.messages);
-          } catch (singleErr) {
-            logger.w(
-              "Full fetch failed for UID $uid ($singleErr). Attempting header salvage...",
-            );
-            final salvagedMsg = await _salvageCorruptedMessage(
-              client,
-              uid,
-              logger,
-            );
-            if (salvagedMsg != null) {
-              messagesToProcess.add(salvagedMsg);
+        final head = heads[uid];
+        final mid = head?.messageId;
+        if (mid != null) {
+          final existing = known[mid];
+          if (existing != null) {
+            if (existing.isDeleted) {
+              // Hidden on purpose (delete policy / user); don't resurrect it.
+            } else if (existing.folderId == targetFolder) {
+              if (existing.uid == null) {
+                rematch.add({
+                  'id': existing.id,
+                  'uid': uid,
+                  'isRead': head!.seen,
+                });
+              }
+              // else: same Message-ID twice in this folder; one row is enough.
+            } else {
+              alsoHere.add(existing.id);
             }
+            skipped++;
+            continue;
           }
-        }
-      }
-
-      List<Email> emailBatch = [];
-      for (final message in messagesToProcess) {
-        final msgDate = message.decodeDate() ?? DateTime.now();
-
-        // Refine incremental check with second-level precision
-        if (!force && lastScanDate != null) {
-          final lastScanSecs = lastScanDate.millisecondsSinceEpoch ~/ 1000;
-          final msgSecs = msgDate.millisecondsSinceEpoch ~/ 1000;
-
-          if (msgSecs <= lastScanSecs) {
+          if (!seenInBatch.add(mid)) {
             skipped++;
             continue;
           }
         }
+        toFetch.add(uid);
+      }
 
-        final emailObj = await _parseAndProcessMessage(
-          message: message,
-          collection: collection,
-          providerId: providerId,
-          targetFolder: targetFolder,
-          appDir: appDir,
-          clientPort: clientPort,
-          logger: logger,
+      final messages = await _fetchFullMessages(client, toFetch, logger);
+      final fetchedUids = messages.map((m) => m.uid).toSet();
+      final lost = toFetch.where((u) => !fetchedUids.contains(u)).length;
+      if (lost > 0) {
+        // Unfetchable even by header salvage: skipped so one corrupt message
+        // can't wedge the folder forever, but reported as a failure.
+        failed += lost;
+        logger.e("$targetFolder: $lost message(s) could not be fetched.");
+      }
+
+      final emailBatch = <Email>[];
+      for (final message in messages) {
+        // Messages without a Message-ID were never in `known`.
+        final mid = message.getHeaderValue('Message-ID')?.trim();
+        if (mid != null && heads[message.uid] == null) {
+          // Header prefetch failed: dedupe now, on the full message.
+          final again = (await _lookupByMessageId(appDb, cid, [mid]))[mid];
+          if (again != null) {
+            if (again.folderId == targetFolder && again.uid == null) {
+              rematch.add({
+                'id': again.id,
+                'uid': message.uid,
+                'isRead': message.isSeen,
+              });
+            } else if (again.folderId != targetFolder && !again.isDeleted) {
+              alsoHere.add(again.id);
+            }
+            skipped++;
+            continue;
+          }
+        }
+        emailBatch.add(
+          await _parseAndProcessMessage(
+            message: message,
+            collection: collection,
+            providerId: providerId,
+            targetFolder: targetFolder,
+            appDir: appDir,
+            clientPort: clientPort,
+            logger: logger,
+            isRead: heads[message.uid]?.seen ?? message.isSeen,
+          ),
         );
-        emailBatch.add(emailObj);
         newEmails++;
       }
 
       if (emailBatch.isNotEmpty) {
         await writeViaMain(clientPort, 'emailBatch', emailBatch);
-        clientPort.send({'type': 'refresh'});
+      }
+      if (rematch.isNotEmpty) {
+        await _emailSync(clientPort, 'rematch', cid, targetFolder, {
+          'rows': rematch,
+        });
+      }
+      if (alsoHere.isNotEmpty) {
+        await _emailSync(clientPort, 'addMembership', cid, targetFolder, {
+          'ids': alsoHere,
+        });
+      }
+      lastSynced = batchUids.last;
+      await _emailSync(clientPort, 'saveFolderState', cid, targetFolder, {
+        'uidValidity': server.uidValidity,
+        'uidNext': plan.reset ? null : stored.uidNext,
+        'highestModseq': plan.reset ? null : stored.highestModseq,
+        'lastSyncedUid': lastSynced,
+      });
+      clientPort.send({'type': 'refresh'});
+    }
+
+    // Local primary rows of this folder: flags and removals both need them.
+    final localRows = await _localPrimaryRows(appDb, cid, targetFolder);
+
+    // Flags: server state wins for already-synced mail.
+    if (plan.flagSync != FlagSync.none && plan.fetchAfterUid > 0) {
+      final readByUid = await _changedFlags(client, plan, localRows, logger);
+      if (readByUid.isNotEmpty) {
+        await _emailSync(clientPort, 'setRead', cid, targetFolder, {
+          'readByUid': readByUid,
+        });
       }
     }
 
-    return (found: totalFound, added: newEmails, skipped: skipped);
+    // Removals.
+    final policy = collection.emailDeletePolicy;
+    if (policy != EmailDeletePolicy.keep) {
+      await _dropVanishedSecondary(
+        client: client,
+        appDb: appDb,
+        cid: cid,
+        folder: targetFolder,
+        remote: remote,
+        localRows: localRows,
+        clientPort: clientPort,
+        logger: logger,
+      );
+    }
+    final vanished = ImapRemovalPlanner.vanished(
+      [for (final r in localRows) r.row],
+      remoteSet,
+      afterReset: plan.reset,
+    );
+    if (vanished.isNotEmpty) {
+      await _resolveVanished(
+        client: client,
+        cid: cid,
+        folder: targetFolder,
+        vanished: vanished,
+        policy: policy,
+        clientPort: clientPort,
+        logger: logger,
+      );
+    }
+
+    // Folder done: only now record what makes a later sync skippable.
+    int finalLast = lastSynced;
+    if (remote.isNotEmpty && remote.last > finalLast) finalLast = remote.last;
+    if (remote.isEmpty && finalLast == 0 && server.uidNext != null) {
+      finalLast = server.uidNext! - 1;
+    }
+    await _emailSync(clientPort, 'saveFolderState', cid, targetFolder, {
+      'uidValidity': server.uidValidity,
+      'uidNext': server.uidNext,
+      'highestModseq': server.highestModseq,
+      'lastSyncedUid': finalLast,
+    });
+    clientPort.send({'type': 'refresh'});
+
+    return (
+      found: remote.length,
+      added: newEmails,
+      skipped: skipped,
+      failed: failed,
+    );
+  }
+
+  static Future<List<_LocalRow>> _localPrimaryRows(
+    AppDatabase db,
+    String cid,
+    String folder,
+  ) async {
+    final rows = await db.select(
+      'SELECT id, uid, message_id, labels, is_read FROM emails '
+      'WHERE collection_id = ? AND folder_id = ? AND is_deleted = 0',
+      [cid, folder],
+    );
+    return [
+      for (final r in rows)
+        _LocalRow(
+          LocalImapRow(
+            id: r['id'] as String,
+            uid: r['uid'] as int?,
+            messageId: r['message_id'] as String?,
+            labels: _splitLabels(r['labels'] as String?),
+          ),
+          (r['is_read'] as int? ?? 0) != 0,
+        ),
+    ];
+  }
+
+  static List<String> _splitLabels(String? s) =>
+      (s == null || s.isEmpty) ? <String>[] : s.split(',');
+
+  /// Existing emails of the collection by Message-ID (any folder, any state).
+  static Future<Map<String, _KnownEmail>> _lookupByMessageId(
+    AppDatabase db,
+    String cid,
+    List<String> messageIds,
+  ) async {
+    final out = <String, _KnownEmail>{};
+    for (final chunk in sqlChunks(messageIds.toSet().toList())) {
+      final ph = List.filled(chunk.length, '?').join(',');
+      final rows = await db.select(
+        'SELECT id, message_id, folder_id, uid, is_deleted FROM emails '
+        'WHERE collection_id = ? AND message_id IN ($ph)',
+        [cid, ...chunk],
+      );
+      for (final r in rows) {
+        out.putIfAbsent(
+          r['message_id'] as String,
+          () => _KnownEmail(
+            id: r['id'] as String,
+            folderId: r['folder_id'] as String?,
+            uid: r['uid'] as int?,
+            isDeleted: (r['is_deleted'] as int? ?? 0) != 0,
+          ),
+        );
+      }
+    }
+    return out;
+  }
+
+  /// `FLAGS` + `Message-ID` for [uids] without downloading bodies. Failure is
+  /// non-fatal (empty map): the caller falls back to deduping after the full
+  /// fetch.
+  static Future<Map<int, _HeadInfo>> _fetchHeaderInfo(
+    ImapClient client,
+    List<int> uids,
+    AppLogger logger,
+  ) async {
+    try {
+      final result = await client.uidFetchMessages(
+        MessageSequence.fromIds(uids, isUid: true),
+        '(FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])',
+      );
+      return {
+        for (final m in result.messages)
+          if (m.uid != null)
+            m.uid!: _HeadInfo(
+              messageId: m.getHeaderValue('Message-ID')?.trim(),
+              seen: m.isSeen,
+            ),
+      };
+    } catch (e) {
+      logger.w("Header prefetch failed ($e); deduping after full fetch.");
+      return {};
+    }
+  }
+
+  /// Full bodies for [uids], one at a time when a batch fetch fails, with
+  /// header-only salvage for messages enough_mail cannot decode.
+  static Future<List<MimeMessage>> _fetchFullMessages(
+    ImapClient client,
+    List<int> uids,
+    AppLogger logger,
+  ) async {
+    if (uids.isEmpty) return [];
+    final seq = MessageSequence.fromIds(uids, isUid: true);
+    try {
+      return (await client.uidFetchMessages(seq, 'BODY.PEEK[]')).messages;
+    } catch (e) {
+      logger.w("Batch fetch failed ($e). Retrying UIDs individually...");
+    }
+    final out = <MimeMessage>[];
+    for (final uid in uids) {
+      try {
+        final single = await client.uidFetchMessages(
+          MessageSequence.fromIds([uid], isUid: true),
+          'BODY.PEEK[]',
+        );
+        out.addAll(single.messages);
+      } catch (singleErr) {
+        logger.w(
+          "Full fetch failed for UID $uid ($singleErr). Attempting header salvage...",
+        );
+        final salvaged = await _salvageCorruptedMessage(client, uid, logger);
+        if (salvaged != null) out.add(salvaged);
+      }
+    }
+    return out;
+  }
+
+  /// Seen-flag changes for already-synced mail (UIDs <= the stored
+  /// lastSyncedUid), as `uid -> isRead`, limited to rows that actually differ.
+  static Future<Map<int, bool>> _changedFlags(
+    ImapClient client,
+    FolderSyncPlan plan,
+    List<_LocalRow> localRows,
+    AppLogger logger,
+  ) async {
+    final localReadByUid = {
+      for (final r in localRows)
+        if (r.row.uid != null) r.row.uid!: r.isRead,
+    };
+    final result = await client.uidFetchMessages(
+      MessageSequence.fromRange(1, plan.fetchAfterUid, isUidSequence: true),
+      'FLAGS',
+      changedSinceModSequence:
+          plan.flagSync == FlagSync.changedSince
+              ? plan.changedSinceModseq
+              : null,
+    );
+    final out = <int, bool>{};
+    for (final m in result.messages) {
+      final uid = m.uid;
+      if (uid == null || !localReadByUid.containsKey(uid)) continue;
+      if (localReadByUid[uid] != m.isSeen) out[uid] = m.isSeen;
+    }
+    return out;
+  }
+
+  /// Secondary memberships (this folder is only in `labels`) whose message is
+  /// no longer in this folder: drop the label. The message lives on in its
+  /// primary folder; if that goes too, its own sync handles it.
+  static Future<void> _dropVanishedSecondary({
+    required ImapClient client,
+    required AppDatabase appDb,
+    required String cid,
+    required String folder,
+    required List<int> remote,
+    required List<_LocalRow> localRows,
+    required SendPort clientPort,
+    required AppLogger logger,
+  }) async {
+    final secondary = await appDb.select(
+      'SELECT id, message_id FROM emails WHERE collection_id = ? '
+      'AND folder_id != ? AND is_deleted = 0 '
+      "AND instr(',' || labels || ',', ?) > 0",
+      [cid, folder, ',$folder,'],
+    );
+    if (secondary.isEmpty) return;
+    final remoteSet = remote.toSet();
+    final primaryPresent =
+        localRows
+            .where((r) => r.row.uid != null && remoteSet.contains(r.row.uid))
+            .length;
+    if (!ImapRemovalPlanner.secondaryScanNeeded(
+      primaryPresent: primaryPresent,
+      secondaryCount: secondary.length,
+      remoteCount: remote.length,
+    )) {
+      return;
+    }
+    final remoteIds = <String>{};
+    for (int i = 0; i < remote.length; i += 500) {
+      final end = i + 500 < remote.length ? i + 500 : remote.length;
+      final heads = await _fetchHeaderInfo(
+        client,
+        remote.sublist(i, end),
+        logger,
+      );
+      for (final h in heads.values) {
+        if (h.messageId != null) remoteIds.add(h.messageId!);
+      }
+    }
+    final gone = ImapRemovalPlanner.goneFromSecondary([
+      for (final r in secondary)
+        LocalImapRow(
+          id: r['id'] as String,
+          uid: null,
+          messageId: r['message_id'] as String?,
+          labels: const [],
+        ),
+    ], remoteIds);
+    if (gone.isNotEmpty) {
+      await _emailSync(clientPort, 'dropMembership', cid, folder, {
+        'ids': [for (final r in gone) r.id],
+      });
+    }
+  }
+
+  /// A message left [folder]. If another folder still holds it, that copy
+  /// becomes the primary (nothing is deleted or hidden); otherwise the
+  /// account's delete policy applies.
+  static Future<void> _resolveVanished({
+    required ImapClient client,
+    required String cid,
+    required String folder,
+    required List<LocalImapRow> vanished,
+    required EmailDeletePolicy policy,
+    required SendPort clientPort,
+    required AppLogger logger,
+  }) async {
+    final expired = <String>[];
+    final promotions = <Map<String, Object?>>[];
+    for (final row in vanished) {
+      var promoted = false;
+      if (row.messageId != null) {
+        final remaining = List<String>.of(row.labels);
+        for (final other in row.labels) {
+          final uid = await _findUid(client, other, row.messageId!, logger);
+          remaining.remove(other);
+          if (uid != null) {
+            promotions.add({
+              'id': row.id,
+              'folderId': other,
+              'uid': uid,
+              'labels': remaining,
+            });
+            promoted = true;
+            break;
+          }
+        }
+      }
+      if (!promoted) expired.add(row.id);
+    }
+    if (promotions.isNotEmpty) {
+      await _emailSync(clientPort, 'promote', cid, folder, {
+        'moves': promotions,
+      });
+    }
+    if (expired.isNotEmpty && policy != EmailDeletePolicy.keep) {
+      logger.i(
+        "${expired.length} message(s) removed from $folder; "
+        "applying policy ${policy.dbValue}.",
+      );
+      await _emailSync(clientPort, 'applyDeletePolicy', cid, folder, {
+        'ids': expired,
+      });
+    }
+  }
+
+  /// UID of the message with [messageId] in [folder], or null (also when the
+  /// folder itself is gone). Selects [folder].
+  static Future<int?> _findUid(
+    ImapClient client,
+    String folder,
+    String messageId,
+    AppLogger logger,
+  ) async {
+    try {
+      await client.selectMailboxByPath(folder);
+      final quoted = messageId.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+      final r = await client.uidSearchMessages(
+        searchCriteria: 'HEADER Message-ID "$quoted"',
+      );
+      final uids = r.matchingSequence?.toList() ?? <int>[];
+      return uids.isEmpty ? null : uids.first;
+    } catch (e) {
+      logger.w("Could not look up $messageId in $folder: $e");
+      return null;
+    }
   }
 
   /// Attempts to fetch header-only metadata for a message whose full body
@@ -891,12 +1336,10 @@ class ImapScannerIsolateWorker {
     required String appDir,
     required SendPort clientPort,
     required AppLogger logger,
+    bool isRead = false,
   }) async {
-    final messageId = message.getHeaderValue('Message-ID');
-    int? uid;
-    try {
-      uid = (message as dynamic).uid;
-    } catch (_) {}
+    final messageId = message.getHeaderValue('Message-ID')?.trim();
+    final int? uid = message.uid;
 
     String emailId =
         messageId ??
@@ -978,7 +1421,7 @@ class ImapScannerIsolateWorker {
       htmlBody: htmlBody,
       folderId: targetFolder,
       messageId: messageId,
-      isRead: false,
+      isRead: isRead,
       hasAttachments: hasAttachments,
       isDeleted: false,
     );
@@ -1030,4 +1473,29 @@ class ImapScannerIsolateWorker {
     if (mimeType == 'application/pdf') return FilesConstants.mimeTypePdf;
     return FilesConstants.mimeTypeUnKnown;
   }
+}
+
+class _HeadInfo {
+  const _HeadInfo({required this.messageId, required this.seen});
+  final String? messageId;
+  final bool seen;
+}
+
+class _KnownEmail {
+  const _KnownEmail({
+    required this.id,
+    required this.folderId,
+    required this.uid,
+    required this.isDeleted,
+  });
+  final String id;
+  final String? folderId;
+  final int? uid;
+  final bool isDeleted;
+}
+
+class _LocalRow {
+  const _LocalRow(this.row, this.isRead);
+  final LocalImapRow row;
+  final bool isRead;
 }

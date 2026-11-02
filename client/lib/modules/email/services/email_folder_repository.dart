@@ -77,6 +77,26 @@ class EmailFolderRepository {
     });
   }
 
+  /// Overwrites the folder's IMAP sync state with exactly the given values,
+  /// nulls included. [upsertFolder] cannot do this — it COALESCEs, so a null
+  /// can never clear a stored value. Pass no arguments to reset the folder to
+  /// "never synced". Only touches an existing row.
+  Future<void> setSyncState(
+    String collectionId,
+    String folderId, {
+    int? uidValidity,
+    int? uidNext,
+    int? highestModseq,
+    int? lastSyncedUid,
+  }) async {
+    await database.execute(
+      "UPDATE email_folders SET uid_validity = ?, uid_next = ?, "
+      "highest_modseq = ?, last_synced_uid = ? "
+      "WHERE collection_id = ? AND id = ?",
+      [uidValidity, uidNext, highestModseq, lastSyncedUid, collectionId, folderId],
+    );
+  }
+
   Future<void> deleteFolders(String collectionId) async {
     await database.execute(
       "DELETE FROM email_folders WHERE collection_id = ?",

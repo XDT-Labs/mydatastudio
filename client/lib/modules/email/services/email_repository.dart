@@ -231,36 +231,4 @@ class EmailRepository {
       }
     });
   }
-
-  Future<void> cleanupDeletedImap(
-    Collection collection,
-    String folder,
-    List<int> remoteUids,
-  ) async {
-    final rows = await database.select(
-      "SELECT id, uid FROM emails WHERE collection_id = ? AND folder_id = ?",
-      [collection.id, folder],
-    );
-    final localEmails =
-        rows
-            .map((row) => (id: row['id'] as String, uid: row['uid'] as int?))
-            .toList();
-
-    final remoteUidSet = remoteUids.toSet();
-    final toDeleteIds =
-        localEmails
-            .where((e) {
-              if (e.uid == null) return false;
-              return !remoteUidSet.contains(e.uid);
-            })
-            .map((e) => e.id)
-            .toList();
-
-    if (toDeleteIds.isNotEmpty) {
-      logger.i(
-        "Cleanup: Deleting ${toDeleteIds.length} emails locally that were removed from IMAP folder $folder.",
-      );
-      await deleteEmails(toDeleteIds, collection: collection);
-    }
-  }
 }

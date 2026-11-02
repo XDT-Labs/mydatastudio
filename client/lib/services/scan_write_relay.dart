@@ -7,6 +7,7 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/imap/imap_sync_writer.dart';
 import 'package:mydatastudio/modules/files/services/batch_file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
@@ -88,6 +89,12 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       await EmailUpsertService.instance.invoke(
         EmailUpsertServiceCommand(List<Email>.from(payload as List), db),
       );
+      return const {};
+
+    case 'emailSync':
+      // IMAP incremental-sync bookkeeping (folder state, membership, flags,
+      // remote removals) — see ImapSyncWriter.
+      await ImapSyncWriter.handle(db, payload as Map);
       return const {};
 
     case 'fileThumbnail':

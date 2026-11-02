@@ -171,37 +171,47 @@ void main() {
     expect(status.single['scan_status'], 'ready');
   });
 
-  imapTest('wrong password is logged and writes nothing', () async {
-    final collection = otherCollection()..accessToken = 'wrong';
-    await persist(collection);
-    await seedMessages(seeder!, 'INBOX', [
-      SeedMessage(
-        messageId: '<it-bad@test.local>',
-        subject: 'x',
-        date: DateTime.utc(2026, 1, 1),
-      ),
-    ]);
+  imapTest(
+    'wrong password writes no mail and marks the scan as error',
+    () async {
+      final collection = otherCollection()..accessToken = 'wrong';
+      await persist(collection);
+      await seedMessages(seeder!, 'INBOX', [
+        SeedMessage(
+          messageId: '<it-bad@test.local>',
+          subject: 'x',
+          date: DateTime.utc(2026, 1, 1),
+        ),
+      ]);
 
-    await runSync(collection);
+      await runSync(collection);
 
-    final emails = await manager.database!.select(
-      'SELECT id FROM emails WHERE collection_id = ?',
-      [collection.id],
-    );
-    expect(emails, isEmpty);
-  });
+      final emails = await manager.database!.select(
+        'SELECT id FROM emails WHERE collection_id = ?',
+        [collection.id],
+      );
+      expect(emails, isEmpty);
+      final status = await manager.database!.select(
+        'SELECT scan_status FROM collections WHERE id = ?',
+        [collection.id],
+      );
+      expect(status.single['scan_status'], 'error');
+    },
+  );
 
-  imapTest('unresolvable provider marks the collection scan status as error',
-      () async {
-    final collection = otherCollection()..imapSettings = null;
-    await persist(collection);
+  imapTest(
+    'unresolvable provider marks the collection scan status as error',
+    () async {
+      final collection = otherCollection()..imapSettings = null;
+      await persist(collection);
 
-    await runSync(collection);
+      await runSync(collection);
 
-    final status = await manager.database!.select(
-      'SELECT scan_status FROM collections WHERE id = ?',
-      [collection.id],
-    );
-    expect(status.single['scan_status'], 'error');
-  });
+      final status = await manager.database!.select(
+        'SELECT scan_status FROM collections WHERE id = ?',
+        [collection.id],
+      );
+      expect(status.single['scan_status'], 'error');
+    },
+  );
 }

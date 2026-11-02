@@ -264,7 +264,7 @@ imap-test-down:
 .PHONY: test-imap
 test-imap:
 	$(MAKE) imap-test-up
-	(cd $(FLUTTER_DIR) && flutter test -t imap test/integration); \
+	(cd $(FLUTTER_DIR) && flutter test -t imap --concurrency=1 test/integration); \
 	  status=$$?; $(MAKE) imap-test-down; exit $$status
 
 # Cleanup
