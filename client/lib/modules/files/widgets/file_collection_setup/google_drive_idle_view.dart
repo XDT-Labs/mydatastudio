@@ -1,6 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/content_policy_controls.dart';
-import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_sign_in_button.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/cloud_account_branding.dart';
 import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 
 class GoogleDriveIdleView extends StatelessWidget {
@@ -11,7 +11,11 @@ class GoogleDriveIdleView extends StatelessWidget {
     required this.onPolicyChanged,
     this.keepDeletedFiles = false,
     this.onKeepDeletedFilesChanged,
+    this.branding,
   });
+
+  /// Defaults to Google Drive.
+  final CloudAccountBranding? branding;
 
   final VoidCallback onConnect;
   final ContentPolicy policy;
@@ -23,21 +27,21 @@ class GoogleDriveIdleView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final b = branding ?? CloudAccountBranding.googleDrive;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Image.asset('assets/images/google-drive.png', height: 72),
+        b.logo,
         const SizedBox(height: 24),
-        const Text(
-          'Connect Google Drive',
+        Text(
+          'Connect ${b.name}',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         Text(
-          'Sign in with your Google account to scan and browse your Drive '
-          'files directly from this app.',
+          b.intro,
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 14,
@@ -58,7 +62,7 @@ class GoogleDriveIdleView extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Requires full Drive access to list, download, and delete files.',
+                  b.accessNote,
                   style: TextStyle(fontSize: 12, color: Colors.blue.shade700),
                 ),
               ),
@@ -66,16 +70,13 @@ class GoogleDriveIdleView extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 28),
-        GoogleDriveSignInButton(onTap: onConnect),
+        b.signInButton(onConnect),
         const SizedBox(height: 12),
         ContentPolicyControls(policy: policy, onChanged: onPolicyChanged),
         SwitchListTile(
           value: keepDeletedFiles,
           onChanged: onKeepDeletedFilesChanged,
-          title: const Text(
-            'Keep files deleted from Google Drive',
-            style: TextStyle(fontSize: 13),
-          ),
+          title: Text(b.keepDeletedLabel, style: TextStyle(fontSize: 13)),
           contentPadding: EdgeInsets.zero,
           dense: true,
           visualDensity: VisualDensity.compact,
