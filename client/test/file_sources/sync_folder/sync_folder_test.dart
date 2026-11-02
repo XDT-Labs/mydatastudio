@@ -43,10 +43,10 @@ void main() {
     test('two Google accounts get distinct display names', () {
       mk('Library/CloudStorage/GoogleDrive-a@x.com/My Drive');
       mk('Library/CloudStorage/GoogleDrive-b@x.com/My Drive');
-      final names = SyncFolderDetector(homeDir: home.path)
-          .detect()
-          .map((f) => f.displayName)
-          .toList();
+      final names =
+          SyncFolderDetector(
+            homeDir: home.path,
+          ).detect().map((f) => f.displayName).toList();
       expect(names.toSet().length, 2);
       expect(names.first, contains('a@x.com'));
     });
@@ -90,6 +90,16 @@ void main() {
       expect(c.isOnlineOnly(p.join(dir.path, 'nope')), isFalse);
       expect(c.isOnlineOnly(p.join(dir.path, '.x.pdf.icloud')), isTrue);
     }, skip: skip);
+
+    // The local scanner builds an FfiOnlineOnlyChecker on every platform;
+    // off macOS the lstat symbols are missing, so it must not look them up.
+    test('off macOS nothing is online-only and nothing throws', () {
+      final ffi = FfiOnlineOnlyChecker(isMacOS: false);
+      final proc = ProcessOnlineOnlyChecker(isMacOS: false);
+      final placeholder = p.join(dir.path, '.x.pdf.icloud');
+      expect(ffi.isOnlineOnly(placeholder), isFalse);
+      expect(proc.isOnlineOnly(placeholder), isFalse);
+    });
 
     test('flag bit constant is SF_DATALESS', () {
       expect(sfDataless, 0x40000000);

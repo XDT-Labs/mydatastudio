@@ -1,6 +1,7 @@
 import 'dart:io' as io;
 
 import 'package:googleapis/drive/v3.dart' as drive;
+import 'package:http/http.dart' as http;
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_sync_estimator.dart';
@@ -18,33 +19,37 @@ class GoogleDriveFileApi implements CloudFileApi, WholeDriveListing {
   GoogleDriveFileApi(this._drive);
 
   /// [CloudFileApiFactory] for Drive: refreshes the access token when it is
-  /// within 5 minutes of expiry, then builds the client.
+  /// within 5 minutes of expiry, then builds a client that keeps refreshing
+  /// it, so a scan longer than one token's life keeps working.
   static Future<CloudFileApi> create(CloudFileApiCredentials c) async {
+    Future<TokenRefreshResult> refresh() => _refresh(c);
     var token = c.accessToken;
-    final expiry = c.expiry?.toUtc();
-    final nearExpiry =
-        expiry == null ||
-        DateTime.now().toUtc().isAfter(
-          expiry.subtract(const Duration(minutes: 5)),
-        );
-    if (nearExpiry) {
-      try {
-        final result = await GoogleAuthService.refreshTokens(
-          accessToken: c.accessToken,
-          refreshToken: c.refreshToken,
-          db: c.db,
-        );
-        token = result.accessToken;
-      } on GoogleAuthException catch (e) {
-        // Dead refresh token (revoked / OAuth client rotated).
-        throw CloudAuthException('$e', needsReAuth: true);
-      } catch (e) {
-        throw CloudAuthException('$e');
-      }
+    var expiry = c.expiry?.toUtc();
+    if (RefreshingBearerClient.isNearExpiry(expiry, DateTime.now().toUtc())) {
+      final result = await refresh();
+      token = result.accessToken;
+      expiry = result.expiration;
     }
     return GoogleDriveFileApi(
-      drive.DriveApi(AuthenticatedHttpClient.bearer(token)),
+      drive.DriveApi(
+        RefreshingBearerClient(token: token, expiry: expiry, refresh: refresh),
+      ),
     );
+  }
+
+  static Future<TokenRefreshResult> _refresh(CloudFileApiCredentials c) async {
+    try {
+      return await GoogleAuthService.refreshTokens(
+        accessToken: c.accessToken,
+        refreshToken: c.refreshToken,
+        db: c.db,
+      );
+    } on GoogleAuthException catch (e) {
+      // Dead refresh token (revoked / OAuth client rotated).
+      throw CloudAuthException('$e', needsReAuth: true);
+    } catch (e) {
+      throw CloudAuthException('$e');
+    }
   }
 
   @override
@@ -201,5 +206,54 @@ class GoogleDriveFileApi implements CloudFileApi, WholeDriveListing {
       contentHash: f.sha256Checksum,
       isDownloadable: !isFolder && isDownloadableMimeType(mime ?? ''),
     );
+  }
+}
+
+/// Bearer-token client that refreshes the token before each request once it
+/// is within 5 minutes of expiry. Concurrent requests share one refresh.
+class RefreshingBearerClient extends http.BaseClient {
+  RefreshingBearerClient({
+    required String token,
+    required DateTime? expiry,
+    required this.refresh,
+    http.Client? inner,
+    DateTime Function()? now,
+  }) : _token = token,
+       _expiry = expiry,
+       _inner = inner ?? http.Client(),
+       _now = now ?? (() => DateTime.now().toUtc());
+
+  final Future<TokenRefreshResult> Function() refresh;
+  final http.Client _inner;
+  final DateTime Function() _now;
+  String _token;
+  DateTime? _expiry;
+  Future<void>? _refreshing;
+
+  static bool isNearExpiry(DateTime? expiry, DateTime now) =>
+      expiry == null ||
+      now.isAfter(expiry.subtract(const Duration(minutes: 5)));
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    if (isNearExpiry(_expiry, _now())) {
+      await (_refreshing ??= _refreshToken().whenComplete(
+        () => _refreshing = null,
+      ));
+    }
+    request.headers['Authorization'] = 'Bearer $_token';
+    return _inner.send(request);
+  }
+
+  Future<void> _refreshToken() async {
+    final result = await refresh();
+    _token = result.accessToken;
+    _expiry = result.expiration.toUtc();
+  }
+
+  @override
+  void close() {
+    _inner.close();
+    super.close();
   }
 }

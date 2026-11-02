@@ -45,14 +45,20 @@ const int _statSize = 144;
 
 /// Fast per-file check using `lstat` through dart:ffi (no process spawn).
 /// `lstat` on a dataless file does not trigger a download.
+///
+/// macOS only: elsewhere the `lstat` symbols don't exist and nothing is
+/// online-only, so every file is reported as local.
 class FfiOnlineOnlyChecker implements OnlineOnlyChecker {
-  FfiOnlineOnlyChecker() {
+  FfiOnlineOnlyChecker({bool? isMacOS})
+    : _enabled = isMacOS ?? Platform.isMacOS {
+    if (!_enabled) return;
     final lib = DynamicLibrary.process();
     _lstat = _lookupLstat(lib);
     _malloc = lib.lookupFunction<_MallocC, _MallocDart>('malloc');
     _free = lib.lookupFunction<_FreeC, _FreeDart>('free');
   }
 
+  final bool _enabled;
   late final _LstatDart _lstat;
   late final _MallocDart _malloc;
   late final _FreeDart _free;
@@ -69,6 +75,7 @@ class FfiOnlineOnlyChecker implements OnlineOnlyChecker {
 
   @override
   bool isOnlineOnly(String path) {
+    if (!_enabled) return false;
     if (iCloudPlaceholderRealName(p.basename(path)) != null) return true;
     final bytes = utf8.encode(path);
     final cPath = _malloc(bytes.length + 1);
@@ -93,10 +100,16 @@ class FfiOnlineOnlyChecker implements OnlineOnlyChecker {
 }
 
 /// Slow fallback: spawns `stat -f %Xf`. Fine for one-off checks, far too slow
-/// (a process per file) for scans.
+/// (a process per file) for scans. macOS only, like [FfiOnlineOnlyChecker].
 class ProcessOnlineOnlyChecker implements OnlineOnlyChecker {
+  ProcessOnlineOnlyChecker({bool? isMacOS})
+    : _enabled = isMacOS ?? Platform.isMacOS;
+
+  final bool _enabled;
+
   @override
   bool isOnlineOnly(String path) {
+    if (!_enabled) return false;
     if (iCloudPlaceholderRealName(p.basename(path)) != null) return true;
     final r = Process.runSync('stat', ['-f', '%Xf', path]);
     if (r.exitCode != 0) return false;

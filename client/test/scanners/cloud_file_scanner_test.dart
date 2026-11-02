@@ -310,14 +310,17 @@ void main() {
       expect(cursorWrites(), isEmpty);
     });
 
-    test('force ignores a stored cursor and walks', () async {
+    // start() only ever spawns forced syncs, so a forced sync with a stored
+    // cursor must use the change feed; otherwise incremental sync never runs
+    // in the app and every sync re-lists the whole Drive.
+    test('a forced sync with a stored cursor is incremental', () async {
       final api = FakeCloudFileApi({
         'root': [_file('f1')],
       });
       await run(worker(), api, args(cursor: 'old'));
-      expect(api.events, isNot(contains('changes')));
-      expect(of('cleanupDeletedFiles'), hasLength(1));
-      expect(cursorWrites(), ['c-start']);
+      expect(api.events, contains('changes'));
+      expect(api.listedFolders, isEmpty);
+      expect(of('cleanupDeletedFiles'), isEmpty);
     });
 
     test(
@@ -717,40 +720,43 @@ void main() {
     );
   });
 
-  test('download queue applies the content policy (category and size)', () async {
-    final api = FakeCloudFileApi({});
-    File row(String id, String mime, int size) => File(
-      id: 'c1:$id',
-      name: id,
-      path: 'fake://$id',
-      parent: '',
-      dateCreated: DateTime(2024),
-      dateLastModified: DateTime(2024),
-      collectionId: 'c1',
-      contentType: mime,
-      isDeleted: false,
-      size: size,
-    );
-    await run(
-      worker(
-        toDownload: [
-          row('small.png', 'image/png', 10),
-          row('big.png', 'image/png', 1000),
-          row('clip.mp4', 'video/mp4', 10),
-        ],
-      ),
-      api,
-      args(
-        // The legacy flag is off: the stored policy alone drives downloads.
-        policy:
-            const ContentPolicy(
-              downloadCategories: {ContentCategory.images},
-              maxFileBytes: 100,
-            ).encode(),
-      ),
-    );
-    expect(api.downloaded, ['small.png']);
-  });
+  test(
+    'download queue applies the content policy (category and size)',
+    () async {
+      final api = FakeCloudFileApi({});
+      File row(String id, String mime, int size) => File(
+        id: 'c1:$id',
+        name: id,
+        path: 'fake://$id',
+        parent: '',
+        dateCreated: DateTime(2024),
+        dateLastModified: DateTime(2024),
+        collectionId: 'c1',
+        contentType: mime,
+        isDeleted: false,
+        size: size,
+      );
+      await run(
+        worker(
+          toDownload: [
+            row('small.png', 'image/png', 10),
+            row('big.png', 'image/png', 1000),
+            row('clip.mp4', 'video/mp4', 10),
+          ],
+        ),
+        api,
+        args(
+          // The legacy flag is off: the stored policy alone drives downloads.
+          policy:
+              const ContentPolicy(
+                downloadCategories: {ContentCategory.images},
+                maxFileBytes: 100,
+              ).encode(),
+        ),
+      );
+      expect(api.downloaded, ['small.png']);
+    },
+  );
 
   test('download_local_copy=false with no policy downloads nothing', () async {
     final api = FakeCloudFileApi({});

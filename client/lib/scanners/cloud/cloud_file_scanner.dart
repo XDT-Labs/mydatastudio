@@ -449,9 +449,10 @@ class CloudFileScannerWorker {
       String? cursorToStore;
 
       // Incremental = the collection has a change cursor (not lastScanDate,
-      // which only says a scan once finished). A forced sync or a targeted
-      // folder scan always lists.
-      var incremental = isFullScan && !force && changeCursor != null;
+      // which only says a scan once finished). Not tied to `force`: start()
+      // only ever runs forced syncs. A targeted folder scan always lists, and
+      // an expired cursor falls back to a full walk below.
+      var incremental = isFullScan && changeCursor != null;
       if (incremental) {
         logger.i(
           'CloudFileIsolate: Performing INCREMENTAL sync for "$collectionName" (change cursor)',

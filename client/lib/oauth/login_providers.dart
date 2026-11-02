@@ -411,7 +411,10 @@ extension LoginProviderExtension on LoginProviders {
     /// Null keeps [existing]'s policy (re-auth) or, for a new collection,
     /// downloads everything.
     ContentPolicy? contentPolicy,
-    bool keepDeletedFiles = false,
+
+    /// Null keeps [existing]'s setting (re-auth); a new collection defaults
+    /// to false.
+    bool? keepDeletedFiles,
 
     /// Shown after sign-in, before anything is stored: lets the caller present
     /// an estimate and veto the sync (false = abandon, no collection created).
@@ -487,7 +490,8 @@ extension LoginProviderExtension on LoginProviders {
             existing?.downloadLocalCopy ??
             true,
         contentPolicy: contentPolicy?.encode() ?? existing?.contentPolicy,
-        keepDeletedFiles: keepDeletedFiles,
+        keepDeletedFiles:
+            keepDeletedFiles ?? existing?.keepDeletedFiles ?? false,
       );
 
       final repo = CollectionRepository(DatabaseManager.instance.database!);

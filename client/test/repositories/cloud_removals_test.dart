@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
+import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 
@@ -169,6 +170,34 @@ void main() {
     expect(r['is_deleted'], 0);
     expect(r['source_deleted_date'], isNotNull);
   });
+
+  // A full-walk sweep must follow the same rule as applyCloudRemovals: when
+  // deleted files are kept, their folder rows stay, or the kept files have no
+  // folder to be browsed from.
+  for (final keep in [true, false]) {
+    test('full-walk sweep ${keep ? 'keeps' : 'removes'} unseen folder rows '
+        'when keepDeleted is $keep', () async {
+      await db.execute(
+        "INSERT INTO folders (id, name, path, parent, collection_id) "
+        "VALUES ('c1:dir', 'dir', 'dir', '', 'c1')",
+      );
+      await CleanupDeletedFilesService.instance.invoke(
+        CleanupDeletedFilesServiceCommand(
+          'c1',
+          '',
+          DateTime.now().add(const Duration(minutes: 1)),
+          db,
+          isCloud: true,
+          isFullScan: true,
+          keepDeleted: keep,
+        ),
+      );
+      expect(
+        await db.select("SELECT id FROM folders WHERE id = 'c1:dir'"),
+        hasLength(keep ? 1 : 0),
+      );
+    });
+  }
 
   test('change_cursor round-trips and can be cleared', () async {
     final repoC = CollectionRepository(db);
