@@ -122,6 +122,11 @@ extension LoginProviderExtension on LoginProviders {
     }
   }
 
+  /// Whether sign-in needs a client secret. Defaults to true; a public desktop
+  /// client that relies on PKCE alone (e.g. Dropbox, Box) returns false and
+  /// then sends only `client_id` + `code_verifier` to the token endpoint.
+  bool get requiresClientSecret => true;
+
   /// OAuth client secret.
   /// Google requires client_secret for desktop apps even with PKCE enabled.
   ///
