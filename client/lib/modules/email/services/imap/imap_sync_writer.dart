@@ -128,6 +128,29 @@ class ImapSyncWriter {
     );
   }
 
+  /// Gmail: replaces the label memberships (and sets the thread) of the
+  /// primary copies in [folderId] (All Mail) from X-GM-LABELS / X-GM-THRID.
+  /// A null thread id leaves the stored one alone.
+  Future<void> setGmailMeta(
+    String collectionId,
+    String folderId,
+    List<({int uid, List<String> labels, String? threadId})> rows,
+  ) async {
+    if (rows.isEmpty) return;
+    await retryOnLock(
+      () => db.transaction((tx) async {
+        for (final r in rows) {
+          await tx.execute(
+            'UPDATE emails SET labels = ?, thread_id = COALESCE(?, thread_id) '
+            'WHERE collection_id = ? AND folder_id = ? AND uid = ?',
+            [r.labels.join(','), r.threadId, collectionId, folderId, r.uid],
+          );
+        }
+      }),
+      label: 'ImapSyncWriter.setGmailMeta',
+    );
+  }
+
   /// Removes [folderId] from the labels of [emailIds]: the message is gone
   /// from that folder but lives on elsewhere.
   Future<void> dropMembership(
@@ -256,6 +279,15 @@ class ImapSyncWriter {
           folderId!,
           (p['readByUid'] as Map).cast<int, bool>(),
         );
+      case 'setGmailMeta':
+        await writer.setGmailMeta(collectionId, folderId!, [
+          for (final r in p['rows'] as List)
+            (
+              uid: (r as Map)['uid'] as int,
+              labels: (r['labels'] as List).cast<String>(),
+              threadId: r['threadId'] as String?,
+            ),
+        ]);
       case 'promote':
         await writer.promote(collectionId, [
           for (final m in p['moves'] as List)

@@ -181,4 +181,23 @@ void main() {
     final r = await row('e1');
     expect([r['uid'], r['is_read']], [40, 1]);
   });
+
+  // Gmail moves a message between labels without changing its UID; the label
+  // columns must follow, and a later label-only change must not lose the
+  // thread.
+  test('setGmailMeta replaces labels and sets the thread', () async {
+    await writer.addMembership('c1', 'Old', ['e1']);
+    await writer.setGmailMeta('c1', 'INBOX', [
+      (uid: 1, labels: ['INBOX', 'Work'], threadId: '99'),
+    ]);
+    var r = await row('e1');
+    expect([r['labels'], r['thread_id']], ['INBOX,Work', '99']);
+
+    await writer.setGmailMeta('c1', 'INBOX', [
+      (uid: 1, labels: <String>[], threadId: null),
+    ]);
+    r = await row('e1');
+    expect([r['labels'], r['thread_id']], ['', '99']);
+    expect((await row('e2'))['labels'], '');
+  });
 }

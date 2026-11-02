@@ -111,6 +111,14 @@ void main() {
       }
     });
 
+    test('gmail signs in with an app password, not OAuth', () {
+      final g = EmailProviderRegistry.gmail;
+      expect(g.authType, EmailAuthType.appPassword);
+      expect(g.oauthService, isNull);
+      expect(g.authFailureHint, contains('Workspace admin'));
+      expect(g.authFailureHint, contains('Takeout'));
+    });
+
     test('provider quirks have plain-language auth failure hints', () {
       String hint(String id) =>
           EmailProviderRegistry.byId(id)!.authFailureHint ?? '';

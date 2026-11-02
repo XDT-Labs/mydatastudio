@@ -19,6 +19,7 @@ import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/email/services/imap/email_provider.dart';
 import 'package:mydatastudio/modules/email/services/imap/folder_role_mapper.dart';
 import 'package:mydatastudio/modules/email/services/imap/folder_sync_planner.dart';
+import 'package:mydatastudio/modules/email/services/imap/gmail_imap.dart';
 import 'package:mydatastudio/modules/email/services/imap/imap_removal_planner.dart';
 import 'package:mydatastudio/modules/email/services/imap/imap_connection_config.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
@@ -274,12 +275,39 @@ class ImapScannerIsolateWorker {
       );
 
       // 2. Sync Emails: every selectable folder, or just the targeted one.
+      // Gmail: only All Mail, so each message is downloaded once; its labels
+      // (X-GM-LABELS) stand in for the other folders.
+      final allMail =
+          config.provider.id == gmailProviderId
+              ? gmailAllMailPath(mailboxes, provider: config.provider)
+              : null;
+      final gmail =
+          allMail == null
+              ? null
+              : GmailLabelMapper(
+                allMailPath: allMail,
+                folders: [
+                  for (final m in mailboxes)
+                    (
+                      path: m.path,
+                      role: folderRoleFor(
+                        name: m.name,
+                        path: m.path,
+                        flags: m.flags,
+                        provider: config.provider,
+                      ),
+                    ),
+                ],
+              );
       final targets =
-          folderId != null
+          gmail != null
+              ? [allMail!]
+              : folderId != null
               ? [folderId]
               : selectableFolderPaths(mailboxes, provider: config.provider);
       int found = 0, added = 0, skipped = 0;
       final failedFolders = <String>[];
+      var downloadLimitHit = false;
       for (final target in targets) {
         try {
           final counts = await _syncFolder(
@@ -292,12 +320,17 @@ class ImapScannerIsolateWorker {
             appDir: appDir,
             clientPort: clientPort,
             logger: logger,
+            gmail: gmail,
           );
           found += counts.found;
           added += counts.added;
           skipped += counts.skipped;
           if (counts.failed > 0) failedFolders.add(target);
         } catch (e, stack) {
+          if (e is ImapDownloadLimitException || isGmailDownloadLimitError(e)) {
+            downloadLimitHit = true;
+            break;
+          }
           failedFolders.add(target);
           logger.e(
             "IMAP sync of folder $target failed: $e",
@@ -310,6 +343,21 @@ class ImapScannerIsolateWorker {
       logger.i(
         "IMAP sync complete: $found found, $added new, $skipped skipped.",
       );
+
+      if (downloadLimitHit) {
+        // Not an error: what was saved stays (per-batch sync state), and the
+        // next sync continues from there once Gmail lifts the limit.
+        logger.w(
+          "Gmail download limit reached; pausing. The next sync resumes.",
+        );
+        await writeViaMain(clientPort, 'collectionStatus', {
+          'collectionId': collection.id,
+          'scanStatus': gmailPausedScanStatus,
+          'lastScanDate': null,
+        });
+        clientPort.send({'type': 'refresh', 'status': 'done'});
+        return;
+      }
 
       if (failedFolders.isNotEmpty) {
         // Fail loud: the folders that did sync keep their progress, but the
@@ -603,6 +651,7 @@ class ImapScannerIsolateWorker {
     required String appDir,
     required SendPort clientPort,
     required AppLogger logger,
+    GmailLabelMapper? gmail,
   }) async {
     int newEmails = 0;
     int skipped = 0;
@@ -670,6 +719,13 @@ class ImapScannerIsolateWorker {
         i + _batchSize < newUids.length ? i + _batchSize : newUids.length,
       );
       final heads = await _fetchHeaderInfo(client, batchUids, logger);
+      final gmailMeta =
+          gmail == null
+              ? const <GmailMessageMeta>[]
+              : await fetchGmailMeta(
+                client,
+                MessageSequence.fromIds(batchUids, isUid: true),
+              );
 
       // Dedupe by Message-ID within the collection before downloading bodies.
       final known = await _lookupByMessageId(appDb, cid, [
@@ -794,6 +850,15 @@ class ImapScannerIsolateWorker {
           'ids': alsoHere,
         });
       }
+      if (gmail != null) {
+        await _writeGmailMeta(
+          gmail: gmail,
+          meta: gmailMeta,
+          cid: cid,
+          folder: targetFolder,
+          clientPort: clientPort,
+        );
+      }
       lastSynced = batchUids.last;
       await _emailSync(clientPort, 'saveFolderState', cid, targetFolder, {
         'uidValidity': server.uidValidity,
@@ -819,9 +884,31 @@ class ImapScannerIsolateWorker {
       }
     }
 
+    // Gmail: a label change bumps the message's MODSEQ but not its flags, so
+    // the FLAGS pass above can miss it. Re-read labels of changed messages.
+    if (gmail != null &&
+        plan.flagSync != FlagSync.none &&
+        plan.fetchAfterUid > 0) {
+      final changed = await fetchGmailMeta(
+        client,
+        MessageSequence.fromRange(1, plan.fetchAfterUid, isUidSequence: true),
+        changedSinceModseq:
+            plan.flagSync == FlagSync.changedSince
+                ? plan.changedSinceModseq
+                : null,
+      );
+      await _writeGmailMeta(
+        gmail: gmail,
+        meta: changed,
+        cid: cid,
+        folder: targetFolder,
+        clientPort: clientPort,
+      );
+    }
+
     // Removals.
     final policy = collection.emailDeletePolicy;
-    if (policy != EmailDeletePolicy.keep) {
+    if (policy != EmailDeletePolicy.keep && gmail == null) {
       await _dropVanishedSecondary(
         client: client,
         appDb: appDb,
@@ -834,7 +921,18 @@ class ImapScannerIsolateWorker {
       );
     }
     final vanished = ImapRemovalPlanner.vanished(
-      [for (final r in localRows) r.row],
+      [
+        for (final r in localRows)
+          // Gmail labels are not separate copies: gone from All Mail is gone.
+          gmail == null
+              ? r.row
+              : LocalImapRow(
+                id: r.row.id,
+                uid: r.row.uid,
+                messageId: r.row.messageId,
+                labels: const [],
+              ),
+      ],
       remoteSet,
       afterReset: plan.reset,
     );
@@ -870,6 +968,43 @@ class ImapScannerIsolateWorker {
       skipped: skipped,
       failed: failed,
     );
+  }
+
+  /// Stores labels and thread of Gmail messages; first creates `email_folders`
+  /// rows for labels LIST did not report (labels hidden from IMAP).
+  static Future<void> _writeGmailMeta({
+    required GmailLabelMapper gmail,
+    required List<GmailMessageMeta> meta,
+    required String cid,
+    required String folder,
+    required SendPort clientPort,
+  }) async {
+    final rows = <Map<String, Object?>>[];
+    for (final m in meta) {
+      final labels = m.labels;
+      if (labels == null && m.threadId == null) continue;
+      final folders = labels == null ? null : gmail.foldersFor(labels);
+      for (final id in folders ?? const <String>[]) {
+        if (!gmail.knownPaths.add(id)) continue;
+        await writeViaMain(
+          clientPort,
+          'emailFolder',
+          EmailFolder(
+            id: id,
+            collectionId: cid,
+            name: id.split('/').last,
+            type: FolderRole.user.name,
+            path: id,
+          ),
+        );
+      }
+      // No X-GM-LABELS in the response: keep the stored labels untouched.
+      if (folders == null) continue;
+      rows.add({'uid': m.uid, 'labels': folders, 'threadId': m.threadId});
+    }
+    if (rows.isNotEmpty) {
+      await _emailSync(clientPort, 'setGmailMeta', cid, folder, {'rows': rows});
+    }
   }
 
   static Future<List<_LocalRow>> _localPrimaryRows(
@@ -972,6 +1107,7 @@ class ImapScannerIsolateWorker {
             ),
       };
     } catch (e) {
+      if (isGmailDownloadLimitError(e)) throw ImapDownloadLimitException(e);
       logger.w("Header prefetch failed ($e); deduping after full fetch.");
       return {};
     }
@@ -989,6 +1125,7 @@ class ImapScannerIsolateWorker {
     try {
       return (await client.uidFetchMessages(seq, 'BODY.PEEK[]')).messages;
     } catch (e) {
+      if (isGmailDownloadLimitError(e)) throw ImapDownloadLimitException(e);
       logger.w("Batch fetch failed ($e). Retrying UIDs individually...");
     }
     final out = <MimeMessage>[];
@@ -1000,6 +1137,9 @@ class ImapScannerIsolateWorker {
         );
         out.addAll(single.messages);
       } catch (singleErr) {
+        if (isGmailDownloadLimitError(singleErr)) {
+          throw ImapDownloadLimitException(singleErr);
+        }
         logger.w(
           "Full fetch failed for UID $uid ($singleErr). Attempting header salvage...",
         );

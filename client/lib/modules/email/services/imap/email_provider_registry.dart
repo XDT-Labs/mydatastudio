@@ -9,8 +9,7 @@ class EmailProviderRegistry {
     id: 'gmail',
     displayName: 'Gmail',
     imapHost: 'imap.gmail.com',
-    authType: EmailAuthType.oauth2,
-    oauthService: 'google',
+    authType: EmailAuthType.appPassword,
     domains: ['gmail.com', 'googlemail.com'],
     folderNameHints: {
       '[gmail]/sent mail': FolderRole.sent,
@@ -29,6 +28,12 @@ class EmailProviderRegistry {
       'If App passwords is missing, your Workspace admin has turned it off. '
           'Use Google Takeout and import the file instead.',
     ],
+    authFailureHint:
+        'Google refused this password. Gmail needs an app password, not your '
+        'normal one. If "App passwords" is missing from your Google account '
+        'security page, 2-Step Verification may be off, or a Workspace admin '
+        'has disabled app passwords. In that case use Google Takeout '
+        'instead.',
   );
 
   static const yahoo = EmailProvider(
