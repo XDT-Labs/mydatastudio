@@ -5,7 +5,7 @@ import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/modules/files/pages/rx_files_page.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/file_sources/sync_folder/sync_folder_detector.dart';
-import 'package:mydatastudio/modules/files/widgets/file_collection_setup/found_folders_section.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/file_source_catalog.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_error_view.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_idle_view.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_loading_view.dart';
@@ -33,15 +33,14 @@ Future<Set<String>> _loadExistingCollectionPaths() async {
   return all.map((c) => c.path).whereType<String>().toSet();
 }
 
-/// "Add files" page: auto-detected sync folders, cloud accounts, and a manual
-/// folder picker for anything else.
+/// "Add files" page: a catalog of file sources, each opening its own form.
 class NewFileCollectionPage extends StatefulWidget {
   const NewFileCollectionPage({super.key, this.detector, this.existingPaths});
 
   /// Injectable for tests; defaults to a real [SyncFolderDetector].
   final SyncFolderDetector? detector;
 
-  /// Paths already used by a collection (hidden from "Found on this Mac").
+  /// Paths already used by a collection (their sync folders are hidden).
   final ExistingCollectionPaths? existingPaths;
 
   @override
@@ -49,26 +48,34 @@ class NewFileCollectionPage extends StatefulWidget {
 }
 
 class _NewFileCollectionPage extends State<NewFileCollectionPage> {
-  String? name;
-  String? path;
-
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _path = TextEditingController();
 
-  late final Future<List<DetectedSyncFolder>> _found = _findFolders();
+  late final Future<List<FileSource>> _found = _findFolders();
 
-  Future<List<DetectedSyncFolder>> _findFolders() async {
+  /// The source whose form is open; null shows the catalog.
+  FileSource? _selected;
+
+  /// Detected sync folders as catalog sources; ones already covered by a
+  /// collection are kept but marked [FileSource.alreadyAdded].
+  Future<List<FileSource>> _findFolders() async {
     try {
       final detected = (widget.detector ?? SyncFolderDetector()).detect();
       final existing =
           (await (widget.existingPaths ?? _loadExistingCollectionPaths)())
               .map(_normalize)
               .toList();
-      return detected.where((f) {
-        final path = _normalize(f.path);
-        return !existing.any((e) => path == e || p.isWithin(e, path));
-      }).toList();
+      return [
+        for (final f in detected)
+          FileSource.detected(
+            f,
+            alreadyAdded: existing.any(
+              (e) =>
+                  _normalize(f.path) == e || p.isWithin(e, _normalize(f.path)),
+            ),
+          ),
+      ];
     } catch (e, st) {
       AppLogger(
         null,
@@ -89,61 +96,79 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
     super.dispose();
   }
 
+  void _open(FileSource source) {
+    _name.text = source.detected?.displayName ?? '';
+    _path.text = source.detected?.path ?? '';
+    setState(() => _selected = source);
+  }
+
+  void _backToCatalog() => setState(() => _selected = null);
+
   @override
   Widget build(BuildContext context) {
+    final selected = _selected;
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
       children: [
         Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _SectionHeader('Found on this Mac'),
-                FutureBuilder<List<DetectedSyncFolder>>(
-                  future: _found,
-                  builder: (context, snap) {
-                    if (snap.connectionState != ConnectionState.done) {
-                      return const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: LinearProgressIndicator(),
-                      );
-                    }
-                    return FoundFoldersSection(
-                      folders: snap.data ?? const [],
-                      onAdd: _addDetected,
-                    );
-                  },
-                ),
-                const SizedBox(height: 32),
-                const _SectionHeader('Connect an account'),
-                const _GoogleDriveTab(),
-                const SizedBox(height: 32),
-                const _SectionHeader('Other'),
-                _buildLocalFilesTab(context),
-              ],
-            ),
+            constraints: const BoxConstraints(maxWidth: 760),
+            child:
+                selected == null
+                    ? FutureBuilder<List<FileSource>>(
+                      future: _found,
+                      builder:
+                          (context, snap) => FileSourceCatalog(
+                            sources: [...?snap.data, ...FileSource.catalog],
+                            detecting:
+                                snap.connectionState != ConnectionState.done,
+                            onSelected: _open,
+                          ),
+                    )
+                    : _buildSourceForm(context, selected),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildLocalFilesTab(BuildContext context) {
-    return LocalFilesTabView(
-      formKey: _formKey,
-      nameController: _name,
-      pathController: _path,
-      onBrowse: () => _browse(),
-      onSave: () => _save(context),
-      onCancel: () => GoRouter.of(context).go('/files'),
+  Widget _buildSourceForm(BuildContext context, FileSource source) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextButton.icon(
+          onPressed: _backToCatalog,
+          icon: const Icon(Icons.arrow_back),
+          label: const Text('All sources'),
+        ),
+        const SizedBox(height: 16),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(
+            source.icon,
+            size: 32,
+            color: theme.colorScheme.primary,
+          ),
+          title: Text(source.title, style: theme.textTheme.titleLarge),
+          subtitle: Text(source.subtitle),
+        ),
+        const SizedBox(height: 16),
+        switch (source.form) {
+          FileSourceForm.folder => LocalFilesTabView(
+            formKey: _formKey,
+            nameController: _name,
+            pathController: _path,
+            intro: source.folderPrompt,
+            onBrowse: _browse,
+            onSave: () => _save(context),
+            onCancel: _backToCatalog,
+          ),
+          FileSourceForm.googleDrive => const _GoogleDriveTab(),
+          FileSourceForm.none => const SizedBox.shrink(),
+        },
+      ],
     );
-  }
-
-  void _addDetected(DetectedSyncFolder folder) {
-    _createLocalCollection(folder.displayName, folder.path);
-    GoRouter.of(context).go('/files');
   }
 
   Future<void> _browse() async {
@@ -151,15 +176,11 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
     if (result != null) {
       _name.text = result.split('/').last;
       _path.text = result;
-      setState(() {
-        name = result.split('/').last;
-        path = result;
-      });
     }
   }
 
-  /// Single creation path for a local file collection, shared by the manual
-  /// picker and the auto-detected "Add" action.
+  /// Single creation path for a local file collection, shared by every
+  /// folder-based source (manual pick, detected sync folder, drives).
   void _createLocalCollection(String name, String selectedPath) {
     final fc = Collection(
       id: const Uuid().v4().toString(),
@@ -295,9 +316,10 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return Align(
+      alignment: Alignment.topLeft,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
+        constraints: const BoxConstraints(maxWidth: 560),
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 280),
           transitionBuilder:
@@ -368,15 +390,4 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
       child: Padding(padding: const EdgeInsets.all(36), child: child),
     );
   }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-  final String title;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: Text(title, style: Theme.of(context).textTheme.titleMedium),
-  );
 }
