@@ -5,10 +5,14 @@ class ImapErrorView extends StatelessWidget {
     super.key,
     required this.errorMessage,
     required this.onRetry,
+    this.hint,
   });
 
   final String? errorMessage;
   final VoidCallback onRetry;
+
+  /// Provider-specific advice for a refused login.
+  final String? hint;
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +32,16 @@ class ImapErrorView extends StatelessWidget {
               errorMessage!,
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.red),
+            ),
+          ),
+        if (hint != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(
+              hint!,
+              key: const Key('auth-failure-hint'),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade700, height: 1.5),
             ),
           ),
         const SizedBox(height: 24),

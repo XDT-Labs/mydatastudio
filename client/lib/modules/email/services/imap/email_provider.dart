@@ -25,6 +25,17 @@ class EmailProvider {
   /// flag for the folder.
   final Map<String, FolderRole> folderNameHints;
 
+  /// Numbered, plain-text steps shown on the setup card.
+  final List<String> setupSteps;
+
+  /// Plain-language text shown when login is refused, for provider quirks
+  /// (revoked app passwords, IMAP switched off, ...).
+  final String? authFailureHint;
+
+  /// Data-centre label -> IMAP host, for providers whose host depends on the
+  /// account's region. The first entry is the default. Empty for most.
+  final Map<String, String> regionHosts;
+
   const EmailProvider({
     required this.id,
     required this.displayName,
@@ -35,6 +46,9 @@ class EmailProvider {
     this.oauthService,
     this.domains = const [],
     this.folderNameHints = const {},
+    this.setupSteps = const [],
+    this.authFailureHint,
+    this.regionHosts = const {},
   });
 
   /// A concrete provider built from user-entered settings.
@@ -67,11 +81,15 @@ class EmailProvider {
     oauthService: oauthService,
     domains: domains,
     folderNameHints: folderNameHints,
+    setupSteps: setupSteps,
+    authFailureHint: authFailureHint,
+    regionHosts: regionHosts,
   );
 }
 
-/// User-entered connection settings for the `other` provider, stored as JSON in
-/// `collections.imap_settings`. Never contains a password.
+/// Connection settings stored as JSON in `collections.imap_settings`: all of
+/// them for the `other` provider, only the chosen host for providers with
+/// [EmailProvider.regionHosts]. Never contains a password.
 class ImapSettings {
   final String host;
   final int port;

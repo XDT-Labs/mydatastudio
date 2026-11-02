@@ -3,6 +3,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/modules/email/services/imap/email_provider.dart';
+import 'package:mydatastudio/modules/email/services/imap/email_provider_registry.dart';
+import 'package:mydatastudio/modules/email/services/imap/imap_connection_config.dart';
 import 'package:mydatastudio/modules/email/services/setup/imap_connection_tester.dart';
 import 'package:mydatastudio/modules/email/widgets/email_setup/email_account_setup_tab.dart';
 
@@ -64,6 +66,97 @@ void main() {
     expect(find.byKey(const Key('password-field')), findsOneWidget);
     expect(find.text('App Password'), findsOneWidget);
     expect(find.byKey(const Key('host-field')), findsNothing);
+  });
+
+  testWidgets('shows the detected provider\'s setup steps', (tester) async {
+    await pumpTab(tester);
+    await enterEmail(tester, 'me@icloud.com');
+
+    expect(find.text('Setup Instructions'), findsOneWidget);
+    for (final step in EmailProviderRegistry.icloud.setupSteps) {
+      expect(find.text(step), findsOneWidget);
+    }
+  });
+
+  testWidgets('a refused iCloud login shows the revoked-password hint', (
+    tester,
+  ) async {
+    tester0.result = ImapConnectionResult.failure(
+      ImapConnectionFailure.badCredentials,
+    );
+    await pumpTab(tester);
+    await enterEmail(tester, 'me@icloud.com');
+    await tester.enterText(find.byKey(const Key('password-field')), 'pw');
+    await tester.tap(find.byKey(const Key('submit-button')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(EmailProviderRegistry.icloud.authFailureHint!),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('an unreachable server does not show the auth hint', (
+    tester,
+  ) async {
+    tester0.result = ImapConnectionResult.failure(
+      ImapConnectionFailure.unreachable,
+    );
+    await pumpTab(tester);
+    await enterEmail(tester, 'me@icloud.com');
+    await tester.enterText(find.byKey(const Key('password-field')), 'pw');
+    await tester.tap(find.byKey(const Key('submit-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('auth-failure-hint')), findsNothing);
+    expect(find.text('Try Again'), findsOneWidget);
+  });
+
+  testWidgets('region picker appears only for Zoho', (tester) async {
+    await pumpTab(tester);
+    await enterEmail(tester, 'me@yahoo.com');
+    expect(find.byKey(const Key('region-dropdown')), findsNothing);
+
+    await enterEmail(tester, 'me@zoho.com');
+    expect(find.byKey(const Key('region-dropdown')), findsOneWidget);
+  });
+
+  testWidgets('Zoho region is tested against and persisted in settings', (
+    tester,
+  ) async {
+    await pumpTab(tester);
+    await enterEmail(tester, 'me@zohomail.eu');
+    await tester.tap(find.byKey(const Key('region-dropdown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Europe').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('password-field')), 'pw');
+    await tester.tap(find.byKey(const Key('submit-button')));
+    await tester.pumpAndSettle();
+
+    expect(tester0.requests.single.host, 'imap.zoho.eu');
+    final c = created.single;
+    expect(c.emailProviderId, 'zoho');
+    final settings = ImapSettings.fromJsonString(c.imapSettings!);
+    expect(settings.host, 'imap.zoho.eu');
+    // The scanner resolves the same host from the saved collection.
+    expect(ImapConnectionConfig.fromCollection(c).host, 'imap.zoho.eu');
+  });
+
+  testWidgets('Zoho defaults to the US host when no region is picked', (
+    tester,
+  ) async {
+    await pumpTab(tester);
+    await enterEmail(tester, 'me@zoho.com');
+    await tester.enterText(find.byKey(const Key('password-field')), 'pw');
+    await tester.tap(find.byKey(const Key('submit-button')));
+    await tester.pumpAndSettle();
+
+    expect(tester0.requests.single.host, 'imap.zoho.com');
+    expect(
+      ImapSettings.fromJsonString(created.single.imapSettings!).host,
+      'imap.zoho.com',
+    );
   });
 
   testWidgets('unknown domain falls back to Other with server fields', (

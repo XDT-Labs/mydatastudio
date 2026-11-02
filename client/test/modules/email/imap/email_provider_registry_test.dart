@@ -21,6 +21,31 @@ void main() {
       'a@googlemail.com': 'gmail',
       'a@aol.com': 'aol',
       'a@fastmail.com': 'fastmail',
+      'a@yahoo.co.uk': 'yahoo',
+      'a@yahoo.ca': 'yahoo',
+      'a@yahoo.com.au': 'yahoo',
+      'a@yahoo.co.jp': 'yahoo',
+      'a@yahoo.fr': 'yahoo',
+      'a@yahoo.de': 'yahoo',
+      'a@att.net': 'att',
+      'a@sbcglobal.net': 'att',
+      'a@bellsouth.net': 'att',
+      'a@verizon.net': 'aol',
+      'a@aim.com': 'aol',
+      'a@ya.ru': 'yandex',
+      'a@yandex.com': 'yandex',
+      'a@gmx.de': 'gmx_de',
+      'a@gmx.net': 'gmx_de',
+      'a@gmx.com': 'gmx_com',
+      'a@gmx.co.uk': 'gmx_com',
+      'a@web.de': 'webde',
+      'a@mail.com': 'mailcom',
+      'a@usa.com': 'mailcom',
+      'a@email.com': 'mailcom',
+      'a@zohomail.eu': 'zoho',
+      'a@zoho.com': 'zoho',
+      'a@hotmail.co.uk': 'outlook',
+      'a@passport.com': 'outlook',
     };
     expected.forEach((email, id) {
       test('$email -> $id', () {
@@ -54,7 +79,10 @@ void main() {
     });
 
     test('unknown or malformed -> other', () {
-      expect(EmailProviderRegistry.detectFromEmail('a@example.org').id, 'other');
+      expect(
+        EmailProviderRegistry.detectFromEmail('a@example.org').id,
+        'other',
+      );
       expect(EmailProviderRegistry.detectFromEmail('nonsense').id, 'other');
       expect(EmailProviderRegistry.detectFromEmail('').id, 'other');
     });
@@ -77,15 +105,63 @@ void main() {
       expect(EmailProviderRegistry.other.imapHost, isNull);
     });
 
-    test('legacy scanners keep their original hosts', () {
-      final yahoo = EmailProviderRegistry.forLegacyScanner(
-        AppConstants.scannerEmailYahoo,
-      )!;
-      final outlook = EmailProviderRegistry.forLegacyScanner(
-        AppConstants.scannerEmailOutlook,
-      )!;
+    test('every provider except other has setup steps', () {
+      for (final p in EmailProviderRegistry.all.where((p) => p.id != 'other')) {
+        expect(p.setupSteps, isNotEmpty, reason: p.id);
+      }
+    });
+
+    test('provider quirks have plain-language auth failure hints', () {
+      String hint(String id) =>
+          EmailProviderRegistry.byId(id)!.authFailureHint ?? '';
+      expect(hint('icloud'), contains('revokes'));
+      expect(hint('gmx_de'), contains('POP3 & IMAP'));
+      expect(hint('webde'), contains('POP3 & IMAP'));
+      expect(hint('mailcom'), contains('POP3 & IMAP'));
+      expect(hint('zoho'), contains('export'));
+      expect(hint('yandex'), contains('few hours'));
+      expect(hint('att'), contains('secure mail key'));
+    });
+
+    test('AT&T uses its own host and AOL treats Bulk as junk', () {
+      expect(EmailProviderRegistry.att.imapHost, 'imap.mail.att.net');
+      expect(EmailProviderRegistry.aol.folderNameHints['bulk'], isNotNull);
+    });
+
+    test('new providers use the hosts from their plans', () {
+      const hosts = {
+        'yandex': 'imap.yandex.com',
+        'gmx_com': 'imap.gmx.com',
+        'gmx_de': 'imap.gmx.net',
+        'mailcom': 'imap.mail.com',
+        'webde': 'imap.web.de',
+        'zoho': 'imap.zoho.com',
+      };
+      hosts.forEach((id, host) {
+        expect(EmailProviderRegistry.byId(id)!.imapHost, host, reason: id);
+      });
+    });
+
+    test('only Zoho has regions, and its default is the first one', () {
+      for (final p in EmailProviderRegistry.all) {
+        expect(p.regionHosts.isNotEmpty, p.id == 'zoho', reason: p.id);
+      }
+      final zoho = EmailProviderRegistry.zoho;
+      expect(zoho.regionHosts.values.first, zoho.imapHost);
+      expect(zoho.regionHosts['Europe'], 'imap.zoho.eu');
+    });
+
+    test('legacy scanners resolve to their providers', () {
+      final yahoo =
+          EmailProviderRegistry.forLegacyScanner(
+            AppConstants.scannerEmailYahoo,
+          )!;
+      final outlook =
+          EmailProviderRegistry.forLegacyScanner(
+            AppConstants.scannerEmailOutlook,
+          )!;
       expect(yahoo.imapHost, 'imap.mail.yahoo.com');
-      expect(outlook.imapHost, 'imap-mail.outlook.com');
+      expect(outlook.imapHost, 'outlook.office365.com');
       expect(
         EmailProviderRegistry.forLegacyScanner(AppConstants.scannerFileLocal),
         isNull,
