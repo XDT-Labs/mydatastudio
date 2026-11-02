@@ -105,7 +105,8 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
       children: [
         Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760),
+            // A form is narrower than the catalog grid; both sit centered.
+            constraints: BoxConstraints(maxWidth: selected == null ? 760 : 560),
             child:
                 selected == null
                     ? FutureBuilder<List<FileSource>>(

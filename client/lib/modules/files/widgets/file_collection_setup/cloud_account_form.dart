@@ -163,7 +163,7 @@ class _CloudAccountFormState extends State<CloudAccountForm> {
   @override
   Widget build(BuildContext context) {
     return Align(
-      alignment: Alignment.topLeft,
+      alignment: Alignment.topCenter,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 560),
         child: AnimatedSwitcher(
