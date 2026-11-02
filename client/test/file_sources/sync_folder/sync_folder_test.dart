@@ -111,37 +111,18 @@ void main() {
       );
     });
 
-    test(
-      'iCloud app containers get a readable name; empty ones are skipped',
-      () {
-        const md = 'Library/Mobile Documents';
-        mk('$md/com~apple~CloudDocs');
-        mk('$md/com~apple~Pages/Documents');
-        File(
-          p.join(home.path, '$md/com~apple~Pages/Documents/a.pages'),
-        ).createSync();
-        mk('$md/iCloud~md~obsidian');
-        File(p.join(home.path, '$md/iCloud~md~obsidian/n.md')).createSync();
-        mk('$md/com~apple~Numbers'); // empty
-        mk('$md/com~apple~Keynote');
-        File(p.join(home.path, '$md/com~apple~Keynote/.DS_Store')).createSync();
+    test('iCloud is one entry: iCloud Drive, without the app containers', () {
+      // Listing every app's container buried the catalog under dozens of
+      // iCloud rows, and rooting at Mobile Documents imported all of them.
+      const md = 'Library/Mobile Documents';
+      mk('$md/com~apple~CloudDocs');
+      mk('$md/com~apple~Pages/Documents');
+      mk('$md/iCloud~md~obsidian');
 
-        final found = SyncFolderDetector(homeDir: home.path).detect();
-        expect(found.map((f) => f.displayName), [
-          'iCloud Drive',
-          'iCloud - Pages',
-          'iCloud - Obsidian',
-        ]);
-        expect(found.first.note, contains('Online-only'));
-      },
-    );
-
-    test('a container holding only legacy .icloud stubs is non-empty', () {
-      const md = 'Library/Mobile Documents/iCloud~md~obsidian';
-      mk(md);
-      File(p.join(home.path, md, '.n.md.icloud')).createSync();
       final found = SyncFolderDetector(homeDir: home.path).detect();
-      expect(found.single.displayName, 'iCloud - Obsidian');
+      expect(found.map((f) => f.displayName), ['iCloud Drive']);
+      expect(found.single.path, p.join(home.path, md, 'com~apple~CloudDocs'));
+      expect(found.single.note, contains('Online-only'));
     });
 
     test('an unreadable Mobile Documents is skipped without throwing', () {

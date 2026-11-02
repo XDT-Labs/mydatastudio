@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:mydatastudio/app_logger.dart';
-import 'package:mydatastudio/file_sources/sync_folder/online_only_checker.dart';
 import 'package:path/path.dart' as p;
 
 enum SyncProvider {
@@ -53,7 +52,7 @@ const _syncComNote = "Vault content isn't on this Mac, so it isn't indexed.";
 
 /// Finds macOS cloud sync folders: File Provider roots under
 /// `~/Library/CloudStorage`, legacy folders such as `~/Dropbox`, and iCloud
-/// Drive plus the app containers beside it.
+/// Drive (not the app containers beside it).
 class SyncFolderDetector {
   /// [homeDir] is injectable for tests; defaults to `$HOME`.
   SyncFolderDetector({String? homeDir})
@@ -69,7 +68,6 @@ class SyncFolderDetector {
       ..._detectCloudStorage(),
       ..._detectLegacyFolders(),
       ..._detectICloud(),
-      ..._detectICloudAppContainers(),
     ].where((f) => seen.add(_resolved(f.path))).toList();
   }
 
@@ -201,10 +199,10 @@ class SyncFolderDetector {
   Directory get _mobileDocuments =>
       Directory(p.join(_home, 'Library', 'Mobile Documents'));
 
-  static const _iCloudDriveContainer = 'com~apple~CloudDocs';
-
+  /// iCloud Drive itself (`com~apple~CloudDocs`, what Finder calls iCloud
+  /// Drive). The app containers beside it in `Mobile Documents` are skipped.
   List<DetectedSyncFolder> _detectICloud() {
-    final dir = Directory(p.join(_mobileDocuments.path, _iCloudDriveContainer));
+    final dir = Directory(p.join(_mobileDocuments.path, 'com~apple~CloudDocs'));
     if (!_safeExists(dir)) return const [];
     return [
       DetectedSyncFolder(
@@ -214,37 +212,6 @@ class SyncFolderDetector {
         note: _iCloudNote,
       ),
     ];
-  }
-
-  /// App-owned iCloud containers (`com~apple~Pages`, `iCloud~md~obsidian`...)
-  /// that actually hold files. Listing needs the same permission as iCloud
-  /// Drive; a denial just means there is nothing to offer.
-  List<DetectedSyncFolder> _detectICloudAppContainers() {
-    return [
-      for (final dir in _visibleSubdirs(_mobileDocuments))
-        if (p.basename(dir.path) != _iCloudDriveContainer &&
-            _hasVisibleEntries(dir))
-          DetectedSyncFolder(
-            provider: SyncProvider.iCloudDrive,
-            displayName: 'iCloud - ${_appName(p.basename(dir.path))}',
-            path: dir.path,
-            note: _iCloudNote,
-          ),
-    ];
-  }
-
-  /// `iCloud~md~obsidian` -> `Obsidian`: last `~` segment, first letter up.
-  static String _appName(String container) {
-    final last = container.split('~').last;
-    return last.isEmpty ? container : last[0].toUpperCase() + last.substring(1);
-  }
-
-  bool _hasVisibleEntries(Directory dir) {
-    try {
-      return dir.listSync().any((e) => !isHiddenFileName(p.basename(e.path)));
-    } on FileSystemException {
-      return false;
-    }
   }
 
   Iterable<Directory> _visibleSubdirs(Directory root) {
