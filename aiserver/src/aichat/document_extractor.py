@@ -1,4 +1,4 @@
-"""Document → markdown → chunks, for search Phase 7 (SEARCH_PLAN §18).
+"""Document → markdown → chunks, for search Phase 7 (docs/plans/unified-search.md §18).
 
 Extraction runs through ``docling-rs``, the Rust port of IBM's docling. Three
 things about it are non-obvious enough that the code would look arbitrary
@@ -52,6 +52,7 @@ import tempfile
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
+from . import wordperfect
 from .utils import _resolve_models_base
 
 # The largest markdown input measured to chunk in bounded time: 291k chars
@@ -65,7 +66,7 @@ CHUNK_MAX_TOKENS = 512
 # The embedding model whose tokenizer decides what "512 tokens" means. Counting
 # against docling's bundled all-MiniLM tokenizer would budget for a different
 # model than the one that embeds the text.
-EMBEDDING_MODEL_DIR = "Qwen-Qwen3-VL-Embedding-2B-local"
+EMBEDDING_MODEL_DIR = "google-embeddinggemma-2-local"
 
 
 class UnsupportedFormat(Exception):
@@ -223,6 +224,9 @@ def pdf_unavailable_reason() -> str:
 _MAGIC = (
     (b"%PDF", "pdf"),
     (b"{\\rtf", "rtf"),
+    # WordPerfect 6-8, whatever the file is named. docling can't read it;
+    # `_convert` hands it to `aichat.wordperfect` instead.
+    (wordperfect.SIGNATURE, "wpd"),
     (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "_ole2"),
     (b"PK\x03\x04", "_zip"),
 )
@@ -379,6 +383,8 @@ def _convert(data: bytes, fmt: str):
     OCR is the expensive path; a scanned PDF yields little text instead of
     costing minutes, and §18b's tripwire is what notices.
     """
+    if fmt == "wpd":
+        return _convert_wordperfect(data)
     data = _as_utf8(data, fmt)
     try:
         return _convert_raw(data, fmt)
@@ -580,6 +586,35 @@ def _run_textutil(data: bytes, fmt: str) -> Optional[str]:
     return result.stdout.decode("utf-8", "replace")
 
 
+def _convert_wordperfect(data: bytes):
+    """A bare WordPerfect file, read without docling (which has no reader)."""
+    text = wordperfect.extract_text(data)
+    if not _is_readable(text):
+        raise ValueError("WordPerfect document yielded no readable text")
+    return _convert_raw(text.encode("utf-8"), "txt")
+
+
+def _recover_wordperfect(data: bytes):
+    """A `.doc` that is really WordPerfect inside an OLE2 container.
+
+    Measured: the last 2 of the 87 §18m failures are exactly this, a
+    `WordDocument` stream holding `\\xFFWPC` data. textutil can't read them
+    either, so this runs first. None when the bytes aren't WordPerfect or
+    yield nothing readable.
+    """
+    payload = wordperfect.find_wordperfect(data)
+    if payload is None:
+        return None
+    text = wordperfect.extract_text(payload)
+    if not _is_readable(text):
+        return None
+    print(
+        f"[INFO] extract-text: .doc was WordPerfect; recovered {len(text)} chars",
+        flush=True,
+    )
+    return _convert_raw(text.encode("utf-8"), "txt")
+
+
 def _recover_legacy(data: bytes, fmt: str):
     """Retry a docling parse failure through macOS's Word reader.
 
@@ -589,6 +624,10 @@ def _recover_legacy(data: bytes, fmt: str):
     """
     if fmt not in _TEXTUTIL_RECOVERABLE:
         return None
+
+    recovered = _recover_wordperfect(data)
+    if recovered is not None:
+        return recovered
 
     text = _run_textutil(data, fmt)
     if text is None or not _is_readable(text):

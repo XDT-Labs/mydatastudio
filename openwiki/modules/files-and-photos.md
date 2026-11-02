@@ -153,6 +153,8 @@ This enables **semantic search**: "Find files similar to this one" via nearest-n
 
 **Recently rewritten** (PR #33) from a React mockup to a full Flutter desktop photo gallery. The Photos module is a specialized view over the `files` table with a focus on images, geo-tagging, albums, and interactive browsing.
 
+**Recent addition** (PR #38): Photo clustering by visual similarity using bisecting spherical k-means on image embeddings, with a slider controlling group count and AI-generated group labels.
+
 ### Directory Structure
 
 ```
@@ -166,6 +168,12 @@ modules/photos/
     photos_service.dart             # Gallery state (RxService)
     selection_service.dart          # Multi-select state
     view_state_service.dart         # Active view mode & filters
+    clustering/
+      spherical_kmeans.dart         # Bisecting k-means clustering core
+      photo_cluster_service.dart    # Cluster lifecycle & slider management
+      photo_cluster_repository.dart # Cluster persistence & queries
+      clustering_isolate.dart       # Background isolate for cluster builds
+      cluster_label_service.dart    # AI label generation for cluster groups
   widgets/
     dialogs/
       album_modal.dart              # Create/edit album modal
@@ -237,6 +245,29 @@ Interactive map (FlutterMap with CartoDB Dark Matter free tiles):
 - **Chronological polyline**: Trip route drawn in order of photo timestamps
 - **Trip playback**: Scrubber to jump to photos in sequence, speed control (0.5x to 4x)
 - **Geo-filter**: Click location to filter to that area
+
+#### 5. Cluster View (Similarity Grouping)
+
+Photos grouped by visual similarity with AI-generated group labels:
+
+- **Bisecting spherical k-means** clustering over Qwen3-VL image embeddings
+- **Group-count slider** (e.g., 4–96 groups) with instant re-grouping
+- **Slider stability**: 92% of photos stay in the same group when k increases by 1, avoiding grid churn
+- **AI labels**: Vision model names each group from its most representative photos (e.g., "Alpine peaks and rocky terrain", "Wedding ceremonies")
+- **Source filtering**: Clusters follow the active source filter (e.g., cluster only a specific collection)
+- **Coherence metric**: Centroid distance of each cluster available for validation
+
+**Implementation:**
+
+- `spherical_kmeans.dart` — Pure Dart k-means algorithm (no plugins, runs in isolate or dart CLI)
+- `clustering_isolate.dart` — Background isolate spawned on filter change, builds tree asynchronously
+- `photo_cluster_repository.dart` — Persists cluster runs to `photo_cluster_runs` and `photo_cluster_assignments` tables
+- `photo_cluster_service.dart` — RxService managing slider state, triggering rebuilds on filter change
+- `cluster_label_service.dart` — Calls the chat model with representative thumbnails to generate group labels
+
+**Performance:** Full tree build is ~3 seconds for 2,808 photos, linear in photo count (n), logarithmic in group count (k). Re-cutting the tree for a new slider position is microseconds (tree walk only). Tested on real 2,808-photo library; prototype showed subject-level groups (Colosseum exteriors, swans vs. other waterbirds, palace vs. cathedral interiors) at 0.74–0.84 coherence.
+
+**See:** `/docs/plans/photo-clustering.md` for full design and measured behavior.
 
 ### Photo Metadata & Albums
 

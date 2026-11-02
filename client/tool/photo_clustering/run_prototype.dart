@@ -15,8 +15,9 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:mydatastudio/modules/photos/services/clustering/spherical_kmeans.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 
-const int kDim = 2048;
+const int kDim = EmbeddingModel.dimension;
 
 class PhotoMeta {
   PhotoMeta(this.fileId, this.collection, this.scanner, this.name, this.description);

@@ -14,3 +14,6 @@ aichat.egg-info
 
 # Vendored by `make pdfium` — a 3.4 MB binary, fetched not tracked.
 vendor/
+
+# Tool-call eval reports (evals/run_tool_eval.py); summaries go in docs/plans/llm-tools.md.
+evals/results/

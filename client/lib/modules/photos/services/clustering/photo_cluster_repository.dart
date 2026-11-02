@@ -3,9 +3,10 @@ import 'dart:typed_data';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/photos/models/photo_cluster.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 
-/// Dimension of the Qwen3-VL embeddings in `files_embeddings`.
-const int kClusterEmbeddingDim = 2048;
+/// Dimension of the EmbeddingGemma 2 embeddings in `files_embeddings`.
+const int kClusterEmbeddingDim = EmbeddingModel.dimension;
 
 /// Every in-scope photo's embedding, packed for clustering.
 typedef ScopedEmbeddings = ({List<String> fileIds, Float32List vectors});
@@ -44,11 +45,11 @@ class PhotoClusterRepository {
 
     final rows = await db.select(
       '''
-      SELECT e.file_id, e.qwen3_vl_embedding
+      SELECT e.file_id, e.embeddinggemma2_embedding
       FROM files_embeddings e
       JOIN files f ON f.id = e.file_id
       WHERE e.type = 'file'
-        AND e.qwen3_vl_embedding IS NOT NULL
+        AND e.embeddinggemma2_embedding IS NOT NULL
         AND f.is_deleted = 0
         AND f.is_user_deleted = 0
         AND f.is_hidden = 0
@@ -67,7 +68,7 @@ class PhotoClusterRepository {
     var row = 0;
 
     for (final r in rows) {
-      final blob = r['qwen3_vl_embedding'] as Uint8List;
+      final blob = r['embeddinggemma2_embedding'] as Uint8List;
       if (blob.lengthInBytes != expectedBytes) {
         logger.w(
           'PhotoClusterRepository: skipping ${r['file_id']} — '
@@ -114,7 +115,7 @@ class PhotoClusterRepository {
       FROM files_embeddings e
       JOIN files f ON f.id = e.file_id
       WHERE e.type = 'file'
-        AND e.qwen3_vl_embedding IS NOT NULL
+        AND e.embeddinggemma2_embedding IS NOT NULL
         AND f.is_deleted = 0
         AND f.is_user_deleted = 0
         AND f.is_hidden = 0

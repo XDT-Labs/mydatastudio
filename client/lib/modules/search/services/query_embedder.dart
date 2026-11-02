@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/modules/search/services/retrievers/vector_retriever.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 
 /// Embeds the query text through the local AI subprocess.
 ///
@@ -15,10 +16,11 @@ import 'package:mydatastudio/modules/search/services/retrievers/vector_retriever
 class AiServerQueryEmbedder {
   static final AppLogger _logger = AppLogger(null);
 
-  /// The same model the scanners embed with. Comparing a query vector against
-  /// stored vectors from a *different* model produces confident nonsense rather
-  /// than an error, so this constant is not a default to be overridden lightly.
-  static const modelName = 'Qwen/Qwen3-VL-Embedding-2B';
+  /// The same model the scanners embed with ([EmbeddingModel.modelName]).
+  /// Comparing a query vector against stored vectors from a *different* model
+  /// produces confident nonsense rather than an error, so this constant is not
+  /// a default to be overridden lightly.
+  static const modelName = EmbeddingModel.modelName;
 
   /// Bounded because this sits on the critical path of a search the user is
   /// waiting on. Ten seconds is generous for a warm model and short enough
@@ -44,6 +46,7 @@ class AiServerQueryEmbedder {
             body: jsonEncode({
               'model_name': modelName,
               'texts': [text],
+              'task': 'query',
             }),
           )
           .timeout(timeout);

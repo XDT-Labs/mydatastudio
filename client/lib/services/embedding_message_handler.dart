@@ -36,6 +36,18 @@ Future<void> handleEmbeddingMessage(
   try {
     switch (table) {
       case 'files_embeddings':
+        // Reuse: the isolate found a byte-identical file that already has a
+        // vector. Copy it in SQL instead of shipping the blob around.
+        final copyFrom = message['copyFrom'] as String?;
+        if (copyFrom != null) {
+          if (!await repo.copyFileEmbedding(copyFrom, id)) {
+            logger.w(
+              'handleEmbeddingMessage: donor $copyFrom had no usable vector '
+              'for $id; it will be re-queued',
+            );
+          }
+          break;
+        }
         final embedding = (message['embedding'] as List).cast<double>();
         await repo.upsertFileEmbedding(id, embedding, type: embeddingType);
         break;

@@ -39,8 +39,8 @@ APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = ggml-org/gemma-4-12B-it-GGUF
 HF_FILE = gemma-4-12B-it-Q4_0.gguf
 HF_MMPROJ_FILE = mmproj-gemma-4-12B-it-Q8_0.gguf
-HF_QWEN3_VL_MODEL = Qwen/Qwen3-VL-Embedding-2B
-HF_QWEN3_VL_DIR = $(PYTHON_DIR)/models/Qwen-Qwen3-VL-Embedding-2B-local
+HF_EMBEDDING_MODEL = google/embeddinggemma-2
+HF_EMBEDDING_DIR = $(PYTHON_DIR)/models/google-embeddinggemma-2-local
 
 # Apple config
 APPLE_ID = mike@xdtlabs.com
@@ -83,11 +83,11 @@ models:
 	else \
 		echo "$(HF_MMPROJ_FILE) already exists, skipping download."; \
 	fi
-	@if [ ! -d $(HF_QWEN3_VL_DIR) ]; then \
-		echo "Downloading Qwen3-VL-Embedding-2B model (Transformers)..."; \
-		hf download $(HF_QWEN3_VL_MODEL) --local-dir $(HF_QWEN3_VL_DIR); \
+	@if [ ! -d $(HF_EMBEDDING_DIR) ]; then \
+		echo "Downloading EmbeddingGemma 2 model (Transformers)..."; \
+		hf download $(HF_EMBEDDING_MODEL) --local-dir $(HF_EMBEDDING_DIR); \
 	else \
-		echo "Qwen3-VL-Embedding-2B model already exists, skipping download."; \
+		echo "EmbeddingGemma 2 model already exists, skipping download."; \
 	fi
 
 	

@@ -1,7 +1,7 @@
 """
 Pydantic models for request/response validation.
 """
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, ConfigDict
 from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, DEFAULT_MODEL_ALIAS
 
@@ -9,9 +9,18 @@ from .config import DEFAULT_LOCAL_MODEL, DEFAULT_GGUF_FILE, DEFAULT_MODEL_ALIAS
 # ── OpenAI-compatible: /v1/chat/completions ──────────────────────────────────
 
 class ChatMessage(BaseModel):
-    role: str = Field(..., description="Message role: 'system', 'user', or 'assistant'")
-    # OpenAI multimodal format: string for text-only, list of content parts for vision
-    content: Union[str, List[Dict[str, Any]]] = Field(..., description="Message content")
+    role: str = Field(..., description="Message role: 'system', 'user', 'assistant', or 'tool'")
+    # OpenAI multimodal format: string for text-only, list of content parts for vision.
+    # None for an assistant turn that only calls tools.
+    content: Optional[Union[str, List[Dict[str, Any]]]] = Field(None, description="Message content")
+    tool_calls: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Assistant turn only: OpenAI-style tool calls the model made "
+                    "(function.arguments as a JSON string).",
+    )
+    tool_call_id: Optional[str] = Field(
+        None, description="Tool turn only: the id of the call this message answers."
+    )
 
 
 class ChatCompletionRequest(BaseModel):
@@ -40,6 +49,18 @@ class ChatCompletionRequest(BaseModel):
             "constrains generation to the given JSON schema."
         ),
     )
+    tools: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description=(
+            "Local GGUF models only (cloud models get a 400). OpenAI-style tool "
+            "definitions; calls come back as message.tool_calls."
+        ),
+    )
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(
+        None,
+        description="'auto' (default when tools are given), 'none', or "
+                    "{\"type\": \"function\", \"function\": {\"name\": ...}} to force one tool.",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -64,15 +85,22 @@ class EmbeddingV1Request(BaseModel):
 # ── Util endpoint models (/util/*) ───────────────────────────────────────────
 
 class EmbeddingRequest(BaseModel):
-    """Multimodal embedding (text or images). Used by /util/embedding.
+    """Multimodal embedding (text, image, audio, or video). Used by /util/embedding.
 
-    Both inputs are lists so there is exactly one request shape and one
-    response shape; a caller with a single item sends a list of one. Text is
-    embedded as a true batch in one forward pass, which is what makes bulk
-    work (an email's body chunks) affordable.
+    Inputs are lists so there is a consistent request and response shape; a
+    caller with a single item sends a list of one. Text inputs are prefixed
+    according to `task` ('query' or 'document') before embedding.
     """
     texts: Optional[List[str]] = Field(None, description="Text content to embed, one vector returned per entry")
+    text: Optional[str] = Field(None, description="Legacy single text field for backwards compatibility")
     images_base64: Optional[List[str]] = Field(None, description="Base64-encoded images, one vector returned per entry")
+    image_base64: Optional[str] = Field(None, description="Legacy single image field for backwards compatibility")
+    audios_base64: Optional[List[str]] = Field(None, description="Base64-encoded audios, one vector returned per entry")
+    videos_base64: Optional[List[str]] = Field(None, description="Base64-encoded videos, one vector returned per entry")
+    task: Literal["query", "document"] = Field(
+        "document",
+        description="Task type for text prompt prefixes ('query' for search queries, 'document' for indexed content)"
+    )
     model_name: str = Field(
         default=DEFAULT_LOCAL_MODEL,
         description="Hugging Face model identifier"
@@ -85,8 +113,9 @@ class EmbeddingRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "image_base64": "iVBORw0KGgo...",
-                "model_name": "Qwen/Qwen3-VL-Embedding-2B"
+                "texts": ["Sample text to embed"],
+                "model_name": "google/embeddinggemma-2",
+                "task": "document"
             }
         }
     )
@@ -97,7 +126,7 @@ class DownloadModelRequest(BaseModel):
 
     When `filename` is omitted or explicitly null, the entire repo snapshot is
     downloaded instead of a single GGUF file — used for multi-file Transformers
-    models like Qwen3-VL-Embedding-2B.
+    models like google/embeddinggemma-2.
     """
     model_name: str = Field(
         default=DEFAULT_LOCAL_MODEL,
@@ -142,7 +171,7 @@ class ExtractTextRequest(BaseModel):
     server never opens a caller-named file, so the endpoint cannot be used as a
     local-file read oracle (AUDIT H2). It also keeps cloud-file resolution on
     the client, where ``local_path``/``download_url`` already live
-    (SEARCH_PLAN §18i).
+    (docs/plans/unified-search.md §18i).
 
     ``filename`` is a *hint*, not a routing decision — the server sniffs the
     bytes, because this archive contains RTF files named ``.doc`` (§18a). The

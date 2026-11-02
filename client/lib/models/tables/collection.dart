@@ -26,6 +26,16 @@ class Collection {
   String? imapSettings;
   EmailDeletePolicy emailDeletePolicy;
 
+  /// Provider change-feed position; null until a full walk has stored one.
+  String? changeCursor;
+
+  /// Keep rows/local copies of files the source deleted (sets
+  /// `files.source_deleted_date` instead of `is_deleted`).
+  bool keepDeletedFiles = false;
+
+  /// ContentPolicy JSON; null = derive from [downloadLocalCopy].
+  String? contentPolicy;
+
   // fields not in db
   String? status;
   String? statusMessage;
@@ -50,6 +60,9 @@ class Collection {
     this.emailProviderId,
     this.imapSettings,
     this.emailDeletePolicy = EmailDeletePolicy.keep,
+    this.changeCursor,
+    this.keepDeletedFiles = false,
+    this.contentPolicy,
   });
 
   factory Collection.fromDbMap(Map<String, dynamic> map) {
@@ -75,6 +88,9 @@ class Collection {
       emailDeletePolicy: EmailDeletePolicy.fromDb(
         map['email_delete_policy'] as String?,
       ),
+      changeCursor: map['change_cursor'] as String?,
+      keepDeletedFiles: (map['keep_deleted_files'] as int? ?? 0) != 0,
+      contentPolicy: map['content_policy'] as String?,
     );
   }
 
@@ -99,6 +115,9 @@ class Collection {
       'email_provider_id': emailProviderId,
       'imap_settings': imapSettings,
       'email_delete_policy': emailDeletePolicy.dbValue,
+      'change_cursor': changeCursor,
+      'keep_deleted_files': keepDeletedFiles ? 1 : 0,
+      'content_policy': contentPolicy,
     };
   }
 }

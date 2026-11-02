@@ -554,20 +554,22 @@ open htmlcov/index.html
 
 ## CI/CD Testing
 
-Tests run in GitHub Actions on each push:
+Tests do **not** run automatically in the release workflow. However, you should run tests locally before pushing a release:
 
-```yaml
-# .github/workflows/build_and_release.yml
-- name: Run Flutter Tests
-  run: |
-    cd client
-    flutter test
+```bash
+# Run Flutter tests
+cd client && flutter test
 
-- name: Run Python Tests
-  run: |
-    cd aiserver
-    PYTHONPATH=src pdm run pytest
+# Run Python tests
+cd aiserver && PYTHONPATH=src pdm run pytest
 ```
+
+The release workflow (`.github/workflows/build_and_release.yml`) only triggers on version tags (`v*`) and runs:
+
+1. **Tag validation** — Ensures tag matches `vX.Y.Z` or `vX.Y.Z-suffix`
+2. **Version extraction** — Derives app version from tag
+3. **Build + sign + notarize** — Python binary, Flutter client, DMG
+4. **Create GitHub Release** — Attaches build artifacts, marks pre-releases if applicable
 
 ---
 

@@ -38,7 +38,7 @@ flowchart LR
         FastAPI["FastAPI / Uvicorn\n(localhost, bearer-token auth)"]
         Local["llama-cpp-python\n(local GGUF models)"]
         Cloud["Cloud passthrough\nGemini / Claude / OpenAI / Grok"]
-        Embed["Embedding models\n(GGUF text + Qwen3-VL multimodal)"]
+        Embed["Embedding models\n(GGUF text + EmbeddingGemma 2 multimodal)"]
         PST["PST parser (pypff)"]
     end
 
@@ -143,7 +143,7 @@ Photo gallery with timeline view, GPS/EXIF data display, and full-text search �
 Semantic search and chat across all collected data via the bundled Python FastAPI service.
 
 - `services/local_llm_content_generator.dart` (`LocalLlmContentGenerator`) — implements the `genui` package's `ContentGenerator` interface
-- Local model: GGUF chat models (e.g. Gemma) via llama-cpp-python; local embeddings via Qwen3-VL-Embedding-2B
+- Local model: GGUF chat models (e.g. Gemma) via llama-cpp-python; local embeddings via EmbeddingGemma 2 (`google/embeddinggemma-2`, 768-d, text/image/audio/video)
 - Optional cloud models: Gemini, Claude, OpenAI, Grok — passthrough only, requires the user's own API key
 - Libraries: LangChain (cloud provider wrappers), llama-cpp-python (local inference)
 
@@ -363,7 +363,7 @@ utils.py          # HuggingFace Hub downloads, path/file helpers
 
 **Cloud passthrough** (optional, bring-your-own-key) — `model_manager.py` also provides `load_gemini_model()`, `load_claude_model()`, `load_openai_model()`, and `load_grok_model()`, each wrapping the corresponding LangChain chat client. Routing is dispatched in `routes.py` based on the resolved model's `group` column in the `aichat_models` table. No cloud calls are made unless the user has configured one of these providers with their own API key — the default, out-of-the-box experience is fully local.
 
-**Embeddings** — GGUF text embedding models load via `langchain_community.llms.LlamaCpp(embedding=True)`; multimodal embeddings (text + image) use Qwen3-VL-Embedding-2B via Transformers (CUDA if available, otherwise CPU — MPS is explicitly avoided due to a PyTorch bug on Apple Silicon).
+**Embeddings** — GGUF text embedding models load via `langchain_community.llms.LlamaCpp(embedding=True)`; multimodal embeddings (text/image/audio/video) use EmbeddingGemma 2 (`google/embeddinggemma-2`, 768-d) loaded via sentence-transformers in bfloat16/float32 (CUDA in bfloat16 if available, otherwise CPU in float32; float16 is never used because it produces NaN for this model).
 
 **Concurrency** — one shared model instance at a time. Because `llama_cpp` isn't safe for concurrent decoding, `state.generation_lock` (a `threading.Lock`) serializes actual generations across requests; per-generation `threading.Event`s back `/v1/chat/stop` so a stop can target a single stream without killing others.
 
@@ -513,11 +513,11 @@ erDiagram
     }
     files_embeddings {
         string fileId PK "FK -> files.id"
-        blob qwen3_vlEmbedding "Float32[2048]"
+        blob embeddinggemma2Embedding "Float32[768]"
     }
     emails_embeddings {
         string emailId PK "FK -> emails.id"
-        blob qwen3_vlEmbedding "Float32[2048]"
+        blob embeddinggemma2Embedding "Float32[768]"
     }
     aichat_models {
         string id PK
@@ -651,7 +651,7 @@ Unified search across files, photos, and email lives in `modules/search/`. It is
 **hybrid retrieval**: a lexical pass and a semantic pass run independently and
 are merged by Reciprocal Rank Fusion, then re-scored by multipliers.
 
-`SEARCH_PLAN.md` §15 ("As-built") is the detailed reference — every constant,
+`docs/plans/unified-search.md` §15 ("As-built") is the detailed reference — every constant,
 its measured justification, the known limits, and a symptom-to-file table.
 What follows is the shape.
 
@@ -664,7 +664,7 @@ raw query
   ├─ Bm25Retriever ....... files_fts + emails_fts (FTS5, implicit AND)
   │                        one merged list, files and emails interleaved
   │
-  ├─ VectorRetriever ..... POST /util/embedding (Qwen3-VL, 2048-d) then
+  ├─ VectorRetriever ..... POST /util/embedding (EmbeddingGemma 2, 768-d) then
   │                        Mode A or Mode B; per-modality similarity floor
   │
   ├─ HybridRanker ........ RRF over 3 lists: bm25, vector_file, vector_email
@@ -738,7 +738,7 @@ capability loss — check the logs before concluding a feature is broken.
 - FastAPI + Uvicorn
 - LangChain (cloud provider wrappers)
 - llama-cpp-python (local inference)
-- Transformers (Qwen3-VL-Embedding-2B multimodal embeddings)
+- sentence-transformers (EmbeddingGemma 2 multimodal embeddings)
 - pypff / libpff (Outlook PST parsing)
 - PyInstaller (executable bundling)
 

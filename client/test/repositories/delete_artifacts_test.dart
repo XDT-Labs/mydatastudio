@@ -12,6 +12,7 @@ import 'package:mydatastudio/modules/files/services/repositories/file_repository
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 
 /// Deletion has to take every artifact with it, or the archive accumulates
 /// ghosts: cached thumbnails for files that are gone, attachment bytes with no
@@ -111,7 +112,7 @@ void main() {
       await FileDesktopRepository(db).create(file);
       await DatabaseRepository(db).upsertFileEmbedding(
         id,
-        List<double>.filled(2048, 0.5),
+        List<double>.filled(EmbeddingModel.dimension, 0.5),
       );
 
       return (file, onDisk, cache.fileForKey(key));
@@ -219,7 +220,7 @@ void main() {
         ],
       );
       await DatabaseRepository(db).replaceEmailEmbeddings(emailId, [
-        List<double>.filled(2048, 0.25),
+        List<double>.filled(EmbeddingModel.dimension, 0.25),
       ]);
 
       final (attachment, attachmentBytes, attachmentThumb) =
@@ -292,7 +293,7 @@ void main() {
         ],
       );
       await DatabaseRepository(db).replaceEmailEmbeddings(emailId, [
-        List<double>.filled(2048, 0.75),
+        List<double>.filled(EmbeddingModel.dimension, 0.75),
       ]);
 
       await CollectionRepository(db).deleteCollection(col.id);
@@ -334,7 +335,7 @@ void main() {
       await FileDesktopRepository(db).delete(file, collection: col);
       await DatabaseRepository(db).upsertFileEmbedding(
         file.id,
-        List<double>.filled(2048, 0.9),
+        List<double>.filled(EmbeddingModel.dimension, 0.9),
       );
 
       expect(

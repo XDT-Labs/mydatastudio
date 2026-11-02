@@ -8,7 +8,7 @@ My Data Studio started with one idea — we need a way to keep a local copy of o
 
 - **Local-first**: All data is stored locally on your device.
 - **Privacy-focused**: No data is stored on My Data Studio's own servers — there are none. AI search and chat run against a locally-bundled LLM by default, not a cloud API.
-- **AI-powered search**: Semantic search and chat across your files, email, and photos using local GGUF models (Gemma + Qwen3-VL embeddings). Optional cloud models (Gemini/Claude/OpenAI/Grok) can be enabled with your own API key — doing so sends that request (system prompt, chat history, your message, and any attached image bytes) off-device to the chosen provider, whose own retention and training terms apply and vary by provider and account tier. Review the provider's policy before enabling it.
+- **AI-powered search**: Semantic search and chat across your files, email, and photos using local models (Gemma chat + EmbeddingGemma 2 multimodal embeddings). Optional cloud models (Gemini/Claude/OpenAI/Grok) can be enabled with your own API key — doing so sends that request (system prompt, chat history, your message, and any attached image bytes) off-device to the chosen provider, whose own retention and training terms apply and vary by provider and account tier. Review the provider's policy before enabling it.
 - **Multiple sources**: Local filesystem, Google Drive, Gmail, Yahoo Mail, Outlook (live IMAP or `.pst` file import).
 - **Open-source**: Free and open-source software (Apache 2.0).
 

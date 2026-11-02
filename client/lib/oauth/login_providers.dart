@@ -17,6 +17,11 @@ import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:uuid/uuid.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:googleapis/drive/v3.dart' as drive;
+import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
+import 'package:mydatastudio/modules/files/services/scanners/google_drive_file_api.dart';
+import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
+import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 
 // ignore: constant_identifier_names
 enum LoginProviders { google, googleDrive, azure, outlook }
@@ -122,6 +127,11 @@ extension LoginProviderExtension on LoginProviders {
         return false;
     }
   }
+
+  /// Whether sign-in needs a client secret. Defaults to true; a public desktop
+  /// client that relies on PKCE alone (e.g. Dropbox, Box) returns false and
+  /// then sends only `client_id` + `code_verifier` to the token endpoint.
+  bool get requiresClientSecret => true;
 
   /// OAuth client secret.
   /// Google requires client_secret for desktop apps even with PKCE enabled.
@@ -398,7 +408,18 @@ extension LoginProviderExtension on LoginProviders {
     BuildContext context, {
     Collection? existing,
     String rootFolderId = 'root',
-    bool downloadLocalCopy = true,
+
+    /// Null keeps [existing]'s policy (re-auth) or, for a new collection,
+    /// downloads everything.
+    ContentPolicy? contentPolicy,
+
+    /// Null keeps [existing]'s setting (re-auth); a new collection defaults
+    /// to false.
+    bool? keepDeletedFiles,
+
+    /// Shown after sign-in, before anything is stored: lets the caller present
+    /// an estimate and veto the sync (false = abandon, no collection created).
+    Future<bool> Function(CloudFileApi api)? confirmSync,
   }) async {
     if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -437,6 +458,15 @@ extension LoginProviderExtension on LoginProviders {
       final userId = profile.userId;
       final email = profile.email;
 
+      if (confirmSync != null) {
+        final api = GoogleDriveFileApi(
+          drive.DriveApi(
+            AuthenticatedHttpClient.bearer(client.credentials.accessToken),
+          ),
+        );
+        if (!await confirmSync(api)) return null;
+      }
+
       final collectionId = existing?.id ?? const Uuid().v4().toString();
 
       final collection = Collection(
@@ -456,7 +486,13 @@ extension LoginProviderExtension on LoginProviders {
         userId: userId,
         expiration: client.credentials.expiration,
         needsReAuth: false,
-        downloadLocalCopy: downloadLocalCopy,
+        downloadLocalCopy:
+            contentPolicy?.downloadsAnything ??
+            existing?.downloadLocalCopy ??
+            true,
+        contentPolicy: contentPolicy?.encode() ?? existing?.contentPolicy,
+        keepDeletedFiles:
+            keepDeletedFiles ?? existing?.keepDeletedFiles ?? false,
       );
 
       final repo = CollectionRepository(DatabaseManager.instance.database!);

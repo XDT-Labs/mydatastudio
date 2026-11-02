@@ -10,6 +10,7 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 
 /// Two files in a real library could never be embedded — one a truncated JPEG,
 /// one a `.jpg` whose bytes are not an image at all. Nothing recorded that, so
@@ -139,7 +140,7 @@ void main() {
 
       await repo.upsertFileEmbedding(
         'recovered',
-        List<double>.filled(2048, 0.1),
+        List<double>.filled(EmbeddingModel.dimension, 0.1),
       );
 
       expect(

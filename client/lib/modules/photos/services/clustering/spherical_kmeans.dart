@@ -1,18 +1,19 @@
-/// Bisecting spherical k-means over Qwen3-VL image embeddings.
+/// Bisecting spherical k-means over EmbeddingGemma 2 image embeddings.
 ///
 /// Pure Dart over [Float32List] — no plugins, no database, no Flutter binding —
 /// so it can run unchanged inside a clustering isolate or a `dart run` harness.
 ///
 /// Two choices here are load-bearing and worth stating up front:
 ///
-/// **Spherical, not Euclidean.** Qwen3-VL is trained under cosine similarity,
-/// and the rest of the app already assumes unit vectors — `findSimilarImages`
-/// converts distance to a percentage with `(1 - d/2) * 100`, which is only a
-/// similarity if `|x| = 1`. So rows are L2-normalised and every comparison is a
-/// dot product. On unit vectors squared Euclidean distance is `2 - 2·cos`, so
-/// this is a monotone re-parameterisation of ordinary k-means, not a different
-/// objective — it just avoids letting vector magnitude, which carries no
-/// meaning here, pull centroids around.
+/// **Spherical, not Euclidean.** EmbeddingGemma 2 produces L2-normalized
+/// vectors and is evaluated under cosine similarity, and the rest of the app
+/// already assumes unit vectors — `findSimilarImages` converts distance to a
+/// percentage with `(1 - d/2) * 100`, which is only a similarity if `|x| = 1`.
+/// So rows are L2-normalised and every comparison is a dot product. On unit
+/// vectors squared Euclidean distance is `2 - 2·cos`, so this is a monotone
+/// re-parameterisation of ordinary k-means, not a different objective — it
+/// just avoids letting vector magnitude, which carries no meaning here, pull
+/// centroids around.
 ///
 /// **Bisecting, not flat.** The photos UI exposes a "number of groups" slider.
 /// Running flat k-means per slider position would re-solve from scratch at

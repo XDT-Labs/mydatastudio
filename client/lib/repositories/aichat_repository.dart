@@ -98,7 +98,9 @@ class AichatRepository {
   Future<List<AichatMessage>> getMessages(String conversationId) async {
     final rows = await db.select(
       'SELECT * FROM aichat_conversation_history '
-      'WHERE conversation_id = ? ORDER BY created_at ASC',
+      // rowid breaks ties: a tool call, its result and the answer are often
+      // written in the same millisecond, and the model needs them in order.
+      'WHERE conversation_id = ? ORDER BY created_at ASC, rowid ASC',
       [conversationId],
     );
     return rows
