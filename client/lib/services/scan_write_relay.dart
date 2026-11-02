@@ -11,6 +11,7 @@ import 'package:mydatastudio/modules/files/services/batch_file_upsert_service.da
 import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:mydatastudio/services/sqlite_retry.dart';
@@ -112,7 +113,30 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
           recursive: map['recursive'] as bool? ?? true,
           isCloud: map['isCloud'] as bool? ?? false,
           isFullScan: map['isFullScan'] as bool? ?? false,
+          keepDeleted: map['keepDeleted'] as bool? ?? false,
         ),
+      );
+      return const {};
+
+    case 'cloudRemovals':
+      final map = payload as Map;
+      await retryOnLock(
+        () => FileDesktopRepository(db).applyCloudRemovals(
+          map['collectionId'] as String,
+          itemIds: List<String>.from(map['itemIds'] as List),
+          parentIds: List<String>.from(map['parentIds'] as List),
+          keepDeleted: map['keepDeleted'] as bool? ?? false,
+          at: map['at'] as DateTime,
+        ),
+        label: 'scanWriteRelay.cloudRemovals',
+      );
+      return const {};
+
+    case 'collectionChangeCursor':
+      final map = payload as Map;
+      await CollectionRepository(db).setChangeCursor(
+        map['collectionId'] as String,
+        map['cursor'] as String?,
       );
       return const {};
 

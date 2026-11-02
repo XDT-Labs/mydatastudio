@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io' as io;
 import 'dart:isolate';
+import 'package:mydatastudio/file_sources/sync_folder/online_only_checker.dart';
+import 'package:mydatastudio/helpers/content_hasher.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
@@ -218,7 +220,11 @@ class LocalFileIsolateWorker {
     this.dbName,
     this.loggerPort, {
     this.appDir,
-  });
+    OnlineOnlyChecker? onlineOnlyChecker,
+  }) : onlineOnlyChecker = onlineOnlyChecker ?? FfiOnlineOnlyChecker();
+
+  /// Decides which files are skipped when hashing (reading would download).
+  final OnlineOnlyChecker onlineOnlyChecker;
 
   final List<Future<void> Function()> _thumbnailQueue = [];
   int _activeThumbnailJobs = 0;
@@ -701,7 +707,8 @@ class LocalFileIsolateWorker {
       return result;
     }
 
-    DateTime lmDate = file_.lastModifiedSync();
+    final stat = file_.statSync();
+    final DateTime lmDate = stat.modified;
 
     // Compute relative path for storage via the shared helper.
     final relPath = ScannerPathHelper.relativePath(absPath, rootPath);
@@ -712,12 +719,6 @@ class LocalFileIsolateWorker {
     // If the file is already in our DB and hasn't changed, reuse the record and its thumbnail.
     if (metadataCache != null && metadataCache.containsKey(fileId)) {
       final cached = metadataCache[fileId]!;
-
-      // Precision fix: Truncate both to seconds before comparing.
-      // SQLite stores DateTime as unix seconds, losing milliseconds.
-      final bool mtimeMatches =
-          (cached.dateLastModified.millisecondsSinceEpoch ~/ 1000) ==
-          (lmDate.millisecondsSinceEpoch ~/ 1000);
 
       // A cached thumbnail only counts if it's still usable: for on-disk keys
       // the file must still exist (it may have been deleted or the storage dir
@@ -730,7 +731,14 @@ class LocalFileIsolateWorker {
               _thumbnailCache.existsForKey(cachedThumb));
       final bool isImage = getMimeType(name) == FilesConstants.mimeTypeImage;
 
-      if (mtimeMatches && (!isImage || hasThumbnail)) {
+      final bool unchanged = !contentHashStale(
+        cachedSize: cached.size,
+        cachedModified: cached.dateLastModified,
+        size: stat.size,
+        modified: lmDate,
+      );
+
+      if (unchanged && (!isImage || hasThumbnail)) {
         // A cached row with no GPS coordinates is ambiguous: it may genuinely
         // have none, or it may predate GPS extraction being wired up at all.
         // Retry extraction on every cache hit until it succeeds once, then
@@ -766,6 +774,7 @@ class LocalFileIsolateWorker {
           latitude: latitude,
           longitude: longitude,
           localPath: cached.localPath,
+          contentHash: cached.contentHash,
         );
         return result;
       }
@@ -781,6 +790,15 @@ class LocalFileIsolateWorker {
       longitude = gps['longitude'] as double?;
     }
 
+    // Only reached for a new or changed file (a cache hit returned above), so
+    // this is the one place a rescan pays for hashing.
+    String? contentHash;
+    try {
+      contentHash = await hashUnlessOnlineOnly(file_, onlineOnlyChecker);
+    } catch (e) {
+      logger?.w('LocalScan: could not hash $absPath: $e');
+    }
+
     result['file'] = File(
       id: fileId,
       collectionId: collectionId_,
@@ -791,11 +809,12 @@ class LocalFileIsolateWorker {
       dateLastModified: lmDate,
       lastScannedDate: scanStartTime,
       isDeleted: false,
-      size: file_.lengthSync(),
+      size: stat.size,
       contentType: mimeType,
       thumbnail: null,
       latitude: latitude,
       longitude: longitude,
+      contentHash: contentHash,
     );
 
     return result;

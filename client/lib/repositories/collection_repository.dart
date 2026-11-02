@@ -61,8 +61,8 @@ class CollectionRepository {
       await db.execute(
         "INSERT INTO collections (id, name, path, type, scanner, scan_status, oauth_service, "
         "access_token, refresh_token, id_token, user_id, expiration, last_scan_date, "
-        "needs_re_auth, download_local_copy, local_copy_path) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "needs_re_auth, download_local_copy, local_copy_path, keep_deleted_files, content_policy) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
           val.id,
           val.name,
@@ -80,6 +80,8 @@ class CollectionRepository {
           val.needsReAuth ? 1 : 0,
           val.downloadLocalCopy ? 1 : 0,
           val.localCopyPath,
+          val.keepDeletedFiles ? 1 : 0,
+          val.contentPolicy,
         ],
       );
       return val;
@@ -94,7 +96,7 @@ class CollectionRepository {
         "name = ?, path = ?, type = ?, scanner = ?, scan_status = ?, "
         "oauth_service = ?, access_token = ?, refresh_token = ?, id_token = ?, user_id = ?, "
         "expiration = ?, last_scan_date = ?, needs_re_auth = ?, "
-        "download_local_copy = ?, local_copy_path = ? "
+        "download_local_copy = ?, local_copy_path = ?, keep_deleted_files = ?, content_policy = ? "
         "WHERE id = ?",
         [
           val.name,
@@ -112,6 +114,8 @@ class CollectionRepository {
           val.needsReAuth ? 1 : 0,
           val.downloadLocalCopy ? 1 : 0,
           val.localCopyPath,
+          val.keepDeletedFiles ? 1 : 0,
+          val.contentPolicy,
           val.id,
         ],
       );
@@ -139,6 +143,17 @@ class CollectionRepository {
         [status, lastScanDate.millisecondsSinceEpoch, id],
       );
     }, label: 'CollectionRepository.updateScanStatus');
+  }
+
+  /// Stores (or, with null, clears) the provider change-feed position. A
+  /// targeted UPDATE for the same reason as [updateScanStatus].
+  Future<void> setChangeCursor(String id, String? cursor) async {
+    return retryOnLock(() async {
+      await db.execute('UPDATE collections SET change_cursor = ? WHERE id = ?', [
+        cursor,
+        id,
+      ]);
+    }, label: 'CollectionRepository.setChangeCursor');
   }
 
   /// Flags [id] as needing reconnection — the single implementation for the

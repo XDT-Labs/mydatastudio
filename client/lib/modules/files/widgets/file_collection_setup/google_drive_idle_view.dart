@@ -1,17 +1,25 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/content_policy_controls.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_sign_in_button.dart';
+import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 
 class GoogleDriveIdleView extends StatelessWidget {
   const GoogleDriveIdleView({
     super.key,
     required this.onConnect,
-    required this.saveLocalCopy,
-    required this.onSaveLocalCopyChanged,
+    required this.policy,
+    required this.onPolicyChanged,
+    this.keepDeletedFiles = false,
+    this.onKeepDeletedFilesChanged,
   });
 
   final VoidCallback onConnect;
-  final bool saveLocalCopy;
-  final ValueChanged<bool?> onSaveLocalCopyChanged;
+  final ContentPolicy policy;
+  final ValueChanged<ContentPolicy> onPolicyChanged;
+
+  /// Keep files (and their local copies) after they are deleted from Drive.
+  final bool keepDeletedFiles;
+  final ValueChanged<bool>? onKeepDeletedFilesChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -60,14 +68,14 @@ class GoogleDriveIdleView extends StatelessWidget {
         const SizedBox(height: 28),
         GoogleDriveSignInButton(onTap: onConnect),
         const SizedBox(height: 12),
-        CheckboxListTile(
-          value: saveLocalCopy,
-          onChanged: onSaveLocalCopyChanged,
+        ContentPolicyControls(policy: policy, onChanged: onPolicyChanged),
+        SwitchListTile(
+          value: keepDeletedFiles,
+          onChanged: onKeepDeletedFilesChanged,
           title: const Text(
-            'Save a local copy of all cloud files, as a local backup',
+            'Keep files deleted from Google Drive',
             style: TextStyle(fontSize: 13),
           ),
-          controlAffinity: ListTileControlAffinity.leading,
           contentPadding: EdgeInsets.zero,
           dense: true,
           visualDensity: VisualDensity.compact,

@@ -9,6 +9,7 @@ class LocalFilesTabView extends StatelessWidget {
     required this.onBrowse,
     required this.onSave,
     required this.onCancel,
+    this.intro = 'Select folder to add.',
   });
 
   /// Owned by the page, so it can validate on save and light up both fields'
@@ -20,86 +21,84 @@ class LocalFilesTabView extends StatelessWidget {
   final VoidCallback onSave;
   final VoidCallback onCancel;
 
+  /// Line shown above the fields; varies by source (network drive, etc.).
+  final String intro;
+
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: SizedBox(
-        width: MediaQuery.of(context).size.width / 2,
-        child: Form(
-          key: formKey,
-          autovalidateMode: AutovalidateMode.onUserInteraction,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Form(
+      key: formKey,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            intro,
+            style: const TextStyle(fontWeight: FontWeight.normal, fontSize: 16),
+          ),
+          const SizedBox(height: 24),
+          Row(
             children: [
-              const Text(
-                'Select folder to add.',
-                style: TextStyle(fontWeight: FontWeight.normal, fontSize: 16),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: nameController,
-                      validator:
-                          (value) =>
-                              (value == null || value.isEmpty)
-                                  ? 'Name is required'
-                                  : null,
-                      decoration: const InputDecoration(
-                        hintText: 'Name of folder',
-                        labelText: 'Name *',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
+              Expanded(
+                child: TextFormField(
+                  controller: nameController,
+                  validator:
+                      (value) =>
+                          (value == null || value.isEmpty)
+                              ? 'Name is required'
+                              : null,
+                  decoration: const InputDecoration(
+                    hintText: 'Name of folder',
+                    labelText: 'Name *',
+                    border: OutlineInputBorder(),
                   ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: pathController,
-                      readOnly: true,
-                      validator:
-                          (value) =>
-                              (value == null || value.isEmpty)
-                                  ? 'Folder is required'
-                                  : null,
-                      decoration: const InputDecoration(
-                        icon: Icon(Icons.folder_open),
-                        hintText: 'Click Browse to select a folder',
-                        labelText: 'Folder *',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    onPressed: onBrowse,
-                    icon: const Icon(Icons.search),
-                    label: const Text('Browse'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 32),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(onPressed: onCancel, child: const Text('Cancel')),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: onSave,
-                    child: const Text('Add Folder'),
-                  ),
-                ],
+                ),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  controller: pathController,
+                  readOnly: true,
+                  validator:
+                      (value) =>
+                          (value == null || value.isEmpty)
+                              ? 'Folder is required'
+                              : null,
+                  decoration: const InputDecoration(
+                    icon: Icon(Icons.folder_open),
+                    hintText: 'Click Browse to select a folder',
+                    labelText: 'Folder *',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: onBrowse,
+                icon: const Icon(Icons.search),
+                label: const Text('Browse'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 32),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(onPressed: onCancel, child: const Text('Cancel')),
+              const SizedBox(width: 12),
+              ElevatedButton(
+                onPressed: onSave,
+                child: const Text('Add Folder'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
