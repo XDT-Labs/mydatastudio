@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: in-progress
 adr: none
-remaining: [region-hosts, oauth-app, pcloud-api-adapter, diff-cursor, sync-folder-card]
+remaining: [verify-folder-name, region-hosts, oauth-app, pcloud-api-adapter, diff-cursor]
 ---
 
 # Plan: pCloud
