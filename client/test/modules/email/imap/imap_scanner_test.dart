@@ -9,6 +9,29 @@ import 'package:mydatastudio/modules/files/files_constants.dart';
 void main() {
   authSelectionTests();
   group('ImapScannerIsolateWorker unit tests', () {
+    test('localFolderName keeps server folder names inside the root', () {
+      // Folder names come from the IMAP server; one must never steer
+      // attachment writes outside the account's extraction directory.
+      expect(ImapScannerIsolateWorker.localFolderName('INBOX'), 'INBOX');
+      expect(ImapScannerIsolateWorker.localFolderName('Work/Projects'),
+          'Work/Projects');
+      expect(ImapScannerIsolateWorker.localFolderName('../../etc'), 'etc');
+      expect(ImapScannerIsolateWorker.localFolderName('/abs/path'), 'abs/path');
+      expect(ImapScannerIsolateWorker.localFolderName(r'..\..\x'), 'x');
+      expect(ImapScannerIsolateWorker.localFolderName('..'), '_');
+    });
+
+    test('decodePartText decodes transfer encoding once and honors charset',
+        () {
+      // "=3D" in quoted-printable is a literal "="; decoding the result a
+      // second time would turn the literal "=41" into "A".
+      final qp = MimePart()
+        ..addHeader('Content-Type', 'text/plain; charset=iso-8859-1')
+        ..addHeader('Content-Transfer-Encoding', 'quoted-printable')
+        ..mimeData = TextMimeData('caf=E9 =3D41\r\n', containsHeader: false);
+      expect(ImapScannerIsolateWorker.decodePartText(qp)?.trim(), 'café =41');
+    });
+
     test('mapMimeType correctly maps standard MIME types', () {
       expect(
         ImapScannerIsolateWorker.mapMimeType('image/jpeg'),

@@ -13,7 +13,6 @@ import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/email_folder.dart';
 import 'package:mydatastudio/models/tables/file.dart' as db_file;
 import 'package:mydatastudio/models/tables/folder.dart' as db_folder;
-import 'package:mydatastudio/modules/email/services/email_decoding_helper.dart';
 import 'package:mydatastudio/helpers/sql_chunks.dart';
 import 'package:mydatastudio/models/tables/email_delete_policy.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
@@ -719,10 +718,13 @@ class ImapScannerIsolateWorker {
           // Header prefetch failed: dedupe now, on the full message.
           final again = (await _lookupByMessageId(appDb, cid, [mid]))[mid];
           if (again != null) {
-            if (again.folderId == targetFolder && again.uid == null) {
+            final uid = message.uid;
+            if (again.folderId == targetFolder &&
+                again.uid == null &&
+                uid != null) {
               rematch.add({
                 'id': again.id,
-                'uid': message.uid,
+                'uid': uid,
                 'isRead': message.isSeen,
               });
             } else if (again.folderId != targetFolder && !again.isDeleted) {
@@ -1378,12 +1380,7 @@ class ImapScannerIsolateWorker {
           (p) => p?.mediaType.text.toLowerCase().contains('plain') ?? false,
           orElse: () => null,
         );
-        if (part != null) {
-          final rawBytes = part.decodeContentBinary();
-          if (rawBytes != null && rawBytes.isNotEmpty) {
-            plainBody = EmailDecodingHelper.decodeQuotedPrintable(rawBytes);
-          }
-        }
+        if (part != null) plainBody = decodePartText(part);
       } catch (_) {}
     }
 
@@ -1393,12 +1390,7 @@ class ImapScannerIsolateWorker {
           (p) => p?.mediaType.text.toLowerCase().contains('html') ?? false,
           orElse: () => null,
         );
-        if (part != null) {
-          final rawBytes = part.decodeContentBinary();
-          if (rawBytes != null && rawBytes.isNotEmpty) {
-            htmlBody = EmailDecodingHelper.decodeQuotedPrintable(rawBytes);
-          }
-        }
+        if (part != null) htmlBody = decodePartText(part);
       } catch (_) {}
     }
 
@@ -1422,7 +1414,7 @@ class ImapScannerIsolateWorker {
       uid: uid,
       collectionId: collection.id,
       date: msgDate,
-      from: message.from?.first.toString() ?? 'unknown',
+      from: message.from?.firstOrNull?.toString() ?? 'unknown',
       to: message.to?.map((e) => e.toString()).toList() ?? [],
       cc: message.cc?.map((e) => e.toString()).toList() ?? [],
       subject: subject,
@@ -1437,7 +1429,7 @@ class ImapScannerIsolateWorker {
     );
 
     if (collection.downloadLocalCopy) {
-      final labelName = targetFolder;
+      final labelName = localFolderName(targetFolder);
       final year = msgDate.year.toString();
       final extractionRoot = p.normalize(
         p.join(appDir, 'files', 'email', collection.id),
@@ -1473,6 +1465,38 @@ class ImapScannerIsolateWorker {
       }
     }
     return emailObj;
+  }
+
+  /// Text of [part] for when enough_mail's own body lookup failed or found
+  /// nothing. [MimePart.decodeContentText] undoes the transfer encoding and
+  /// applies the part's charset; if that throws (bad charset label, malformed
+  /// encoding), fall back to the transfer-decoded bytes as lenient UTF-8.
+  /// Never runs the bytes through quoted-printable decoding again: they are
+  /// already decoded, so a literal "=41" in the text would be corrupted.
+  static String? decodePartText(MimePart part) {
+    try {
+      final text = part.decodeContentText();
+      if (text != null && text.isNotEmpty) return text;
+    } catch (_) {}
+    try {
+      final bytes = part.decodeContentBinary();
+      if (bytes == null || bytes.isEmpty) return null;
+      return utf8.decode(bytes, allowMalformed: true);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Relative directory for an IMAP folder's attachments under the account's
+  /// extraction root. The folder name comes from the server, so `..`, `.`,
+  /// empty and absolute segments are dropped: a name like `../../x` must not
+  /// write outside the root. Ordinary names, including nested `A/B`, are
+  /// unchanged.
+  static String localFolderName(String imapFolder) {
+    final segments = imapFolder
+        .split(RegExp(r'[/\\]'))
+        .where((s) => s.isNotEmpty && s != '.' && s != '..');
+    return segments.isEmpty ? '_' : segments.join('/');
   }
 
   /// Maps a standard MIME type to the internal [FilesConstants] value.

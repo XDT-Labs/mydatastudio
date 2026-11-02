@@ -113,6 +113,21 @@ void main() {
       expect(saved?.emailDeletePolicy, EmailDeletePolicy.remove);
     });
 
+    testWidgets('a failed save leaves the in-memory policy unchanged',
+        (tester) async {
+      // The dialog edits the drawer's live Collection; if the write fails it
+      // must not show a policy the database doesn't have.
+      final col = _col(AppConstants.scannerEmailImap);
+      await _open(tester, col, (_) async => throw StateError('db locked'));
+      await tester.tap(find.text('Hide in this app'));
+      await tester.pump();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining("Couldn't save"), findsOneWidget);
+      expect(col.emailDeletePolicy, EmailDeletePolicy.keep);
+      expect(find.byType(EmailAccountSettingsDialog), findsOneWidget);
+    });
+
     testWidgets('saving unchanged remove does not re-confirm', (tester) async {
       Collection? saved;
       await _open(

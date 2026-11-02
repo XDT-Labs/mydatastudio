@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/app_constants.dart';
+import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email_delete_policy.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
@@ -51,6 +52,7 @@ class EmailAccountSettingsDialog extends StatefulWidget {
 class _EmailAccountSettingsDialogState
     extends State<EmailAccountSettingsDialog> {
   late EmailDeletePolicy _policy = widget.collection.emailDeletePolicy;
+  bool _saveFailed = false;
 
   static const _options = <(EmailDeletePolicy, String, String)>[
     (
@@ -75,8 +77,18 @@ class _EmailAccountSettingsDialogState
     final changedToRemove = _policy == EmailDeletePolicy.remove &&
         widget.collection.emailDeletePolicy != EmailDeletePolicy.remove;
     if (changedToRemove && !await _confirmRemove()) return;
+    // Revert on failure so the caller's Collection doesn't claim a policy
+    // that was never stored.
+    final previous = widget.collection.emailDeletePolicy;
     widget.collection.emailDeletePolicy = _policy;
-    await widget.onSave(widget.collection);
+    try {
+      await widget.onSave(widget.collection);
+    } catch (e) {
+      AppLogger(null).e('Saving email delete policy failed: $e');
+      widget.collection.emailDeletePolicy = previous;
+      if (mounted) setState(() => _saveFailed = true);
+      return;
+    }
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -142,6 +154,11 @@ class _EmailAccountSettingsDialogState
                 ],
               ),
             ),
+            if (_saveFailed)
+              Text(
+                "Couldn't save the setting. Please try again.",
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
           ],
         ),
       ),
