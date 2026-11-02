@@ -17,6 +17,15 @@ class DatabaseRepository {
 
   DatabaseRepository(this.db);
 
+  /// SQL: the file's collection has not opted out of indexing through its
+  /// ContentPolicy (`collections.content_policy`, aliased `c`). Filtering in
+  /// SQL keeps excluded files out of every embedding/chunk/description queue
+  /// without the isolates needing to know about policies; a NULL policy means
+  /// "index" so existing collections are unchanged.
+  static const collectionIndexed =
+      "(c.content_policy IS NULL OR "
+      "IFNULL(json_extract(c.content_policy, '\$.index'), 1) <> 0)";
+
   Future<int> countAllRows(String table) async {
     final rows = await db.select("select count(*) as count from $table;");
     if (rows.isEmpty) return 0;
@@ -364,6 +373,7 @@ class DatabaseRepository {
         AND f.is_deleted = 0
         AND f.is_user_deleted = 0
         AND f.is_inline = 0
+        AND $collectionIndexed
         AND f.embedding_attempts < ?
         $exclusion
       LIMIT ?
@@ -490,6 +500,7 @@ class DatabaseRepository {
                AND f.content_type NOT LIKE 'application/vnd.google-apps.%')
               OR f.content_type IN ($exportableTypes)
             )
+        AND $collectionIndexed
         AND f.embedding_attempts < ?
         AND NOT EXISTS (
               SELECT 1 FROM file_chunks fc
@@ -579,6 +590,7 @@ class DatabaseRepository {
         AND f.is_deleted = 0
         AND f.is_user_deleted = 0
         AND f.is_inline = 0
+        AND $collectionIndexed
         AND f.description_attempts < ?
       LIMIT ?
       ''',

@@ -16,6 +16,11 @@ import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:uuid/uuid.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:googleapis/drive/v3.dart' as drive;
+import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
+import 'package:mydatastudio/modules/files/services/scanners/google_drive_file_api.dart';
+import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
+import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 
 // ignore: constant_identifier_names
 enum LoginProviders { google, googleDrive, azure, outlook }
@@ -402,8 +407,15 @@ extension LoginProviderExtension on LoginProviders {
     BuildContext context, {
     Collection? existing,
     String rootFolderId = 'root',
-    bool downloadLocalCopy = true,
+
+    /// Null keeps [existing]'s policy (re-auth) or, for a new collection,
+    /// downloads everything.
+    ContentPolicy? contentPolicy,
     bool keepDeletedFiles = false,
+
+    /// Shown after sign-in, before anything is stored: lets the caller present
+    /// an estimate and veto the sync (false = abandon, no collection created).
+    Future<bool> Function(CloudFileApi api)? confirmSync,
   }) async {
     if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -442,6 +454,15 @@ extension LoginProviderExtension on LoginProviders {
       final userId = profile.userId;
       final email = profile.email;
 
+      if (confirmSync != null) {
+        final api = GoogleDriveFileApi(
+          drive.DriveApi(
+            AuthenticatedHttpClient.bearer(client.credentials.accessToken),
+          ),
+        );
+        if (!await confirmSync(api)) return null;
+      }
+
       final collectionId = existing?.id ?? const Uuid().v4().toString();
 
       final collection = Collection(
@@ -461,7 +482,11 @@ extension LoginProviderExtension on LoginProviders {
         userId: userId,
         expiration: client.credentials.expiration,
         needsReAuth: false,
-        downloadLocalCopy: downloadLocalCopy,
+        downloadLocalCopy:
+            contentPolicy?.downloadsAnything ??
+            existing?.downloadLocalCopy ??
+            true,
+        contentPolicy: contentPolicy?.encode() ?? existing?.contentPolicy,
         keepDeletedFiles: keepDeletedFiles,
       );
 

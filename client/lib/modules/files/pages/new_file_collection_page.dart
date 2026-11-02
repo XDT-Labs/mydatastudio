@@ -12,6 +12,8 @@ import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_success_view.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_configure_view.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/local_files_tab_view.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/sync_estimate_dialog.dart';
+import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 import 'package:mydatastudio/oauth/login_providers.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
@@ -206,7 +208,7 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
   _DriveAuthState _authState = _DriveAuthState.loading;
   String? _errorMessage;
   String? _connectedEmail;
-  bool _saveLocalCopy = true;
+  ContentPolicy _policy = ContentPolicy.everything;
   bool _keepDeletedFiles = false;
 
   @override
@@ -245,7 +247,15 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
     try {
       final collection = await LoginProviderExtension.handleGoogleDrive(
         context,
-        downloadLocalCopy: _saveLocalCopy,
+        contentPolicy: _policy,
+        confirmSync:
+            (api) async =>
+                await showDialog<bool>(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (_) => SyncEstimateDialog(api: api, policy: _policy),
+                ) ??
+                false,
         keepDeletedFiles: _keepDeletedFiles,
       );
 
@@ -334,12 +344,8 @@ class _GoogleDriveTabState extends State<_GoogleDriveTab> {
               key: const ValueKey('idle'),
               child: GoogleDriveIdleView(
                 onConnect: _connectGoogleDrive,
-                saveLocalCopy: _saveLocalCopy,
-                onSaveLocalCopyChanged: (value) {
-                  setState(() {
-                    _saveLocalCopy = value ?? true;
-                  });
-                },
+                policy: _policy,
+                onPolicyChanged: (value) => setState(() => _policy = value),
                 keepDeletedFiles: _keepDeletedFiles,
                 onKeepDeletedFilesChanged: (value) {
                   setState(() {

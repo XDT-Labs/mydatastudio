@@ -15,6 +15,7 @@ import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:mydatastudio/scanners/scan_isolate_support.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 import 'package:mydatastudio/services/scan_write_relay.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:path/path.dart' as p;
@@ -125,6 +126,7 @@ class CloudFileScanner extends CollectionScanner {
       'collectionPath': collection.path,
       'lastScanDate': collection.lastScanDate?.toIso8601String(),
       'downloadLocalCopy': collection.downloadLocalCopy,
+      'contentPolicy': collection.contentPolicy,
       'changeCursor': collection.changeCursor,
       'keepDeletedFiles': collection.keepDeletedFiles,
       // The root folder ID to start scanning from (e.g. 'root' or a specific folder ID)
@@ -379,6 +381,10 @@ class CloudFileScannerWorker {
     // directory and is only used to open the db — see [CloudFileScanner.appDir].
     final appDir = args['appDir'] as String? ?? args['storagePath'] as String?;
     final downloadLocalCopy = args['downloadLocalCopy'] as bool? ?? false;
+    final policy = ContentPolicy.resolve(
+      json: args['contentPolicy'] as String?,
+      downloadLocalCopy: downloadLocalCopy,
+    );
     final isFullScan = args['isFullScan'] as bool? ?? false;
     final recursive = args['recursive'] as bool? ?? true;
     final force = args['force'] as bool? ?? false;
@@ -554,7 +560,7 @@ class CloudFileScannerWorker {
       _isScanning = false;
       port.send({'type': 'scan_complete'});
 
-      if (downloadLocalCopy && appDir != null) {
+      if (policy.downloadsAnything && appDir != null) {
         // Query DB for files with null localPath
         logger.i('CloudFileIsolate: querying DB for files needing download...');
         final allFilesNeedingDownload = await _filesToDownload(collectionId);
@@ -563,7 +569,8 @@ class CloudFileScannerWorker {
         // Skip items the provider can't hand over as plain bytes (e.g. Google
         // Docs/Sheets).
         for (final file in allFilesNeedingDownload) {
-          if (api.isDownloadableMimeType(file.contentType)) {
+          if (api.isDownloadableMimeType(file.contentType) &&
+              policy.shouldDownload(file)) {
             _downloadQueue.add(file);
           }
         }

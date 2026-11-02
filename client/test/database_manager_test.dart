@@ -238,6 +238,9 @@ void main() {
           'ALTER TABLE collections DROP COLUMN keep_deleted_files',
         );
         await appDb.rawDb.execute(
+          'ALTER TABLE collections DROP COLUMN content_policy',
+        );
+        await appDb.rawDb.execute(
           'ALTER TABLE files DROP COLUMN source_deleted_date',
         );
         await appDb.close();
@@ -246,7 +249,7 @@ void main() {
         final cols = (await appDb.rawDb.select(
           'PRAGMA table_info(collections)',
         )).map((r) => r['name'] as String).toSet();
-        expect(cols, containsAll(['change_cursor', 'keep_deleted_files']));
+        expect(cols, containsAll(['change_cursor', 'keep_deleted_files', 'content_policy']));
         expect(await _fileColumns(appDb), contains('source_deleted_date'));
 
         await appDb.close();

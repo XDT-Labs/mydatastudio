@@ -9,6 +9,7 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_scanner.dart';
+import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 import 'package:path/path.dart' as p;
 
 class _MockDb extends Mock implements AppDatabase {}
@@ -140,6 +141,7 @@ void main() {
     String root = 'root',
     String? cursor,
     bool keepDeleted = false,
+    String? policy,
   }) => {
     'collectionId': 'c1',
     'collectionName': 'My Drive',
@@ -149,6 +151,7 @@ void main() {
     'force': force,
     'recursive': recursive,
     'downloadLocalCopy': download,
+    'contentPolicy': policy,
     'lastScanDate': lastScan,
     'changeCursor': cursor,
     'keepDeletedFiles': keepDeleted,
@@ -712,6 +715,47 @@ void main() {
       io.File(p.join(tmp, 'files', 'fake', 'My Drive', 'ok1.txt')).existsSync(),
       isTrue,
     );
+  });
+
+  test('download queue applies the content policy (category and size)', () async {
+    final api = FakeCloudFileApi({});
+    File row(String id, String mime, int size) => File(
+      id: 'c1:$id',
+      name: id,
+      path: 'fake://$id',
+      parent: '',
+      dateCreated: DateTime(2024),
+      dateLastModified: DateTime(2024),
+      collectionId: 'c1',
+      contentType: mime,
+      isDeleted: false,
+      size: size,
+    );
+    await run(
+      worker(
+        toDownload: [
+          row('small.png', 'image/png', 10),
+          row('big.png', 'image/png', 1000),
+          row('clip.mp4', 'video/mp4', 10),
+        ],
+      ),
+      api,
+      args(
+        // The legacy flag is off: the stored policy alone drives downloads.
+        policy:
+            const ContentPolicy(
+              downloadCategories: {ContentCategory.images},
+              maxFileBytes: 100,
+            ).encode(),
+      ),
+    );
+    expect(api.downloaded, ['small.png']);
+  });
+
+  test('download_local_copy=false with no policy downloads nothing', () async {
+    final api = FakeCloudFileApi({});
+    await run(worker(), api, args());
+    expect(api.downloaded, isEmpty);
   });
 
   test(

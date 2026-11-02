@@ -3,9 +3,10 @@ import 'dart:io' as io;
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
+import 'package:mydatastudio/scanners/cloud/cloud_sync_estimator.dart';
 
 /// Google Drive v3 implementation of [CloudFileApi].
-class GoogleDriveFileApi implements CloudFileApi {
+class GoogleDriveFileApi implements CloudFileApi, WholeDriveListing {
   static const folderMimeType = 'application/vnd.google-apps.folder';
 
   static const _fields =
@@ -57,6 +58,27 @@ class GoogleDriveFileApi implements CloudFileApi {
         pageSize: 200,
         orderBy: 'folder, name',
       );
+
+  /// Whole-drive listing for the pre-sync estimate: 1000 per page, minimal
+  /// fields. Restricted to items we own, which is what a walk from 'root'
+  /// reaches (shared-with-me items are not under My Drive).
+  @override
+  Stream<List<CloudFileEntry>> listAllEntries() async* {
+    String? token;
+    do {
+      final r = await _drive.files.list(
+        q: "trashed = false and 'me' in owners",
+        $fields: 'nextPageToken, files(id, name, mimeType, size)',
+        pageSize: 1000,
+        pageToken: token,
+      );
+      yield [
+        for (final f in r.files ?? const <drive.File>[])
+          if (_toEntry(f) case final e?) e,
+      ];
+      token = r.nextPageToken;
+    } while (token != null);
+  }
 
   static const _changeFields =
       'nextPageToken, newStartPageToken, changes(fileId, removed, '

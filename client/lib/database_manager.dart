@@ -1519,6 +1519,9 @@ class AppDatabase {
         // Keep rows and local copies of files the source deleted, instead of
         // marking them is_deleted.
         'keep_deleted_files': 'INTEGER NOT NULL DEFAULT 0',
+        // ContentPolicy JSON (what to download / whether to index). NULL =
+        // derive from download_local_copy.
+        'content_policy': 'TEXT',
       },
       'albums': {'description': 'TEXT', 'cover_file_id': 'TEXT'},
       // Which embedding pipeline produced the vector in this row. See
@@ -2057,7 +2060,8 @@ class AppDatabase {
       download_local_copy INTEGER NOT NULL DEFAULT 0,
       local_copy_path TEXT,
       change_cursor TEXT,
-      keep_deleted_files INTEGER NOT NULL DEFAULT 0
+      keep_deleted_files INTEGER NOT NULL DEFAULT 0,
+      content_policy TEXT
     );
     ''',
     // emails

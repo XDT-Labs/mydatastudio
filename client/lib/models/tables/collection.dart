@@ -24,6 +24,9 @@ class Collection {
   /// `files.source_deleted_date` instead of `is_deleted`).
   bool keepDeletedFiles = false;
 
+  /// ContentPolicy JSON; null = derive from [downloadLocalCopy].
+  String? contentPolicy;
+
   // fields not in db
   String? status;
   String? statusMessage;
@@ -47,6 +50,7 @@ class Collection {
     this.localCopyPath,
     this.changeCursor,
     this.keepDeletedFiles = false,
+    this.contentPolicy,
   });
 
   factory Collection.fromDbMap(Map<String, dynamic> map) {
@@ -69,6 +73,7 @@ class Collection {
       localCopyPath: map['local_copy_path'] as String?,
       changeCursor: map['change_cursor'] as String?,
       keepDeletedFiles: (map['keep_deleted_files'] as int? ?? 0) != 0,
+      contentPolicy: map['content_policy'] as String?,
     );
   }
 
@@ -92,6 +97,7 @@ class Collection {
       'local_copy_path': localCopyPath,
       'change_cursor': changeCursor,
       'keep_deleted_files': keepDeletedFiles ? 1 : 0,
+      'content_policy': contentPolicy,
     };
   }
 }
