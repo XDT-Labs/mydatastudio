@@ -17,7 +17,36 @@ import 'package:mydatastudio/widgets/accessible_tap.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 
-enum _EmailAccordionSection { gmail, yahoo, outlook, other }
+enum EmailAccordionSection { gmail, yahoo, outlook, other }
+
+/// Which drawer section an email collection belongs to. Generic `email.imap`
+/// collections are grouped by their provider, legacy scanners by scanner id.
+EmailAccordionSection emailAccordionSectionFor(
+  String scanner,
+  String? emailProviderId,
+) {
+  switch (scanner) {
+    case AppConstants.scannerEmailGmail:
+      return EmailAccordionSection.gmail;
+    case AppConstants.scannerEmailYahoo:
+      return EmailAccordionSection.yahoo;
+    case AppConstants.scannerEmailOutlook:
+    case AppConstants.scannerEmailOutlookPst:
+      return EmailAccordionSection.outlook;
+    case AppConstants.scannerEmailImap:
+      switch (emailProviderId) {
+        case 'gmail':
+          return EmailAccordionSection.gmail;
+        case 'yahoo':
+          return EmailAccordionSection.yahoo;
+        case 'outlook':
+          return EmailAccordionSection.outlook;
+      }
+      return EmailAccordionSection.other;
+    default:
+      return EmailAccordionSection.other;
+  }
+}
 
 class EmailDrawer extends StatefulWidget {
   const EmailDrawer({super.key});
@@ -38,7 +67,7 @@ class _EmailDrawer extends State<EmailDrawer> {
   Collection? collection;
   String? selectedFolderId;
 
-  _EmailAccordionSection? _expandedSection = _EmailAccordionSection.gmail;
+  EmailAccordionSection? _expandedSection = EmailAccordionSection.gmail;
 
   @override
   void initState() {
@@ -56,7 +85,10 @@ class _EmailDrawer extends State<EmailDrawer> {
           collection = value;
           // Auto-expand the section containing the selected account
           if (value != null) {
-            _expandedSection = _sectionFor(value.scanner);
+            _expandedSection = emailAccordionSectionFor(
+              value.scanner,
+              value.emailProviderId,
+            );
           }
         });
       }
@@ -84,20 +116,6 @@ class _EmailDrawer extends State<EmailDrawer> {
     super.dispose();
   }
 
-  _EmailAccordionSection _sectionFor(String scanner) {
-    switch (scanner) {
-      case AppConstants.scannerEmailGmail:
-        return _EmailAccordionSection.gmail;
-      case AppConstants.scannerEmailYahoo:
-        return _EmailAccordionSection.yahoo;
-      case AppConstants.scannerEmailOutlook:
-      case AppConstants.scannerEmailOutlookPst:
-        return _EmailAccordionSection.outlook;
-      default:
-        return _EmailAccordionSection.other;
-    }
-  }
-
   String _getDisplayName(Collection c) {
     final name = c.name;
     // If name contains an email in parens, show just the email
@@ -112,44 +130,21 @@ class _EmailDrawer extends State<EmailDrawer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final gmailAccounts =
-        collections
-            .where((c) => c.scanner == AppConstants.scannerEmailGmail)
-            .toList()
-          ..sort(
-            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-          );
-    final yahooAccounts =
-        collections
-            .where((c) => c.scanner == AppConstants.scannerEmailYahoo)
-            .toList()
-          ..sort(
-            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-          );
-    final outlookAccounts =
+    List<Collection> accountsIn(EmailAccordionSection section) =>
         collections
             .where(
               (c) =>
-                  c.scanner == AppConstants.scannerEmailOutlook ||
-                  c.scanner == AppConstants.scannerEmailOutlookPst,
+                  emailAccordionSectionFor(c.scanner, c.emailProviderId) ==
+                  section,
             )
             .toList()
           ..sort(
             (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
           );
-    final otherAccounts =
-        collections
-            .where(
-              (c) =>
-                  c.scanner != AppConstants.scannerEmailGmail &&
-                  c.scanner != AppConstants.scannerEmailYahoo &&
-                  c.scanner != AppConstants.scannerEmailOutlook &&
-                  c.scanner != AppConstants.scannerEmailOutlookPst,
-            )
-            .toList()
-          ..sort(
-            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-          );
+    final gmailAccounts = accountsIn(EmailAccordionSection.gmail);
+    final yahooAccounts = accountsIn(EmailAccordionSection.yahoo);
+    final outlookAccounts = accountsIn(EmailAccordionSection.outlook);
+    final otherAccounts = accountsIn(EmailAccordionSection.other);
 
     return SizedBox.expand(
       child: Container(
@@ -178,17 +173,17 @@ class _EmailDrawer extends State<EmailDrawer> {
                           title: 'Gmail',
                           icon: Icons.email_outlined,
                           isExpanded:
-                              _expandedSection == _EmailAccordionSection.gmail,
+                              _expandedSection == EmailAccordionSection.gmail,
                           onTap:
                               () => setState(() {
                                 _expandedSection =
                                     _expandedSection ==
-                                            _EmailAccordionSection.gmail
+                                            EmailAccordionSection.gmail
                                         ? null
-                                        : _EmailAccordionSection.gmail;
+                                        : EmailAccordionSection.gmail;
                               }),
                         ),
-                        if (_expandedSection == _EmailAccordionSection.gmail)
+                        if (_expandedSection == EmailAccordionSection.gmail)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
@@ -211,17 +206,17 @@ class _EmailDrawer extends State<EmailDrawer> {
                           title: 'Yahoo',
                           icon: Icons.mail_outlined,
                           isExpanded:
-                              _expandedSection == _EmailAccordionSection.yahoo,
+                              _expandedSection == EmailAccordionSection.yahoo,
                           onTap:
                               () => setState(() {
                                 _expandedSection =
                                     _expandedSection ==
-                                            _EmailAccordionSection.yahoo
+                                            EmailAccordionSection.yahoo
                                         ? null
-                                        : _EmailAccordionSection.yahoo;
+                                        : EmailAccordionSection.yahoo;
                               }),
                         ),
-                        if (_expandedSection == _EmailAccordionSection.yahoo)
+                        if (_expandedSection == EmailAccordionSection.yahoo)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
@@ -244,18 +239,17 @@ class _EmailDrawer extends State<EmailDrawer> {
                           title: 'Outlook',
                           icon: Icons.inbox_outlined,
                           isExpanded:
-                              _expandedSection ==
-                              _EmailAccordionSection.outlook,
+                              _expandedSection == EmailAccordionSection.outlook,
                           onTap:
                               () => setState(() {
                                 _expandedSection =
                                     _expandedSection ==
-                                            _EmailAccordionSection.outlook
+                                            EmailAccordionSection.outlook
                                         ? null
-                                        : _EmailAccordionSection.outlook;
+                                        : EmailAccordionSection.outlook;
                               }),
                         ),
-                        if (_expandedSection == _EmailAccordionSection.outlook)
+                        if (_expandedSection == EmailAccordionSection.outlook)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(
@@ -278,17 +272,17 @@ class _EmailDrawer extends State<EmailDrawer> {
                           title: 'Other',
                           icon: Icons.alternate_email,
                           isExpanded:
-                              _expandedSection == _EmailAccordionSection.other,
+                              _expandedSection == EmailAccordionSection.other,
                           onTap:
                               () => setState(() {
                                 _expandedSection =
                                     _expandedSection ==
-                                            _EmailAccordionSection.other
+                                            EmailAccordionSection.other
                                         ? null
-                                        : _EmailAccordionSection.other;
+                                        : EmailAccordionSection.other;
                               }),
                         ),
-                        if (_expandedSection == _EmailAccordionSection.other)
+                        if (_expandedSection == EmailAccordionSection.other)
                           Padding(
                             padding: const EdgeInsets.only(left: 16.0),
                             child: Column(

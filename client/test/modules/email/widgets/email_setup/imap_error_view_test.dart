@@ -1,14 +1,14 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_error_view.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/imap_error_view.dart';
 
 void main() {
-  group('YahooErrorView', () {
+  group('ImapErrorView', () {
     testWidgets('shows Setup Failed heading', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: YahooErrorView(errorMessage: null, onRetry: () {}),
+            body: ImapErrorView(errorMessage: null, onRetry: () {}),
           ),
         ),
       );
@@ -20,7 +20,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: YahooErrorView(
+            body: ImapErrorView(
               errorMessage: 'IMAP auth failed',
               onRetry: () {},
             ),
@@ -35,7 +35,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: YahooErrorView(errorMessage: null, onRetry: () {}),
+            body: ImapErrorView(errorMessage: null, onRetry: () {}),
           ),
         ),
       );
@@ -48,7 +48,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: YahooErrorView(
+            body: ImapErrorView(
               errorMessage: null,
               onRetry: () => called = true,
             ),

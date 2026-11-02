@@ -1,7 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
-class YahooSuccessView extends StatelessWidget {
-  const YahooSuccessView({super.key, required this.connectedEmail});
+class ImapSuccessView extends StatelessWidget {
+  const ImapSuccessView({super.key, required this.connectedEmail});
 
   final String? connectedEmail;
 

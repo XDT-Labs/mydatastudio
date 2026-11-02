@@ -25,10 +25,10 @@ import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_success_vie
 import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_error_view.dart';
 import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_configure_view.dart';
 import 'package:mydatastudio/modules/email/widgets/email_setup/outlook_configure_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_idle_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_loading_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_success_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_error_view.dart';
+import 'package:mydatastudio/modules/email/services/imap/email_provider.dart';
+import 'package:mydatastudio/modules/email/services/imap/email_provider_registry.dart';
+import 'package:mydatastudio/modules/email/services/setup/imap_connection_tester.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/email_account_setup_tab.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
@@ -72,15 +72,17 @@ class _NewEmailPage extends State<NewEmailPage> {
       body: Center(
         child: SizedBox.expand(
           child: DefaultTabController(
-            length: 4,
+            length: 3,
             child: Scaffold(
               appBar: AppBar(
                 toolbarHeight: 0,
                 bottom: const TabBar(
                   tabs: [
                     Tab(icon: Icon(Icons.email), text: 'Gmail'),
-                    Tab(icon: Icon(Icons.email), text: 'Yahoo Mail'),
-                    Tab(icon: Icon(Icons.email), text: 'Outlook'),
+                    Tab(
+                      icon: Icon(Icons.alternate_email),
+                      text: 'Email account (IMAP)',
+                    ),
                     Tab(icon: Icon(Icons.email), text: 'Outlook PST'),
                   ],
                 ),
@@ -88,8 +90,7 @@ class _NewEmailPage extends State<NewEmailPage> {
               body: TabBarView(
                 children: [
                   const _GmailTab(),
-                  const _YahooTab(),
-                  const _OutlookTab(),
+                  const _ImapAccountTab(),
                   const _OutlookPstTab(),
                 ],
               ),
@@ -506,164 +507,65 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
 }
 
 // =============================================================================
-// Yahoo Tab — stateful OAuth flow
+// Email account (IMAP) Tab — provider detection, then the provider's own flow
 // =============================================================================
 
-enum _YahooAuthState { idle, loading, success, error }
+class _ImapAccountTab extends StatelessWidget {
+  const _ImapAccountTab();
 
-class _YahooTab extends StatefulWidget {
-  const _YahooTab();
-
-  @override
-  State<_YahooTab> createState() => _YahooTabState();
-}
-
-class _YahooTabState extends State<_YahooTab> {
-  _YahooAuthState _authState = _YahooAuthState.idle;
-  String? _errorMessage;
-  String? _connectedEmail;
-
-  final _formKey = GlobalKey<FormState>();
-  final _email = TextEditingController();
-  final _appPassword = TextEditingController();
-
-  @override
-  void dispose() {
-    _email.dispose();
-    _appPassword.dispose();
-    super.dispose();
+  Future<void> _save(Collection collection) async {
+    // Same persistence + scanner start the old Yahoo flow used.
+    GetCollectionsService.instance.addCollection(collection);
+    ScannerManager.getInstance().startScanner(collection);
+    EmailPage.selectedCollection.add(collection);
   }
 
-  Future<void> _connectYahoo() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
+  Future<void> _openUrl(Uri url) async {
+    if (!await launchUrl(url)) throw Exception('Could not open $url');
+  }
 
-    setState(() {
-      _authState = _YahooAuthState.loading;
-      _errorMessage = null;
-    });
-
-    try {
-      final email = _email.text;
-      final appPassword = _appPassword.text;
-
-      // Create collection manually (App Password approach)
-      final collectionId = const Uuid().v4();
-      final appDataDir = MainApp.appDataDirectory.valueOrNull;
-      final extractionRoot =
-          appDataDir != null
-              ? p.join(appDataDir, 'files', 'email', collectionId)
-              : null;
-      final c = Collection(
-        id: collectionId,
-        name: email,
-        path: email, // Root path for IMAP scanner
-        localCopyPath: extractionRoot,
-        type: 'email',
-        scanner: AppConstants.scannerEmailYahoo,
-        scanStatus: 'idle',
-        oauthService: 'yahoo_app_password',
-        accessToken: appPassword, // Store app password in accessToken field
-        userId: email,
-        needsReAuth: false,
-        downloadLocalCopy: true,
-      );
-
-      GetCollectionsService.instance.addCollection(c);
-      ScannerManager.getInstance().startScanner(c);
-
-      if (!mounted) return;
-
-      setState(() {
-        _authState = _YahooAuthState.success;
-        _connectedEmail = email;
-      });
-
-      EmailPage.selectedCollection.add(c);
-
-      await Future.delayed(const Duration(milliseconds: 900));
-      if (!mounted) return;
-      GoRouter.of(context).go('/email');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _authState = _YahooAuthState.error;
-        _errorMessage = e.toString();
-      });
+  Widget _oauth(BuildContext context, EmailProvider provider) {
+    if (provider.id == EmailProviderRegistry.outlook.id) {
+      return const _OutlookTab();
     }
-  }
-
-  Future<void> _launchYahooSecurity() async {
-    final url = Uri.parse('https://login.yahoo.com/account/security');
-    if (!await launchUrl(url)) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Could not open browser')));
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
+    // Gmail keeps its Gmail-API flow on its own tab.
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 520),
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 280),
-          child: switch (_authState) {
-            _YahooAuthState.loading => _buildLoading(),
-            _YahooAuthState.success => _buildSuccess(),
-            _YahooAuthState.error => _buildError(),
-            _YahooAuthState.idle => _buildIdle(),
-          },
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${provider.displayName} accounts connect through the '
+                  '${provider.displayName} tab.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed:
+                      () => DefaultTabController.of(context).animateTo(0),
+                  child: Text('Go to ${provider.displayName}'),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildIdle() {
-    return _cardContainer(
-      key: const ValueKey('idle'),
-      child: YahooIdleView(
-        formKey: _formKey,
-        emailController: _email,
-        appPasswordController: _appPassword,
-        onConnect: _connectYahoo,
-        onLaunchSecurity: _launchYahooSecurity,
-      ),
-    );
-  }
-
-  Widget _buildLoading() {
-    return _cardContainer(
-      key: const ValueKey('loading'),
-      child: const YahooLoadingView(),
-    );
-  }
-
-  Widget _buildSuccess() {
-    return _cardContainer(
-      key: const ValueKey('success'),
-      child: YahooSuccessView(connectedEmail: _connectedEmail),
-    );
-  }
-
-  Widget _buildError() {
-    return _cardContainer(
-      key: const ValueKey('error'),
-      child: YahooErrorView(
-        errorMessage: _errorMessage,
-        onRetry: () => setState(() => _authState = _YahooAuthState.idle),
-      ),
-    );
-  }
-
-  Widget _cardContainer({required Widget child, required Key key}) {
-    return Card(
-      key: key,
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(padding: const EdgeInsets.all(32), child: child),
+  @override
+  Widget build(BuildContext context) {
+    return EmailAccountSetupTab(
+      connectionTester: const EnoughMailImapConnectionTester(),
+      appDataDirectory: () => MainApp.appDataDirectory.valueOrNull,
+      onAccountCreated: _save,
+      onDone: (context) => GoRouter.of(context).go('/email'),
+      oauthBuilder: _oauth,
+      onOpenUrl: _openUrl,
     );
   }
 }

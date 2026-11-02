@@ -55,6 +55,7 @@ class GetFileAndFoldersService
     const emailScanners = {
       AppConstants.scannerEmailOutlookPst,
       AppConstants.scannerEmailYahoo,
+      AppConstants.scannerEmailImap,
       AppConstants.scannerEmailGmail,
     };
 

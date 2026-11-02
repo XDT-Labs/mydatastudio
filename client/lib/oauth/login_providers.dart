@@ -6,6 +6,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/provider.dart';
+import 'package:mydatastudio/modules/email/services/imap/email_provider_registry.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/oauth/desktop_oauth_manager.dart';
@@ -611,6 +612,7 @@ extension LoginProviderExtension on LoginProviders {
         localCopyPath: extractionRoot,
         type: "email",
         scanner: AppConstants.scannerEmailOutlook,
+        emailProviderId: EmailProviderRegistry.outlook.id,
         scanStatus: "pending",
         oauthService: "outlook",
         accessToken: client.credentials.accessToken,

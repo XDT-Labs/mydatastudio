@@ -1,7 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
-class YahooErrorView extends StatelessWidget {
-  const YahooErrorView({
+class ImapErrorView extends StatelessWidget {
+  const ImapErrorView({
     super.key,
     required this.errorMessage,
     required this.onRetry,
