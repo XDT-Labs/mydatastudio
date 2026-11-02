@@ -63,8 +63,8 @@ class CollectionRepository {
         "INSERT INTO collections (id, name, path, type, scanner, scan_status, oauth_service, "
         "access_token, refresh_token, id_token, user_id, expiration, last_scan_date, "
         "needs_re_auth, download_local_copy, local_copy_path, keep_deleted_files, content_policy, "
-        "email_provider_id, imap_settings, email_delete_policy) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "email_provider_id, imap_settings, email_delete_policy, date_created) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
           val.id,
           val.name,
@@ -87,6 +87,7 @@ class CollectionRepository {
           val.emailProviderId,
           val.imapSettings,
           val.emailDeletePolicy.dbValue,
+          (val.dateCreated ?? DateTime.now()).millisecondsSinceEpoch,
         ],
       );
       return val;
@@ -175,6 +176,29 @@ class CollectionRepository {
         [policy.dbValue, collectionId],
       );
     }, label: 'CollectionRepository.updateEmailDeletePolicy');
+  }
+
+  /// Sets only the OAuth token columns (access, refresh, expiration) for [id].
+  /// A targeted UPDATE so a refresh in a scanner isolate cannot clobber other
+  /// columns a concurrent writer changed. Tokens are encrypted here.
+  Future<void> updateOAuthTokens(
+    String id, {
+    required String accessToken,
+    required String refreshToken,
+    required DateTime expiration,
+  }) async {
+    return retryOnLock(() async {
+      await db.execute(
+        'UPDATE collections SET access_token = ?, refresh_token = ?, '
+        'expiration = ? WHERE id = ?',
+        [
+          CredentialCodec.encrypt(accessToken),
+          CredentialCodec.encrypt(refreshToken),
+          expiration.millisecondsSinceEpoch,
+          id,
+        ],
+      );
+    }, label: 'CollectionRepository.updateOAuthTokens');
   }
 
   /// Stores (or, with null, clears) the provider change-feed position. A

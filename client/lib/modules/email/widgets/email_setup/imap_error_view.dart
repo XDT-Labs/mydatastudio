@@ -6,6 +6,8 @@ class ImapErrorView extends StatelessWidget {
     required this.errorMessage,
     required this.onRetry,
     this.hint,
+    this.secondaryActionLabel,
+    this.onSecondaryAction,
   });
 
   final String? errorMessage;
@@ -13,6 +15,10 @@ class ImapErrorView extends StatelessWidget {
 
   /// Provider-specific advice for a refused login.
   final String? hint;
+
+  /// Optional second button under "Try Again"; shown when a label is given.
+  final String? secondaryActionLabel;
+  final VoidCallback? onSecondaryAction;
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +52,15 @@ class ImapErrorView extends StatelessWidget {
           ),
         const SizedBox(height: 24),
         ElevatedButton(onPressed: onRetry, child: const Text('Try Again')),
+        if (secondaryActionLabel != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: TextButton(
+              key: const Key('secondary-action'),
+              onPressed: onSecondaryAction,
+              child: Text(secondaryActionLabel!),
+            ),
+          ),
       ],
     );
   }

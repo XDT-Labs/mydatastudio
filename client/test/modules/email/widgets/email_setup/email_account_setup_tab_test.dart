@@ -225,6 +225,62 @@ void main() {
     expect(find.byKey(const Key('email-field')), findsOneWidget);
   });
 
+  // A new Yandex app password can take hours to activate, so a login refused
+  // at setup must be saveable; the scanner's retry window then covers it.
+  testWidgets('Yandex bad credentials offer saving and retrying later', (
+    tester,
+  ) async {
+    tester0.result = ImapConnectionResult.failure(
+      ImapConnectionFailure.badCredentials,
+    );
+    await pumpTab(tester);
+    await enterEmail(tester, 'me@yandex.com');
+    await tester.enterText(find.byKey(const Key('password-field')), 'abcdabcdabcdabcd');
+    await tester.tap(find.byKey(const Key('submit-button')));
+    await tester.pumpAndSettle();
+
+    expect(created, isEmpty);
+    expect(find.text('Save and retry automatically'), findsOneWidget);
+    expect(find.byKey(const Key('auth-failure-hint')), findsOneWidget);
+
+    await tester.tap(find.text('Save and retry automatically'));
+    await tester.pumpAndSettle();
+
+    final c = created.single;
+    expect(c.emailProviderId, 'yandex');
+    expect(c.userId, 'me@yandex.com');
+    expect(c.accessToken, 'abcdabcdabcdabcd');
+    expect(c.dateCreated, isNotNull);
+  });
+
+  testWidgets('save-and-retry is offered only for Yandex bad credentials', (
+    tester,
+  ) async {
+    // Another provider with bad credentials.
+    tester0.result = ImapConnectionResult.failure(
+      ImapConnectionFailure.badCredentials,
+    );
+    await pumpTab(tester);
+    await enterEmail(tester, 'me@yahoo.com');
+    await tester.enterText(find.byKey(const Key('password-field')), 'abcdabcdabcdabcd');
+    await tester.tap(find.byKey(const Key('submit-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Save and retry automatically'), findsNothing);
+
+    // Yandex, but the server is unreachable.
+    await tester.tap(find.text('Try Again'));
+    await tester.pumpAndSettle();
+    tester0.result = ImapConnectionResult.failure(
+      ImapConnectionFailure.unreachable,
+    );
+    await tester.enterText(find.byKey(const Key('email-field')), 'me@yandex.com');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('submit-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Save and retry automatically'), findsNothing);
+    expect(created, isEmpty);
+  });
+
   testWidgets('success creates an email.imap collection for Yahoo', (
     tester,
   ) async {

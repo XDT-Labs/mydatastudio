@@ -34,6 +34,7 @@ Collection buildImapCollection({
     accessToken: password,
     userId: username,
     needsReAuth: false,
+    dateCreated: DateTime.now(),
     downloadLocalCopy: true,
   );
 }
