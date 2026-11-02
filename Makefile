@@ -8,6 +8,9 @@
 #   make build-python   - Build and zip the Python aiserver service
 #   make build-client   - Build the Flutter Desktop client (macOS release)
 #   make notarize       - Notarize the macOS build (requires APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID env vars)
+#   make imap-test-up   - Start the disposable Dovecot IMAP test server (Docker)
+#   make imap-test-down - Stop the IMAP test server
+#   make test-imap      - Run the `imap`-tagged integration tests against it
 #   make clean          - Remove all build artifacts
 # ==============================================================================
 
@@ -244,6 +247,25 @@ notarize:
 	#   --password "<password>" \
 	#   --team-id "TTM6V47DL9"
 
+
+# IMAP integration-test server (Dovecot in Docker; see client/test/integration/imap_server/)
+IMAP_TEST_COMPOSE = docker compose -f $(FLUTTER_DIR)/test/integration/imap_server/docker-compose.yml
+
+.PHONY: imap-test-up
+imap-test-up:
+	@echo "--- 📬 Starting IMAP test server ---"
+	$(IMAP_TEST_COMPOSE) up -d --wait --force-recreate
+
+.PHONY: imap-test-down
+imap-test-down:
+	@echo "--- 🛑 Stopping IMAP test server ---"
+	$(IMAP_TEST_COMPOSE) down -v
+
+.PHONY: test-imap
+test-imap:
+	$(MAKE) imap-test-up
+	(cd $(FLUTTER_DIR) && flutter test -t imap test/integration); \
+	  status=$$?; $(MAKE) imap-test-down; exit $$status
 
 # Cleanup
 .PHONY: clean

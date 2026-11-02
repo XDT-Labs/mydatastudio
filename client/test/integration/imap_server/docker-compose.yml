@@ -1,0 +1,18 @@
+# TEST-ONLY disposable IMAP server (Dovecot) for integration tests.
+# Plaintext auth, no TLS, bound to localhost only. Storage is tmpfs, so every
+# `up` starts clean.
+services:
+  imap:
+    image: dovecot/dovecot:2.4.1
+    container_name: mds-imap-test
+    ports:
+      - "127.0.0.1:3143:143"
+    volumes:
+      - ./dovecot.conf:/etc/dovecot/dovecot.conf:ro
+    tmpfs:
+      - /srv/mail:uid=1000,gid=1000,mode=0775
+    healthcheck:
+      test: ["CMD-SHELL", "doveadm service status >/dev/null 2>&1 || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
