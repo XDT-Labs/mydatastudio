@@ -10,6 +10,7 @@ import 'package:mydatastudio/modules/email/services/imap/email_provider_registry
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/oauth/desktop_oauth_manager.dart';
+import 'package:mydatastudio/oauth/microsoft_auth.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:material_ui/material_ui.dart';
@@ -56,14 +57,9 @@ extension LoginProviderExtension on LoginProviders {
     }
   }
 
-  String get tenant {
-    switch (this) {
-      case LoginProviders.outlook:
-        return "consumers";
-      default:
-        return "common";
-    }
-  }
+  /// Outlook signs in on `/common` so personal Outlook.com accounts and
+  /// Microsoft 365 work/school accounts both work.
+  String get tenant => "common";
 
   String get authorizationEndpoint {
     switch (this) {
@@ -111,13 +107,30 @@ extension LoginProviderExtension on LoginProviders {
       }
     }
 
-    return '';
+    return bundledClientId;
   }
+
+  /// Client ID compiled into this build; used when the user has not entered
+  /// their own. Only Outlook ships one (`--dart-define=OUTLOOK_CLIENT_ID`).
+  String get bundledClientId =>
+      this == LoginProviders.outlook ? kBundledOutlookClientId : '';
+
+  /// Path of the loopback redirect URI. Microsoft matches the registered
+  /// `http://localhost` ignoring the port but not the path, so Outlook
+  /// redirects to the bare origin.
+  String get redirectPath => this == LoginProviders.outlook ? '' : '/auth';
 
   /// Whether this provider uses PKCE (code_challenge + code_verifier).
   /// Google desktop apps use PKCE per https://developers.google.com/identity/protocols/oauth2/native-app
   /// Note: Google still requires client_secret alongside PKCE for desktop clients.
-  bool get usesPkce {
+  /// Microsoft uses PKCE as a public client, with no secret at all.
+  bool get usesPkce => true;
+
+  /// Whether sign-in needs a client secret. Google desktop clients do; a
+  /// public client that relies on PKCE alone (Microsoft/Outlook; Dropbox, Box
+  /// later) returns false and then sends only `client_id` + `code_verifier`
+  /// to the token endpoint, and no secret on refresh.
+  bool get requiresClientSecret {
     switch (this) {
       case LoginProviders.google:
       case LoginProviders.googleDrive:
@@ -127,11 +140,6 @@ extension LoginProviderExtension on LoginProviders {
         return false;
     }
   }
-
-  /// Whether sign-in needs a client secret. Defaults to true; a public desktop
-  /// client that relies on PKCE alone (e.g. Dropbox, Box) returns false and
-  /// then sends only `client_id` + `code_verifier` to the token endpoint.
-  bool get requiresClientSecret => true;
 
   /// OAuth client secret.
   /// Google requires client_secret for desktop apps even with PKCE enabled.
@@ -181,13 +189,7 @@ extension LoginProviderExtension on LoginProviders {
       case LoginProviders.azure:
         return ['openid', 'email'];
       case LoginProviders.outlook:
-        return [
-          'https://outlook.office.com/IMAP.AccessAsUser.All',
-          'openid',
-          'email',
-          'profile',
-          'offline_access',
-        ];
+        return kOutlookScopes;
     }
   }
 
@@ -531,6 +533,7 @@ extension LoginProviderExtension on LoginProviders {
   static Future<Collection?> handleOutlookMail(
     BuildContext context, {
     Collection? existing,
+    void Function(Object error)? onError,
   }) async {
     if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -555,10 +558,7 @@ extension LoginProviderExtension on LoginProviders {
       );
 
       final client = await oauthManager.login(
-        customParameters: {
-          'prompt': 'select_account',
-          'domain_hint': 'consumers',
-        },
+        customParameters: {'prompt': 'select_account'},
       );
       final credentials = client.credentials;
       String? email;
@@ -674,7 +674,11 @@ extension LoginProviderExtension on LoginProviders {
       return collection;
     } catch (e, stack) {
       AppLogger(null).e('Outlook OAuth failed', error: e, stackTrace: stack);
-      if (context.mounted) {
+      // A caller that shows the error itself (the setup tab) gets the real
+      // cause; otherwise fall back to the generic snackbar.
+      if (onError != null) {
+        onError(e);
+      } else if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Outlook sign-in failed. Please try again.'),

@@ -25,6 +25,7 @@ import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_success_vie
 import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_error_view.dart';
 import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_configure_view.dart';
 import 'package:mydatastudio/modules/email/widgets/email_setup/outlook_configure_view.dart';
+import 'package:mydatastudio/oauth/microsoft_auth.dart';
 import 'package:mydatastudio/modules/email/services/imap/email_provider.dart';
 import 'package:mydatastudio/modules/email/services/imap/email_provider_registry.dart';
 import 'package:mydatastudio/modules/email/services/setup/imap_connection_tester.dart';
@@ -599,12 +600,13 @@ class _OutlookTabState extends State<_OutlookTab> {
       _authState = _OutlookAuthState.loading;
     });
 
+    // Microsoft is a public client: only a client ID is needed (the one the
+    // user entered, else the one bundled with this build). No secret.
     final clientId = await LoginProviders.outlook.clientId();
-    final clientSecret = await LoginProviders.outlook.clientSecret();
 
     if (!mounted) return;
 
-    if (clientId.isEmpty || clientSecret.isEmpty) {
+    if (clientId.isEmpty) {
       setState(() {
         _authState = _OutlookAuthState.configure;
       });
@@ -622,8 +624,10 @@ class _OutlookTabState extends State<_OutlookTab> {
     });
 
     try {
+      Object? signInError;
       final collection = await LoginProviderExtension.handleOutlookMail(
         context,
+        onError: (e) => signInError = e,
       );
 
       if (!mounted) return;
@@ -631,7 +635,10 @@ class _OutlookTabState extends State<_OutlookTab> {
       if (collection == null) {
         setState(() {
           _authState = _OutlookAuthState.error;
-          _errorMessage = 'Sign-in was cancelled or failed. Please try again.';
+          _errorMessage =
+              signInError == null
+                  ? 'Sign-in was cancelled or failed. Please try again.'
+                  : _describeOutlookError(signInError!);
         });
         return;
       }
@@ -651,9 +658,16 @@ class _OutlookTabState extends State<_OutlookTab> {
       if (!mounted) return;
       setState(() {
         _authState = _OutlookAuthState.error;
-        _errorMessage = e.toString();
+        _errorMessage = _describeOutlookError(e);
       });
     }
+  }
+
+  /// Plain-language guidance for known Microsoft 365 problems (admin consent
+  /// required, IMAP disabled); the raw error otherwise.
+  String _describeOutlookError(Object error) {
+    final raw = error.toString();
+    return classifyMicrosoftAuthError(raw).message ?? raw;
   }
 
   @override
@@ -711,6 +725,12 @@ class _OutlookTabState extends State<_OutlookTab> {
                 borderRadius: BorderRadius.circular(8),
               ),
             ),
+          ),
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed:
+                () => setState(() => _authState = _OutlookAuthState.configure),
+            child: const Text('Use my own Microsoft app (Client ID)'),
           ),
         ],
       ),

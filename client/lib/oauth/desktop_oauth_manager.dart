@@ -30,9 +30,11 @@ class DesktopOAuthManager extends DesktopLoginManager {
 
   Future<oauth2.Client> login({Map<String, String>? customParameters}) async {
     await redirectServer?.close();
-    // Bind to an ephemeral port on localhost
+    // Bind to an ephemeral port on localhost (Entra and Google both accept
+    // any port for a registered loopback redirect).
     redirectServer = await HttpServer.bind('localhost', 0);
-    final redirectURL = 'http://localhost:${redirectServer!.port}/auth';
+    final redirectURL =
+        'http://localhost:${redirectServer!.port}${loginProvider.redirectPath}';
     var client = await _getOAuth2Client(
       Uri.parse(redirectURL),
       customParameters: customParameters,

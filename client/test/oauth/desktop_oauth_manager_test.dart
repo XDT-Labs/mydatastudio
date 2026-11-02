@@ -16,7 +16,8 @@ class _FakeBrowserOAuthManager extends DesktopOAuthManager {
     required super.clientIdLoader,
     required super.clientSecretLoader,
     required super.httpClient,
-  }) : super(loginProvider: LoginProviders.googleDrive);
+    super.loginProvider = LoginProviders.googleDrive,
+  });
 
   @override
   Future<void> redirect(Uri url) async => authorizationUrl = url;
@@ -68,10 +69,73 @@ void main() {
     expect(m.login(), throwsA(isA<ProviderConfigurationException>()));
   });
 
-  test('every built-in provider keeps requiring a secret by default', () {
-    for (final p in LoginProviders.values) {
-      expect(p.requiresClientSecret, isTrue, reason: p.name);
-    }
+  test('Google keeps requiring a secret; Microsoft is a public client', () {
+    expect(LoginProviders.google.requiresClientSecret, isTrue);
+    expect(LoginProviders.googleDrive.requiresClientSecret, isTrue);
+    expect(LoginProviders.outlook.requiresClientSecret, isFalse);
+    expect(LoginProviders.azure.requiresClientSecret, isFalse);
+  });
+
+  group('Outlook as a public client', () {
+    // requiresClientSecret is deliberately NOT passed: the provider's own
+    // answer is what must let a secret-less sign-in start.
+    _FakeBrowserOAuthManager outlook({
+      String clientId = 'outlook-client',
+      String secret = '',
+    }) => _FakeBrowserOAuthManager(
+      loginProvider: LoginProviders.outlook,
+      requiresClientSecret: null,
+      clientIdLoader: () async => clientId,
+      clientSecretLoader: () async => secret,
+      httpClient: tokenServer,
+    );
+
+    test('starts without any secret, with S256 PKCE on /common', () async {
+      final m = outlook();
+      await m.login();
+      await m.redirectServer?.close();
+
+      final url = m.authorizationUrl!;
+      expect(url.host, 'login.microsoftonline.com');
+      expect(url.path, '/common/oauth2/v2.0/authorize');
+      expect(url.queryParameters['code_challenge_method'], 'S256');
+      expect(url.queryParameters['code_challenge'], isNotEmpty);
+      expect(
+        url.queryParameters['redirect_uri'],
+        matches(RegExp(r'^http://localhost:\d+$')),
+      );
+      expect(
+        url.queryParameters['scope']!.split(' '),
+        containsAll([
+          'https://outlook.office.com/IMAP.AccessAsUser.All',
+          'offline_access',
+          'openid',
+          'email',
+        ]),
+      );
+    });
+
+    test(
+      'never sends a leftover stored secret, on exchange or refresh',
+      () async {
+        final m = outlook(secret: 'stale-secret-from-old-setup');
+        final client = await m.login();
+        await m.redirectServer?.close();
+        await client.refreshCredentials();
+
+        expect(tokenRequests, hasLength(2));
+        for (final r in tokenRequests) {
+          expect(r.bodyFields.containsKey('client_secret'), isFalse);
+          expect(r.bodyFields['client_id'], 'outlook-client');
+        }
+        expect(tokenRequests.first.bodyFields['code_verifier'], isNotEmpty);
+      },
+    );
+
+    test('still refuses to start with no client ID at all', () {
+      final m = outlook(clientId: '');
+      expect(m.login(), throwsA(isA<ProviderConfigurationException>()));
+    });
   });
 
   test('public (PKCE-only) client builds an S256 authorization URL', () async {

@@ -173,7 +173,7 @@ build-client:
 	cd $(FLUTTER_DIR) && \
 		cp pubspec.prod.yaml pubspec.yaml && \
 		flutter pub get && \
-		flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
+		flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM --dart-define=OUTLOOK_CLIENT_ID=$$OUTLOOK_CLIENT_ID
 	@echo "--- ✅ Flutter build complete ---"
 	@BRANCH=$$(git branch --show-current); \
 	if [ "$$BRANCH" = "main" ] && [ -z "$$CI" ]; then \
