@@ -28,6 +28,16 @@ void main() {
       expect(result, '/Users/mike/Photos');
     });
 
+    test('cloud dropbox:// path passes through unchanged', () {
+      final col = _makeCollection(localCopyPath: '/Users/mike/Photos');
+      final file = makeTestFile(
+        path: 'dropbox://id:abc',
+        parent: '',
+        name: 'abc',
+      );
+      expect(FilePathResolver.absolute(file, col), 'dropbox://id:abc');
+    });
+
     test('cloud gdrive:// path passes through unchanged', () {
       final col = _makeCollection(localCopyPath: '/Users/mike/Photos');
       final file = makeTestFile(

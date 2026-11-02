@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: in-progress
 adr: none
-remaining: [secret-decision, box-api-adapter, events-cursor, sync-folder-card]
+remaining: [secret-decision, box-api-adapter, events-cursor]
 ---
 
 # Plan: Box

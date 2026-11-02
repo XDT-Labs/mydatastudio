@@ -17,6 +17,16 @@ class Collection {
   bool downloadLocalCopy = false;
   String? localCopyPath;
 
+  /// Provider change-feed position; null until a full walk has stored one.
+  String? changeCursor;
+
+  /// Keep rows/local copies of files the source deleted (sets
+  /// `files.source_deleted_date` instead of `is_deleted`).
+  bool keepDeletedFiles = false;
+
+  /// ContentPolicy JSON; null = derive from [downloadLocalCopy].
+  String? contentPolicy;
+
   // fields not in db
   String? status;
   String? statusMessage;
@@ -38,6 +48,9 @@ class Collection {
     required this.needsReAuth,
     this.downloadLocalCopy = false,
     this.localCopyPath,
+    this.changeCursor,
+    this.keepDeletedFiles = false,
+    this.contentPolicy,
   });
 
   factory Collection.fromDbMap(Map<String, dynamic> map) {
@@ -58,6 +71,9 @@ class Collection {
       needsReAuth: (map['needs_re_auth'] as int? ?? 0) != 0,
       downloadLocalCopy: (map['download_local_copy'] as int? ?? 0) != 0,
       localCopyPath: map['local_copy_path'] as String?,
+      changeCursor: map['change_cursor'] as String?,
+      keepDeletedFiles: (map['keep_deleted_files'] as int? ?? 0) != 0,
+      contentPolicy: map['content_policy'] as String?,
     );
   }
 
@@ -79,6 +95,9 @@ class Collection {
       'needs_re_auth': needsReAuth ? 1 : 0,
       'download_local_copy': downloadLocalCopy ? 1 : 0,
       'local_copy_path': localCopyPath,
+      'change_cursor': changeCursor,
+      'keep_deleted_files': keepDeletedFiles ? 1 : 0,
+      'content_policy': contentPolicy,
     };
   }
 }

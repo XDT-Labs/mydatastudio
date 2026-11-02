@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: in-progress
 adr: none
-remaining: [entra-scope, graph-delta-adapter, business-and-sharepoint, sync-folder-card, provider-ui-actions]
+remaining: [entra-scope, thumbnails, business-and-sharepoint, provider-ui-actions]
 ---
 
 # Plan: OneDrive (personal, work/school) and SharePoint

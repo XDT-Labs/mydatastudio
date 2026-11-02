@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: in-progress
 adr: none
-remaining: [app-registration, pkce-login, dropbox-api-adapter, production-approval, sync-folder-card, provider-ui-actions]
+remaining: [app-registration, thumbnails, production-approval, provider-ui-actions]
 ---
 
 # Plan: Dropbox

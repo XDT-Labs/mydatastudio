@@ -12,6 +12,9 @@ class CleanupDeletedFilesServiceCommand {
   final bool isCloud;
   final bool isFullScan;
 
+  /// Mark missing files source-deleted instead of is_deleted.
+  final bool keepDeleted;
+
   CleanupDeletedFilesServiceCommand(
     this.collectionId,
     this.path,
@@ -20,6 +23,7 @@ class CleanupDeletedFilesServiceCommand {
     this.recursive = true,
     this.isCloud = false,
     this.isFullScan = false,
+    this.keepDeleted = false,
   });
 }
 
@@ -45,15 +49,20 @@ class CleanupDeletedFilesService {
         recursive: command.recursive,
         isCloud: command.isCloud,
         isFullScan: command.isFullScan,
+        keepDeleted: command.keepDeleted,
       );
-      await folderRepo.deleteMissing(
-        command.collectionId,
-        command.path,
-        command.scanStartTime,
-        recursive: command.recursive,
-        isCloud: command.isCloud,
-        isFullScan: command.isFullScan,
-      );
+      // Kept files stay browsable only if their folder rows stay too (same
+      // rule as applyCloudRemovals).
+      if (!command.keepDeleted) {
+        await folderRepo.deleteMissing(
+          command.collectionId,
+          command.path,
+          command.scanStartTime,
+          recursive: command.recursive,
+          isCloud: command.isCloud,
+          isFullScan: command.isFullScan,
+        );
+      }
 
       return 0;
     } catch (e) {

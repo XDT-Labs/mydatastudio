@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: in-progress
 adr: none
-remaining: [changes-api, move-to-cloud-file-scanner, scope-decision, sync-folder-option, shared-drives]
+remaining: [changes-api, scope-decision, shared-drives]
 ---
 
 # Plan: Google Drive

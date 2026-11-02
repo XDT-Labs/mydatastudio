@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: in-progress
 adr: none
-remaining: [sync-folder-card]
+remaining: [verify-on-device]
 ---
 
 # Plan: Sync.com (sync folder only)

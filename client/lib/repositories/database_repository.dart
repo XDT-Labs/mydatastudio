@@ -17,6 +17,15 @@ class DatabaseRepository {
 
   DatabaseRepository(this.db);
 
+  /// SQL: the file's collection has not opted out of indexing through its
+  /// ContentPolicy (`collections.content_policy`, aliased `c`). Filtering in
+  /// SQL keeps excluded files out of every embedding/chunk/description queue
+  /// without the isolates needing to know about policies; a NULL policy means
+  /// "index" so existing collections are unchanged.
+  static const collectionIndexed =
+      "(c.content_policy IS NULL OR "
+      "IFNULL(json_extract(c.content_policy, '\$.index'), 1) <> 0)";
+
   Future<int> countAllRows(String table) async {
     final rows = await db.select("select count(*) as count from $table;");
     if (rows.isEmpty) return 0;
@@ -114,6 +123,56 @@ class DatabaseRepository {
         'upsertFileEmbedding: fileId=$fileId type=$type dim=${embedding.length}',
       );
     }
+  }
+
+  /// Id of another live file with the same [contentHash] that already holds a
+  /// current-model whole-file vector, or null. The vector is a function of the
+  /// bytes alone, so it can stand in for [fileId]'s own.
+  Future<String?> findEmbeddedDuplicate(
+    String fileId,
+    String contentHash,
+  ) async {
+    final rows = await db.select(
+      '''
+      SELECT f.id FROM files f
+      INNER JOIN files_embeddings fe
+        ON fe.file_id = f.id AND fe.type = 'file' AND fe.sequence = 0
+      WHERE f.content_hash = ? AND f.id <> ?
+        AND f.is_deleted = 0 AND f.is_user_deleted = 0
+        AND fe.embeddinggemma2_embedding IS NOT NULL
+        AND fe.model_version = ?
+      ORDER BY f.id LIMIT 1
+      ''',
+      [contentHash, fileId, EmbeddingModel.current],
+    );
+    return rows.isEmpty ? null : rows.first['id'] as String;
+  }
+
+  /// Copies [fromFileId]'s whole-file vector onto [toFileId] inside SQL, so the
+  /// vector blob never crosses an isolate boundary. Returns whether a row
+  /// was written (false if the donor lost its vector or [toFileId] is gone).
+  Future<bool> copyFileEmbedding(String fromFileId, String toFileId) async {
+    final result = await db.execute(
+      '''
+      INSERT INTO files_embeddings
+        (file_id, type, sequence, embeddinggemma2_embedding, model_version)
+      SELECT ?, 'file', 0, fe.embeddinggemma2_embedding, fe.model_version
+      FROM files_embeddings fe
+      WHERE fe.file_id = ? AND fe.type = 'file' AND fe.sequence = 0
+        AND fe.embeddinggemma2_embedding IS NOT NULL
+        AND fe.model_version = ?
+        AND EXISTS (SELECT 1 FROM files WHERE id = ?)
+      ON CONFLICT(file_id, type, sequence) DO UPDATE SET
+        embeddinggemma2_embedding = excluded.embeddinggemma2_embedding,
+        model_version = excluded.model_version
+      ''',
+      [toFileId, fromFileId, EmbeddingModel.current, toFileId],
+    );
+    if (result.affectedRows == 0) return false;
+    await db.execute('UPDATE files SET embedding_attempts = 0 WHERE id = ?', [
+      toFileId,
+    ]);
+    return true;
   }
 
   /// Deletes the embedding record for [fileId] from `files_embeddings`.
@@ -314,6 +373,7 @@ class DatabaseRepository {
         AND f.is_deleted = 0
         AND f.is_user_deleted = 0
         AND f.is_inline = 0
+        AND $collectionIndexed
         AND f.embedding_attempts < ?
         $exclusion
       LIMIT ?
@@ -440,6 +500,7 @@ class DatabaseRepository {
                AND f.content_type NOT LIKE 'application/vnd.google-apps.%')
               OR f.content_type IN ($exportableTypes)
             )
+        AND $collectionIndexed
         AND f.embedding_attempts < ?
         AND NOT EXISTS (
               SELECT 1 FROM file_chunks fc
@@ -529,6 +590,7 @@ class DatabaseRepository {
         AND f.is_deleted = 0
         AND f.is_user_deleted = 0
         AND f.is_inline = 0
+        AND $collectionIndexed
         AND f.description_attempts < ?
       LIMIT ?
       ''',

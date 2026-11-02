@@ -112,19 +112,25 @@ Defined in [social-x-sync.md](plans/social-x-sync.md), *Shared social foundation
 ### File-source foundation
 
 From [files-sources-foundation.md](plans/files-sources-foundation.md):
-- [ ] **`CloudFileScanner`** + `CloudFileApi` adapter interface (Google Drive moved onto it
-      first, unchanged behaviour)
-- [ ] **Change-cursor sync** with `file_source_sync_state`: moves and deletes, cursor-expiry
-      re-list, the "keep deleted files" setting
-- [ ] **Content policy** (metadata always; thumbnails and photos; documents for text up to a
-      limit; the estimate before the first sync)
+- [x] **`CloudFileScanner`** + `CloudFileApi` adapter interface (Google Drive moved onto it
+      first, unchanged behaviour). Merged in #40.
+- [x] **Change-cursor sync** with `file_source_sync_state`: moves and deletes, cursor-expiry
+      re-list, the "keep deleted files" setting. Merged in #40; the cursor is stored in
+      `collections.change_cursor` rather than a separate table.
+- [x] **Content policy** (metadata always; thumbnails and photos; documents for text up to a
+      limit; the estimate before the first sync). Merged in #40.
 - [ ] **Sync-folder connector**: detect `~/Library/CloudStorage/*`, iCloud Drive and legacy
       folders; `providerHint`; **dataless (`SF_DATALESS`) detection via FFI `stat`**; legacy
-      `.icloud` stubs; the bounded "download for indexing" option
-- [ ] **OAuth:** relax `DesktopOAuthManager`'s "secret required" check per provider (PKCE
-      public clients)
-- [ ] **`files.content_hash`** + cross-source dedupe
-- [ ] **New file source page:** "Found on this Mac" / "Connect an account" / "Other"
+      `.icloud` stubs; the bounded "download for indexing" option. **Partly done:** detection,
+      `SF_DATALESS` and `.icloud` stubs merged in #40 and #42. Still to do: `providerHint`
+      and "download for indexing".
+- [x] **OAuth:** relax `DesktopOAuthManager`'s "secret required" check per provider (PKCE
+      public clients). Merged in #40.
+- [x] **`files.content_hash`** + cross-source dedupe. Merged in #40; the EmbeddingGemma
+      column fix is in #42.
+- [x] **New file source page:** "Found on this Mac" / "Connect an account" / "Other". Merged in
+      #40 as a searchable catalog with two groups, "Folders on this Mac" and "Cloud accounts";
+      each tile opens its own form.
 
 ### Spikes (real accounts; record the answers in each plan)
 
@@ -148,7 +154,9 @@ From [files-sources-foundation.md](plans/files-sources-foundation.md):
       Wave 1's Google Drive public-release path
 - [ ] **Sync folders:** real folder names under `~/Library/CloudStorage/` for each provider app
       (Box Drive); whether our entitlements can read
-      `~/Library/Mobile Documents` → gates Wave 1's sync-folder cards
+      `~/Library/Mobile Documents` → gates Wave 1's sync-folder cards. **Open:** the cards were
+      built ahead of the spike (#42), including cards for the deferred pCloud, Proton Drive and
+      MEGA, whose folder names are guesses. The app can read `Mobile Documents` on the dev Mac.
 - [ ] **Box:** does token exchange require a client secret (→ token service)? →
       gates Wave 1's Box API
 
@@ -162,17 +170,25 @@ Drive, MEGA and Sync.com moved to Deferred: lower priority than these.
 **Depends on:** the Wave 0 file-source foundation, the sync-folder spike, and the Box spike
 (for the Box API). Google Drive (Changes API) and the Box API moved up from Waves 3 and 5.
 
+**Status:** the sync-folder cards, the Dropbox API and the OneDrive API are built and in review
+in #42 (which also built cards for the deferred pCloud, Proton Drive, MEGA and Sync.com). Nothing
+is ticked until it is merged and checked against real accounts or real sync-app folders.
+
 - [ ] **Sync-folder cards** (no sign-in), one per detected app:
-  - [ ] **iCloud Drive**, including app containers and legacy stubs
-        ([files-icloud-drive.md](plans/files-icloud-drive.md))
+  - [ ] **iCloud Drive**, including legacy stubs
+        ([files-icloud-drive.md](plans/files-icloud-drive.md)). App containers are no longer
+        listed: one "iCloud Drive" card is rooted at `com~apple~CloudDocs`, by product decision
   - [ ] **Dropbox** folder ([files-dropbox.md](plans/files-dropbox.md))
   - [ ] **OneDrive** folder ([files-onedrive.md](plans/files-onedrive.md))
   - [ ] **Google Drive** folder ([files-google-drive.md](plans/files-google-drive.md))
   - [ ] **Box Drive** folder ([files-box.md](plans/files-box.md))
 - [ ] **Dropbox API**: PKCE app, `list_folder` cursor, batch thumbnails; **production approval
-      before 50 linked users** ([files-dropbox.md](plans/files-dropbox.md))
+      before 50 linked users** ([files-dropbox.md](plans/files-dropbox.md)). Built: PKCE,
+      cursor sync, cursor reset, 429 backoff. Not built: thumbnails. App registration and
+      production approval still to do.
 - [ ] **OneDrive API**: the Outlook Entra app plus `Files.Read`, Graph `delta`, personal and
-      work accounts ([files-onedrive.md](plans/files-onedrive.md))
+      work accounts ([files-onedrive.md](plans/files-onedrive.md)). Built: `/common` PKCE sign-in,
+      delta sync, 410 resync. Not built: thumbnails. Not tested: work accounts.
 - [ ] **Google Drive:** move to the Changes API (deletes and moves), narrow to `drive.readonly`,
       export Google-native files for text, shared drives. The public-release path follows the
       restricted-scope spike; until then, the sync folder ([files-google-drive.md](plans/files-google-drive.md))

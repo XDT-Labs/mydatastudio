@@ -1,8 +1,20 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/google_drive_idle_view.dart';
+import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 
 void main() {
+  // The policy controls make the card taller than the default 800x600 surface.
+  setUp(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    final view =
+        TestWidgetsFlutterBinding.instance.platformDispatcher.views.first;
+    view.physicalSize = const Size(1000, 1800);
+    view.devicePixelRatio = 1;
+    addTearDown(view.resetPhysicalSize);
+    addTearDown(view.resetDevicePixelRatio);
+  });
+
   group('GoogleDriveIdleView', () {
     testWidgets('shows Connect Google Drive heading', (tester) async {
       await tester.pumpWidget(
@@ -10,8 +22,8 @@ void main() {
           home: Scaffold(
             body: GoogleDriveIdleView(
               onConnect: () {},
-              saveLocalCopy: true,
-              onSaveLocalCopyChanged: (_) {},
+              policy: ContentPolicy.everything,
+              onPolicyChanged: (_) {},
             ),
           ),
         ),
@@ -26,8 +38,8 @@ void main() {
           home: Scaffold(
             body: GoogleDriveIdleView(
               onConnect: () {},
-              saveLocalCopy: true,
-              onSaveLocalCopyChanged: (_) {},
+              policy: ContentPolicy.everything,
+              onPolicyChanged: (_) {},
             ),
           ),
         ),
@@ -42,8 +54,8 @@ void main() {
           home: Scaffold(
             body: GoogleDriveIdleView(
               onConnect: () {},
-              saveLocalCopy: true,
-              onSaveLocalCopyChanged: (_) {},
+              policy: ContentPolicy.everything,
+              onPolicyChanged: (_) {},
             ),
           ),
         ),
@@ -59,8 +71,8 @@ void main() {
           home: Scaffold(
             body: GoogleDriveIdleView(
               onConnect: () => called = true,
-              saveLocalCopy: true,
-              onSaveLocalCopyChanged: (_) {},
+              policy: ContentPolicy.everything,
+              onPolicyChanged: (_) {},
             ),
           ),
         ),
@@ -72,27 +84,54 @@ void main() {
       expect(called, isTrue);
     });
 
-    testWidgets('checkbox toggles local copy preference', (tester) async {
-      bool? lastValue;
+    testWidgets('unchecking a category reports a policy without it', (
+      tester,
+    ) async {
+      ContentPolicy? last;
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: GoogleDriveIdleView(
-              onConnect: () {},
-              saveLocalCopy: true,
-              onSaveLocalCopyChanged: (val) => lastValue = val,
+            body: SingleChildScrollView(
+              child: GoogleDriveIdleView(
+                onConnect: () {},
+                policy: ContentPolicy.everything,
+                onPolicyChanged: (v) => last = v,
+              ),
             ),
           ),
         ),
       );
 
-      final checkbox = find.byType(Checkbox);
-      expect(checkbox, findsOneWidget);
-
-      await tester.tap(find.textContaining('Save a local copy'));
+      await tester.tap(find.byKey(const ValueKey('category-videos')));
       await tester.pump();
 
-      expect(lastValue, isFalse);
+      expect(last!.downloadCategories, isNot(contains(ContentCategory.videos)));
+      expect(last!.downloadCategories, contains(ContentCategory.images));
+    });
+
+    testWidgets('keep-deleted switch defaults off and reports toggles', (
+      tester,
+    ) async {
+      bool? changed;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GoogleDriveIdleView(
+              onConnect: () {},
+              policy: ContentPolicy.everything,
+              onPolicyChanged: (_) {},
+              onKeepDeletedFilesChanged: (v) => changed = v,
+            ),
+          ),
+        ),
+      );
+      final sw = find.widgetWithText(
+        SwitchListTile,
+        'Keep files deleted from Google Drive',
+      );
+      expect(tester.widget<SwitchListTile>(sw).value, isFalse);
+      await tester.tap(sw);
+      expect(changed, isTrue);
     });
   });
 }

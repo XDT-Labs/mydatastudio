@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: in-progress
 adr: none
-remaining: [sync-folder-card, megacmd-evaluation]
+remaining: [verify-folder-name, megacmd-evaluation]
 ---
 
 # Plan: MEGA (sync folder; MEGAcmd later)
