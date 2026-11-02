@@ -11,17 +11,26 @@ class AuthDialogManager {
   void init() {
     GetCollectionsService.instance.sink.listen((value) {
       for (var c in value) {
-        if (c.needsReAuth && c.oauthService == 'google') {
-          _showGoogleAuthDialog(c);
+        if (c.needsReAuth &&
+            (c.oauthService == 'google' || c.oauthService == 'dropbox')) {
+          _showAuthDialog(c);
         }
       }
     });
   }
 
-  void _showGoogleAuthDialog(Collection collection) {
+  void _showAuthDialog(Collection collection) {
+    final isDropbox = collection.oauthService == 'dropbox';
     final isEmail = collection.type == 'email';
-    final typeLabel = isEmail ? 'Gmail' : 'Google Drive';
+    final typeLabel =
+        isDropbox ? 'Dropbox' : (isEmail ? 'Gmail' : 'Google Drive');
     final icon = isEmail ? Icons.email : Icons.cloud;
+    final message =
+        isDropbox
+            ? "Your Dropbox sign-in has expired or been revoked.\nClick the button to sign in again."
+            : "Your Google OAuth token has expired or been revoked for '$typeLabel'.\nClick the button to re-authenticate.";
+    final buttonLabel =
+        isDropbox ? 'Sign in to Dropbox' : 'Login with Google ($typeLabel)';
 
     showDialog<SimpleDialog>(
       context: _globalNavigationKey.currentState!.context,
@@ -29,12 +38,7 @@ class AuthDialogManager {
         return SimpleDialog(
           title: const Text('Authentication Expired'),
           children: <Widget>[
-            SimpleDialogOption(
-              onPressed: null,
-              child: Text(
-                "Your Google OAuth token has expired or been revoked for '$typeLabel'.\nClick the button to re-authenticate.",
-              ),
-            ),
+            SimpleDialogOption(onPressed: null, child: Text(message)),
             SimpleDialogOption(
               onPressed: null,
               child: SizedBox(
@@ -42,9 +46,14 @@ class AuthDialogManager {
                 height: 48,
                 child: ElevatedButton.icon(
                   icon: Icon(icon),
-                  label: Text("Login with Google ($typeLabel)"),
+                  label: Text(buttonLabel),
                   onPressed: () async {
-                    if (isEmail) {
+                    if (isDropbox) {
+                      await LoginProviderExtension.handleDropbox(
+                        context,
+                        existing: collection,
+                      );
+                    } else if (isEmail) {
                       await LoginProviderExtension.handleGoogleMail(
                         context,
                         existing: collection,

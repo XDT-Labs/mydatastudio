@@ -79,6 +79,30 @@ void main() {
       }
     });
 
+    testWidgets('Dropbox is available and opens its sign-in form', (
+      tester,
+    ) async {
+      await pump(tester);
+      final dropbox = find.byKey(const ValueKey('source-dropbox'));
+      expect(
+        find.descendant(of: dropbox, matching: find.text('Soon')),
+        findsNothing,
+      );
+      expect(
+        FileSource.catalog.firstWhere((s) => s.id == 'dropbox').available,
+        isTrue,
+      );
+
+      await tester.tap(_tile('Dropbox'));
+      await tester.pump();
+      expect(find.text('All sources'), findsOneWidget);
+      // No app key configured yet: asks for the key only, never a secret.
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Configure Dropbox'), findsOneWidget);
+      expect(find.text('App key'), findsOneWidget);
+      expect(find.text('Client Secret'), findsNothing);
+    });
+
     testWidgets('detected sync folders appear as Found tiles', (tester) async {
       await pump(tester, found: [_icloud, _dropboxFolder]);
       expect(_tile('iCloud Drive'), findsOneWidget);
@@ -152,8 +176,8 @@ void main() {
       tester,
     ) async {
       await pump(tester);
-      expect(find.text('Soon'), findsNWidgets(3));
-      await tester.tap(_tile('Dropbox'));
+      expect(find.text('Soon'), findsNWidgets(2)); // OneDrive, Box
+      await tester.tap(_tile('OneDrive'));
       await tester.pump();
       expect(find.text('All sources'), findsNothing);
       expect(_macHeader, findsOneWidget);

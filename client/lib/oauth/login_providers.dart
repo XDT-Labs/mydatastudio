@@ -14,16 +14,18 @@ import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
+import 'package:oauth2/oauth2.dart' as oauth2;
 import 'package:uuid/uuid.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
+import 'package:mydatastudio/modules/files/services/scanners/dropbox_file_api.dart';
 import 'package:mydatastudio/modules/files/services/scanners/google_drive_file_api.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 
 // ignore: constant_identifier_names
-enum LoginProviders { google, googleDrive, azure, outlook }
+enum LoginProviders { google, googleDrive, azure, outlook, dropbox }
 
 class GoogleUserProfile {
   final String userId;
@@ -52,6 +54,8 @@ extension LoginProviderExtension on LoginProviders {
       case LoginProviders.azure:
       case LoginProviders.outlook:
         return 'azure';
+      case LoginProviders.dropbox:
+        return 'dropbox';
     }
   }
 
@@ -72,6 +76,8 @@ extension LoginProviderExtension on LoginProviders {
       case LoginProviders.azure:
       case LoginProviders.outlook:
         return "https://login.microsoftonline.com/$tenant/oauth2/v2.0/authorize";
+      case LoginProviders.dropbox:
+        return "https://www.dropbox.com/oauth2/authorize";
     }
   }
 
@@ -83,6 +89,8 @@ extension LoginProviderExtension on LoginProviders {
       case LoginProviders.azure:
       case LoginProviders.outlook:
         return "https://login.microsoftonline.com/$tenant/oauth2/v2.0/token";
+      case LoginProviders.dropbox:
+        return "https://api.dropboxapi.com/oauth2/token";
     }
   }
 
@@ -120,6 +128,7 @@ extension LoginProviderExtension on LoginProviders {
     switch (this) {
       case LoginProviders.google:
       case LoginProviders.googleDrive:
+      case LoginProviders.dropbox:
         return true;
       case LoginProviders.azure:
       case LoginProviders.outlook:
@@ -130,7 +139,11 @@ extension LoginProviderExtension on LoginProviders {
   /// Whether sign-in needs a client secret. Defaults to true; a public desktop
   /// client that relies on PKCE alone (e.g. Dropbox, Box) returns false and
   /// then sends only `client_id` + `code_verifier` to the token endpoint.
-  bool get requiresClientSecret => true;
+  bool get requiresClientSecret => this != LoginProviders.dropbox;
+
+  /// Whether the token request must repeat `scope` (Microsoft v2.0 requires
+  /// it). Dropbox's token endpoint takes none.
+  bool get tokenRequestNeedsScope => this != LoginProviders.dropbox;
 
   /// OAuth client secret.
   /// Google requires client_secret for desktop apps even with PKCE enabled.
@@ -186,6 +199,13 @@ extension LoginProviderExtension on LoginProviders {
           'email',
           'profile',
           'offline_access',
+        ];
+      case LoginProviders.dropbox:
+        // Read-only: list, download and thumbnails; nothing can modify Dropbox.
+        return [
+          'account_info.read',
+          'files.metadata.read',
+          'files.content.read',
         ];
     }
   }
@@ -466,50 +486,20 @@ extension LoginProviderExtension on LoginProviders {
         if (!await confirmSync(api)) return null;
       }
 
-      final collectionId = existing?.id ?? const Uuid().v4().toString();
-
-      final collection = Collection(
-        id: collectionId,
+      return await _saveCloudFileCollection(
+        credentials: client.credentials,
+        existing: existing,
         name: email,
         // 'path' stores the Drive root folder ID for this collection.
         // 'root' refers to the user's entire Drive. The folder picker UI
         // (Phase 9) can update this to a specific folder ID.
         path: rootFolderId,
-        type: 'file',
         scanner: AppConstants.scannerFileGDrive,
-        scanStatus: 'pending',
         oauthService: 'google',
-        accessToken: client.credentials.accessToken,
-        refreshToken: client.credentials.refreshToken,
-        idToken: client.credentials.idToken,
         userId: userId,
-        expiration: client.credentials.expiration,
-        needsReAuth: false,
-        downloadLocalCopy:
-            contentPolicy?.downloadsAnything ??
-            existing?.downloadLocalCopy ??
-            true,
-        contentPolicy: contentPolicy?.encode() ?? existing?.contentPolicy,
-        keepDeletedFiles:
-            keepDeletedFiles ?? existing?.keepDeletedFiles ?? false,
+        contentPolicy: contentPolicy,
+        keepDeletedFiles: keepDeletedFiles,
       );
-
-      final repo = CollectionRepository(DatabaseManager.instance.database!);
-      if (existing != null) {
-        await repo.updateCollection(collection);
-      } else {
-        await repo.addCollection(collection);
-      }
-
-      // Notify the file collections list to refresh
-      GetCollectionsService.instance.invoke(
-        GetCollectionsServiceCommand('file'),
-      );
-
-      // Start the scanner immediately
-      ScannerManager.getInstance().startScanner(collection);
-
-      return collection;
     } catch (e, stack) {
       AppLogger(
         null,
@@ -518,6 +508,158 @@ extension LoginProviderExtension on LoginProviders {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Google Drive sign-in failed. Please try again.'),
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
+  /// Persists a signed-in cloud file account as a `file` [Collection] (new or
+  /// re-authorised [existing]), refreshes the collections list and starts its
+  /// scanner. Shared by every OAuth cloud-drive connector.
+  static Future<Collection> _saveCloudFileCollection({
+    required oauth2.Credentials credentials,
+    required Collection? existing,
+    required String name,
+    required String path,
+    required String scanner,
+    required String oauthService,
+    required String userId,
+    required ContentPolicy? contentPolicy,
+    required bool? keepDeletedFiles,
+  }) async {
+    final collection = Collection(
+      id: existing?.id ?? const Uuid().v4().toString(),
+      name: name,
+      path: path,
+      type: 'file',
+      scanner: scanner,
+      scanStatus: 'pending',
+      oauthService: oauthService,
+      accessToken: credentials.accessToken,
+      refreshToken: credentials.refreshToken,
+      idToken: credentials.idToken,
+      userId: userId,
+      expiration: credentials.expiration,
+      needsReAuth: false,
+      downloadLocalCopy:
+          contentPolicy?.downloadsAnything ??
+          existing?.downloadLocalCopy ??
+          true,
+      contentPolicy: contentPolicy?.encode() ?? existing?.contentPolicy,
+      keepDeletedFiles: keepDeletedFiles ?? existing?.keepDeletedFiles ?? false,
+    );
+
+    final repo = CollectionRepository(DatabaseManager.instance.database!);
+    if (existing != null) {
+      await repo.updateCollection(collection);
+    } else {
+      await repo.addCollection(collection);
+    }
+
+    // Notify the file collections list to refresh
+    GetCollectionsService.instance.invoke(GetCollectionsServiceCommand('file'));
+
+    // Start the scanner immediately
+    ScannerManager.getInstance().startScanner(collection);
+
+    return collection;
+  }
+
+  /// Account behind a Dropbox access token (`users/get_current_account`).
+  static Future<({String accountId, String email})?> fetchDropboxAccount(
+    String accessToken, {
+    http.Client? client,
+  }) async {
+    final httpClient = client ?? http.Client();
+    try {
+      final response = await httpClient
+          .post(
+            Uri.parse('https://api.dropboxapi.com/2/users/get_current_account'),
+            headers: {'Authorization': 'Bearer $accessToken'},
+          )
+          .timeout(_profileTimeout);
+      if (response.statusCode != 200) {
+        AppLogger(null).e(
+          'Dropbox get_current_account error (${response.statusCode}): ${response.body}',
+        );
+        return null;
+      }
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final id = body['account_id'] as String?;
+      final email = body['email'] as String?;
+      if (id == null || email == null || email.isEmpty) return null;
+      return (accountId: id, email: email);
+    } catch (e) {
+      AppLogger(null).e('Dropbox account lookup failed: $e');
+      return null;
+    } finally {
+      if (client == null) httpClient.close();
+    }
+  }
+
+  /// Dropbox sign-in (PKCE, no client secret) mirroring [handleGoogleDrive]:
+  /// creates (or re-authorises [existing]) a `file` collection with scanner
+  /// `file.dropbox`. [rootFolderId] `'root'` is the whole Dropbox.
+  static Future<Collection?> handleDropbox(
+    BuildContext context, {
+    Collection? existing,
+    String rootFolderId = 'root',
+    ContentPolicy? contentPolicy,
+    bool? keepDeletedFiles,
+    Future<bool> Function(CloudFileApi api)? confirmSync,
+  }) async {
+    if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Dropbox is only supported on the desktop version of this app.',
+          ),
+        ),
+      );
+      return null;
+    }
+
+    try {
+      final client = await DesktopOAuthManager(
+        loginProvider: LoginProviders.dropbox,
+      ).login(customParameters: {'token_access_type': 'offline'});
+
+      final account = await fetchDropboxAccount(client.credentials.accessToken);
+      if (account == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to fetch Dropbox account.')),
+          );
+        }
+        return null;
+      }
+
+      if (confirmSync != null) {
+        final api = DropboxFileApi(
+          AuthenticatedHttpClient.bearer(client.credentials.accessToken),
+        );
+        if (!await confirmSync(api)) return null;
+      }
+
+      return await _saveCloudFileCollection(
+        credentials: client.credentials,
+        existing: existing,
+        name: account.email,
+        path: rootFolderId,
+        scanner: AppConstants.scannerFileDropbox,
+        oauthService: 'dropbox',
+        userId: account.accountId,
+        contentPolicy: contentPolicy,
+        keepDeletedFiles: keepDeletedFiles,
+      );
+    } catch (e, stack) {
+      AppLogger(null).e('Dropbox OAuth failed', error: e, stackTrace: stack);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Dropbox sign-in failed. Please try again.'),
           ),
         );
       }

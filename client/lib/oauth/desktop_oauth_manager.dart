@@ -78,7 +78,8 @@ class DesktopOAuthManager extends DesktopLoginManager {
       ),
       httpClient: JsonAcceptingHttpClient(
         httpClient: httpClient,
-        scopes: loginProvider.scopes,
+        scopes:
+            loginProvider.tokenRequestNeedsScope ? loginProvider.scopes : null,
       ),
       basicAuth: false,
       secret: needsSecret && clientSecret.isNotEmpty ? clientSecret : null,

@@ -10,7 +10,7 @@ enum FileSourceGroup {
 }
 
 /// Which setup form a source opens.
-enum FileSourceForm { folder, googleDrive, none }
+enum FileSourceForm { folder, googleDrive, dropbox, none }
 
 /// One tile in the "add a source" catalog. Adding a provider means adding an
 /// entry to [FileSource.catalog] and, if it needs one, a new [FileSourceForm].
@@ -115,7 +115,7 @@ class FileSource {
       title: 'Dropbox',
       subtitle: 'Sign in with Dropbox',
       icon: Icons.cloud_queue,
-      form: FileSourceForm.none,
+      form: FileSourceForm.dropbox,
     ),
     FileSource(
       id: 'onedrive',

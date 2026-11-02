@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
-import 'package:mydatastudio/modules/files/services/scanners/google_drive_file_api.dart';
+import 'package:mydatastudio/scanners/cloud/refreshing_bearer_client.dart';
 
 /// A full Drive scan can outlast one access token (about an hour). The client
 /// must swap in a fresh token mid-scan, or every later request fails auth and
