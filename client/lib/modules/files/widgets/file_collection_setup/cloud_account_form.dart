@@ -13,7 +13,7 @@ import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 
-/// Sign-in form shared by every OAuth cloud drive (Google Drive, Dropbox...):
+/// Sign-in form shared by every OAuth cloud drive (Google Drive, Dropbox, OneDrive...):
 /// credentials check -> sign in -> content policy and estimate -> collection.
 /// Provider differences live in [CloudAccountBranding] and the two callbacks.
 
@@ -45,13 +45,21 @@ class CloudAccountForm extends StatefulWidget {
     connect: LoginProviderExtension.handleDropbox,
   );
 
+  factory CloudAccountForm.oneDrive() => CloudAccountForm(
+    branding: CloudAccountBranding.oneDrive,
+    // PKCE-only: just the Entra application (client) ID, no secret.
+    isConfigured:
+        () async => (await LoginProviders.oneDrive.clientId()).isNotEmpty,
+    connect: LoginProviderExtension.handleOneDrive,
+  );
+
   final CloudAccountBranding branding;
 
   /// Whether the OAuth app credentials are already set up.
   final Future<bool> Function() isConfigured;
 
   /// Runs sign-in and creates the collection (`handleGoogleDrive` /
-  /// `handleDropbox`); null when cancelled or failed.
+  /// `handleDropbox` / `handleOneDrive`); null when cancelled or failed.
   final Future<Collection?> Function(
     BuildContext context, {
     ContentPolicy? contentPolicy,

@@ -99,4 +99,48 @@ class CloudAccountBranding {
         'read-only scopes) and enter its App key. No secret is needed.',
     idLabel: 'App key',
   );
+
+  static final oneDrive = CloudAccountBranding(
+    name: 'OneDrive',
+    logo: const Icon(
+      Icons.cloud_circle_outlined,
+      size: 72,
+      color: Color(0xFF0078D4),
+    ),
+    intro:
+        'Sign in with your Microsoft account (personal or work/school) to scan '
+        'and browse your OneDrive files directly from this app.',
+    accessNote:
+        'Read-only access: this app can never change or delete your files. '
+        "Personal Vault isn't readable by apps.",
+    keepDeletedLabel: 'Keep files deleted from OneDrive',
+    scanningNote: 'Scanning your OneDrive in the background…',
+    signInButton:
+        (onTap) => ElevatedButton.icon(
+          onPressed: onTap,
+          icon: const Icon(Icons.cloud_circle_outlined, size: 18),
+          label: const Text('Sign in with Microsoft'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF0078D4),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+    // Shares the Microsoft (Entra) app row with Outlook mail.
+    service: 'azure',
+    requiresSecret: false,
+    credentialsUrl:
+        'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
+    credentialsLinkText: 'Register an app in the Microsoft Entra admin center',
+    configureIntro:
+        'To connect to OneDrive, register a Microsoft Entra app as a public '
+        'client (accounts in any organization and personal accounts, redirect '
+        'URI http://localhost, delegated Files.Read, User.Read and '
+        'offline_access) and enter its Application (client) ID. No secret is '
+        'needed.',
+    idLabel: 'Application (client) ID',
+  );
 }

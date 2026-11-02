@@ -103,6 +103,28 @@ void main() {
       expect(find.text('Client Secret'), findsNothing);
     });
 
+    testWidgets('OneDrive is available and opens its sign-in form', (
+      tester,
+    ) async {
+      await pump(tester);
+      final onedrive = find.byKey(const ValueKey('source-onedrive'));
+      expect(
+        find.descendant(of: onedrive, matching: find.text('Soon')),
+        findsNothing,
+      );
+      expect(
+        FileSource.catalog.firstWhere((s) => s.id == 'onedrive').available,
+        isTrue,
+      );
+
+      await tester.tap(_tile('OneDrive'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Configure OneDrive'), findsOneWidget);
+      expect(find.text('Application (client) ID'), findsOneWidget);
+      expect(find.text('Client Secret'), findsNothing);
+    });
+
     testWidgets('detected sync folders appear as Found tiles', (tester) async {
       await pump(tester, found: [_icloud, _dropboxFolder]);
       expect(_tile('iCloud Drive'), findsOneWidget);
@@ -176,8 +198,8 @@ void main() {
       tester,
     ) async {
       await pump(tester);
-      expect(find.text('Soon'), findsNWidgets(2)); // OneDrive, Box
-      await tester.tap(_tile('OneDrive'));
+      expect(find.text('Soon'), findsOneWidget); // Box
+      await tester.tap(_tile('Box'));
       await tester.pump();
       expect(find.text('All sources'), findsNothing);
       expect(_macHeader, findsOneWidget);

@@ -10,7 +10,7 @@ import 'package:path/path.dart' as p;
 /// needed for actual filesystem operations without any extra DB queries.
 ///
 /// ## Rules
-/// - Cloud paths starting with `gdrive://` or `dropbox://` pass through
+/// - Cloud paths starting with `gdrive://`, `dropbox://` or `onedrive://` pass through
 ///   unchanged.
 /// - Paths that are already absolute (start with `/`) pass through unchanged.
 /// - For local files: `localCopyPath + '/' + asset.path`.
@@ -30,13 +30,15 @@ class FilePathResolver {
     // Cloud or already-absolute paths pass through unchanged.
     if (relativePath.startsWith('gdrive://') ||
         relativePath.startsWith('dropbox://') ||
+        relativePath.startsWith('onedrive://') ||
         relativePath.startsWith('/')) {
       return relativePath;
     }
 
     // Cloud folders store their provider ID as the path, which is absolute
     if (collection.scanner == AppConstants.scannerFileGDrive ||
-        collection.scanner == AppConstants.scannerFileDropbox) {
+        collection.scanner == AppConstants.scannerFileDropbox ||
+        collection.scanner == AppConstants.scannerFileOneDrive) {
       return relativePath;
     }
 
