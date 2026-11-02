@@ -1,7 +1,7 @@
 ---
-status: in-progress
+status: done
 adr: 0001
-remaining: [ui-visual-check]
+remaining: []
 ---
 
 # Plan: Give the local LLM tools to search the archive
@@ -361,9 +361,8 @@ a `search` call and answers from the results, and the conversation survives a re
   it renew?" with *"The email from Sarah Lee titled 'Lease renewal' (dated 2024-04-02) states
   that the apartment lease renews on **May 1**."* A follow-up arithmetic question made no
   tool call.
-- **Not yet verified:** how the chat UI looks (activity line, source chips, toggle) in the
-  running app. Driving the app with computer use wasn't approved in this session. That
-  check is the `ui-visual-check` left in `remaining`.
+- **Verified in the running app** (2026-11-01): the model calls the search tool from the chat
+  UI. This closed the `ui-visual-check` that was left in `remaining`.
 
 ### Phase 6: Later (not scheduled)
 

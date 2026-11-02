@@ -6,7 +6,7 @@ remaining: [base-image-choice, image-build, nas-file-mounts, auth-and-tls, in-co
 
 # Plan: Run the Linux desktop app on a Synology NAS in Docker
 
-**Wave 6** ([release plan](../RELEASE-PLAN.md)), near the end of feature development. Depends on
+**Wave 7** ([release plan](../RELEASE-PLAN.md)), near the end of feature development. Depends on
 [core-ci-linux-build.md](core-ci-linux-build.md).
 
 The goal: My Data Studio runs **24/7 on the NAS**, indexing the NAS's own folders directly, and

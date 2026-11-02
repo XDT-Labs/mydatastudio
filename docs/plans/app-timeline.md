@@ -10,7 +10,8 @@ remaining: [l0-index-and-schema, l1-map-and-timeline, l2-lanes, l3-playback, l4-
 Playback Viewer": React 19, Tailwind, `motion`, `@vis.gl/react-google-maps`, an Express server
 calling Gemini). It plays back three hand-written sample "stories" on a Google Map, with seven
 fixed lanes underneath. This plan rebuilds it as the **Timeline** app module in the Flutter
-client (`client/lib/modules/timeline/`), drawing on the user's real archive.
+client (`client/lib/modules/timeline/`), drawing on the user's real archive. It replaces the Timeline view and trip playback that
+were dropped from [photos-gallery-rewrite.md](photos-gallery-rewrite.md) (Phase 7, Task 8.3).
 
 **What it's for:** playing back your life. The archive's dated items sit in **lanes** at the
 bottom, like the tracks in Adobe Premiere, all on one long, shared time ruler. Items with a

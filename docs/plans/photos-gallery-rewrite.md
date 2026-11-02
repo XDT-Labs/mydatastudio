@@ -1,7 +1,7 @@
 ---
-status: in-progress
+status: done
 adr: none
-remaining: [confirm-timeline-view, confirm-trip-playback, integration-tests]
+remaining: []
 ---
 
 # Photos Module — Flutter Migration Plan
@@ -9,6 +9,7 @@ remaining: [confirm-timeline-view, confirm-trip-playback, integration-tests]
 > **Source:** React "Lumina Gallery" app (`/Users/mikenimer/Development/github/aistudio/photo-gallery/`)
 > **Target:** Flutter module replacing `client/lib/modules/photos/` in My Data Studio Desktop
 > **Date:** 2026-08-02
+> **Closed 2026-11-01:** built except Phase 7 (Timeline view), Task 8.3 (trip playback) and Task 12.3 (integration tests), which were dropped. The timeline view and trip playback move to their own app: [app-timeline.md](app-timeline.md).
 
 ---
 
@@ -541,6 +542,8 @@ Scrollable list (not `DataTable` — use `ListView.builder` for virtualization):
 
 ## Phase 7 — Timeline View
 
+> **Dropped (2026-11-01):** not built. Moved to the Timeline app ([app-timeline.md](app-timeline.md)).
+
 > **Goal:** Chronological timeline with month groupings and a floating quick-jump sidebar.
 > **React equivalent:** `MediaTimeline.tsx`
 
@@ -611,6 +614,8 @@ dependencies:
 - **Auto-fit bounds:** On load, fit map to show all markers with padding
 
 ### Task 8.3 — Trip Playback Controller
+
+> **Dropped (2026-11-01):** not built. Playback is part of the Timeline app ([app-timeline.md](app-timeline.md)).
 
 **File:** `client/lib/modules/photos/widgets/views/trip_playback_controller.dart`
 
@@ -769,6 +774,8 @@ Simple dialog listing all shortcuts in a two-column table (Key | Action).
 | `album_modal_test.dart` | Create album, add to album, validation |
 
 ### Task 12.3 — Integration Tests
+
+> **Dropped (2026-11-01):** not built.
 
 **Directory:** `client/integration_test/photos/`
 
