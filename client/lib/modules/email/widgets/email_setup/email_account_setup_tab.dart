@@ -65,6 +65,12 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
   String? _authHint;
   String? _connectedEmail;
 
+  /// What the last failed test was run with, kept so a Yandex account whose
+  /// new app password is not active yet can be saved anyway.
+  ImapConnectionRequest? _failedRequest;
+  String? _failedEmail;
+  bool _failedWithBadCredentials = false;
+
   @override
   void dispose() {
     _email.dispose();
@@ -120,6 +126,7 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
       security: isOther ? _security : _provider.security,
       username: username,
       password: _password.text,
+      providerId: _provider.id,
     );
   }
 
@@ -138,6 +145,7 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
       _state = _SetupState.loading;
       _errorMessage = null;
       _authHint = null;
+      _failedWithBadCredentials = false;
     });
 
     try {
@@ -145,6 +153,10 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
       if (!mounted) return;
       if (!result.ok) {
         setState(() {
+          _failedRequest = request;
+          _failedEmail = email;
+          _failedWithBadCredentials =
+              result.failure == ImapConnectionFailure.badCredentials;
           _state = _SetupState.error;
           _errorMessage = result.message;
           if (result.failure == ImapConnectionFailure.badCredentials) {
@@ -154,38 +166,73 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
         return;
       }
 
-      final collection = buildImapCollection(
-        provider: _provider,
-        email: email,
-        username: username,
-        password: request.password,
-        settings:
-            isOther || _provider.regionHosts.isNotEmpty
-                ? ImapSettings(
-                  host: request.host,
-                  port: request.port,
-                  security: request.security,
-                  username: username,
-                )
-                : null,
-        appDataDir: widget.appDataDirectory(),
+      await _saveAccount(
+        request,
+        email,
+        result.resolvedUsername ?? username,
       );
-      await widget.onAccountCreated(collection);
       if (!mounted) return;
 
-      setState(() {
-        _state = _SetupState.success;
-        _connectedEmail = email;
-      });
-
-      await Future.delayed(widget.successDelay);
-      if (!mounted) return;
-      widget.onDone(context);
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _state = _SetupState.error;
         _errorMessage = e.toString();
+        _failedWithBadCredentials = false;
+      });
+    }
+  }
+
+  /// Saves the account, shows the success view, then leaves the flow.
+  Future<void> _saveAccount(
+    ImapConnectionRequest request,
+    String email,
+    String username,
+  ) async {
+    final isOther = _provider.id == EmailProviderRegistry.other.id;
+    final collection = buildImapCollection(
+      provider: _provider,
+      email: email,
+      username: username,
+      password: request.password,
+      settings:
+          isOther || _provider.regionHosts.isNotEmpty
+              ? ImapSettings(
+                host: request.host,
+                port: request.port,
+                security: request.security,
+                username: username,
+              )
+              : null,
+      appDataDir: widget.appDataDirectory(),
+    );
+    await widget.onAccountCreated(collection);
+    if (!mounted) return;
+
+    setState(() {
+      _state = _SetupState.success;
+      _connectedEmail = email;
+    });
+
+    await Future.delayed(widget.successDelay);
+    if (!mounted) return;
+    widget.onDone(context);
+  }
+
+  /// Yandex only: a new app password can take hours to activate, so save the
+  /// account anyway and let the scanner's retry window pick it up.
+  Future<void> _saveAndRetryAutomatically() async {
+    final request = _failedRequest;
+    final email = _failedEmail;
+    if (request == null || email == null) return;
+    try {
+      await _saveAccount(request, email, request.username);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _state = _SetupState.error;
+        _errorMessage = e.toString();
+        _failedWithBadCredentials = false;
       });
     }
   }
@@ -242,6 +289,11 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
                 errorMessage: _errorMessage,
                 hint: _authHint,
                 onRetry: () => setState(() => _state = _SetupState.idle),
+                secondaryActionLabel:
+                    _provider.id == 'yandex' && _failedWithBadCredentials
+                        ? 'Save and retry automatically'
+                        : null,
+                onSecondaryAction: _saveAndRetryAutomatically,
               ),
             ),
             _ => _card(

@@ -165,6 +165,17 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       );
       return const {};
 
+    case 'collectionTokens':
+      // Refreshed OAuth tokens (access, refresh, expiration only).
+      final map = payload as Map;
+      await CollectionRepository(db).updateOAuthTokens(
+        map['collectionId'] as String,
+        accessToken: map['accessToken'] as String,
+        refreshToken: map['refreshToken'] as String,
+        expiration: map['expiration'] as DateTime,
+      );
+      return const {};
+
     case 'collectionStatus':
       // A targeted update (scan_status, last_scan_date only) — not the full
       // Collection object the isolate read at scan start, which would

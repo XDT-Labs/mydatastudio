@@ -15,6 +15,9 @@ class Collection {
   String? userId;
   DateTime? expiration;
   DateTime? lastScanDate;
+
+  /// When the collection was added; null for rows from before the column.
+  DateTime? dateCreated;
   bool needsReAuth = false;
   bool downloadLocalCopy = false;
   String? localCopyPath;
@@ -54,6 +57,7 @@ class Collection {
     this.userId,
     this.expiration,
     this.lastScanDate,
+    this.dateCreated,
     required this.needsReAuth,
     this.downloadLocalCopy = false,
     this.localCopyPath,
@@ -80,6 +84,7 @@ class Collection {
       userId: map['user_id'] as String?,
       expiration: map['expiration'] != null ? DateTime.fromMillisecondsSinceEpoch(map['expiration'] as int) : null,
       lastScanDate: map['last_scan_date'] != null ? DateTime.fromMillisecondsSinceEpoch(map['last_scan_date'] as int) : null,
+      dateCreated: map['date_created'] != null ? DateTime.fromMillisecondsSinceEpoch(map['date_created'] as int) : null,
       needsReAuth: (map['needs_re_auth'] as int? ?? 0) != 0,
       downloadLocalCopy: (map['download_local_copy'] as int? ?? 0) != 0,
       localCopyPath: map['local_copy_path'] as String?,
@@ -109,6 +114,7 @@ class Collection {
       'user_id': userId,
       'expiration': expiration?.millisecondsSinceEpoch,
       'last_scan_date': lastScanDate?.millisecondsSinceEpoch,
+      'date_created': dateCreated?.millisecondsSinceEpoch,
       'needs_re_auth': needsReAuth ? 1 : 0,
       'download_local_copy': downloadLocalCopy ? 1 : 0,
       'local_copy_path': localCopyPath,

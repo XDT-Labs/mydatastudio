@@ -21,7 +21,11 @@ import 'package:mydatastudio/modules/email/services/imap/folder_role_mapper.dart
 import 'package:mydatastudio/modules/email/services/imap/folder_sync_planner.dart';
 import 'package:mydatastudio/modules/email/services/imap/gmail_imap.dart';
 import 'package:mydatastudio/modules/email/services/imap/imap_removal_planner.dart';
+import 'package:mydatastudio/modules/email/services/imap/imap_auth_policy.dart';
 import 'package:mydatastudio/modules/email/services/imap/imap_connection_config.dart';
+import 'package:mydatastudio/modules/email/services/imap/outlook_token_refresher.dart';
+import 'package:mydatastudio/oauth/login_providers.dart';
+import 'package:mydatastudio/oauth/microsoft_auth.dart';
 import 'package:mydatastudio/modules/files/files_constants.dart';
 import 'package:mydatastudio/modules/email/services/inline_attachment.dart';
 import 'package:mydatastudio/modules/files/services/scanners/scanner_path_helper.dart';
@@ -219,12 +223,32 @@ class ImapScannerIsolateWorker {
 
     final AppLogger logger = AppLogger(clientPort);
 
-    final ImapConnectionConfig config;
+    ImapConnectionConfig config;
     try {
       config = ImapConnectionConfig.fromCollection(collection);
     } on ImapConfigException catch (e) {
       logger.e('IMAP scan aborted for ${collection.name}: ${e.message}');
       if (clientPort != null) {
+        await _recordScanError(clientPort, collection, logger);
+      }
+      return;
+    }
+
+    // Outlook access tokens last about an hour; renew before connecting.
+    try {
+      config = await _refreshOutlookTokenIfNeeded(
+        collection,
+        config,
+        clientPort,
+        dbDir,
+        logger,
+      );
+    } catch (e) {
+      logger.e('Outlook token refresh failed for ${collection.name}: $e');
+      if (clientPort != null) {
+        if (e is MicrosoftAuthException && e.isInvalidGrant) {
+          await _flagNeedsReAuth(clientPort, collection, logger);
+        }
         await _recordScanError(clientPort, collection, logger);
       }
       return;
@@ -381,6 +405,11 @@ class ImapScannerIsolateWorker {
       }
 
       clientPort.send({'type': 'refresh', 'status': 'done'});
+    } on ImapAuthFailure catch (e, stack) {
+      logger.e("IMAP login rejected: $e", error: e, stackTrace: stack);
+      if (clientPort != null && type == 'sync') {
+        await _handleAuthFailure(clientPort, collection, config, e, logger);
+      }
     } catch (e, stack) {
       logger.e("Error in IMAP Isolate: $e", error: e, stackTrace: stack);
       // Auth rejected, network down, ...: say so on the collection instead of
@@ -397,6 +426,94 @@ class ImapScannerIsolateWorker {
         } catch (_) {}
       }
     }
+  }
+
+  /// Refreshes the Outlook token when due and relays the new tokens to the
+  /// main isolate. The isolate's own database is read for a user-entered
+  /// client ID (the main-isolate singleton is unset here).
+  static Future<ImapConnectionConfig> _refreshOutlookTokenIfNeeded(
+    Collection collection,
+    ImapConnectionConfig config,
+    SendPort? clientPort,
+    String dbDir,
+    AppLogger logger,
+  ) {
+    return ensureFreshOutlookToken(
+      collection: collection,
+      config: config,
+      clientId: () async {
+        final db = await AppDatabase.create(null, dbDir, AppConstants.dbName);
+        try {
+          return await LoginProviders.outlook.clientId(db);
+        } finally {
+          await db.close();
+        }
+      },
+      persist: (tokens) async {
+        logger.i('Refreshed Outlook access token for ${collection.name}');
+        // No port = the move_to_trash job; it uses the token for this run only.
+        if (clientPort == null) return;
+        await writeViaMain(clientPort, 'collectionTokens', {
+          'collectionId': collection.id,
+          'accessToken': tokens.accessToken,
+          'refreshToken': tokens.refreshToken,
+          'expiration': tokens.expiration,
+        });
+      },
+    );
+  }
+
+  static Future<void> _flagNeedsReAuth(
+    SendPort clientPort,
+    Collection collection,
+    AppLogger logger,
+  ) async {
+    try {
+      await writeViaMain(clientPort, 'needsReAuth', {
+        'collectionId': collection.id,
+      });
+    } catch (err) {
+      logger.w('Could not flag needsReAuth: $err');
+    }
+  }
+
+  /// The server refused the login. Outlook gets a diagnosis in the log (the
+  /// token was just refreshed, so signing in again would not help). Other
+  /// providers are flagged `needs_re_auth` only for a clear credential
+  /// rejection (not for a brand-new Yandex app password, which can take
+  /// hours to activate); otherwise only a scan error is recorded and the
+  /// next scheduled sync retries.
+  static Future<void> _handleAuthFailure(
+    SendPort clientPort,
+    Collection collection,
+    ImapConnectionConfig config,
+    ImapAuthFailure failure,
+    AppLogger logger,
+  ) async {
+    if (config.provider.id == 'outlook') {
+      // The scan error text is not stored anywhere the UI reads, so the
+      // classified message only reaches the log.
+      final problem = classifyMicrosoftAuthError(failure.toString());
+      final message = problem.message;
+      if (message != null) logger.e('Outlook sign-in problem: $message');
+    } else {
+      final action = decideAuthFailureAction(
+        providerId: config.provider.id,
+        serverText: failure.cause.toString(),
+        dateCreated: collection.dateCreated,
+      );
+      if (action == AuthFailureAction.flagReAuth) {
+        await _flagNeedsReAuth(clientPort, collection, logger);
+      } else {
+        logger.w(
+          '${config.provider.displayName} rejected the login for '
+          '${collection.name} without a clear credential error (or a new '
+          'Yandex app password is still activating); will retry on the next '
+          'sync.',
+        );
+      }
+    }
+    await _recordScanError(clientPort, collection, logger);
   }
 
   /// Marks the collection's scan as failed, leaving `last_scan_date` alone.
@@ -432,7 +549,11 @@ class ImapScannerIsolateWorker {
     if (config.security == ImapSecurity.startTls) {
       await client.startTls();
     }
-    await authenticate(client, config, logger);
+    try {
+      await authenticate(client, config, logger);
+    } on ImapException catch (e) {
+      throw ImapAuthFailure(e);
+    }
   }
 
   /// oauth2 -> XOAUTH2; appPassword/password -> LOGIN.

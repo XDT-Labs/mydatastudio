@@ -1615,6 +1615,8 @@ class AppDatabase {
         'source_deleted_date': 'INTEGER',
       },
       'collections': {
+        // When the collection was added (epoch ms). NULL on legacy rows.
+        'date_created': 'INTEGER',
         // Provider change-feed position (Drive page token etc.). NULL means
         // "no baseline yet": the next sync is a full walk that stores one.
         'change_cursor': 'TEXT',
@@ -2176,6 +2178,7 @@ class AppDatabase {
       user_id TEXT,
       expiration INTEGER,
       last_scan_date INTEGER,
+      date_created INTEGER,
       needs_re_auth INTEGER NOT NULL DEFAULT 0,
       download_local_copy INTEGER NOT NULL DEFAULT 0,
       local_copy_path TEXT,
