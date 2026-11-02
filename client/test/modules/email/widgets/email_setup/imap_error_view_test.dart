@@ -61,5 +61,21 @@ void main() {
 
       expect(called, isTrue);
     });
+
+    testWidgets('shows the provider hint when given', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ImapErrorView(
+              errorMessage: 'rejected',
+              hint: 'Turn IMAP back on',
+              onRetry: () {},
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Turn IMAP back on'), findsOneWidget);
+    });
   });
 }

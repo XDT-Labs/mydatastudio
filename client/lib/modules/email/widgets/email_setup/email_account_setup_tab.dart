@@ -60,7 +60,9 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
   EmailProvider _provider = EmailProviderRegistry.other;
   ImapSecurity _security = ImapSecurity.ssl;
   bool _providerOverridden = false;
+  String? _regionHost;
   String? _errorMessage;
+  String? _authHint;
   String? _connectedEmail;
 
   @override
@@ -77,6 +79,7 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
     setState(() {
       if (!_providerOverridden) {
         _provider = EmailProviderRegistry.detectFromEmail(value);
+        _regionHost = null;
       }
     });
   }
@@ -85,6 +88,7 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
     setState(() {
       _provider = provider;
       _providerOverridden = true;
+      _regionHost = null;
     });
   }
 
@@ -99,10 +103,19 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
     });
   }
 
+  void _onRegionChanged(String host) => setState(() => _regionHost = host);
+
+  /// The host the provider is reached at: the user's region pick for providers
+  /// with regions, otherwise the registry default.
+  String get _providerHost =>
+      _provider.regionHosts.containsValue(_regionHost)
+          ? _regionHost!
+          : _provider.imapHost!;
+
   ImapConnectionRequest _buildRequest(String email, String username) {
     final isOther = _provider.id == EmailProviderRegistry.other.id;
     return ImapConnectionRequest(
-      host: isOther ? _host.text.trim() : _provider.imapHost!,
+      host: isOther ? _host.text.trim() : _providerHost,
       port: isOther ? int.parse(_port.text.trim()) : _provider.imapPort,
       security: isOther ? _security : _provider.security,
       username: username,
@@ -124,6 +137,7 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
     setState(() {
       _state = _SetupState.loading;
       _errorMessage = null;
+      _authHint = null;
     });
 
     try {
@@ -133,6 +147,9 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
         setState(() {
           _state = _SetupState.error;
           _errorMessage = result.message;
+          if (result.failure == ImapConnectionFailure.badCredentials) {
+            _authHint = _provider.authFailureHint;
+          }
         });
         return;
       }
@@ -143,7 +160,7 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
         username: username,
         password: request.password,
         settings:
-            isOther
+            isOther || _provider.regionHosts.isNotEmpty
                 ? ImapSettings(
                   host: request.host,
                   port: request.port,
@@ -223,6 +240,7 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
               const ValueKey('error'),
               ImapErrorView(
                 errorMessage: _errorMessage,
+                hint: _authHint,
                 onRetry: () => setState(() => _state = _SetupState.idle),
               ),
             ),
@@ -237,11 +255,13 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
                 usernameController: _username,
                 provider: _provider,
                 security: _security,
+                regionHost: _regionHost,
                 showProviderSection:
                     _providerOverridden || _email.text.contains('@'),
                 onEmailChanged: _onEmailChanged,
                 onProviderChanged: _onProviderChanged,
                 onSecurityChanged: _onSecurityChanged,
+                onRegionChanged: _onRegionChanged,
                 onSubmit: _submit,
                 onContinueOAuth:
                     () => setState(() => _state = _SetupState.oauth),

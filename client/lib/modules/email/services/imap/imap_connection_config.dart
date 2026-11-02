@@ -38,7 +38,8 @@ class ImapConnectionConfig {
 
   /// Resolution order: `emailProviderId` -> registry; else the legacy
   /// `scanner` value (`email.yahoo` / `email.outlook`). The `other` provider
-  /// takes host/port/security from `Collection.imapSettings`.
+  /// takes host/port/security from `Collection.imapSettings`; other providers
+  /// only take the host from there, when stored.
   ///
   /// Throws [ImapConfigException] rather than guessing.
   factory ImapConnectionConfig.fromCollection(Collection collection) {
@@ -76,6 +77,11 @@ class ImapConnectionConfig {
         imapPort: settings.port,
         security: settings.security,
       );
+    }
+    // A stored host wins for registry providers too (e.g. the Zoho region the
+    // user picked at setup).
+    else if (settings != null && settings.host.isNotEmpty) {
+      provider = provider.copyWith(imapHost: settings.host);
     }
 
     final host = provider.imapHost;

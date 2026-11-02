@@ -40,6 +40,30 @@ void main() {
     },
   );
 
+  test('a stored host wins for a registry provider (Zoho region)', () {
+    final cfg = ImapConnectionConfig.fromCollection(
+      _c(
+        providerId: 'zoho',
+        userId: 'me@zohomail.eu',
+        settings:
+            const ImapSettings(
+              host: 'imap.zoho.eu',
+              username: 'me@zohomail.eu',
+            ).toJsonString(),
+      ),
+    );
+    expect(cfg.host, 'imap.zoho.eu');
+    expect(cfg.port, 993);
+    expect(cfg.provider.id, 'zoho');
+  });
+
+  test('without stored settings a registry provider uses its default host', () {
+    final cfg = ImapConnectionConfig.fromCollection(
+      _c(providerId: 'zoho', userId: 'me@zoho.com'),
+    );
+    expect(cfg.host, 'imap.zoho.com');
+  });
+
   test('legacy email.yahoo resolves to Yahoo and logs in as userId', () {
     final cfg = ImapConnectionConfig.fromCollection(
       _c(scanner: 'email.yahoo', userId: 'me@yahoo.com', name: 'Display'),
@@ -55,7 +79,7 @@ void main() {
       _c(scanner: 'email.outlook', name: 'me@outlook.com', userId: 'ignored'),
     );
     expect(cfg.provider.id, 'outlook');
-    expect(cfg.host, 'imap-mail.outlook.com');
+    expect(cfg.host, 'outlook.office365.com');
     expect(cfg.authType, EmailAuthType.oauth2);
     expect(cfg.username, 'me@outlook.com');
   });

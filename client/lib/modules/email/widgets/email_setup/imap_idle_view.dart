@@ -3,7 +3,8 @@ import 'package:mydatastudio/modules/email/services/imap/email_provider.dart';
 import 'package:mydatastudio/modules/email/services/imap/email_provider_registry.dart';
 import 'package:mydatastudio/modules/email/widgets/email_setup/step_indicator_widget.dart';
 
-/// Provider-specific instructions for creating an app password.
+/// Setup instructions for a provider: its registry steps plus, for some, a
+/// link to the page where the credential is created.
 class AppPasswordHelp {
   const AppPasswordHelp({required this.steps, this.url, this.linkLabel});
 
@@ -12,37 +13,30 @@ class AppPasswordHelp {
   final String? linkLabel;
 
   static AppPasswordHelp forProvider(EmailProvider provider) {
+    final steps =
+        provider.setupSteps.isNotEmpty
+            ? provider.setupSteps
+            : [
+              'Open the security settings of your ${provider.displayName} '
+                  'account.',
+              'Generate an app-specific password for IMAP access.',
+              'Paste it below.',
+            ];
     switch (provider.id) {
       case 'yahoo':
         return AppPasswordHelp(
-          steps: const [
-            'Log in to your Yahoo Account Security settings.',
-            'Click "Generate app password".',
-            'Select "Other App", name it "mydatastudio", and click Generate.',
-            'Copy the 16-character code and paste it below.',
-          ],
+          steps: steps,
           url: Uri.parse('https://login.yahoo.com/account/security'),
           linkLabel: 'Open Yahoo Security Settings',
         );
       case 'icloud':
         return AppPasswordHelp(
-          steps: const [
-            'Sign in to your Apple Account and open Sign-In and Security.',
-            'Choose "App-Specific Passwords" and generate one.',
-            'Paste it below.',
-          ],
+          steps: steps,
           url: Uri.parse('https://account.apple.com/account/manage'),
           linkLabel: 'Open Apple Account',
         );
       default:
-        return AppPasswordHelp(
-          steps: [
-            'Open the security settings of your ${provider.displayName} '
-                'account.',
-            'Generate an app-specific password for IMAP access.',
-            'Paste it below.',
-          ],
-        );
+        return AppPasswordHelp(steps: steps);
     }
   }
 }
@@ -61,10 +55,12 @@ class ImapIdleView extends StatelessWidget {
     required this.usernameController,
     required this.provider,
     required this.security,
+    required this.regionHost,
     required this.showProviderSection,
     required this.onEmailChanged,
     required this.onProviderChanged,
     required this.onSecurityChanged,
+    required this.onRegionChanged,
     required this.onSubmit,
     required this.onContinueOAuth,
     required this.onOpenHelpUrl,
@@ -79,12 +75,16 @@ class ImapIdleView extends StatelessWidget {
   final EmailProvider provider;
   final ImapSecurity security;
 
+  /// The chosen host of a provider with [EmailProvider.regionHosts].
+  final String? regionHost;
+
   /// False until the user has typed an address (or picked a provider), so the
   /// first screen is just the address field.
   final bool showProviderSection;
   final ValueChanged<String> onEmailChanged;
   final ValueChanged<EmailProvider> onProviderChanged;
   final ValueChanged<ImapSecurity> onSecurityChanged;
+  final ValueChanged<String> onRegionChanged;
   final VoidCallback onSubmit;
   final VoidCallback onContinueOAuth;
   final ValueChanged<Uri> onOpenHelpUrl;
@@ -134,7 +134,7 @@ class ImapIdleView extends StatelessWidget {
             Center(
               child: Text(
                 'Enter your address and we will work out the rest. Works with '
-                'Yahoo, Outlook, iCloud, AOL, Fastmail and any IMAP server.',
+                'Yahoo, Outlook, iCloud, AOL, Fastmail, GMX, Zoho and any IMAP server.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.grey.shade600, height: 1.5),
               ),
@@ -201,7 +201,8 @@ class ImapIdleView extends StatelessWidget {
                   ),
                 ),
               ] else ...[
-                if (isAppPassword) ..._buildHelp(context),
+                if (!isOther) ..._buildHelp(context),
+                if (provider.regionHosts.isNotEmpty) ..._buildRegionField(),
                 if (isOther) ..._buildServerFields(),
                 TextFormField(
                   key: const Key('password-field'),
@@ -280,6 +281,24 @@ class ImapIdleView extends StatelessWidget {
             ],
           ],
         ),
+      ),
+      const SizedBox(height: 16),
+    ];
+  }
+
+  List<Widget> _buildRegionField() {
+    return [
+      DropdownButtonFormField<String>(
+        key: const Key('region-dropdown'),
+        initialValue: regionHost ?? provider.imapHost,
+        decoration: _decoration('Region', icon: Icons.public),
+        items: [
+          for (final e in provider.regionHosts.entries)
+            DropdownMenuItem(value: e.value, child: Text(e.key)),
+        ],
+        onChanged: (host) {
+          if (host != null) onRegionChanged(host);
+        },
       ),
       const SizedBox(height: 16),
     ];
