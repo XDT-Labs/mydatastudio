@@ -34,6 +34,9 @@ class AppConstants {
 
   static const String scannerEmailYahoo = "email.yahoo";
 
+  /// Any IMAP provider; the concrete provider is [Collection.emailProviderId].
+  static const String scannerEmailImap = "email.imap";
+
   // File source scanners
   static const String scannerFileLocal = "file.local";
   static const String scannerFileGDrive = "file.gdrive";
