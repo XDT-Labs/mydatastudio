@@ -15,7 +15,7 @@ import 'package:mydatastudio/repositories/collection_repository.dart';
 /// - Refreshing the token using the stored refresh token (PKCE, no client_secret).
 /// - Persisting the new token back to the [Collection] record in the DB.
 ///
-/// Used by [GoogleDriveProvider] (UI actions), [CloudFileIsolateWorker]
+/// Used by [GoogleDriveProvider] (UI actions), [CloudFileScannerWorker]
 /// (Drive background scanning), and [GmailScannerIsolateWorker] (email scanning).
 /// The isolate version uses [refreshTokens] with raw token strings.
 class GoogleAuthService {
