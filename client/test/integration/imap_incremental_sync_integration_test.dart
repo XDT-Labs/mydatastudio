@@ -30,6 +30,7 @@ void main() {
     'INBOX',
     'Sent',
     'Trash',
+    'Junk',
     'Archive',
     'Sent Items',
     'Papierkorb',
@@ -162,6 +163,8 @@ void main() {
       ]);
       await seedMessages(seeder!, 'Sent', [msg('s1')]);
       await seedMessages(seeder!, 'Trash', [msg('t1')]);
+      await seedMessages(seeder!, 'Junk', [msg('j1')]);
+      await seedMessages(seeder!, 'Papierkorb', [msg('p1')]);
 
       await sync(c);
 
@@ -170,7 +173,7 @@ void main() {
         'INBOX:Subject i1',
         'INBOX:Subject i2',
         'Sent:Subject s1',
-        'Trash:Subject t1',
+        // Trash, Junk and the flagged Papierkorb are skipped.
       });
       final st = await folderState('INBOX');
       expect(st['uid_validity'], isNotNull);
@@ -184,8 +187,38 @@ void main() {
           f['id']: f['type'],
       };
       expect(types['Sent'], 'sent');
+      // Skipped folders are still listed (and classified), just not synced.
       expect(types['Trash'], 'trash');
+      expect(types['Junk'], 'junk');
       expect(types['INBOX'], 'inbox');
+      expect((await folderState('Trash'))['last_synced_uid'], isNull);
+    },
+  );
+
+  imapTest(
+    'mail already stored from a now-skipped folder is left untouched',
+    () async {
+      final c = await persisted(EmailDeletePolicy.remove);
+      await seedMessages(seeder!, 'INBOX', [msg('keepme')]);
+      await sync(c);
+      // A row an earlier version synced from Trash, with a uid that matches
+      // nothing on the server.
+      await manager.database!.execute(
+        'INSERT INTO emails (id, collection_id, date, "from", "to", '
+        "folder_id, uid, message_id, subject) VALUES "
+        "('<old-trash@test.local>', 'imap-incr', 0, 'a', 'b', 'Trash', 999, "
+        "'<old-trash@test.local>', 'Old')",
+      );
+
+      await sync(c);
+
+      final rows = await emails();
+      expect(
+        rows.map((e) => e['message_id']),
+        containsAll(['<old-trash@test.local>', '<incr-keepme@test.local>']),
+        reason: 'even under policy remove: a skipped folder is never evaluated',
+      );
+      expect(rows.every((e) => e['is_deleted'] == 0), isTrue);
     },
   );
 

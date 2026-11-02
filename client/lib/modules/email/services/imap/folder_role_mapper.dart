@@ -21,6 +21,11 @@ enum FolderRole {
   );
 }
 
+/// Roles whose folders are not synced: spam and deleted mail is noise in an
+/// archive. Rows already stored from such a folder are left alone; the folder
+/// is simply never visited, so no removal logic runs for it either.
+const syncSkippedRoles = <FolderRole>{FolderRole.trash, FolderRole.junk};
+
 const _genericNameHints = <String, FolderRole>{
   'sent': FolderRole.sent,
   'sent mail': FolderRole.sent,

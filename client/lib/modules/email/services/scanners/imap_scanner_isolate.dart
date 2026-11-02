@@ -275,7 +275,9 @@ class ImapScannerIsolateWorker {
 
       // 2. Sync Emails: every selectable folder, or just the targeted one.
       final targets =
-          folderId != null ? [folderId] : selectableFolderPaths(mailboxes);
+          folderId != null
+              ? [folderId]
+              : selectableFolderPaths(mailboxes, provider: config.provider);
       int found = 0, added = 0, skipped = 0;
       final failedFolders = <String>[];
       for (final target in targets) {
@@ -528,15 +530,27 @@ class ImapScannerIsolateWorker {
     return mailboxes;
   }
 
-  /// Paths of the mailboxes that can be SELECTed (not `\\Noselect` /
-  /// `\\NonExistent` containers), INBOX first.
-  static List<String> selectableFolderPaths(List<Mailbox> mailboxes) {
+  /// Paths of the mailboxes to sync: SELECTable (not `\\Noselect` /
+  /// `\\NonExistent` containers) and not of a [syncSkippedRoles] role
+  /// (Junk/Trash), INBOX first.
+  static List<String> selectableFolderPaths(
+    List<Mailbox> mailboxes, {
+    EmailProvider? provider,
+  }) {
     final paths =
         mailboxes
             .where(
               (m) =>
                   !m.hasFlag(MailboxFlag.noSelect) &&
-                  !m.hasFlag(MailboxFlag.nonExistent),
+                  !m.hasFlag(MailboxFlag.nonExistent) &&
+                  !syncSkippedRoles.contains(
+                    folderRoleFor(
+                      name: m.name,
+                      path: m.path,
+                      flags: m.flags,
+                      provider: provider,
+                    ),
+                  ),
             )
             .map((m) => m.path)
             .toList();
@@ -625,11 +639,7 @@ class ImapScannerIsolateWorker {
               lastSyncedUid: storedRows.first['last_synced_uid'] as int?,
             );
 
-    final plan = FolderSyncPlanner.plan(
-      stored,
-      server,
-      fullResync: fullResync,
-    );
+    final plan = FolderSyncPlanner.plan(stored, server, fullResync: fullResync);
     if (plan.skip) {
       logger.s("$targetFolder unchanged since last sync.");
       return (found: 0, added: 0, skipped: 0, failed: 0);
@@ -649,6 +659,7 @@ class ImapScannerIsolateWorker {
     final remoteSet = remote.toSet();
     final newUids = remote.where((u) => u > plan.fetchAfterUid).toList();
     int lastSynced = plan.fetchAfterUid;
+    int downloaded = 0;
     logger.s(
       "$targetFolder: ${remote.length} on server, ${newUids.length} new.",
     );
@@ -665,6 +676,13 @@ class ImapScannerIsolateWorker {
         for (final h in heads.values)
           if (h.messageId != null) h.messageId!,
       ]);
+      // Rows from before the engine (and any later message) without a
+      // Message-ID are identified by their deterministic id instead.
+      final knownIdless = await _existingIds(appDb, cid, targetFolder, [
+        for (final h in heads.entries)
+          if (h.value.messageId == null)
+            messageIdlessEmailId(providerId, cid, targetFolder, h.key),
+      ]);
       final toFetch = <int>[];
       final rematch = <Map<String, Object?>>[];
       final alsoHere = <String>[];
@@ -672,6 +690,19 @@ class ImapScannerIsolateWorker {
       for (final uid in batchUids) {
         final head = heads[uid];
         final mid = head?.messageId;
+        if (head != null && mid == null) {
+          final idlessId = messageIdlessEmailId(
+            providerId,
+            cid,
+            targetFolder,
+            uid,
+          );
+          if (knownIdless.contains(idlessId)) {
+            rematch.add({'id': idlessId, 'uid': uid, 'isRead': head.seen});
+            skipped++;
+            continue;
+          }
+        }
         if (mid != null) {
           final existing = known[mid];
           if (existing != null) {
@@ -700,6 +731,7 @@ class ImapScannerIsolateWorker {
         toFetch.add(uid);
       }
 
+      downloaded += toFetch.length;
       final messages = await _fetchFullMessages(client, toFetch, logger);
       final fetchedUids = messages.map((m) => m.uid).toSet();
       final lost = toFetch.where((u) => !fetchedUids.contains(u)).length;
@@ -771,6 +803,8 @@ class ImapScannerIsolateWorker {
       });
       clientPort.send({'type': 'refresh'});
     }
+
+    logger.i("$targetFolder: $downloaded message bodies downloaded.");
 
     // Local primary rows of this folder: flags and removals both need them.
     final localRows = await _localPrimaryRows(appDb, cid, targetFolder);
@@ -889,6 +923,28 @@ class ImapScannerIsolateWorker {
             isDeleted: (r['is_deleted'] as int? ?? 0) != 0,
           ),
         );
+      }
+    }
+    return out;
+  }
+
+  /// Which of the row [ids] already exist in [folder] of the collection.
+  static Future<Set<String>> _existingIds(
+    AppDatabase db,
+    String cid,
+    String folder,
+    List<String> ids,
+  ) async {
+    final out = <String>{};
+    for (final chunk in sqlChunks(ids)) {
+      final ph = List.filled(chunk.length, '?').join(',');
+      final rows = await db.select(
+        'SELECT id FROM emails WHERE collection_id = ? AND folder_id = ? '
+        'AND id IN ($ph)',
+        [cid, folder, ...chunk],
+      );
+      for (final r in rows) {
+        out.add(r['id'] as String);
       }
     }
     return out;
@@ -1340,6 +1396,19 @@ class ImapScannerIsolateWorker {
     );
   }
 
+  /// Row id for a message with no Message-ID header. Deterministic per UID, and
+  /// the same formula the pre-engine Yahoo/Outlook scanners used (providerId
+  /// `yahoo`/`outlook`), so those legacy rows are recognised, not duplicated.
+  static String messageIdlessEmailId(
+    String providerId,
+    String cid,
+    String folder,
+    int? uid,
+  ) => const Uuid().v5(
+    Namespace.url.value,
+    'email:$providerId:$cid:$folder:${uid ?? const Uuid().v4()}',
+  );
+
   static Future<Email> _parseAndProcessMessage({
     required MimeMessage message,
     required Collection collection,
@@ -1355,10 +1424,7 @@ class ImapScannerIsolateWorker {
 
     String emailId =
         messageId ??
-        const Uuid().v5(
-          Namespace.url.value,
-          'email:$providerId:${collection.id}:$targetFolder:${uid ?? const Uuid().v4()}',
-        );
+        messageIdlessEmailId(providerId, collection.id, targetFolder, uid);
 
     String? plainBody;
     try {
