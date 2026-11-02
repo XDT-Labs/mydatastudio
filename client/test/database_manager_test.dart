@@ -741,11 +741,13 @@ void main() {
           "INSERT INTO file_chunks (file_id, chunk_index, text) "
           "VALUES ('chunked', 0, 'already extracted')",
         );
+        // Run this upgrade step on its own. Reopening would run every step
+        // through the latest, and version 6 (the EmbeddingGemma 2 switch)
+        // resets every file's attempts, hiding what this step did. The
+        // database is already fully upgraded; user_version 4 re-arms just
+        // this step (version 5).
         await appDb.rawDb.execute('PRAGMA user_version = 4');
-        await appDb.close();
-
-        // Reopening is what an upgraded install does.
-        appDb = await AppDatabase.create(null, supportDir.path, dbName);
+        await appDb.runDocRecoveryStep();
         Future<int> attemptsOf(String id) async {
           final rows = await appDb.rawDb.select(
             'SELECT embedding_attempts FROM files WHERE id = ?',

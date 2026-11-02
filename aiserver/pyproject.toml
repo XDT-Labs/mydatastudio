@@ -16,13 +16,15 @@ dependencies = [
     "fastapi==0.120.4",
     "langchain-core==0.3.79",
     "langchain==0.3.27",
-    "huggingface-hub==0.36.0",
+    "huggingface-hub>=0.36.0",
     "langchain-google-genai",
     "langchain-openai>=0.3.35",
     "langchain-anthropic>=0.3.22",
     "langchain-community",
-    "transformers>=4.57.0",
-    "qwen-vl-utils",
+    "transformers>=5.18.0",
+    "sentence-transformers>=6.1.0",
+    "soundfile",
+    "av",
     "torch",
     "torchvision",
     "pillow",
@@ -30,7 +32,7 @@ dependencies = [
     "accelerate",
     "libpff-python",
     "rawpy==0.26.1",
-    "docling-rs>=1.7.0",
+    "docling-rs>=1.7.0,<2",  # 2.x native lib fails to load on macOS (missing ___isPlatformVersionAtLeast)
 ]
 
 requires-python = ">=3.11,<3.15"

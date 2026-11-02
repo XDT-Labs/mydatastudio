@@ -24,7 +24,7 @@ DEFAULT_DB = os.path.expanduser(
 # Only rows whose vector is exactly this many bytes are dumped. A short or
 # oversized BLOB means a partially written or wrong-model embedding; letting one
 # through would silently shift every subsequent vector in the flat binary.
-DIM = 2048
+DIM = 768
 EXPECTED_BYTES = DIM * 4
 
 
@@ -57,14 +57,14 @@ def main():
     rows = conn.execute(
         """
         SELECT e.file_id, c.name, c.scanner, f.name, f.description,
-               e.qwen3_vl_embedding
+               e.embeddinggemma2_embedding
         FROM files_embeddings e
         JOIN files f ON f.id = e.file_id
         JOIN collections c ON c.id = f.collection_id
         WHERE e.type = ?
           AND f.is_deleted = 0
           AND f.is_inline = 0
-          AND e.qwen3_vl_embedding IS NOT NULL
+          AND e.embeddinggemma2_embedding IS NOT NULL
         ORDER BY e.file_id
         """,
         (args.type,),

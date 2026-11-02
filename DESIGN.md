@@ -55,39 +55,95 @@ colors:
   mesh-indigo: rgba(79, 55, 138, 0.12)
   border-subtle: rgba(255, 255, 255, 0.08)
 typography:
+  # Source of truth: _buildTheme() in client/lib/family_dam_app.dart.
+  # Font: the macOS system font (.AppleSystemUIFont = SF Pro), fallbacks Inter, Segoe UI, sans-serif.
   display-brand:
     fontFamily: Montserrat
-    fontSize: 24px
-    fontWeight: '800'
-    lineHeight: 32px
-    letterSpacing: -0.02em
-  headline-lg:
-    fontFamily: Public Sans
-    fontSize: 20px
-    fontWeight: '700'
-    lineHeight: 28px
-  body-md:
-    fontFamily: Public Sans
-    fontSize: 14px
+    fontSize: 22px
+    fontWeight: '200'
+    letterSpacing: -0.5px
+  display-lg:
+    fontFamily: System
+    fontSize: 56px
     fontWeight: '400'
-    lineHeight: 20px
-  body-md-bold:
-    fontFamily: Public Sans
-    fontSize: 14px
-    fontWeight: '700'
-    lineHeight: 20px
-  label-caps:
-    fontFamily: Public Sans
-    fontSize: 10px
-    fontWeight: '900'
-    lineHeight: 16px
-    letterSpacing: 0.15em
-  table-header:
-    fontFamily: Public Sans
+    letterSpacing: -0.5px
+  display-md:
+    fontFamily: System
+    fontSize: 44px
+    fontWeight: '400'
+    letterSpacing: -0.5px
+  display-sm:
+    fontFamily: System
+    fontSize: 36px
+    fontWeight: '400'
+    letterSpacing: -0.25px
+  headline-lg:
+    fontFamily: System
+    fontSize: 32px
+    fontWeight: '500'
+    letterSpacing: -0.2px
+  headline-md:
+    fontFamily: System
+    fontSize: 28px
+    fontWeight: '500'
+    letterSpacing: -0.2px
+  headline-sm:
+    fontFamily: System
+    fontSize: 24px
+    fontWeight: '500'
+    letterSpacing: -0.15px
+  title-lg:
+    fontFamily: System
+    fontSize: 20px
+    fontWeight: '500'
+    letterSpacing: -0.15px
+  title-md:
+    fontFamily: System
+    fontSize: 15px
+    fontWeight: '500'
+    letterSpacing: -0.1px
+  title-sm:
+    fontFamily: System
+    fontSize: 13.5px
+    fontWeight: '500'
+    letterSpacing: -0.1px
+  body-lg:
+    fontFamily: System
+    fontSize: 15px
+    fontWeight: '400'
+    lineHeight: 1.4
+    letterSpacing: -0.1px
+  body-md:
+    fontFamily: System
+    fontSize: 13.5px
+    fontWeight: '400'
+    lineHeight: 1.4
+    letterSpacing: -0.1px
+  body-sm:
+    fontFamily: System
+    fontSize: 12px
+    fontWeight: '400'
+    lineHeight: 1.35
+  label-lg:
+    fontFamily: System
+    fontSize: 13.5px
+    fontWeight: '500'
+    letterSpacing: -0.1px
+  label-md:
+    fontFamily: System
+    fontSize: 12px
+    fontWeight: '500'
+  label-sm:
+    fontFamily: System
     fontSize: 11px
-    fontWeight: '900'
-    lineHeight: 16px
-    letterSpacing: 0.1em
+    fontWeight: '500'
+    letterSpacing: 0.2px
+  table-header:
+    fontFamily: System
+    fontSize: 14px
+    fontWeight: '500'
+  mono:
+    fontFamily: SF Mono
 rounded:
   sm: 0.25rem
   DEFAULT: 0.5rem
@@ -121,10 +177,23 @@ The palette is a deep-space dark theme dominated by the "Neutral" obsidian base 
 
 ## Typography
 
-The typographic system utilizes a high-contrast pairing, implemented via the `google_fonts` package (no bundled font assets):
-- **Montserrat** is used for brand-level display and high-impact headers (`displayLarge/Medium/Small`, `headlineLarge/Medium/Small`) to convey a bold, urban energy.
-- **Public Sans** handles the heavy lifting for data density (`titleLarge/Medium/Small`, `bodyLarge/Medium/Small`, `labelLarge/Medium/Small`). It is chosen for its exceptional legibility at small sizes (10px - 14px) and its institutional, trustworthy feel.
-- **Inter** is additionally used in-code for nav-rail labels and data-table column headers — a third, denser face not originally part of this spec; treat it as reserved for high-density tabular/navigation chrome only, not general body copy.
+Text uses the **platform system font**: `.AppleSystemUIFont` (SF Pro) on macOS, with the
+fallbacks `Inter`, `Segoe UI` and `sans-serif` for the Windows and Linux builds. No font files are
+bundled. The source of truth is `_buildTheme()` in `client/lib/family_dam_app.dart`; the
+`typography` tokens above mirror it.
+
+- **The Material 3 text roles** (`display*`, `headline*`, `title*`, `body*`, `label*`) all use the
+  system font, at the sizes above (from 56 px `displayLarge` down to 11 px `labelSmall`). Widgets
+  take text styles from `Theme.of(context).textTheme` rather than setting a `fontFamily`.
+  Weights stay at 400–500, and letter-spacing tightens slightly as size grows.
+- **Montserrat** (via `google_fonts`) is used in one place: the **brand wordmark** "MyData
+  Studio" in `adaptive_app_bar.dart`, at weight 200 in `primary`. It isn't a theme role; keep it
+  to brand marks.
+- **SF Mono** is the monospace face for code, model ids, file text previews and keyboard
+  shortcuts. (`keyboard_shortcuts_modal.dart` still uses `GoogleFonts.robotoMono`; switch it to
+  SF Mono.)
+- **Nav-rail labels and data-table headers** use the system font too (`navigationRailTheme`,
+  `dataTableTheme`), with table headers at 14 px / 500 in `onSurfaceVariant`.
 
 Hierarchy is established through weight and letter-spacing rather than dramatic size changes. Data labels and category headers use a "Micro-Caps" style—extra bold, small size, and wide tracking—to differentiate them from interactive content.
 

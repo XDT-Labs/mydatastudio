@@ -1,4 +1,4 @@
-"""Document extraction for search Phase 7 (SEARCH_PLAN §18).
+"""Document extraction for search Phase 7 (docs/plans/unified-search.md §18).
 
 Each test here encodes a decision that was *measured* during the §18h step 0
 spike, not a guess about how the library behaves. Where a test looks

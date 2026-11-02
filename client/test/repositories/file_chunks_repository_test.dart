@@ -55,7 +55,7 @@ void main() {
   ];
 
   List<List<double>> vectors(int n) => [
-    for (var i = 0; i < n; i++) List<double>.filled(2048, 0.01 * (i + 1)),
+    for (var i = 0; i < n; i++) List<double>.filled(EmbeddingModel.dimension, 0.01 * (i + 1)),
   ];
 
   tearDown(() async => db.close());

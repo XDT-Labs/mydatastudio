@@ -52,7 +52,7 @@ class VectorHit {
       '${chunkSequence == null ? '' : ', chunk $chunkSequence'})';
 }
 
-/// Semantic retrieval over the Qwen3-VL embeddings.
+/// Semantic retrieval over the EmbeddingGemma 2 embeddings.
 ///
 /// Runs in one of two modes, and the choice is forced by a property of
 /// `vector_full_scan` that is easy to miss: **it cannot be pre-filtered.** It
@@ -63,11 +63,11 @@ class VectorHit {
 ///
 /// - **Mode A — filters present.** The filter picks a bounded candidate set,
 ///   its blobs are read, and cosine is computed in Dart. Exactly filtered, and
-///   at 2048 dims a few thousand candidates is a few milliseconds of dot
+///   at 768 dims a few thousand candidates is a few milliseconds of dot
 ///   products.
 /// - **Mode B — no filters.** Nothing to narrow by, so `vector_full_scan` does
 ///   the work inside SQLite and returns only the top N — which avoids pulling
-///   the whole corpus (8 KB per vector) into Dart.
+///   the whole corpus (3 KB per vector) into Dart.
 ///
 /// Every failure path returns an empty list rather than throwing. Search must
 /// keep working when the AI subprocess is down; degrading to lexical-only is a
@@ -192,7 +192,7 @@ class VectorRetriever {
 
   /// Ceiling on rows read in Mode A.
   ///
-  /// 4,000 vectors is ~32 MB of blobs — the point where reading them stops
+  /// 4,000 vectors is ~12 MB of blobs — the point where reading them stops
   /// being free. Past it the filter set is ranked by recency and its most
   /// recent slice is what gets scored, which is a real (documented) recall
   /// loss on a huge filter set. The measured corpus holds ~4,700 file vectors
@@ -210,8 +210,8 @@ class VectorRetriever {
   /// chunking was adopted to reach. Doubling it holds email coverage where it
   /// was.
   ///
-  /// The cost is transient memory during the mail pass: ~65 MB of blobs read
-  /// and scored, against ~32 MB before. Both are bounded by construction,
+  /// The cost is transient memory during the mail pass: ~25 MB of blobs read
+  /// and scored, against ~12 MB before. Both are bounded by construction,
   /// which is what this constant is for.
   static const modeAEmailChunkCap = modeACandidateCap * 2;
 
@@ -224,7 +224,7 @@ class VectorRetriever {
   /// a few hundred files.
   ///
   /// Deliberately not scaled by the full 9x. The cap bounds *memory* — 8,000
-  /// vectors is ~65 MB of blobs, the same ceiling mail already accepted — and
+  /// vectors is ~25 MB of blobs, the same ceiling mail already accepted — and
   /// a filter selective enough to be in Mode A rarely returns thousands of
   /// documents. If this starts binding, [capMessage] says so.
   static const modeAFileChunkCap = modeACandidateCap * 2;
@@ -404,11 +404,11 @@ class VectorRetriever {
     if (query.hasFilters) {
       final rows = await db.select(
         '''
-        SELECT emb.file_id AS id, emb.qwen3_vl_embedding AS v,
+        SELECT emb.file_id AS id, emb.embeddinggemma2_embedding AS v,
                emb.type AS emb_type, emb.sequence AS emb_sequence
         FROM files_embeddings emb
         JOIN files f ON f.id = emb.file_id
-        WHERE ${filter.sql} AND emb.qwen3_vl_embedding IS NOT NULL
+        WHERE ${filter.sql} AND emb.embeddinggemma2_embedding IS NOT NULL
         ORDER BY f.date_created DESC
         LIMIT ?
         ''',
@@ -436,7 +436,7 @@ class VectorRetriever {
       FROM files_embeddings emb
       JOIN files f ON f.id = emb.file_id
       JOIN vector_full_scan(
-        'files_embeddings', 'qwen3_vl_embedding', vector_as_f32(?), ?
+        'files_embeddings', 'embeddinggemma2_embedding', vector_as_f32(?), ?
       ) AS v ON emb.rowid = v.rowid
       WHERE ${filter.sql}
       ORDER BY v.distance ASC
@@ -459,10 +459,10 @@ class VectorRetriever {
     if (query.hasFilters) {
       final rows = await db.select(
         '''
-        SELECT emb.email_id AS id, emb.qwen3_vl_embedding AS v
+        SELECT emb.email_id AS id, emb.embeddinggemma2_embedding AS v
         FROM emails_embeddings emb
         JOIN emails e ON e.id = emb.email_id
-        WHERE ${filter.sql} AND emb.qwen3_vl_embedding IS NOT NULL
+        WHERE ${filter.sql} AND emb.embeddinggemma2_embedding IS NOT NULL
         ORDER BY e.date DESC
         LIMIT ?
         ''',
@@ -489,7 +489,7 @@ class VectorRetriever {
       FROM emails_embeddings emb
       JOIN emails e ON e.id = emb.email_id
       JOIN vector_full_scan(
-        'emails_embeddings', 'qwen3_vl_embedding', vector_as_f32(?), ?
+        'emails_embeddings', 'embeddinggemma2_embedding', vector_as_f32(?), ?
       ) AS v ON emb.rowid = v.rowid
       WHERE ${filter.sql}
       ORDER BY v.distance ASC

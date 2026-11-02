@@ -13,6 +13,7 @@ import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/modules/email/services/searchable_body.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:mydatastudio/services/embedding_message_handler.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 import 'package:mydatastudio/services/sequential_write_queue.dart';
 
 class EmailEmbeddingIsolate {
@@ -263,6 +264,7 @@ class EmailEmbeddingIsolate {
     // just got drained, so it's fine to back off.
     const kBatchSize = 100;
     var lastBatchLength = 0;
+    var lastBatchSuccessCount = 0;
 
     while (true) {
       try {
@@ -312,13 +314,14 @@ class EmailEmbeddingIsolate {
           for (final chunks in chunksPerEmail) chunks.length,
         ], maxChunksPerRequest);
 
+        lastBatchSuccessCount = 0;
         for (final group in groups) {
           if (isPaused) {
             logger.d("Pause requested; abandoning remaining batch");
             break;
           }
           try {
-            await _embedAndSend(
+            final ok = await _embedAndSend(
               [for (final i in group) emails[i]],
               [for (final i in group) chunksPerEmail[i]],
               serviceUrl!,
@@ -326,6 +329,7 @@ class EmailEmbeddingIsolate {
               replyTo,
               logger,
             );
+            if (ok) lastBatchSuccessCount++;
           } catch (e) {
             logger.e("Error embedding batch of ${group.length} emails: $e");
           }
@@ -339,10 +343,10 @@ class EmailEmbeddingIsolate {
         await Future.delayed(const Duration(seconds: 30));
       }
 
-      // Short when the last batch was full (more backlog likely waiting),
-      // otherwise the usual pace.
+      // Short when the last batch was full and at least one item succeeded
+      // (more backlog likely waiting), otherwise back off.
       await Future.delayed(
-        lastBatchLength >= kBatchSize
+        (lastBatchLength >= kBatchSize && lastBatchSuccessCount > 0)
             ? const Duration(seconds: 1)
             : const Duration(seconds: 10),
       );
@@ -363,7 +367,7 @@ class EmailEmbeddingIsolate {
               ...aiServerAuthHeaders(serviceToken),
             },
             body: jsonEncode({
-              'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+              'model_name': EmbeddingModel.modelName,
               'filename': null,
             }),
           )
@@ -417,7 +421,7 @@ class EmailEmbeddingIsolate {
   /// refuses a response of the wrong length precisely so this arithmetic can be
   /// trusted — a short reply here would silently shift every subsequent email's
   /// vectors onto the wrong message.
-  static Future<void> _embedAndSend(
+  static Future<bool> _embedAndSend(
     List<Email> emails,
     List<List<String>> chunksPerEmail,
     String serviceUrl,
@@ -449,7 +453,7 @@ class EmailEmbeddingIsolate {
         for (final email in emails) {
           logger.w("Skipped unprocessable email: ${email.id}");
         }
-        return;
+        return false;
       }
       vectors.addAll(slice);
     }
@@ -479,6 +483,7 @@ class EmailEmbeddingIsolate {
       });
       offset += count;
     }
+    return true;
   }
 
   /// Embeds a list of chunks in a single request.
@@ -506,8 +511,9 @@ class EmailEmbeddingIsolate {
           ...aiServerAuthHeaders(serviceToken),
         },
         body: jsonEncode({
-          'model_name': 'Qwen/Qwen3-VL-Embedding-2B',
+          'model_name': EmbeddingModel.modelName,
           'texts': texts,
+          'task': 'document',
         }),
       );
 

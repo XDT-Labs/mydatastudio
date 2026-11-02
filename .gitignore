@@ -2,6 +2,7 @@
 app/
 aiserver/dist/
 aiserver/models/
+mockups/
 
 
 # Miscellaneous

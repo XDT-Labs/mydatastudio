@@ -12,6 +12,7 @@ import 'package:mydatastudio/modules/files/services/repositories/file_repository
 import 'package:mydatastudio/modules/files/widgets/file_details/tags_and_landmarks_section.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 
 // This file only covers loading real tags/landmarks from the database and
 // rendering them — the one thing not already covered elsewhere. The add/
@@ -55,7 +56,7 @@ void main() {
 
     testWidgets(
       'loads and shows real tags and landmarks from the database '
-      '(SKIPPED — see TODO.md: hangs for minutes in this environment, '
+      '(SKIPPED — see docs/plans/fix-tags-landmarks-widget-test.md: hangs for minutes in this environment, '
       'cause unresolved)',
       skip: true,
       (tester) async {
@@ -98,7 +99,7 @@ void main() {
           description: 'The Eiffel Tower at sunset.',
           tags: const ['sunset', 'landmark'],
           landmarks: const ['Eiffel Tower'],
-          embedding: List<double>.filled(2048, 0.5),
+          embedding: List<double>.filled(EmbeddingModel.dimension, 0.5),
         );
 
         await tester.pumpWidget(

@@ -1,6 +1,6 @@
 # Regenerating the embeddings
 
-Every vector written before `7ac9c99` came from a randomly-initialised model
+Every vector written before `7ac9c99` (merged to `main` as `2b196fd`) came from a randomly-initialised model
 (see that commit). They are noise, and because the random initialisation
 differed on every launch of the AI subprocess, vectors written in one app
 session were never comparable with another's. There is nothing to salvage.
@@ -12,16 +12,16 @@ to redo. Adding the column *is* the migration.
 
 ## What to do
 
-**1. Build the Python service from this branch.**
+**1. Build the Python service from the current branch.**
 
 ```bash
-cd /Users/mikenimer/Development/github/mydatatools-desktop/.claude/worktrees/multi-modal-search-plan-8a7d8f && make build-python && make local-install-python
+make build-python && make local-install-python
 ```
 
-The checkout matters and is easy to get wrong: the loader fix lives on
-`claude/multi-modal-search-plan-8a7d8f`, **not** on `develop`. Building from
-`develop` produces a binary with the original bug, and the rebuild would then
-refill the archive with fresh noise — indistinguishable from success.
+Run it from the repo root. The loader fix is merged (`2b196fd`, #34), so any
+branch based on current `main` has it. Building from an older checkout would
+produce a binary with the original bug, and the rebuild would then refill the
+archive with fresh noise — indistinguishable from success.
 
 Verify before going further. The fixed loader raises rather than serving noise,
 so a service that starts cleanly is a service that loaded its weights. It must

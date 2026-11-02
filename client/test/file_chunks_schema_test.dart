@@ -128,6 +128,19 @@ void main() {
   });
 
   group('recovering PDFs retired by a missing pdfium', () {
+    // Each case runs this upgrade step on its own. Opening a database runs
+    // every step through the latest version, and version 6 (the EmbeddingGemma
+    // 2 switch) resets every file's attempts, which would hide what this step
+    // did. `freshDb` is already fully upgraded; setting user_version back to 3
+    // re-arms just this step (version 4).
+    Future<int> attemptsOf(AppDatabase db, String id) async {
+      final rows = await db.rawDb.select(
+        'SELECT embedding_attempts FROM files WHERE id = ?',
+        [id],
+      );
+      return rows.first['embedding_attempts'] as int;
+    }
+
     test('clears attempts on PDFs that never produced chunks', () async {
       final db = await freshDb('chunk_pdf_recovery_test.db');
       await insertFile(db, 'f1');
@@ -139,18 +152,13 @@ void main() {
         "UPDATE files SET embedding_attempts = 5 WHERE id = 'f1'",
       );
       await db.rawDb.execute('PRAGMA user_version = 3');
-      final path = db.path!;
-      final name = db.name!;
+
+      await db.runPdfRecoveryStep();
+
+      expect(await attemptsOf(db, 'f1'), 0);
+      final version = await db.rawDb.select('PRAGMA user_version');
+      expect(version.first.values.first, 4, reason: 'the step must not re-run');
       await db.close();
-
-      final reopened = await AppDatabase.create(null, path, name);
-      final rows = await reopened.rawDb.select(
-        'SELECT embedding_attempts FROM files WHERE id = ?',
-        ['f1'],
-      );
-
-      expect(rows.first['embedding_attempts'], 0);
-      await reopened.close();
     });
 
     test('leaves a PDF that already extracted alone', () async {
@@ -164,28 +172,18 @@ void main() {
         "VALUES ('f1', 0, 'already extracted')",
       );
       await db.rawDb.execute('PRAGMA user_version = 3');
-      final path = db.path!;
-      final name = db.name!;
-      await db.close();
 
-      final reopened = await AppDatabase.create(null, path, name);
-      final rows = await reopened.rawDb.select(
-        'SELECT embedding_attempts FROM files WHERE id = ?',
-        ['f1'],
-      );
+      await db.runPdfRecoveryStep();
 
-      expect(rows.first['embedding_attempts'], 2,
+      expect(await attemptsOf(db, 'f1'), 2,
           reason: 'this file was never blocked by the missing library');
-      await reopened.close();
+      await db.close();
     });
 
-    test('re-offers a .doc the PDF pass deliberately left behind', () async {
-      // This test used to assert the opposite, on the belief that docling
-      // could not read these files at all. §18m measured that belief and found
-      // it wrong: the reader was partial, not the files damaged, and macOS's
-      // textutil reads 85 of the 87 it refused. So a second pass un-retires
-      // them — and this case is the one that runs *both* passes in a single
-      // open, from an archive predating either.
+    test('leaves a .doc for the .doc pass, which then re-offers it', () async {
+      // The PDF pass is scoped to PDFs. §18m later found the .doc failures
+      // were the reader's fault too, and a second pass (version 5) un-retires
+      // them. Running the two steps in order shows each does its own part.
       final db = await freshDb('chunk_pdf_recovery_doc_test.db');
       await db.rawDb.execute(
         'INSERT INTO files (id, collection_id, name, path, parent, '
@@ -194,22 +192,17 @@ void main() {
         "'application/msword', 100, 5)",
       );
       await db.rawDb.execute('PRAGMA user_version = 3');
-      final path = db.path!;
-      final name = db.name!;
-      await db.close();
 
-      final reopened = await AppDatabase.create(null, path, name);
-      final rows = await reopened.rawDb.select(
-        'SELECT embedding_attempts FROM files WHERE id = ?',
-        ['d1'],
-      );
+      await db.runPdfRecoveryStep();
+      expect(await attemptsOf(db, 'd1'), 5, reason: 'not a PDF');
 
-      expect(rows.first['embedding_attempts'], 0,
+      await db.runDocRecoveryStep();
+      expect(await attemptsOf(db, 'd1'), 0,
           reason:
               'the reader was incomplete, not the file damaged; leaving it '
               'retired would put the fallback out of reach of every file it '
               'was built for');
-      await reopened.close();
+      await db.close();
     });
   });
 

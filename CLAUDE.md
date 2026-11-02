@@ -121,7 +121,7 @@ Concurrency: one shared model instance at a time; a `threading.Lock` (`state.gen
 
 ### Database Schema
 
-Tables (raw `CREATE TABLE` DDL in `database_manager.dart`): `apps`, `app_users`, `collections`, `files`, `folders`, `emails`, `email_folders`, `albums`, `providers`, `files_embeddings`, `emails_embeddings`, `aichat_conversations`, `aichat_conversation_history`, `aichat_models`, `aichat_skills`. Collections own Files/Folders/Emails. `files_embeddings`/`emails_embeddings` store float vectors (Qwen3-VL-Embedding-2B, dim 2048) via resqlite_vector for semantic search.
+Tables (raw `CREATE TABLE` DDL in `database_manager.dart`): `apps`, `app_users`, `collections`, `files`, `folders`, `emails`, `email_folders`, `albums`, `providers`, `files_embeddings`, `emails_embeddings`, `aichat_conversations`, `aichat_conversation_history`, `aichat_models`, `aichat_skills`. Collections own Files/Folders/Emails. `files_embeddings`/`emails_embeddings` store float vectors (EmbeddingGemma 2 / google/embeddinggemma-2, dim 768) via resqlite_vector for semantic search.
 
 ### macOS Bundle IDs
 
@@ -131,6 +131,7 @@ Both `main` and `develop` branches currently build to `com.xdtlabs.mydatastudio`
 
 - **Test-driven for non-trivial changes**: write a test that expresses the intended behavior before implementing, then implement to make it pass (red-green-refactor). Trivial one-liners don't need ceremony — use judgment, consistent with Rule 2 below.
 - **Build before test**: run a build and fix compiler/analyzer errors before running the test suite — don't let test failures mask build breaks.
+- **Flutter version**: assume the latest stable Flutter. When a library needs a newer Flutter/Dart than the project currently uses, upgrading Flutter is expected, not a blocker — plans and CI should target latest stable rather than pin an old version.
 - **Regression tests**: when fixing a bug, add a test that would have caught it, not just the fix itself (see Rule 9).
 - **Code qualities**: concrete enough to be understood, abstract enough to change; expose the problem's domain in naming; high cohesion / loose coupling; single responsibility per method/class.
 - **Git commits**: never run `git commit` unless the user asked for a commit in the message being responded to. Code gets reviewed before it enters history.

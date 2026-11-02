@@ -105,7 +105,7 @@ void main() {
           }
           vector[g] = 1.0;
           await db.execute(
-            'INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding) '
+            'INSERT INTO files_embeddings (file_id, type, embeddinggemma2_embedding) '
             'VALUES (?, ?, ?)',
             [id, 'file', vector.buffer.asUint8List()],
           );

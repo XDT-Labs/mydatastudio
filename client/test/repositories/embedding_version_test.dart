@@ -18,7 +18,7 @@ Future<AppDatabase> _freshDb(String dbName) async {
   return AppDatabase.create(null, supportDir.path, dbName);
 }
 
-List<double> _vector() => List<double>.filled(2048, 0.01);
+List<double> _vector() => List<double>.filled(EmbeddingModel.dimension, 0.01);
 
 /// getFilesWithMissingEmbeddings INNER JOINs collections, so a file with no
 /// collection row is invisible to it — which would make every "is it queued?"
