@@ -77,6 +77,10 @@ void main() {
     expect(auth.queryParameters['token_access_type'], 'offline');
     expect(auth.queryParameters['code_challenge_method'], 'S256');
     expect(auth.queryParameters['code_challenge'], isNotEmpty);
+    // Dropbox matches the registered redirect URI exactly, port included;
+    // a random port would fail every sign-in, so it must stay fixed (and
+    // match the URI the configure form tells users to register).
+    expect(auth.queryParameters['redirect_uri'], 'http://localhost:53134/auth');
     expect(
       auth.queryParameters['scope'],
       'account_info.read files.metadata.read files.content.read',

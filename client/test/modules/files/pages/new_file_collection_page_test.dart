@@ -1,3 +1,5 @@
+import 'dart:io' as io;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
@@ -167,6 +169,30 @@ void main() {
       expect(_tile('Google Drive - My Drive'), findsOneWidget);
       expect(find.text('Added'), findsOneWidget);
       expect(_tile('Dropbox folder'), findsOneWidget);
+    });
+
+    testWidgets('a collection added through a symlink counts as added', (
+      tester,
+    ) async {
+      // `~/Dropbox` often links to the CloudStorage folder the detector
+      // reports; adding it again would scan the same files twice.
+      final home = io.Directory.systemTemp.createTempSync('home');
+      addTearDown(() => home.deleteSync(recursive: true));
+      final real = io.Directory('${home.path}/CloudStorage/Dropbox')
+        ..createSync(recursive: true);
+      io.Link('${home.path}/Dropbox').createSync(real.path);
+      await pump(
+        tester,
+        found: [
+          DetectedSyncFolder(
+            provider: SyncProvider.dropbox,
+            displayName: 'Dropbox folder',
+            path: real.path,
+          ),
+        ],
+        existing: {'${home.path}/Dropbox'},
+      );
+      expect(find.text('Added'), findsOneWidget);
     });
 
     testWidgets('a failed lookup still leaves the manual sources usable', (

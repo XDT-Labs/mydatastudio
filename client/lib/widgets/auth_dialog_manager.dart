@@ -61,29 +61,44 @@ class AuthDialogManager {
                   icon: Icon(icon),
                   label: Text(buttonLabel),
                   onPressed: () async {
-                    if (isDropbox) {
-                      await LoginProviderExtension.handleDropbox(
-                        context,
-                        existing: collection,
+                    // Close first: sign-in happens in the browser, and the
+                    // dialog's context dies with it, so handlers get the
+                    // navigator's.
+                    final navContext =
+                        _globalNavigationKey.currentState!.context;
+                    Navigator.of(context).pop();
+                    try {
+                      if (isDropbox) {
+                        await LoginProviderExtension.handleDropbox(
+                          navContext,
+                          existing: collection,
+                        );
+                      } else if (isOneDrive) {
+                        await LoginProviderExtension.handleOneDrive(
+                          navContext,
+                          existing: collection,
+                        );
+                      } else if (isEmail) {
+                        await LoginProviderExtension.handleGoogleMail(
+                          navContext,
+                          existing: collection,
+                        );
+                      } else {
+                        await LoginProviderExtension.handleGoogleDrive(
+                          navContext,
+                          existing: collection,
+                        );
+                      }
+                    } catch (e) {
+                      // e.g. OneDrive's "admin consent required" message.
+                      if (!navContext.mounted) return;
+                      ScaffoldMessenger.of(navContext).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            e.toString().replaceFirst('Exception: ', ''),
+                          ),
+                        ),
                       );
-                    } else if (isOneDrive) {
-                      await LoginProviderExtension.handleOneDrive(
-                        context,
-                        existing: collection,
-                      );
-                    } else if (isEmail) {
-                      await LoginProviderExtension.handleGoogleMail(
-                        context,
-                        existing: collection,
-                      );
-                    } else {
-                      await LoginProviderExtension.handleGoogleDrive(
-                        context,
-                        existing: collection,
-                      );
-                    }
-                    if (context.mounted) {
-                      Navigator.of(context).pop();
                     }
                   },
                 ),

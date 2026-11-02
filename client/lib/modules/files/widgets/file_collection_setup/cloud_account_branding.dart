@@ -96,7 +96,8 @@ class CloudAccountBranding {
     credentialsLinkText: 'Create an app in the Dropbox App Console',
     configureIntro:
         'To connect to Dropbox, create a Dropbox app (Scoped access, Full Dropbox, '
-        'read-only scopes) and enter its App key. No secret is needed.',
+        'read-only scopes, redirect URI http://localhost:53134/auth) and enter '
+        'its App key. No secret is needed.',
     idLabel: 'App key',
   );
 
@@ -138,7 +139,7 @@ class CloudAccountBranding {
     configureIntro:
         'To connect to OneDrive, register a Microsoft Entra app as a public '
         'client (accounts in any organization and personal accounts, redirect '
-        'URI http://localhost, delegated Files.Read, User.Read and '
+        'URI http://localhost/auth, delegated Files.Read, User.Read and '
         'offline_access) and enter its Application (client) ID. No secret is '
         'needed.',
     idLabel: 'Application (client) ID',

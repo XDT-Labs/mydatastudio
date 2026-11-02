@@ -51,6 +51,14 @@ void main() {
       expect(names.first, contains('a@x.com'));
     });
 
+    test('Sync.com CloudFiles folder is named and carries its note', () {
+      mk('Library/CloudStorage/Sync');
+      final found = SyncFolderDetector(homeDir: home.path).detect().single;
+      expect(found.provider, SyncProvider.syncCom);
+      expect(found.displayName, 'Sync.com');
+      expect(found.note, contains('Vault'));
+    });
+
     test('missing directories yield an empty list', () {
       expect(SyncFolderDetector(homeDir: home.path).detect(), isEmpty);
     });

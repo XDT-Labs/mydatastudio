@@ -2,6 +2,7 @@ import 'dart:io' as io;
 import 'dart:isolate';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mydatastudio/file_sources/sync_folder/online_only_checker.dart';
 import 'package:mydatastudio/modules/files/services/scanners/local_file_isolate.dart';
 import 'package:path/path.dart' as p;
 
@@ -52,4 +53,39 @@ void main() {
     );
     expect(r['file'], isNull);
   });
+
+  test('a dataless image is not read for EXIF or a thumbnail', () async {
+    // An `SF_DATALESS` file keeps its normal name, so only the checker knows
+    // it is online-only; opening it would make macOS download it.
+    final dataless = LocalFileIsolateWorker(
+      null,
+      port.sendPort,
+      root.path,
+      'test.db',
+      port.sendPort,
+      onlineOnlyChecker: _AllOnlineOnly(),
+    );
+    final r = await dataless.validateFileForTest(
+      'c1',
+      touch('photo.jpg'),
+      root.path,
+    );
+    expect(r['file'], isNotNull);
+    expect(r['contentReadable'], isFalse);
+    expect(r['file'].contentHash, isNull);
+  });
+
+  test('a local image stays readable', () async {
+    final r = await worker.validateFileForTest(
+      'c1',
+      touch('photo.jpg'),
+      root.path,
+    );
+    expect(r['contentReadable'], isTrue);
+  });
+}
+
+class _AllOnlineOnly implements OnlineOnlyChecker {
+  @override
+  bool isOnlineOnly(String path) => true;
 }

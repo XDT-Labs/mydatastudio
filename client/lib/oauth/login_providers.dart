@@ -152,6 +152,11 @@ extension LoginProviderExtension on LoginProviders {
   /// it). Dropbox's token endpoint takes none.
   bool get tokenRequestNeedsScope => this != LoginProviders.dropbox;
 
+  /// Fixed loopback port for providers that match the registered redirect
+  /// URI exactly, port included (Dropbox). Null means any free port, which
+  /// Google and Microsoft accept for `localhost`.
+  int? get redirectPort => this == LoginProviders.dropbox ? 53134 : null;
+
   /// OAuth client secret.
   /// Google requires client_secret for desktop apps even with PKCE enabled.
   ///

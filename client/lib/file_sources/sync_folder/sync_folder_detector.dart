@@ -155,6 +155,17 @@ class SyncFolderDetector {
               note: _protonNote,
             ),
           );
+        case 'sync':
+          // Sync.com's CloudFiles app uses `CloudStorage/Sync`.
+          result.add(
+            DetectedSyncFolder(
+              provider: SyncProvider.syncCom,
+              displayName: 'Sync.com',
+              account: suffix,
+              path: dir.path,
+              note: _syncComNote,
+            ),
+          );
         case 'mega':
           result.add(
             DetectedSyncFolder(

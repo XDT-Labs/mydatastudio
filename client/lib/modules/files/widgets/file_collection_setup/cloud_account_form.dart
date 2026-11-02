@@ -11,7 +11,6 @@ import 'package:mydatastudio/modules/files/widgets/file_collection_setup/sync_es
 import 'package:mydatastudio/oauth/login_providers.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 import 'package:mydatastudio/scanners/cloud/content_policy.dart';
-import 'package:mydatastudio/scanners/scanner_manager.dart';
 
 /// Sign-in form shared by every OAuth cloud drive (Google Drive, Dropbox, OneDrive...):
 /// credentials check -> sign in -> content policy and estimate -> collection.
@@ -115,14 +114,16 @@ class _CloudAccountFormState extends State<CloudAccountForm> {
       final collection = await widget.connect(
         context,
         contentPolicy: _policy,
-        confirmSync:
-            (api) async =>
-                await showDialog<bool>(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (_) => SyncEstimateDialog(api: api, policy: _policy),
-                ) ??
-                false,
+        confirmSync: (api) async {
+          // Sign-in runs in the browser; the page may be gone by now.
+          if (!mounted) return false;
+          return await showDialog<bool>(
+                context: context,
+                barrierDismissible: false,
+                builder: (_) => SyncEstimateDialog(api: api, policy: _policy),
+              ) ??
+              false;
+        },
         keepDeletedFiles: _keepDeletedFiles,
       );
 
@@ -136,12 +137,11 @@ class _CloudAccountFormState extends State<CloudAccountForm> {
         return;
       }
 
-      ScannerManager.getInstance().startScanner(collection);
-
-      final nameMatch = RegExp(r'\((.+?)\)').firstMatch(collection.name);
+      // The connect handler already saved the collection and started its
+      // scanner, and named it after the account.
       setState(() {
         _authState = _AuthState.success;
-        _connectedEmail = nameMatch?.group(1);
+        _connectedEmail = collection.name;
       });
 
       await Future.delayed(const Duration(milliseconds: 900));

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:path/path.dart' as p;
@@ -77,8 +79,15 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
     }
   }
 
+  /// Canonical form for comparing folders: symlinks resolved (`~/Dropbox`
+  /// may point into `~/Library/CloudStorage`), trailing slash dropped.
   static String _normalize(String path) {
-    final n = p.normalize(path);
+    var n = p.normalize(path);
+    try {
+      n = Directory(n).resolveSymbolicLinksSync();
+    } on FileSystemException {
+      // Missing or unreadable: compare it as written.
+    }
     return n.length > 1 && n.endsWith('/') ? n.substring(0, n.length - 1) : n;
   }
 

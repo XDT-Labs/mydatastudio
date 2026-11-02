@@ -207,11 +207,12 @@ void main() {
       }, AppLogger(null));
 
       final rows = await db.rawDb.select(
-        'SELECT file_id, length(qwen3_vl_embedding) AS n, model_version '
+        'SELECT file_id, embeddinggemma2_embedding AS v, model_version '
         "FROM files_embeddings WHERE type = 'file' ORDER BY file_id",
       );
       expect(rows.map((r) => r['file_id']), ['a', 'b']);
-      expect(rows[1]['n'], rows[0]['n']);
+      expect(rows[0]['v'], isNotNull);
+      expect(rows[1]['v'], rows[0]['v'], reason: 'b must get a copy of a');
       expect(rows[1]['model_version'], rows[0]['model_version']);
       expect(await dbRepo.getFilesWithMissingEmbeddings(), isNot(
         contains(predicate<File>((f) => f.id == 'b')),

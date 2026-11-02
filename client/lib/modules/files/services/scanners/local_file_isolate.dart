@@ -519,10 +519,10 @@ class LocalFileIsolateWorker {
         if (validation['isCacheHit'] == true) cacheHits++;
 
         if (file != null) {
-          // A stub has no content on disk to thumbnail.
+          // An online-only file has no content on disk to thumbnail.
           if (validation['isCacheHit'] == false &&
-              file.contentType == FilesConstants.mimeTypeImage &&
-              iCloudPlaceholderRealName(p.basename(asset.path)) == null) {
+              validation['contentReadable'] == true &&
+              file.contentType == FilesConstants.mimeTypeImage) {
             _enqueueThumbnailJob(
               file.collectionId,
               file.id,
@@ -726,6 +726,12 @@ class LocalFileIsolateWorker {
     final stat = io.File(statPath).statSync();
     final DateTime lmDate = stat.modified;
 
+    // Reading an online-only file (a legacy stub or an `SF_DATALESS` file)
+    // makes macOS download it, so EXIF, hashing and thumbnails all skip it.
+    final bool contentReadable =
+        stubRealPath == null && !onlineOnlyChecker.isOnlineOnly(statPath);
+    result['contentReadable'] = contentReadable;
+
     // Compute relative path for storage via the shared helper.
     final relPath = ScannerPathHelper.relativePath(absPath, rootPath);
     final relParent = ScannerPathHelper.relativeParent(absPath, rootPath);
@@ -762,7 +768,10 @@ class LocalFileIsolateWorker {
         // the non-null result is trusted from then on.
         double? latitude = cached.latitude;
         double? longitude = cached.longitude;
-        if (isImage && latitude == null && longitude == null) {
+        if (isImage &&
+            contentReadable &&
+            latitude == null &&
+            longitude == null) {
           final gps = await ExifExtractor().extractLatLng(
             absPath,
             cached.contentType,
@@ -801,7 +810,7 @@ class LocalFileIsolateWorker {
 
     double? latitude;
     double? longitude;
-    if (mimeType == FilesConstants.mimeTypeImage && stubRealPath == null) {
+    if (mimeType == FilesConstants.mimeTypeImage && contentReadable) {
       final gps = await ExifExtractor().extractLatLng(absPath, mimeType);
       latitude = gps['latitude'] as double?;
       longitude = gps['longitude'] as double?;
