@@ -40,6 +40,17 @@ void main() {
     expect(find.text('Sign in to Dropbox'), findsOneWidget);
   });
 
+  testWidgets('OneDrive collection needing re-auth gets a OneDrive prompt', (
+    tester,
+  ) async {
+    await emit(tester, _col('onedrive'));
+    expect(
+      find.textContaining('Your OneDrive sign-in has expired'),
+      findsOneWidget,
+    );
+    expect(find.text('Sign in to OneDrive'), findsOneWidget);
+  });
+
   testWidgets('Google Drive prompt wording is unchanged', (tester) async {
     await emit(tester, _col('google'));
     expect(

@@ -21,11 +21,12 @@ import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatastudio/modules/files/services/scanners/dropbox_file_api.dart';
 import 'package:mydatastudio/modules/files/services/scanners/google_drive_file_api.dart';
+import 'package:mydatastudio/modules/files/services/scanners/onedrive_file_api.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 
 // ignore: constant_identifier_names
-enum LoginProviders { google, googleDrive, azure, outlook, dropbox }
+enum LoginProviders { google, googleDrive, azure, outlook, oneDrive, dropbox }
 
 class GoogleUserProfile {
   final String userId;
@@ -53,6 +54,8 @@ extension LoginProviderExtension on LoginProviders {
         return 'google';
       case LoginProviders.azure:
       case LoginProviders.outlook:
+      // OneDrive shares the Microsoft (Entra) app registration with Outlook.
+      case LoginProviders.oneDrive:
         return 'azure';
       case LoginProviders.dropbox:
         return 'dropbox';
@@ -75,6 +78,7 @@ extension LoginProviderExtension on LoginProviders {
         return "https://accounts.google.com/o/oauth2/v2/auth";
       case LoginProviders.azure:
       case LoginProviders.outlook:
+      case LoginProviders.oneDrive:
         return "https://login.microsoftonline.com/$tenant/oauth2/v2.0/authorize";
       case LoginProviders.dropbox:
         return "https://www.dropbox.com/oauth2/authorize";
@@ -88,6 +92,7 @@ extension LoginProviderExtension on LoginProviders {
         return "https://oauth2.googleapis.com/token";
       case LoginProviders.azure:
       case LoginProviders.outlook:
+      case LoginProviders.oneDrive:
         return "https://login.microsoftonline.com/$tenant/oauth2/v2.0/token";
       case LoginProviders.dropbox:
         return "https://api.dropboxapi.com/oauth2/token";
@@ -128,6 +133,7 @@ extension LoginProviderExtension on LoginProviders {
     switch (this) {
       case LoginProviders.google:
       case LoginProviders.googleDrive:
+      case LoginProviders.oneDrive:
       case LoginProviders.dropbox:
         return true;
       case LoginProviders.azure:
@@ -137,9 +143,10 @@ extension LoginProviderExtension on LoginProviders {
   }
 
   /// Whether sign-in needs a client secret. Defaults to true; a public desktop
-  /// client that relies on PKCE alone (e.g. Dropbox, Box) returns false and
+  /// client that relies on PKCE alone (e.g. Dropbox, OneDrive, Box) returns false and
   /// then sends only `client_id` + `code_verifier` to the token endpoint.
-  bool get requiresClientSecret => this != LoginProviders.dropbox;
+  bool get requiresClientSecret =>
+      this != LoginProviders.dropbox && this != LoginProviders.oneDrive;
 
   /// Whether the token request must repeat `scope` (Microsoft v2.0 requires
   /// it). Dropbox's token endpoint takes none.
@@ -199,6 +206,17 @@ extension LoginProviderExtension on LoginProviders {
           'email',
           'profile',
           'offline_access',
+        ];
+      case LoginProviders.oneDrive:
+        // Read-only: `Files.Read` lists, downloads and runs `delta` on both
+        // personal and work/school drives, and cannot modify anything.
+        return [
+          'Files.Read',
+          'offline_access',
+          'User.Read',
+          'openid',
+          'email',
+          'profile',
         ];
       case LoginProviders.dropbox:
         // Read-only: list, download and thumbnails; nothing can modify Dropbox.
@@ -660,6 +678,133 @@ extension LoginProviderExtension on LoginProviders {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Dropbox sign-in failed. Please try again.'),
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
+  /// Account behind a Microsoft Graph access token (`GET /me`).
+  static Future<({String accountId, String email})?> fetchOneDriveAccount(
+    String accessToken, {
+    http.Client? client,
+  }) async {
+    final httpClient = client ?? http.Client();
+    try {
+      final response = await httpClient
+          .get(
+            Uri.parse('https://graph.microsoft.com/v1.0/me'),
+            headers: {'Authorization': 'Bearer $accessToken'},
+          )
+          .timeout(_profileTimeout);
+      if (response.statusCode != 200) {
+        AppLogger(
+          null,
+        ).e('Graph /me error (${response.statusCode}): ${response.body}');
+        return null;
+      }
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final id = body['id'] as String?;
+      final mail = body['mail'] as String?;
+      final email =
+          (mail != null && mail.isNotEmpty)
+              ? mail
+              : body['userPrincipalName'] as String?;
+      if (id == null || email == null || email.isEmpty) return null;
+      return (accountId: id, email: email);
+    } catch (e) {
+      AppLogger(null).e('Graph /me lookup failed: $e');
+      return null;
+    } finally {
+      if (client == null) httpClient.close();
+    }
+  }
+
+  /// Plain-language message when a work/school tenant refuses user consent
+  /// ("Need admin approval", `AADSTS65001`, `consent_required`); null for any
+  /// other failure.
+  static String? oneDriveConsentBlockedMessage(Object error) {
+    if (error is! oauth2.AuthorizationException) return null;
+    final text = '${error.error} ${error.description}'.toLowerCase();
+    final blocked =
+        text.contains('consent_required') ||
+        text.contains('aadsts65001') ||
+        text.contains('aadsts90094') ||
+        text.contains('admin approval') ||
+        text.contains('admin consent');
+    if (!blocked) return null;
+    return 'Your organization needs an administrator to approve this app '
+        'before it can read OneDrive files. Ask your IT admin to grant '
+        'consent, or sign in with a personal Microsoft account.';
+  }
+
+  /// OneDrive sign-in (PKCE, no client secret) mirroring [handleDropbox]:
+  /// creates (or re-authorises [existing]) a `file` collection with scanner
+  /// `file.onedrive`. [rootFolderId] `'root'` is the whole drive.
+  static Future<Collection?> handleOneDrive(
+    BuildContext context, {
+    Collection? existing,
+    String rootFolderId = 'root',
+    ContentPolicy? contentPolicy,
+    bool? keepDeletedFiles,
+    Future<bool> Function(CloudFileApi api)? confirmSync,
+  }) async {
+    if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'OneDrive is only supported on the desktop version of this app.',
+          ),
+        ),
+      );
+      return null;
+    }
+
+    try {
+      final client = await DesktopOAuthManager(
+        loginProvider: LoginProviders.oneDrive,
+      ).login(customParameters: {'prompt': 'select_account'});
+
+      final account = await fetchOneDriveAccount(
+        client.credentials.accessToken,
+      );
+      if (account == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to fetch OneDrive account.')),
+          );
+        }
+        return null;
+      }
+
+      if (confirmSync != null) {
+        final api = OneDriveFileApi(
+          AuthenticatedHttpClient.bearer(client.credentials.accessToken),
+        );
+        if (!await confirmSync(api)) return null;
+      }
+
+      return await _saveCloudFileCollection(
+        credentials: client.credentials,
+        existing: existing,
+        name: account.email,
+        path: rootFolderId,
+        scanner: AppConstants.scannerFileOneDrive,
+        oauthService: 'onedrive',
+        userId: account.accountId,
+        contentPolicy: contentPolicy,
+        keepDeletedFiles: keepDeletedFiles,
+      );
+    } catch (e, stack) {
+      AppLogger(null).e('OneDrive OAuth failed', error: e, stackTrace: stack);
+      // Surfaced through the sign-in form's error view instead of a snackbar.
+      final blocked = oneDriveConsentBlockedMessage(e);
+      if (blocked != null) throw Exception(blocked);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('OneDrive sign-in failed. Please try again.'),
           ),
         );
       }

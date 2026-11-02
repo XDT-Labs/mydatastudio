@@ -12,7 +12,9 @@ class AuthDialogManager {
     GetCollectionsService.instance.sink.listen((value) {
       for (var c in value) {
         if (c.needsReAuth &&
-            (c.oauthService == 'google' || c.oauthService == 'dropbox')) {
+            (c.oauthService == 'google' ||
+                c.oauthService == 'dropbox' ||
+                c.oauthService == 'onedrive')) {
           _showAuthDialog(c);
         }
       }
@@ -21,16 +23,27 @@ class AuthDialogManager {
 
   void _showAuthDialog(Collection collection) {
     final isDropbox = collection.oauthService == 'dropbox';
+    final isOneDrive = collection.oauthService == 'onedrive';
     final isEmail = collection.type == 'email';
     final typeLabel =
-        isDropbox ? 'Dropbox' : (isEmail ? 'Gmail' : 'Google Drive');
+        isDropbox
+            ? 'Dropbox'
+            : isOneDrive
+            ? 'OneDrive'
+            : (isEmail ? 'Gmail' : 'Google Drive');
     final icon = isEmail ? Icons.email : Icons.cloud;
     final message =
         isDropbox
             ? "Your Dropbox sign-in has expired or been revoked.\nClick the button to sign in again."
+            : isOneDrive
+            ? "Your OneDrive sign-in has expired or been revoked.\nClick the button to sign in again."
             : "Your Google OAuth token has expired or been revoked for '$typeLabel'.\nClick the button to re-authenticate.";
     final buttonLabel =
-        isDropbox ? 'Sign in to Dropbox' : 'Login with Google ($typeLabel)';
+        isDropbox
+            ? 'Sign in to Dropbox'
+            : isOneDrive
+            ? 'Sign in to OneDrive'
+            : 'Login with Google ($typeLabel)';
 
     showDialog<SimpleDialog>(
       context: _globalNavigationKey.currentState!.context,
@@ -50,6 +63,11 @@ class AuthDialogManager {
                   onPressed: () async {
                     if (isDropbox) {
                       await LoginProviderExtension.handleDropbox(
+                        context,
+                        existing: collection,
+                      );
+                    } else if (isOneDrive) {
+                      await LoginProviderExtension.handleOneDrive(
                         context,
                         existing: collection,
                       );

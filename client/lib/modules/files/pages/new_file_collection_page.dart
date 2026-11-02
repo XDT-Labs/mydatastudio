@@ -159,6 +159,7 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
           ),
           FileSourceForm.googleDrive => CloudAccountForm.googleDrive(),
           FileSourceForm.dropbox => CloudAccountForm.dropbox(),
+          FileSourceForm.oneDrive => CloudAccountForm.oneDrive(),
           FileSourceForm.none => const SizedBox.shrink(),
         },
       ],

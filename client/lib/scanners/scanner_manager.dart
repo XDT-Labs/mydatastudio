@@ -6,6 +6,7 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/modules/files/services/scanners/dropbox_file_scanner.dart';
+import 'package:mydatastudio/modules/files/services/scanners/onedrive_file_scanner.dart';
 import 'package:mydatastudio/modules/files/services/scanners/google_file_scanner.dart';
 import 'package:mydatastudio/modules/files/services/scanners/local_file_isolate.dart';
 import 'package:mydatastudio/modules/email/services/scanners/gmail_scanner.dart';
@@ -243,6 +244,16 @@ class ScannerManager {
         case AppConstants.scannerFileDropbox:
           logger.i("Registering Dropbox scanner for ${c.name} (ID: ${c.id})");
           scanner = DropboxFileIsolate(
+            null,
+            storagePath: DatabaseManager.instance.databaseDirectoryPath!,
+            appDir: DatabaseManager.instance.storagePath!,
+            dbName: AppConstants.dbName,
+          );
+          break;
+
+        case AppConstants.scannerFileOneDrive:
+          logger.i("Registering OneDrive scanner for ${c.name} (ID: ${c.id})");
+          scanner = OneDriveFileIsolate(
             null,
             storagePath: DatabaseManager.instance.databaseDirectoryPath!,
             appDir: DatabaseManager.instance.storagePath!,
