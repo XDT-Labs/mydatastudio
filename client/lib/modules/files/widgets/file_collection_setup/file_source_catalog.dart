@@ -40,6 +40,7 @@ class FileSource {
     subtitle: folder.path,
     icon: iconFor(folder.provider),
     form: FileSourceForm.folder,
+    folderPrompt: folder.note ?? 'Select folder to add.',
     detected: folder,
     alreadyAdded: alreadyAdded,
   );
@@ -65,6 +66,10 @@ class FileSource {
     SyncProvider.dropbox => Icons.cloud_queue,
     SyncProvider.oneDrive => Icons.cloud_circle_outlined,
     SyncProvider.box => Icons.inventory_2_outlined,
+    SyncProvider.pCloud => Icons.cloud_upload_outlined,
+    SyncProvider.proton => Icons.lock_outline,
+    SyncProvider.mega => Icons.shield_outlined,
+    SyncProvider.syncCom => Icons.sync,
     SyncProvider.other => Icons.folder_outlined,
   };
 

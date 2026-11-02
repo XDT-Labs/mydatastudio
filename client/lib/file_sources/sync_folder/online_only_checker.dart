@@ -31,6 +31,12 @@ String? iCloudPlaceholderRealPath(String path) {
   return real == null ? null : p.join(p.dirname(path), real);
 }
 
+/// Whether a scanner should skip [fileName] as a hidden file. Legacy iCloud
+/// placeholders are dot-files by construction but stand for real, visible
+/// files, so they are not hidden.
+bool isHiddenFileName(String fileName) =>
+    fileName.startsWith('.') && iCloudPlaceholderRealName(fileName) == null;
+
 typedef _LstatC = Int32 Function(Pointer<Uint8>, Pointer<Uint8>);
 typedef _LstatDart = int Function(Pointer<Uint8>, Pointer<Uint8>);
 typedef _MallocC = Pointer<Uint8> Function(IntPtr);
