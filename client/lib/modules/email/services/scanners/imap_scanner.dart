@@ -3,13 +3,13 @@ import 'package:path/path.dart' as p;
 
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
-import 'package:mydatastudio/modules/email/services/scanners/outlook_scanner_isolate.dart';
+import 'package:mydatastudio/modules/email/services/scanners/imap_scanner_isolate.dart';
 import 'package:mydatastudio/scanners/collection_scanner.dart';
 import 'package:flutter/services.dart';
 
-/// [OutlookScanner] is a collection scanner responsible for indexing emails
-/// from an Outlook account via IMAP. It manages the lifecycle of the
-/// [OutlookScannerIsolate] and bridges communication between the UI and worker.
+/// [ImapScanner] is a collection scanner responsible for indexing emails
+/// from an IMAP account via IMAP. It manages the lifecycle of the
+/// [ImapScannerIsolate] and bridges communication between the UI and worker.
 ///
 /// Synchronization Rules:
 /// 1. [Registration-Only Startup] Scanners MUST only register on startup.
@@ -18,24 +18,24 @@ import 'package:flutter/services.dart';
 /// 4. [Discovery vs Sync] Discover items quickly, sync heavy metadata incrementally.
 /// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
 ///    syncs (path == null) and targeted folder scans (path != null).
-class OutlookScanner extends CollectionScanner {
+class ImapScanner extends CollectionScanner {
   final String dbPath;
   final Collection collection;
   final String appDir;
-  OutlookScannerIsolate? isolate;
+  ImapScannerIsolate? isolate;
   bool isStopped = false;
 
   final AppLogger logger = AppLogger(null);
 
-  OutlookScanner({
+  ImapScanner({
     required this.dbPath,
     required this.collection,
     required this.appDir,
   });
 
-  /// Starts the Outlook scanning process.
+  /// Starts the IMAP scanning process.
   ///
-  /// [collection] The Outlook collection to scan.
+  /// [collection] The IMAP collection to scan.
   /// [path] Mode selector:
   ///   - If NULL: **Full Sync**. Exhaustively traverses all IMAP folders.
   ///   - If NOT NULL: **Targeted Scan**. Focuses ONLY on the specified folder ID
@@ -61,7 +61,7 @@ class OutlookScanner extends CollectionScanner {
     if (isScanning.value) return 0;
 
     isScanning.add(true);
-    logger.i("Outlook sync started for ${collection.name}");
+    logger.i("IMAP sync started for ${collection.name}");
 
     //start full scan in isolate
     ReceivePort receivePort = ReceivePort();
@@ -76,7 +76,7 @@ class OutlookScanner extends CollectionScanner {
 
     //start isolate
     RootIsolateToken? token = RootIsolateToken.instance;
-    isolate = OutlookScannerIsolate(
+    isolate = ImapScannerIsolate(
       token: token,
       appDir: appDir,
       dbDir: p.dirname(p.dirname(dbPath)),
@@ -100,7 +100,7 @@ class OutlookScanner extends CollectionScanner {
     if (uids.isEmpty) return;
 
     // Lazy-init isolate if needed
-    isolate ??= OutlookScannerIsolate(
+    isolate ??= ImapScannerIsolate(
       token: RootIsolateToken.instance,
       appDir: appDir,
       dbDir: p.dirname(p.dirname(dbPath)),

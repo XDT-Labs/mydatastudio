@@ -9,9 +9,8 @@ import 'package:mydatastudio/modules/files/services/scanners/google_file_scanner
 import 'package:mydatastudio/modules/files/services/scanners/local_file_isolate.dart';
 import 'package:mydatastudio/modules/email/services/scanners/gmail_scanner.dart';
 import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
-import 'package:mydatastudio/modules/email/services/scanners/outlook_scanner.dart';
+import 'package:mydatastudio/modules/email/services/scanners/imap_scanner.dart';
 
-import 'package:mydatastudio/modules/email/services/scanners/yahoo_scanner.dart';
 import 'package:mydatastudio/scanners/collection_scanner.dart';
 
 typedef ScannerFactory = Future<CollectionScanner> Function(Collection c);
@@ -252,22 +251,11 @@ class ScannerManager {
           );
           break;
 
+        case AppConstants.scannerEmailImap:
         case AppConstants.scannerEmailYahoo:
-          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          scanner = YahooScanner(
-            dbPath: p.join(
-              DatabaseManager.instance.databaseDirectoryPath!,
-              'data',
-              AppConstants.dbName,
-            ),
-            collection: c,
-            appDir: DatabaseManager.instance.storagePath!,
-          );
-          break;
-
         case AppConstants.scannerEmailOutlook:
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          scanner = OutlookScanner(
+          scanner = ImapScanner(
             dbPath: p.join(
               DatabaseManager.instance.databaseDirectoryPath!,
               'data',

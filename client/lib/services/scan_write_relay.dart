@@ -142,7 +142,7 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       await CollectionRepository(db).updateScanStatus(
         map['collectionId'] as String,
         map['scanStatus'] as String,
-        map['lastScanDate'] as DateTime,
+        map['lastScanDate'] as DateTime?,
       );
       return const {};
 

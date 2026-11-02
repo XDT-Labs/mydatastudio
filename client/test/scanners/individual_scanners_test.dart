@@ -5,8 +5,7 @@ import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/modules/files/services/scanners/local_file_isolate.dart';
 import 'package:mydatastudio/modules/files/services/scanners/google_file_scanner.dart';
 import 'package:mydatastudio/modules/email/services/scanners/gmail_scanner_isolate.dart';
-import 'package:mydatastudio/modules/email/services/scanners/outlook_scanner_isolate.dart';
-import 'package:mydatastudio/modules/email/services/scanners/yahoo_scanner_isolate.dart';
+import 'package:mydatastudio/modules/email/services/scanners/imap_scanner_isolate.dart';
 
 class TestLocalFileIsolate extends LocalFileIsolate {
   TestLocalFileIsolate(SendPort? loggerPort)
@@ -77,25 +76,8 @@ class TestGmailScannerIsolate extends GmailScannerIsolate {
   }
 }
 
-class TestOutlookScannerIsolate extends OutlookScannerIsolate {
-  TestOutlookScannerIsolate({required String appDir}) : super(appDir: appDir, dbDir: appDir);
-
-  Map<String, dynamic>? lastSpawnArgs;
-
-  @override
-  Future<Isolate?> spawnIsolate(
-    void Function(Map<String, dynamic>) entryPoint,
-    Map<String, dynamic> args,
-  ) async {
-    lastSpawnArgs = args;
-    final SendPort port = args['port'] as SendPort;
-    port.send({'status': 'done'});
-    return null;
-  }
-}
-
-class TestYahooScannerIsolate extends YahooScannerIsolate {
-  TestYahooScannerIsolate({required String appDir}) : super(appDir: appDir, dbDir: appDir);
+class TestImapScannerIsolate extends ImapScannerIsolate {
+  TestImapScannerIsolate({required String appDir}) : super(appDir: appDir, dbDir: appDir);
 
   Map<String, dynamic>? lastSpawnArgs;
 
@@ -174,19 +156,9 @@ void main() {
     );
 
     test(
-      'OutlookScannerIsolate propagates force: false for startup registration',
+      'ImapScannerIsolate propagates force: false for startup registration',
       () async {
-        final scanner = TestOutlookScannerIsolate(appDir: 'app');
-        await scanner.start(collection, force: false);
-
-        expect(scanner.lastSpawnArgs, isNull, reason: 'Rule 2');
-      },
-    );
-
-    test(
-      'YahooScannerIsolate propagates force: false for startup registration',
-      () async {
-        final scanner = TestYahooScannerIsolate(appDir: 'app');
+        final scanner = TestImapScannerIsolate(appDir: 'app');
         await scanner.start(collection, force: false);
 
         expect(scanner.lastSpawnArgs, isNull, reason: 'Rule 2');
@@ -233,19 +205,9 @@ void main() {
     );
 
     test(
-      'OutlookScannerIsolate propagates force: true for manual sync',
+      'ImapScannerIsolate propagates force: true for manual sync',
       () async {
-        final scanner = TestOutlookScannerIsolate(appDir: 'app');
-        await scanner.start(collection, force: true);
-
-        expect(scanner.lastSpawnArgs?['force'], isTrue);
-      },
-    );
-
-    test(
-      'YahooScannerIsolate propagates force: true for manual sync',
-      () async {
-        final scanner = TestYahooScannerIsolate(appDir: 'app');
+        final scanner = TestImapScannerIsolate(appDir: 'app');
         await scanner.start(collection, force: true);
 
         expect(scanner.lastSpawnArgs?['force'], isTrue);

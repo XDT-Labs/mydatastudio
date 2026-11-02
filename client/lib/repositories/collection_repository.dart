@@ -139,9 +139,17 @@ class CollectionRepository {
   Future<void> updateScanStatus(
     String id,
     String status,
-    DateTime lastScanDate,
+    DateTime? lastScanDate,
   ) async {
     return retryOnLock(() async {
+      // A null date leaves last_scan_date untouched (e.g. recording an error).
+      if (lastScanDate == null) {
+        await db.execute("UPDATE collections SET scan_status = ? WHERE id = ?", [
+          status,
+          id,
+        ]);
+        return;
+      }
       await db.execute(
         "UPDATE collections SET scan_status = ?, last_scan_date = ? WHERE id = ?",
         [status, lastScanDate.millisecondsSinceEpoch, id],
