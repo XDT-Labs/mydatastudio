@@ -20,6 +20,7 @@ parts lists each wave (`1, 4`). Within each section, rows are ordered by wave.
 
 | Feature | Status | Wave | Plan | ADR | Notes |
 |---|---|---|---|---|---|
+| Releases cut from version tags (production on `main`, betas on `develop`) | `in-progress` | — | — ([build_and_release.yml](../.github/workflows/build_and_release.yml)) | — | Pushing a version tag builds macOS and publishes the GitHub release. A `verify-tag` job parses the tag once and checks its branch: `vX.Y.Z` must be on `main` (production release), `vX.Y.Z-suffix` on `develop` (pre-release). Every platform's build job should `needs: verify-tag` and take its `version` output. Left: confirm with a real beta tag on `develop` and a real tag on `main` (`main` doesn't have the tag workflow yet). Windows and Linux jobs are each plan's `ci-job`. |
 | Glassmorphism elevation model | `ready` | — | [glassmorphism-elevation.md](plans/glassmorphism-elevation.md) | — | Decision made 2026-08-01 to build out `DESIGN.md`'s spec. |
 | Tier 2 auto-update (Sparkle) | `proposed` | — | [sparkle-auto-update.md](plans/sparkle-auto-update.md) | — | Probably needs an ADR (EdDSA key custody, appcast hosting). |
 | Fix hanging `TagsAndLandmarksSection` widget test | `proposed` | — | [fix-tags-landmarks-widget-test.md](plans/fix-tags-landmarks-widget-test.md) | — | Test is `skip: true`; investigation notes in the plan. |

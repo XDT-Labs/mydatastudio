@@ -6,6 +6,11 @@ name: Build and Release
 # GitHub release named after the tag. A tag with a pre-release suffix
 # (v1.2.3-beta.1) is published as a pre-release, which the in-app update
 # checker ignores.
+#
+# Which branch a tag may be cut from depends on its kind:
+#   vX.Y.Z         production release  -> the tagged commit must be on main
+#   vX.Y.Z-suffix  pre-release / beta  -> the tagged commit must be on develop
+# Anything else fails before a build starts.
 on:
   push:
     tags: ["v*"]
@@ -14,15 +19,16 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  build:
-    name: Build macOS Release
-    runs-on: macos-latest
+  # A cheap gate every platform's build job needs: it parses the tag once and
+  # checks it was cut from the right branch, so a bad tag fails in seconds and
+  # every platform builds the same version.
+  verify-tag:
+    name: Verify Tag and Branch
+    runs-on: ubuntu-latest
     outputs:
+      version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
-
     steps:
-      # Validate the tag first so a malformed one fails in seconds, not after
-      # a full build.
       - name: Resolve Version from Tag
         id: version
         env:
@@ -32,8 +38,9 @@ jobs:
             echo "Error: tag '$TAG' is not a version tag (expected vX.Y.Z or vX.Y.Z-suffix)"
             exit 1
           fi
-          # macOS wants CFBundleShortVersionString to be plain X.Y.Z, so the
-          # pre-release suffix stays on the tag/release name only.
+          # Platforms want a plain X.Y.Z app version (macOS's
+          # CFBundleShortVersionString, for one), so the pre-release suffix
+          # stays on the tag/release name only.
           echo "version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
           if [ -n "${BASH_REMATCH[2]}" ]; then
             echo "prerelease=true" >> $GITHUB_OUTPUT
@@ -41,6 +48,30 @@ jobs:
             echo "prerelease=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Tagged Commit Is on the Release Branch
+        env:
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          if [ "$PRERELEASE" = "true" ]; then BRANCH=develop; else BRANCH=main; fi
+          git fetch --no-tags origin "$BRANCH"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$BRANCH"; then
+            echo "Error: tag '$TAG' points at $GITHUB_SHA, which is not on $BRANCH."
+            echo "Production tags (vX.Y.Z) are cut from main; pre-release tags (vX.Y.Z-suffix) from develop."
+            exit 1
+          fi
+
+  build:
+    name: Build macOS Release
+    needs: verify-tag
+    runs-on: macos-latest
+
+    steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -106,7 +137,7 @@ jobs:
       # `<version>+<build>` stamp re-extracts the bundled aiserver.
       - name: Update Version in pubspec.prod.yaml
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.verify-tag.outputs.version }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
           if ! grep -qE '^version:' client/pubspec.prod.yaml; then
@@ -266,7 +297,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [verify-tag, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -284,7 +315,7 @@ jobs:
           files: |
             artifacts/macos-dmg/*.dmg
             artifacts/aiserver-macos/*.zip
-          prerelease: ${{ needs.build.outputs.prerelease == 'true' }}
+          prerelease: ${{ needs.verify-tag.outputs.prerelease == 'true' }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
