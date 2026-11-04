@@ -119,7 +119,7 @@ class DatabaseRepository {
       await db.execute('UPDATE files SET embedding_attempts = 0 WHERE id = ?', [
         fileId,
       ]);
-      logger.d(
+      logger.t(
         'upsertFileEmbedding: fileId=$fileId type=$type dim=${embedding.length}',
       );
     }
