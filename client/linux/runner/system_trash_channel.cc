@@ -48,9 +48,10 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* call,
   }
 
   FlValue* args = fl_method_call_get_args(call);
-  FlValue* path = fl_value_get_type(args) == FL_VALUE_TYPE_MAP
-                      ? fl_value_lookup_string(args, "path")
-                      : nullptr;
+  FlValue* path =
+      args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP
+          ? fl_value_lookup_string(args, "path")
+          : nullptr;
   if (path == nullptr || fl_value_get_type(path) != FL_VALUE_TYPE_STRING ||
       fl_value_get_string(path)[0] == '\0') {
     respond_error(call, "bad_arguments",

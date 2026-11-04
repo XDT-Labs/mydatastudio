@@ -97,9 +97,8 @@ ifeq ($(UNAME_S),Linux)
 build-python:
 	@echo "--- 🐍 Building Python aiserver service (Linux, CPU) ---"
 	@cd $(PYTHON_DIR) && \
-		TORCH=$$(sed -n '/^name = "torch"$$/{n;s/version = "\(.*\)"/\1/p;}' pdm.lock) && \
-		VISION=$$(sed -n '/^name = "torchvision"$$/{n;s/version = "\(.*\)"/\1/p;}' pdm.lock) && \
-		test -n "$$TORCH" && test -n "$$VISION" && \
+		TORCH=$$(python3.11 -c "import tomllib; print(next(p['version'] for p in tomllib.load(open('pdm.lock', 'rb'))['package'] if p['name'] == 'torch'))") && \
+		VISION=$$(python3.11 -c "import tomllib; print(next(p['version'] for p in tomllib.load(open('pdm.lock', 'rb'))['package'] if p['name'] == 'torchvision'))") && \
 		python3.11 -m venv --clear .venv && \
 		pdm export --dev --no-hashes -f requirements -o build-linux-requirements.txt && \
 		sed -i -E '/^(cuda-|nvidia-|triton|torch==|torchvision==)/d' build-linux-requirements.txt && \

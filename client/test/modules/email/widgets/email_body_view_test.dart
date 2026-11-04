@@ -157,6 +157,45 @@ void main() {
       },
     );
 
+    testWidgets(
+      'Open in browser survives its temp folder being cleaned up mid-session',
+      (tester) async {
+        // The folder is cached for the whole run, and long-running sessions
+        // outlive it when the OS clears /tmp. The feature must not stay broken
+        // until the app restarts.
+        String? openedPath;
+        await tester.pumpWidget(
+          _host(
+            HtmlEmailBodyView(
+              body: _htmlBody,
+              openInBrowser: (path) async {
+                openedPath = path;
+                return true;
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await _tapOpenInBrowser(tester, () => openedPath != null);
+        await tester.pump();
+
+        final firstPath = openedPath!;
+        await tester.runAsync(
+          () => io.File(firstPath).parent.delete(recursive: true),
+        );
+        openedPath = null;
+
+        await _tapOpenInBrowser(tester, () => openedPath != null);
+        await tester.pump();
+
+        expect(find.text('Could not open browser'), findsNothing);
+        final reopened = await tester.runAsync(
+          () => io.File(openedPath!).readAsString(),
+        );
+        expect(reopened, contains('Visible text é'));
+      },
+    );
+
     testWidgets('says so when the browser cannot be opened', (tester) async {
       var reached = false;
       await tester.pumpWidget(

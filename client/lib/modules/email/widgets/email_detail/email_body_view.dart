@@ -126,7 +126,11 @@ class HtmlEmailBodyView extends StatelessWidget implements EmailBodyView {
     final messenger = ScaffoldMessenger.of(context);
     var opened = false;
     try {
-      final dir = _browserCopyDir ??= await _createPrivateDir();
+      // Rechecked because the OS may clear temp folders during a long session.
+      var dir = _browserCopyDir;
+      if (dir == null || !await dir.exists()) {
+        dir = _browserCopyDir = await _createPrivateDir();
+      }
       final file = io.File(p.join(dir.path, 'email.html'));
       // The sanitiser strips `<meta charset>`, so the BOM is what tells the
       // browser this file is UTF-8.
