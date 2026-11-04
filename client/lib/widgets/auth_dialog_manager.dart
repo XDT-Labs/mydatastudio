@@ -12,6 +12,7 @@ class AuthDialogManager {
     GetCollectionsService.instance.sink.listen((value) {
       for (var c in value) {
         if (c.needsReAuth &&
+            c.type != 'email' &&
             (c.oauthService == 'google' ||
                 c.oauthService == 'dropbox' ||
                 c.oauthService == 'onedrive')) {
@@ -24,26 +25,18 @@ class AuthDialogManager {
   void _showAuthDialog(Collection collection) {
     final isDropbox = collection.oauthService == 'dropbox';
     final isOneDrive = collection.oauthService == 'onedrive';
-    final isEmail = collection.type == 'email';
-    final typeLabel =
-        isDropbox
-            ? 'Dropbox'
-            : isOneDrive
-            ? 'OneDrive'
-            : (isEmail ? 'Gmail' : 'Google Drive');
-    final icon = isEmail ? Icons.email : Icons.cloud;
     final message =
         isDropbox
             ? "Your Dropbox sign-in has expired or been revoked.\nClick the button to sign in again."
             : isOneDrive
             ? "Your OneDrive sign-in has expired or been revoked.\nClick the button to sign in again."
-            : "Your Google OAuth token has expired or been revoked for '$typeLabel'.\nClick the button to re-authenticate.";
+            : "Your Google OAuth token has expired or been revoked for 'Google Drive'.\nClick the button to re-authenticate.";
     final buttonLabel =
         isDropbox
             ? 'Sign in to Dropbox'
             : isOneDrive
             ? 'Sign in to OneDrive'
-            : 'Login with Google ($typeLabel)';
+            : 'Login with Google (Google Drive)';
 
     showDialog<SimpleDialog>(
       context: _globalNavigationKey.currentState!.context,
@@ -58,7 +51,7 @@ class AuthDialogManager {
                 width: 225,
                 height: 48,
                 child: ElevatedButton.icon(
-                  icon: Icon(icon),
+                  icon: const Icon(Icons.cloud),
                   label: Text(buttonLabel),
                   onPressed: () async {
                     // Close first: sign-in happens in the browser, and the
@@ -75,11 +68,6 @@ class AuthDialogManager {
                         );
                       } else if (isOneDrive) {
                         await LoginProviderExtension.handleOneDrive(
-                          navContext,
-                          existing: collection,
-                        );
-                      } else if (isEmail) {
-                        await LoginProviderExtension.handleGoogleMail(
                           navContext,
                           existing: collection,
                         );

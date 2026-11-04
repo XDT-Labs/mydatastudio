@@ -209,7 +209,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 '• https://www.googleapis.com/auth/drive\n'
                 '• https://www.googleapis.com/auth/user.emails.read\n'
                 '• https://www.googleapis.com/auth/gmail.readonly\n\n'
-                'Note: Ensure that the Google People API, Google Drive API, and Gmail API are enabled in your Google Cloud Console project.',
+                'Note: Ensure that the Google People API and Google Drive API are enabled in your Google Cloud Console project.',
                 style: TextStyle(fontSize: 14, height: 1.4),
               ),
               const SizedBox(height: 8),

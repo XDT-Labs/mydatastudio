@@ -115,7 +115,8 @@ void main() {
       final gmailCol = makeTestCollection(
         name: 'Gmail (person@example.com)',
         type: 'email',
-        scanner: AppConstants.scannerEmailGmail,
+        scanner: AppConstants.scannerEmailImap,
+        emailProviderId: 'gmail',
       );
 
       GetCollectionsService.instance.sink.add([localCol, gdriveCol, gmailCol]);
@@ -182,12 +183,14 @@ void main() {
         final gmailCol1 = makeTestCollection(
           name: 'Gmail (one@example.com)',
           type: 'email',
-          scanner: AppConstants.scannerEmailGmail,
+          scanner: AppConstants.scannerEmailImap,
+        emailProviderId: 'gmail',
         );
         final gmailCol2 = makeTestCollection(
           name: 'Gmail (two@example.com)',
           type: 'email',
-          scanner: AppConstants.scannerEmailGmail,
+          scanner: AppConstants.scannerEmailImap,
+        emailProviderId: 'gmail',
         );
         GetCollectionsService.instance.sink.add([gmailCol1, gmailCol2]);
 

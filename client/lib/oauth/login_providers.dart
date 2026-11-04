@@ -6,9 +6,11 @@ import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/provider.dart';
+import 'package:mydatastudio/modules/email/services/imap/email_provider_registry.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/oauth/desktop_oauth_manager.dart';
+import 'package:mydatastudio/oauth/microsoft_auth.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:material_ui/material_ui.dart';
@@ -62,14 +64,9 @@ extension LoginProviderExtension on LoginProviders {
     }
   }
 
-  String get tenant {
-    switch (this) {
-      case LoginProviders.outlook:
-        return "consumers";
-      default:
-        return "common";
-    }
-  }
+  /// Outlook signs in on `/common` so personal Outlook.com accounts and
+  /// Microsoft 365 work/school accounts both work.
+  String get tenant => "common";
 
   String get authorizationEndpoint {
     switch (this) {
@@ -123,30 +120,41 @@ extension LoginProviderExtension on LoginProviders {
       }
     }
 
-    return '';
+    return bundledClientId;
   }
+
+  /// Client ID compiled into this build; used when the user has not entered
+  /// their own. Only Outlook ships one (`--dart-define=OUTLOOK_CLIENT_ID`).
+  String get bundledClientId =>
+      this == LoginProviders.outlook ? kBundledOutlookClientId : '';
+
+  /// Path of the loopback redirect URI. Microsoft matches the registered
+  /// `http://localhost` ignoring the port but not the path, so Outlook
+  /// redirects to the bare origin.
+  String get redirectPath => this == LoginProviders.outlook ? '' : '/auth';
 
   /// Whether this provider uses PKCE (code_challenge + code_verifier).
   /// Google desktop apps use PKCE per https://developers.google.com/identity/protocols/oauth2/native-app
   /// Note: Google still requires client_secret alongside PKCE for desktop clients.
-  bool get usesPkce {
+  /// Microsoft uses PKCE as a public client, with no secret at all.
+  bool get usesPkce => true;
+
+  /// Whether sign-in needs a client secret. Google desktop clients do; a
+  /// public client that relies on PKCE alone (Microsoft/Outlook, OneDrive,
+  /// Dropbox; Box later) returns false and then sends only `client_id` + `code_verifier`
+  /// to the token endpoint, and no secret on refresh.
+  bool get requiresClientSecret {
     switch (this) {
       case LoginProviders.google:
       case LoginProviders.googleDrive:
-      case LoginProviders.oneDrive:
-      case LoginProviders.dropbox:
         return true;
       case LoginProviders.azure:
       case LoginProviders.outlook:
+      case LoginProviders.oneDrive:
+      case LoginProviders.dropbox:
         return false;
     }
   }
-
-  /// Whether sign-in needs a client secret. Defaults to true; a public desktop
-  /// client that relies on PKCE alone (e.g. Dropbox, OneDrive, Box) returns false and
-  /// then sends only `client_id` + `code_verifier` to the token endpoint.
-  bool get requiresClientSecret =>
-      this != LoginProviders.dropbox && this != LoginProviders.oneDrive;
 
   /// Whether the token request must repeat `scope` (Microsoft v2.0 requires
   /// it). Dropbox's token endpoint takes none.
@@ -190,7 +198,6 @@ extension LoginProviderExtension on LoginProviders {
           'https://www.googleapis.com/auth/userinfo.email',
           'https://www.googleapis.com/auth/userinfo.profile',
           'https://www.googleapis.com/auth/user.emails.read',
-          'https://www.googleapis.com/auth/gmail.readonly',
         ];
       case LoginProviders.googleDrive:
         // 'drive' scope enables listing, downloading, and deleting files.
@@ -205,13 +212,7 @@ extension LoginProviderExtension on LoginProviders {
       case LoginProviders.azure:
         return ['openid', 'email'];
       case LoginProviders.outlook:
-        return [
-          'https://outlook.office.com/IMAP.AccessAsUser.All',
-          'openid',
-          'email',
-          'profile',
-          'offline_access',
-        ];
+        return kOutlookScopes;
       case LoginProviders.oneDrive:
         // Read-only: `Files.Read` lists, downloads and runs `delta` on both
         // personal and work/school drives, and cannot modify anything.
@@ -334,105 +335,6 @@ extension LoginProviderExtension on LoginProviders {
       }
     }
   }
-
-  /// Initiates the Google Mail OAuth2 flow, fetches the user's profile,
-  /// and creates a [Collection] of type `email` with scanner `email.gmail`.
-  static Future<Collection?> handleGoogleMail(
-    BuildContext context, {
-    Collection? existing,
-  }) async {
-    if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Gmail is only supported on the desktop version of this app.',
-          ),
-        ),
-      );
-      return null;
-    }
-
-    try {
-      final appDataDir = MainApp.appDataDirectory.valueOrNull;
-      if (appDataDir == null) {
-        throw Exception(
-          'App data directory not initialized. Please restart the app.',
-        );
-      }
-      final oauthManager = DesktopOAuthManager(
-        loginProvider: LoginProviders.google,
-      );
-
-      final client = await oauthManager.login();
-
-      final profile = await fetchGoogleProfile(client.credentials.accessToken);
-      if (profile == null) {
-        AppLogger(null).e(
-          'Failed to fetch Google profile from both People API and UserInfo API.',
-        );
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Failed to fetch Google profile. Ensure Google People API is enabled in your GCP Console.',
-              ),
-            ),
-          );
-        }
-        return null;
-      }
-      final userId = profile.userId;
-      final email = profile.email;
-
-      final collectionId = existing?.id ?? const Uuid().v4().toString();
-      final extractionRoot = '$appDataDir/files/email/$collectionId';
-
-      final collection = Collection(
-        id: collectionId,
-        name: email,
-        path: "$appDataDir/files/email/$email",
-        localCopyPath: extractionRoot,
-        type: "email",
-        scanner: AppConstants.scannerEmailGmail,
-        scanStatus: "pending",
-        oauthService: "google",
-        accessToken: client.credentials.accessToken,
-        refreshToken: client.credentials.refreshToken,
-        idToken: client.credentials.idToken,
-        userId: userId,
-        expiration: client.credentials.expiration,
-        needsReAuth: false,
-      );
-
-      final repo = CollectionRepository(DatabaseManager.instance.database!);
-      if (existing != null) {
-        await repo.updateCollection(collection);
-      } else {
-        await repo.addCollection(collection);
-      }
-
-      // Notify the email collections list to refresh
-      GetCollectionsService.instance.invoke(
-        GetCollectionsServiceCommand("email"),
-      );
-
-      return collection;
-    } catch (e, stack) {
-      AppLogger(null).e('Gmail OAuth failed', error: e, stackTrace: stack);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Gmail sign-in failed. Please try again.'),
-          ),
-        );
-      }
-      return null;
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Google Drive handler (new)
-  // ---------------------------------------------------------------------------
 
   /// Initiates the Google Drive OAuth2 flow, fetches the user's Google profile,
   /// and creates (or updates) a [Collection] of type `file` with scanner
@@ -822,6 +724,7 @@ extension LoginProviderExtension on LoginProviders {
   static Future<Collection?> handleOutlookMail(
     BuildContext context, {
     Collection? existing,
+    void Function(Object error)? onError,
   }) async {
     if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -846,10 +749,7 @@ extension LoginProviderExtension on LoginProviders {
       );
 
       final client = await oauthManager.login(
-        customParameters: {
-          'prompt': 'select_account',
-          'domain_hint': 'consumers',
-        },
+        customParameters: {'prompt': 'select_account'},
       );
       final credentials = client.credentials;
       String? email;
@@ -939,6 +839,7 @@ extension LoginProviderExtension on LoginProviders {
         localCopyPath: extractionRoot,
         type: "email",
         scanner: AppConstants.scannerEmailOutlook,
+        emailProviderId: EmailProviderRegistry.outlook.id,
         scanStatus: "pending",
         oauthService: "outlook",
         accessToken: client.credentials.accessToken,
@@ -964,7 +865,11 @@ extension LoginProviderExtension on LoginProviders {
       return collection;
     } catch (e, stack) {
       AppLogger(null).e('Outlook OAuth failed', error: e, stackTrace: stack);
-      if (context.mounted) {
+      // A caller that shows the error itself (the setup tab) gets the real
+      // cause; otherwise fall back to the generic snackbar.
+      if (onError != null) {
+        onError(e);
+      } else if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Outlook sign-in failed. Please try again.'),

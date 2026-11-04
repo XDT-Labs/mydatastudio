@@ -68,5 +68,38 @@ void main() {
 
       expect(called, isTrue);
     });
+
+    testWidgets('Settings menu item only appears when onSettings is given', (tester) async {
+      Future<void> pumpTile(VoidCallback? onSettings) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: CollectionTileWidget(
+                collection: col,
+                isSelected: false,
+                displayName: 'My Photos',
+                onTap: () {},
+                onSync: () {},
+                onDelete: () {},
+                onSettings: onSettings,
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.byType(PopupMenuButton<String>));
+        await tester.pumpAndSettle();
+      }
+
+      await pumpTile(null);
+      expect(find.text('Settings'), findsNothing);
+
+      await tester.tapAt(const Offset(1, 1));
+      await tester.pumpAndSettle();
+      var called = false;
+      await pumpTile(() => called = true);
+      await tester.tap(find.text('Settings'));
+      await tester.pumpAndSettle();
+      expect(called, isTrue);
+    });
   });
 }

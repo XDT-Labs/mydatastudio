@@ -255,7 +255,12 @@ class _PhotoDrawerState extends State<PhotoDrawer> {
   List<Widget> _buildSourceGroups(ThemeData theme, ColorScheme colorScheme) {
     final Map<PhotoSourceGroup, List<Collection>> grouped = {};
     for (final c in _sourceCollections) {
-      grouped.putIfAbsent(photoSourceGroupFor(c.scanner), () => []).add(c);
+      grouped
+          .putIfAbsent(
+            photoSourceGroupFor(c.scanner, emailProviderId: c.emailProviderId),
+            () => [],
+          )
+          .add(c);
     }
 
     const order = kPhotoSourceGroupOrder;

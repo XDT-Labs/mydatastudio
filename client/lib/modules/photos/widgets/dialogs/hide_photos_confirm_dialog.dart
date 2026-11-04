@@ -41,7 +41,10 @@ Future<RemovePhotosChoice?> showRemovePhotosDialog(
 
   for (final f in selectedFiles) {
     final collection = byId[f.collectionId];
-    final group = photoSourceGroupFor(collection?.scanner);
+    final group = photoSourceGroupFor(
+      collection?.scanner,
+      emailProviderId: collection?.emailProviderId,
+    );
     countByGroup[group] = (countByGroup[group] ?? 0) + 1;
     switch (group) {
       case PhotoSourceGroup.local:

@@ -121,8 +121,11 @@ class EmailContactRepository {
   /// large archive is mostly `html_body`/`plain_body`/`headers`, and pulling
   /// those to count addresses would materialize hundreds of megabytes for
   /// nothing.
+  ///
+  /// Tallies first and swaps in one transaction, so a crash partway through
+  /// leaves the old index rather than half of a new one.
   Future<int> backfillFromEmails({int pageSize = 500}) async {
-    await db.execute('DELETE FROM emails_contacts');
+    final tallies = <String, _ContactTally>{};
 
     var offset = 0;
     var indexed = 0;
@@ -134,30 +137,93 @@ class EmailContactRepository {
       );
       if (rows.isEmpty) break;
 
-      await db.transaction((tx) async {
-        for (final row in rows) {
-          final timestamp = (row['date'] as int?) ?? 0;
+      for (final row in rows) {
+        final timestamp = (row['date'] as int?) ?? 0;
 
-          final sender = AddressParser.parseOne(row['from'] as String?);
-          if (sender != null) {
-            await _upsert(tx, sender, timestamp, isRecipient: false);
-          }
-          for (final recipient in [
-            ...AddressParser.parseList(row['to'] as String?),
-            ...AddressParser.parseList(row['cc'] as String?),
-          ]) {
-            await _upsert(tx, recipient, timestamp, isRecipient: true);
-          }
+        final sender = AddressParser.parseOne(row['from'] as String?);
+        if (sender != null) {
+          tallies
+              .putIfAbsent(sender.address, () => _ContactTally(sender))
+              .add(sender, timestamp, isRecipient: false);
         }
-      });
+        for (final recipient in _recipientsIn(row)) {
+          tallies
+              .putIfAbsent(recipient.address, () => _ContactTally(recipient))
+              .add(recipient, timestamp, isRecipient: true);
+        }
+      }
 
       indexed += rows.length;
       offset += pageSize;
     }
 
+    await db.transaction((tx) async {
+      await tx.execute('DELETE FROM emails_contacts');
+      for (final t in tallies.values) {
+        await tx.execute(
+          '''
+          INSERT INTO emails_contacts (address, display_name, local_part,
+                                       message_count, sent_count,
+                                       first_seen, last_seen)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ''',
+          [
+            t.address,
+            t.displayName,
+            t.localPart,
+            t.messageCount,
+            t.sentCount,
+            t.firstSeen,
+            t.lastSeen,
+          ],
+        );
+      }
+    });
+
     logger.i('EmailContactRepository: indexed contacts from $indexed emails');
     return indexed;
   }
+
+  /// Takes [rows] (`from`, `to`, `cc`) back out of the index, inside the
+  /// transaction deleting them, and drops any address left with no mail.
+  ///
+  /// A decrement rather than a rebuild, since this runs on every delete; a
+  /// rebuild re-parses the whole archive. `first_seen`/`last_seen` may be left
+  /// wider than the mail that remains, which only affects ranking.
+  static Future<void> unindex(
+    Transaction tx,
+    List<Map<String, Object?>> rows,
+  ) async {
+    for (final row in rows) {
+      final sender = AddressParser.parseOne(row['from'] as String?);
+      if (sender != null) await _decrement(tx, sender, isRecipient: false);
+      for (final recipient in _recipientsIn(row)) {
+        await _decrement(tx, recipient, isRecipient: true);
+      }
+    }
+    await tx.execute('DELETE FROM emails_contacts WHERE message_count <= 0');
+  }
+
+  static Future<void> _decrement(
+    Transaction tx,
+    ParsedAddress parsed, {
+    required bool isRecipient,
+  }) {
+    return tx.execute(
+      '''
+      UPDATE emails_contacts
+      SET message_count = message_count - 1,
+          sent_count = MAX(0, sent_count - ?)
+      WHERE address = ?
+      ''',
+      [isRecipient ? 1 : 0, parsed.address],
+    );
+  }
+
+  static List<ParsedAddress> _recipientsIn(Map<String, Object?> row) => [
+    ...AddressParser.parseList(row['to'] as String?),
+    ...AddressParser.parseList(row['cc'] as String?),
+  ];
 
   /// Every contact, most-corresponded-with first.
   ///
@@ -256,4 +322,31 @@ class EmailContact {
 
   @override
   String toString() => 'EmailContact($address, $displayName, n=$messageCount)';
+}
+
+/// One address's running totals during [EmailContactRepository.backfillFromEmails].
+class _ContactTally {
+  _ContactTally(ParsedAddress first)
+    : address = first.address,
+      localPart = first.localPart;
+
+  final String address;
+  String localPart;
+  String? displayName;
+  int messageCount = 0;
+  int sentCount = 0;
+  int? firstSeen;
+  int? lastSeen;
+
+  void add(ParsedAddress parsed, int timestamp, {required bool isRecipient}) {
+    // First real name wins, as in [EmailContactRepository._upsert].
+    displayName ??= parsed.displayName;
+    localPart = parsed.localPart;
+    messageCount++;
+    if (isRecipient) sentCount++;
+    final first = firstSeen;
+    firstSeen = first == null || timestamp < first ? timestamp : first;
+    final last = lastSeen;
+    lastSeen = last == null || timestamp > last ? timestamp : last;
+  }
 }

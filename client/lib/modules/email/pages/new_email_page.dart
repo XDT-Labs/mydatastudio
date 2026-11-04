@@ -19,16 +19,12 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:mydatastudio/modules/email/pages/email_page.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_idle_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_loading_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_success_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_error_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/gmail_configure_view.dart';
 import 'package:mydatastudio/modules/email/widgets/email_setup/outlook_configure_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_idle_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_loading_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_success_view.dart';
-import 'package:mydatastudio/modules/email/widgets/email_setup/yahoo_error_view.dart';
+import 'package:mydatastudio/oauth/microsoft_auth.dart';
+import 'package:mydatastudio/modules/email/services/imap/email_provider.dart';
+import 'package:mydatastudio/modules/email/services/setup/imap_connection_tester.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/email_account_setup_tab.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/email_source_catalog.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
@@ -45,6 +41,8 @@ class _NewEmailPage extends State<NewEmailPage> {
       GetCollectionsService.instance;
   StreamSubscription<List<Collection>>? _collectionsServiceSub;
   List<Collection> collections = [];
+  EmailSource? _selected;
+  String? _initialEmail;
 
   @override
   void initState() {
@@ -63,191 +61,57 @@ class _NewEmailPage extends State<NewEmailPage> {
     super.dispose();
   }
 
+  void _open(EmailSource source, String? email) {
+    setState(() {
+      _selected = source;
+      _initialEmail = email;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    //final textTheme = Theme.of(context).textTheme;
-    //final colorScheme = Theme.of(context).colorScheme;
-
+    final selected = _selected;
     return Scaffold(
-      body: Center(
-        child: SizedBox.expand(
-          child: DefaultTabController(
-            length: 4,
-            child: Scaffold(
-              appBar: AppBar(
-                toolbarHeight: 0,
-                bottom: const TabBar(
-                  tabs: [
-                    Tab(icon: Icon(Icons.email), text: 'Gmail'),
-                    Tab(icon: Icon(Icons.email), text: 'Yahoo Mail'),
-                    Tab(icon: Icon(Icons.email), text: 'Outlook'),
-                    Tab(icon: Icon(Icons.email), text: 'Outlook PST'),
+      body:
+          selected == null
+              ? ListView(
+                padding: const EdgeInsets.all(24),
+                children: [
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 760),
+                      child: EmailSourceCatalog(
+                        accounts: collections,
+                        onSelected: _open,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+              : Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => setState(() => _selected = null),
+                      icon: const Icon(Icons.arrow_back),
+                      label: const Text('All sources'),
+                    ),
+                    const SizedBox(height: 16),
+                    Expanded(
+                      child: switch (selected.form) {
+                        EmailSourceForm.imap => _ImapAccountTab(
+                          provider: selected.providers.first,
+                          email: _initialEmail,
+                        ),
+                        EmailSourceForm.outlook => const _OutlookTab(),
+                        EmailSourceForm.pstFile => const _OutlookPstTab(),
+                      },
+                    ),
                   ],
                 ),
               ),
-              body: TabBarView(
-                children: [
-                  const _GmailTab(),
-                  const _YahooTab(),
-                  const _OutlookTab(),
-                  const _OutlookPstTab(),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// =============================================================================
-// Gmail Tab — stateful OAuth flow mirroring Google Drive
-// =============================================================================
-
-enum _GmailAuthState { idle, loading, success, error, configure }
-
-class _GmailTab extends StatefulWidget {
-  const _GmailTab();
-
-  @override
-  State<_GmailTab> createState() => _GmailTabState();
-}
-
-class _GmailTabState extends State<_GmailTab> {
-  _GmailAuthState _authState = _GmailAuthState.loading;
-  String? _errorMessage;
-  String? _connectedEmail;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkConfiguration();
-  }
-
-  Future<void> _checkConfiguration() async {
-    setState(() {
-      _authState = _GmailAuthState.loading;
-    });
-
-    final clientId = await LoginProviders.google.clientId();
-    final clientSecret = await LoginProviders.google.clientSecret();
-
-    if (!mounted) return;
-
-    if (clientId.isEmpty || clientSecret.isEmpty) {
-      setState(() {
-        _authState = _GmailAuthState.configure;
-      });
-    } else {
-      setState(() {
-        _authState = _GmailAuthState.idle;
-      });
-    }
-  }
-
-  Future<void> _connectGmail() async {
-    setState(() {
-      _authState = _GmailAuthState.loading;
-      _errorMessage = null;
-    });
-
-    try {
-      final collection = await LoginProviderExtension.handleGoogleMail(context);
-
-      if (!mounted) return;
-
-      if (collection == null) {
-        setState(() {
-          _authState = _GmailAuthState.error;
-          _errorMessage = 'Sign-in was cancelled or failed. Please try again.';
-        });
-        return;
-      }
-
-      setState(() {
-        _authState = _GmailAuthState.success;
-        _connectedEmail = collection.name;
-      });
-
-      EmailPage.selectedCollection.add(collection);
-      ScannerManager.getInstance().startScanner(collection);
-
-      await Future.delayed(const Duration(milliseconds: 900));
-      if (!mounted) return;
-      GoRouter.of(context).go('/email');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _authState = _GmailAuthState.error;
-        _errorMessage = e.toString();
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 280),
-          child: switch (_authState) {
-            _GmailAuthState.loading => _buildLoading(),
-            _GmailAuthState.success => _buildSuccess(),
-            _GmailAuthState.error => _buildError(),
-            _GmailAuthState.idle => _buildIdle(),
-            _GmailAuthState.configure => _buildConfigure(),
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildIdle() {
-    return _cardContainer(
-      key: const ValueKey('idle'),
-      child: GmailIdleView(onConnect: _connectGmail),
-    );
-  }
-
-  Widget _buildLoading() {
-    return _cardContainer(
-      key: const ValueKey('loading'),
-      child: const GmailLoadingView(),
-    );
-  }
-
-  Widget _buildSuccess() {
-    return _cardContainer(
-      key: const ValueKey('success'),
-      child: GmailSuccessView(connectedEmail: _connectedEmail),
-    );
-  }
-
-  Widget _buildError() {
-    return _cardContainer(
-      key: const ValueKey('error'),
-      child: GmailErrorView(
-        errorMessage: _errorMessage,
-        onRetry: _connectGmail,
-      ),
-    );
-  }
-
-  Widget _buildConfigure() {
-    return _cardContainer(
-      key: const ValueKey('configure'),
-      child: GmailConfigureView(onConfigured: _checkConfiguration),
-    );
-  }
-
-  Widget _cardContainer({required Widget child, required Key key}) {
-    return Card(
-      key: key,
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(padding: const EdgeInsets.all(36), child: child),
     );
   }
 }
@@ -506,164 +370,37 @@ class _OutlookPstTabState extends State<_OutlookPstTab> {
 }
 
 // =============================================================================
-// Yahoo Tab — stateful OAuth flow
+// Email account (IMAP) form — provider detection, then the provider's own flow
 // =============================================================================
 
-enum _YahooAuthState { idle, loading, success, error }
+class _ImapAccountTab extends StatelessWidget {
+  const _ImapAccountTab({required this.provider, this.email});
 
-class _YahooTab extends StatefulWidget {
-  const _YahooTab();
+  final EmailProvider provider;
+  final String? email;
 
-  @override
-  State<_YahooTab> createState() => _YahooTabState();
-}
-
-class _YahooTabState extends State<_YahooTab> {
-  _YahooAuthState _authState = _YahooAuthState.idle;
-  String? _errorMessage;
-  String? _connectedEmail;
-
-  final _formKey = GlobalKey<FormState>();
-  final _email = TextEditingController();
-  final _appPassword = TextEditingController();
-
-  @override
-  void dispose() {
-    _email.dispose();
-    _appPassword.dispose();
-    super.dispose();
+  Future<void> _save(Collection collection) async {
+    // Same persistence + scanner start the old Yahoo flow used.
+    GetCollectionsService.instance.addCollection(collection);
+    ScannerManager.getInstance().startScanner(collection);
+    EmailPage.selectedCollection.add(collection);
   }
 
-  Future<void> _connectYahoo() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-
-    setState(() {
-      _authState = _YahooAuthState.loading;
-      _errorMessage = null;
-    });
-
-    try {
-      final email = _email.text;
-      final appPassword = _appPassword.text;
-
-      // Create collection manually (App Password approach)
-      final collectionId = const Uuid().v4();
-      final appDataDir = MainApp.appDataDirectory.valueOrNull;
-      final extractionRoot =
-          appDataDir != null
-              ? p.join(appDataDir, 'files', 'email', collectionId)
-              : null;
-      final c = Collection(
-        id: collectionId,
-        name: email,
-        path: email, // Root path for IMAP scanner
-        localCopyPath: extractionRoot,
-        type: 'email',
-        scanner: AppConstants.scannerEmailYahoo,
-        scanStatus: 'idle',
-        oauthService: 'yahoo_app_password',
-        accessToken: appPassword, // Store app password in accessToken field
-        userId: email,
-        needsReAuth: false,
-        downloadLocalCopy: true,
-      );
-
-      GetCollectionsService.instance.addCollection(c);
-      ScannerManager.getInstance().startScanner(c);
-
-      if (!mounted) return;
-
-      setState(() {
-        _authState = _YahooAuthState.success;
-        _connectedEmail = email;
-      });
-
-      EmailPage.selectedCollection.add(c);
-
-      await Future.delayed(const Duration(milliseconds: 900));
-      if (!mounted) return;
-      GoRouter.of(context).go('/email');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _authState = _YahooAuthState.error;
-        _errorMessage = e.toString();
-      });
-    }
-  }
-
-  Future<void> _launchYahooSecurity() async {
-    final url = Uri.parse('https://login.yahoo.com/account/security');
-    if (!await launchUrl(url)) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Could not open browser')));
-      }
-    }
+  Future<void> _openUrl(Uri url) async {
+    if (!await launchUrl(url)) throw Exception('Could not open $url');
   }
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 520),
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 280),
-          child: switch (_authState) {
-            _YahooAuthState.loading => _buildLoading(),
-            _YahooAuthState.success => _buildSuccess(),
-            _YahooAuthState.error => _buildError(),
-            _YahooAuthState.idle => _buildIdle(),
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildIdle() {
-    return _cardContainer(
-      key: const ValueKey('idle'),
-      child: YahooIdleView(
-        formKey: _formKey,
-        emailController: _email,
-        appPasswordController: _appPassword,
-        onConnect: _connectYahoo,
-        onLaunchSecurity: _launchYahooSecurity,
-      ),
-    );
-  }
-
-  Widget _buildLoading() {
-    return _cardContainer(
-      key: const ValueKey('loading'),
-      child: const YahooLoadingView(),
-    );
-  }
-
-  Widget _buildSuccess() {
-    return _cardContainer(
-      key: const ValueKey('success'),
-      child: YahooSuccessView(connectedEmail: _connectedEmail),
-    );
-  }
-
-  Widget _buildError() {
-    return _cardContainer(
-      key: const ValueKey('error'),
-      child: YahooErrorView(
-        errorMessage: _errorMessage,
-        onRetry: () => setState(() => _authState = _YahooAuthState.idle),
-      ),
-    );
-  }
-
-  Widget _cardContainer({required Widget child, required Key key}) {
-    return Card(
-      key: key,
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(padding: const EdgeInsets.all(32), child: child),
+    return EmailAccountSetupTab(
+      connectionTester: const EnoughMailImapConnectionTester(),
+      appDataDirectory: () => MainApp.appDataDirectory.valueOrNull,
+      onAccountCreated: _save,
+      onDone: (context) => GoRouter.of(context).go('/email'),
+      oauthBuilder: (_, _) => const _OutlookTab(),
+      onOpenUrl: _openUrl,
+      initialProvider: provider,
+      initialEmail: email,
     );
   }
 }
@@ -697,12 +434,13 @@ class _OutlookTabState extends State<_OutlookTab> {
       _authState = _OutlookAuthState.loading;
     });
 
+    // Microsoft is a public client: only a client ID is needed (the one the
+    // user entered, else the one bundled with this build). No secret.
     final clientId = await LoginProviders.outlook.clientId();
-    final clientSecret = await LoginProviders.outlook.clientSecret();
 
     if (!mounted) return;
 
-    if (clientId.isEmpty || clientSecret.isEmpty) {
+    if (clientId.isEmpty) {
       setState(() {
         _authState = _OutlookAuthState.configure;
       });
@@ -720,8 +458,10 @@ class _OutlookTabState extends State<_OutlookTab> {
     });
 
     try {
+      Object? signInError;
       final collection = await LoginProviderExtension.handleOutlookMail(
         context,
+        onError: (e) => signInError = e,
       );
 
       if (!mounted) return;
@@ -729,7 +469,10 @@ class _OutlookTabState extends State<_OutlookTab> {
       if (collection == null) {
         setState(() {
           _authState = _OutlookAuthState.error;
-          _errorMessage = 'Sign-in was cancelled or failed. Please try again.';
+          _errorMessage =
+              signInError == null
+                  ? 'Sign-in was cancelled or failed. Please try again.'
+                  : _describeOutlookError(signInError!);
         });
         return;
       }
@@ -749,9 +492,16 @@ class _OutlookTabState extends State<_OutlookTab> {
       if (!mounted) return;
       setState(() {
         _authState = _OutlookAuthState.error;
-        _errorMessage = e.toString();
+        _errorMessage = _describeOutlookError(e);
       });
     }
+  }
+
+  /// Plain-language guidance for known Microsoft 365 problems (admin consent
+  /// required, IMAP disabled); the raw error otherwise.
+  String _describeOutlookError(Object error) {
+    final raw = error.toString();
+    return classifyMicrosoftAuthError(raw).message ?? raw;
   }
 
   @override
@@ -809,6 +559,12 @@ class _OutlookTabState extends State<_OutlookTab> {
                 borderRadius: BorderRadius.circular(8),
               ),
             ),
+          ),
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed:
+                () => setState(() => _authState = _OutlookAuthState.configure),
+            child: const Text('Use my own Microsoft app (Client ID)'),
           ),
         ],
       ),

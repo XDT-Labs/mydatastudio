@@ -21,20 +21,33 @@ const List<PhotoSourceGroup> kPhotoSourceGroupOrder = [
   PhotoSourceGroup.other,
 ];
 
-PhotoSourceGroup photoSourceGroupFor(String? scanner) {
+/// [emailProviderId] is the collection's `emailProviderId`; it groups generic
+/// `email.imap` collections with the provider the user actually connected.
+PhotoSourceGroup photoSourceGroupFor(
+  String? scanner, {
+  String? emailProviderId,
+}) {
   switch (scanner) {
     case AppConstants.scannerFileLocal:
       return PhotoSourceGroup.local;
     case AppConstants.scannerFileGDrive:
       return PhotoSourceGroup.gdrive;
-    case AppConstants.scannerEmailGmail:
-      return PhotoSourceGroup.gmail;
     case AppConstants.scannerEmailYahoo:
       return PhotoSourceGroup.yahoo;
     // Live IMAP and PST import are one source as far as the user is concerned.
     case AppConstants.scannerEmailOutlook:
     case AppConstants.scannerEmailOutlookPst:
       return PhotoSourceGroup.outlook;
+    case AppConstants.scannerEmailImap:
+      switch (emailProviderId) {
+        case 'gmail':
+          return PhotoSourceGroup.gmail;
+        case 'yahoo':
+          return PhotoSourceGroup.yahoo;
+        case 'outlook':
+          return PhotoSourceGroup.outlook;
+      }
+      return PhotoSourceGroup.other;
     default:
       return PhotoSourceGroup.other;
   }
