@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 from PIL import Image
 
 from aichat.model_manager import (
+    _root_cause,
     select_embedding_dtype,
     is_transformers_embedding_model,
     load_transformers_embedding_model,
@@ -149,6 +150,23 @@ class TestLoadTransformersEmbeddingModel:
 
         assert "operator torchvision::nms does not exist" in str(exc_info.value)
         assert isinstance(exc_info.value.__cause__, ImportError)
+
+    def test_root_cause_follows_implicit_chaining(self):
+        """A wrapper raised inside `except` without `from` must not hide the original."""
+        original = RuntimeError("original")
+        wrapper = ImportError("wrapper")
+        wrapper.__context__ = original
+
+        assert _root_cause(wrapper) is original
+
+    def test_root_cause_stops_on_a_cycle(self):
+        """Failing to report an error must not hang the embedding request."""
+        first = ImportError("first")
+        second = RuntimeError("second")
+        first.__cause__ = second
+        second.__context__ = first
+
+        assert _root_cause(first) is second
 
 
 class FakeSentenceTransformer:
