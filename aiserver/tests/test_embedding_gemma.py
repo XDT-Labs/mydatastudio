@@ -1,6 +1,7 @@
 """
 Unit tests for EmbeddingGemma 2 SentenceTransformer-based embedding model loading and generation.
 """
+import builtins
 import os
 import pytest
 import torch
@@ -120,6 +121,34 @@ class TestLoadTransformersEmbeddingModel:
 
             assert "reported dimension 1024" in str(exc_info.value)
             assert str(EMBEDDING_DIMENSION) in str(exc_info.value)
+
+
+    def test_import_failure_reports_its_root_cause(self):
+        """
+        The package can be installed and still fail to import, so "is required"
+        sent a frozen-build bug hunting in the wrong place. transformers re-wraps
+        the real error as an ImportError, so the root must be dug out for the log,
+        which only carries this one line.
+        """
+        real_import = builtins.__import__
+
+        def failing_import(name, *args, **kwargs):
+            if name == "sentence_transformers":
+                try:
+                    raise RuntimeError("operator torchvision::nms does not exist")
+                except RuntimeError as root:
+                    raise ModuleNotFoundError("Could not import module 'PreTrainedModel'") from root
+            return real_import(name, *args, **kwargs)
+
+        with patch("torch.cuda.is_available", return_value=False), \
+             patch("aichat.model_manager.SentenceTransformer", None), \
+             patch("builtins.__import__", side_effect=failing_import):
+
+            with pytest.raises(RuntimeError) as exc_info:
+                load_transformers_embedding_model("google/embeddinggemma-2", "/fake/path")
+
+        assert "operator torchvision::nms does not exist" in str(exc_info.value)
+        assert isinstance(exc_info.value.__cause__, ImportError)
 
 
 class FakeSentenceTransformer:

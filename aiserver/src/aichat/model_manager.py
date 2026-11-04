@@ -356,8 +356,15 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
         try:
             from sentence_transformers import SentenceTransformer as _ST
             st_cls = _ST
-        except ImportError:
-            raise RuntimeError("sentence-transformers is required to load this embedding model.")
+        except ImportError as e:
+            # The package may be present but failing to import; name the real
+            # error, which transformers wraps in a generic ImportError.
+            root_cause = e
+            while root_cause.__cause__ is not None:
+                root_cause = root_cause.__cause__
+            raise RuntimeError(
+                f"sentence-transformers could not be imported: {type(root_cause).__name__}: {root_cause}"
+            ) from e
 
     model = st_cls(model_path, device=device, model_kwargs={"torch_dtype": dtype})
 
