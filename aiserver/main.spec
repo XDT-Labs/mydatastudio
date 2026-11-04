@@ -28,7 +28,10 @@ hiddenimports = [
 ]
 
 # Collect all for complex packages
-for pkg in ['llama_cpp', 'uvicorn', 'fastapi', 'langchain', 'langchain_community', 'langchain_core', 'langchain_google_genai', 'langchain_openai', 'langchain_anthropic', 'rawpy', 'pillow_heif', 'sentence_transformers']:
+# torchvision is here for its native ops (_C_stable): the contrib hook still asks
+# for the pre-0.29 name `_C`, so without this they are silently left out and
+# importing transformers fails in the frozen app.
+for pkg in ['llama_cpp', 'uvicorn', 'fastapi', 'langchain', 'langchain_community', 'langchain_core', 'langchain_google_genai', 'langchain_openai', 'langchain_anthropic', 'rawpy', 'pillow_heif', 'sentence_transformers', 'torchvision']:
     try:
         print(f"Collecting {pkg}...")
         tmp_ret = collect_all(pkg)
