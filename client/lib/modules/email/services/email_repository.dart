@@ -5,6 +5,7 @@ import 'package:mydatastudio/helpers/sql_chunks.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/search/services/email_contact_repository.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/modules/email/services/searchable_body.dart';
 
@@ -224,6 +225,11 @@ class EmailRepository {
     await database.transaction((tx) async {
       for (final chunk in sqlChunks(ids)) {
         final placeholders = List.filled(chunk.length, '?').join(',');
+        final addressRows = await tx.select(
+          'SELECT "from", "to", cc FROM emails WHERE id IN ($placeholders)',
+          chunk,
+        );
+        await EmailContactRepository.unindex(tx, addressRows);
         await tx.execute(
           "DELETE FROM emails WHERE id IN ($placeholders)",
           chunk,

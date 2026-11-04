@@ -147,17 +147,23 @@ class ImapScannerIsolate {
     }
   }
 
-  Future<void> moveToTrash(
+  /// Returns whether the server confirmed the move. Waits for the worker, so a
+  /// caller can keep its local copy of mail that is still on the server.
+  Future<bool> moveToTrash(
     Collection collection, {
     String? folderId,
     required List<int> uids,
+    Map<String, List<String>> otherCopies = const {},
     SendPort? statusPort,
   }) async {
+    final result = ReceivePort();
     Map<String, dynamic> args = {
       'token': token ?? RootIsolateToken.instance,
       'collection': collection,
       'folderId': folderId,
       'uids': uids,
+      'otherCopies': otherCopies,
+      'resultPort': result.sendPort,
       'type': 'move_to_trash',
       'appDir': appDir,
       'dbDir': dbDir,
@@ -165,9 +171,24 @@ class ImapScannerIsolate {
     };
 
     // We use a fresh isolate for the move operation to avoid blocking or being blocked by long-running scans
-    await Isolate.spawn(ImapScannerIsolateWorker.worker, args);
-    if (statusPort != null) {
-      statusPort.send("Remote delete request sent for ${uids.length} messages");
+    try {
+      // The worker sends true on success; any other ending, including a crash,
+      // reaches the port as the null exit message.
+      await Isolate.spawn(
+        ImapScannerIsolateWorker.worker,
+        args,
+        onExit: result.sendPort,
+      );
+      final moved = await result.first.timeout(
+        const Duration(minutes: 2),
+        onTimeout: () => false,
+      );
+      if (statusPort != null) {
+        statusPort.send("Remote delete finished for ${uids.length} messages");
+      }
+      return moved == true;
+    } finally {
+      result.close();
     }
   }
 
@@ -262,12 +283,16 @@ class ImapScannerIsolateWorker {
       if (type == 'move_to_trash' &&
           uidsToMove != null &&
           uidsToMove.isNotEmpty) {
-        await _moveToTrash(
+        final moved = await _moveToTrash(
           client,
           folderId: folderId,
           uids: uidsToMove,
+          otherCopies:
+              (args['otherCopies'] as Map<String, List<String>>?) ?? const {},
+          provider: config.provider,
           logger: logger,
         );
+        if (moved) (args['resultPort'] as SendPort?)?.send(true);
         await client.logout();
         return;
       }
@@ -623,38 +648,94 @@ class ImapScannerIsolateWorker {
     }
   }
 
-  static Future<void> _moveToTrash(
+  /// Returns false unless every copy reached the trash. Never guesses at a
+  /// destination: with no trash folder the mail stays where it is, because
+  /// moving it to some other folder would be reported as a delete.
+  static Future<bool> _moveToTrash(
     ImapClient client, {
     required String? folderId,
     required List<int> uids,
+    required Map<String, List<String>> otherCopies,
+    required EmailProvider provider,
     required AppLogger logger,
   }) async {
-    final mailboxes = await client.listMailboxes();
-    final trashMailbox =
-        mailboxes.where((m) => m.isTrash).firstOrNull ??
+    // Recursive: unlike the synced folders, a trash folder is often nested
+    // ([Gmail]/Trash, INBOX.Trash).
+    final mailboxes = await client.listMailboxes(recursive: true);
+    final trashPath =
         mailboxes
             .where(
               (m) =>
-                  m.name.toLowerCase() == 'trash' ||
-                  m.name.toLowerCase() == 'archive',
+                  folderRoleFor(
+                    name: m.name,
+                    path: m.path,
+                    flags: m.flags,
+                    provider: provider,
+                  ) ==
+                  FolderRole.trash,
             )
-            .firstOrNull;
-
-    final trashPath = trashMailbox?.path ?? 'Trash';
-    final targetFolder = folderId ?? 'INBOX';
-
-    logger.s(
-      "Moving ${uids.length} messages to $trashPath from $targetFolder...",
-    );
-    await client.selectMailboxByPath(targetFolder);
-
-    final sequence = MessageSequence();
-    for (final uid in uids) {
-      sequence.add(uid);
+            .firstOrNull
+            ?.path;
+    if (trashPath == null) {
+      logger.e("No trash folder found on the server; nothing was moved.");
+      return false;
     }
+
+    final targetFolder = folderId ?? 'INBOX';
+    var moved = true;
+    if (targetFolder != trashPath) {
+      logger.s(
+        "Moving ${uids.length} messages to $trashPath from $targetFolder...",
+      );
+      await client.selectMailboxByPath(targetFolder);
+      final sequence = MessageSequence();
+      for (final uid in uids) {
+        sequence.add(uid);
+      }
+      moved = await _moveSequence(client, sequence, trashPath, logger);
+    }
+
+    // Gmail labels are not copies: leaving All Mail already removed them all.
+    if (provider.id == gmailProviderId) return moved;
+    for (final entry in otherCopies.entries) {
+      if (entry.key == trashPath) continue;
+      try {
+        await client.selectMailboxByPath(entry.key);
+        final sequence = MessageSequence();
+        for (final messageId in entry.value) {
+          final escaped = messageId
+              .replaceAll(r'\', r'\\')
+              .replaceAll('"', r'\"');
+          final found = await client.uidSearchMessages(
+            searchCriteria: 'HEADER Message-ID "$escaped"',
+          );
+          final uids = found.matchingSequence?.toList() ?? const <int>[];
+          for (final uid in uids) {
+            sequence.add(uid);
+          }
+        }
+        if (sequence.isNotEmpty) {
+          moved =
+              await _moveSequence(client, sequence, trashPath, logger) && moved;
+        }
+      } catch (e) {
+        logger.e("Could not move copies in ${entry.key} to trash: $e");
+        moved = false;
+      }
+    }
+    return moved;
+  }
+
+  static Future<bool> _moveSequence(
+    ImapClient client,
+    MessageSequence sequence,
+    String trashPath,
+    AppLogger logger,
+  ) async {
     try {
       await client.uidMove(sequence, targetMailboxPath: trashPath);
       logger.s("Cleanup: remote move to $trashPath complete.");
+      return true;
     } catch (e) {
       logger.e("Error during IMAP MOVE: $e. Attempting Copy/Delete fallback.");
       try {
@@ -664,24 +745,27 @@ class ImapScannerIsolateWorker {
         ], action: StoreAction.add);
         await client.uidExpunge(sequence);
         logger.s("Cleanup: move to Trash completed via fallback.");
+        return true;
       } catch (e2) {
         logger.e("Fallback Copy/Delete failed: $e2");
+        return false;
       }
     }
   }
 
   /// Upserts one `email_folders` row per mailbox. Role comes from SPECIAL-USE
-  /// flags / provider hints; the id is the full IMAP path. Only top-level
-  /// mailboxes are listed (non-recursive LIST), for which the path equals the
-  /// old leaf-name id, so existing `emails.folder_id` values still resolve.
+  /// flags / provider hints; the id is the full IMAP path. The listing is
+  /// recursive because nested mailboxes hold real mail, and Gmail's All Mail
+  /// is one of them (`[Gmail]/All Mail`).
   static Future<List<Mailbox>> _syncFolderList(
     ImapClient client,
     ImapConnectionConfig config,
     Collection collection,
     SendPort clientPort,
   ) async {
-    final mailboxes = await client.listMailboxes();
+    final mailboxes = await client.listMailboxes(recursive: true);
     for (final mailbox in mailboxes) {
+      final parentEnd = mailbox.path.lastIndexOf(mailbox.pathSeparator);
       final role = folderRoleFor(
         name: mailbox.name,
         path: mailbox.path,
@@ -693,6 +777,7 @@ class ImapScannerIsolateWorker {
         collectionId: collection.id,
         name: mailbox.name,
         type: role.name,
+        parentId: parentEnd > 0 ? mailbox.path.substring(0, parentEnd) : null,
         path: mailbox.path,
       );
       await writeViaMain(clientPort, 'emailFolder', folder);

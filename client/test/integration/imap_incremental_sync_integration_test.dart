@@ -36,6 +36,8 @@ void main() {
     'Papierkorb',
   ];
   const scratchMailbox = 'ItReval';
+  const nestedParent = 'ItNest';
+  const nestedChild = 'ItNest/Child';
 
   setUpAll(() async {
     available = await isImapTestServerAvailable();
@@ -55,12 +57,16 @@ void main() {
       await deleteAll(seeder!, m);
     }
     await _dropMailbox(seeder!, scratchMailbox);
+    await _dropMailbox(seeder!, nestedChild);
+    await _dropMailbox(seeder!, nestedParent);
   });
 
   tearDown(() async {
     if (!available) return;
     try {
       await _dropMailbox(seeder!, scratchMailbox);
+      await _dropMailbox(seeder!, nestedChild);
+      await _dropMailbox(seeder!, nestedParent);
       await seeder?.logout();
     } catch (_) {}
     seeder = null;
@@ -192,6 +198,30 @@ void main() {
       expect(types['Junk'], 'junk');
       expect(types['INBOX'], 'inbox');
       expect((await folderState('Trash'))['last_synced_uid'], isNull);
+    },
+  );
+
+  imapTest(
+    'nested folders are listed under their parent and their mail is synced',
+    () async {
+      // A folder inside another is where Gmail keeps All Mail
+      // ([Gmail]/All Mail), so a listing that stops at the top level silently
+      // loses that mail, on any provider that nests.
+      final c = await persisted(EmailDeletePolicy.keep);
+      await seeder!.createMailbox(nestedParent);
+      await seeder!.createMailbox(nestedChild);
+      await seedMessages(seeder!, nestedChild, [msg('nested')]);
+
+      await sync(c);
+
+      expect(
+        (await byMessageId('<incr-nested@test.local>'))['folder_id'],
+        nestedChild,
+      );
+      final child = await folderState(nestedChild);
+      expect(child['name'], 'Child');
+      expect(child['parent_id'], nestedParent, reason: 'shown under its parent');
+      expect((await folderState(nestedParent))['parent_id'], isNull);
     },
   );
 

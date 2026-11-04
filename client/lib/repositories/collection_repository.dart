@@ -4,7 +4,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/email_delete_policy.dart';
-import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
+import 'package:mydatastudio/modules/search/services/email_contact_repository.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/services/sqlite_retry.dart';
 import 'package:path/path.dart' as p;
@@ -270,56 +270,59 @@ class CollectionRepository {
           id,
         ]);
         await tx.execute("DELETE FROM collections WHERE id = ?", [id]);
+        for (final path in _diskPathsOf(collection)) {
+          await tx.execute(
+            "INSERT OR IGNORE INTO pending_disk_deletes (path) VALUES (?)",
+            [path],
+          );
+        }
       }),
       label: 'CollectionRepository.deleteCollection',
     );
 
-    // 8. Physical disk cleanup (especially for email attachments/cache)
-    String? appDir = MainApp.appDataDirectory.value;
-    if (appDir != null) {
-      if (collection.type == 'email') {
-        try {
-          final collectionDiskPath = p.join(
-            appDir,
-            'files',
-            'email',
-            collection.id,
-          );
-          final dir = io.Directory(collectionDiskPath);
-          if (await dir.exists()) {
-            await dir.delete(recursive: true);
-            logger.i("Deleted email collection disk path: $collectionDiskPath");
-          }
-        } catch (e) {
-          logger.e("Failed to delete email collection files from disk: $e");
-        }
-      } else if (collection.type == 'file' &&
-          collection.scanner.contains('gdrive')) {
-        try {
-          // Google Drive files are saved under files/gdrive/{collection.name}
-          final collectionDiskPath = p.join(
-            appDir,
-            'files',
-            'gdrive',
-            collection.name,
-          );
-          final dir = io.Directory(collectionDiskPath);
-          if (await dir.exists()) {
-            await dir.delete(recursive: true);
-            logger.i(
-              "Deleted GDrive collection disk path: $collectionDiskPath",
-            );
-          }
-        } catch (e) {
-          logger.e("Failed to delete GDrive collection files from disk: $e");
-        }
-      }
+    await deletePendingDiskPaths();
 
-      // Remove any cached thumbnails for this collection (all types).
+    // Contact counts can't say which account an address came from, so only a
+    // rebuild removes the ones that came solely from this one. Non-fatal: the
+    // account is already gone, and this only feeds search suggestions.
+    if (collection.type == 'email') {
       try {
-        await ThumbnailCache(appDir).deleteCollection(id);
+        await EmailContactRepository(db).backfillFromEmails();
       } catch (e) {
-        logger.e("Failed to delete cached thumbnails for collection $id: $e");
+        logger.e("Failed to rebuild contacts after deleting $id: $e");
+      }
+    }
+  }
+
+  /// Where [collection]'s files live, relative to the storage root.
+  List<String> _diskPathsOf(Collection collection) => [
+    if (collection.type == 'email') p.join('files', 'email', collection.id),
+    if (collection.type == 'file' && collection.scanner.contains('gdrive'))
+      // Google Drive files are saved under files/gdrive/{collection.name}
+      p.join('files', 'gdrive', collection.name),
+    p.join('thumbnails', collection.id),
+  ];
+
+  /// Deletes the folders of deleted collections. A folder stays queued until
+  /// it is really gone, and this runs again at startup, so a failure here, or
+  /// storage that isn't reachable, doesn't strand files with nothing pointing
+  /// at them.
+  Future<void> deletePendingDiskPaths() async {
+    final appDir = MainApp.appDataDirectory.valueOrNull;
+    if (appDir == null || !await io.Directory(appDir).exists()) return;
+
+    final rows = await db.select("SELECT path FROM pending_disk_deletes");
+    for (final row in rows) {
+      final path = row['path'] as String;
+      try {
+        final dir = io.Directory(p.join(appDir, path));
+        if (await dir.exists()) await dir.delete(recursive: true);
+        await db.execute("DELETE FROM pending_disk_deletes WHERE path = ?", [
+          path,
+        ]);
+        logger.i("Deleted collection disk path: $path");
+      } catch (e) {
+        logger.e("Failed to delete $path from disk, will retry: $e");
       }
     }
   }

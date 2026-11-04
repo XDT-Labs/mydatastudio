@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:path/path.dart' as p;
 import 'package:resqlite/resqlite.dart';
@@ -279,6 +280,12 @@ class DatabaseManager {
     final generation = ++_startGeneration;
 
     logger.i("Starting background isolates and scanners (vault unlocked)...");
+
+    try {
+      await CollectionRepository(appDatabase!).deletePendingDiskPaths();
+    } catch (e) {
+      logger.e("Could not finish deleting old collection files: $e");
+    }
 
     // 1. Start scanners
     await _startScanners();
@@ -566,6 +573,14 @@ class AppDatabase {
       await _seedAichatModels(_db);
       await _seedAichatSkills(_db);
     }
+    // Folders of deleted collections, relative to the storage root, not yet
+    // removed from disk. Here rather than in schemaDDL so that existing
+    // archives get it too.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS pending_disk_deletes (
+        path TEXT PRIMARY KEY
+      );
+    ''');
     await _db.execute('''
       CREATE TABLE IF NOT EXISTS emails_embeddings (
         email_id TEXT NOT NULL,

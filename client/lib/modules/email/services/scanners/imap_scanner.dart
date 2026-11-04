@@ -93,12 +93,13 @@ class ImapScanner extends CollectionScanner {
   }
 
   @override
-  Future<void> moveToTrash(
+  Future<bool> moveToTrash(
     Collection collection,
     String folderId,
-    List<int> uids,
-  ) async {
-    if (uids.isEmpty) return;
+    List<int> uids, {
+    Map<String, List<String>> otherCopies = const {},
+  }) async {
+    if (uids.isEmpty) return true;
 
     // Lazy-init isolate if needed
     isolate ??= ImapScannerIsolate(
@@ -107,7 +108,12 @@ class ImapScanner extends CollectionScanner {
       dbDir: p.dirname(p.dirname(dbPath)),
     );
 
-    await isolate!.moveToTrash(collection, folderId: folderId, uids: uids);
+    return isolate!.moveToTrash(
+      collection,
+      folderId: folderId,
+      uids: uids,
+      otherCopies: otherCopies,
+    );
   }
 
   @override
