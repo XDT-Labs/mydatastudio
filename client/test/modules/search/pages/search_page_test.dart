@@ -70,7 +70,7 @@ SearchResult _file({
 ///
 /// [emailById] always returns null, and the tests below only ever select files.
 /// The email panel is not reachable from a widget test at all: `EmailDetails`
-/// builds a `WebViewController` in `initState`, and `webview_flutter` has no
+/// ends up building a `WebViewController`, and `webview_flutter` has no
 /// platform implementation under `flutter test`, so constructing it throws.
 /// Covering the mail path needs an integration test on a real device.
 class _FakeDetailLoader implements SearchDetailRepository {

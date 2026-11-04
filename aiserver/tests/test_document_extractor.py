@@ -355,6 +355,51 @@ class TestPdfRuntime:
     def test_rejects_a_missing_file(self, tmp_path):
         assert not de._is_macho(str(tmp_path / "absent.dylib"))
 
+    def test_linux_expects_a_shared_object_and_rejects_a_mac_build(
+        self, tmp_path, monkeypatch
+    ):
+        # The same guard in the other direction: the Linux bundle must not
+        # accept a Mach-O, or PDFs fail there with the same misleading message.
+        monkeypatch.setattr(de.sys, "platform", "linux")
+        assert de._pdfium_lib_name() == "libpdfium.so"
+        elf = tmp_path / "libpdfium.so"
+        elf.write_bytes(b"\x7fELF" + b"\0" * 64)
+        macho = tmp_path / "wrong.so"
+        macho.write_bytes(b"\xcf\xfa\xed\xfe" + b"\0" * 64)
+        assert de._is_native_library(str(elf))
+        assert not de._is_native_library(str(macho))
+
+    def test_macos_keeps_expecting_a_dylib(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(de.sys, "platform", "darwin")
+        assert de._pdfium_lib_name() == "libpdfium.dylib"
+        elf = tmp_path / "libpdfium.dylib"
+        elf.write_bytes(b"\x7fELF" + b"\0" * 64)
+        assert not de._is_native_library(str(elf))
+
+    def test_configure_on_linux_points_docling_at_the_vendored_so(
+        self, tmp_path, monkeypatch
+    ):
+        self._reset()
+        monkeypatch.setattr(de.sys, "platform", "linux")
+        monkeypatch.delenv("PDFIUM_DYNAMIC_LIB_PATH", raising=False)
+        (tmp_path / "libpdfium.so").write_bytes(b"\x7fELF" + b"\0" * 64)
+        monkeypatch.setattr(de, "_pdfium_search_roots", lambda: [str(tmp_path)])
+        try:
+            assert de.configure_pdf_runtime() is True
+            assert de.os.environ["PDFIUM_DYNAMIC_LIB_PATH"] == str(tmp_path)
+        finally:
+            monkeypatch.delenv("PDFIUM_DYNAMIC_LIB_PATH", raising=False)
+            self._reset()
+
+    def test_docling_failing_to_load_is_unavailable_not_unparseable(
+        self, monkeypatch
+    ):
+        # Ubuntu 22.04's glibc can't load the docling-rs wheel. Those files are
+        # fine, so they must stay retryable for when the OS is upgraded.
+        monkeypatch.setitem(de.sys.modules, "docling_rs", None)
+        with pytest.raises(de.ExtractionUnavailable, match="could not load"):
+            de._convert_raw(b"hello", "txt")
+
     def test_an_external_override_is_honoured(self, monkeypatch):
         # A developer pointing at their own build should not have it silently
         # replaced by whatever happens to be vendored.

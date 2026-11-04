@@ -82,3 +82,8 @@ app support db.session.sql
 
 # Vendored by `make pdfium` — a 3.4 MB binary, fetched not tracked.
 aiserver/vendor/
+
+# Written by client/tool/linux_without_flutter_angle.py for Linux builds
+client/pubspec_overrides.yaml
+# Written by `make build-python` on Linux
+aiserver/build-linux-requirements.txt

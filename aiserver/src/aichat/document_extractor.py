@@ -125,7 +125,12 @@ class Extraction:
 # and in the source tree during development. `make pdfium` populates the
 # latter; main.spec copies it into the former.
 _PDFIUM_SUBDIR = os.path.join("vendor", "pdfium", "lib")
-_PDFIUM_LIB = "libpdfium.dylib"
+
+
+def _pdfium_lib_name() -> str:
+    """The vendored library's filename on this platform."""
+    return "libpdfium.so" if sys.platform.startswith("linux") else "libpdfium.dylib"
+
 
 # Set once, at import, and read by the Rust side on first PDF.
 _pdf_ready: Optional[bool] = None
@@ -169,6 +174,17 @@ def _is_macho(path: str) -> bool:
     )
 
 
+def _is_native_library(path: str) -> bool:
+    """True if `path` is a library this platform can load (see `_is_macho`)."""
+    if not sys.platform.startswith("linux"):
+        return _is_macho(path)
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(4) == b"\x7fELF"
+    except OSError:
+        return False
+
+
 def configure_pdf_runtime() -> bool:
     """Point docling at the vendored pdfium. Idempotent; returns readiness.
 
@@ -187,13 +203,13 @@ def configure_pdf_runtime() -> bool:
         return True
 
     for root in _pdfium_search_roots():
-        candidate = os.path.join(root, _PDFIUM_LIB)
+        candidate = os.path.join(root, _pdfium_lib_name())
         if not os.path.exists(candidate):
             continue
-        if not _is_macho(candidate):
+        if not _is_native_library(candidate):
             _pdf_reason = (
-                f"{candidate} is not a Mach-O object — wrong platform build; "
-                "PDF extraction disabled"
+                f"{candidate} is not a library for {sys.platform} — wrong "
+                "platform build; PDF extraction disabled"
             )
             print(f"[ERROR] extract-text: {_pdf_reason}", flush=True)
             _pdf_ready = False
@@ -204,7 +220,7 @@ def configure_pdf_runtime() -> bool:
         return True
 
     _pdf_reason = (
-        f"no {_PDFIUM_LIB} in {_pdfium_search_roots()} — run `make pdfium`"
+        f"no {_pdfium_lib_name()} in {_pdfium_search_roots()} — run `make pdfium`"
     )
     print(f"[WARN] extract-text: {_pdf_reason}", flush=True)
     _pdf_ready = False
@@ -489,8 +505,6 @@ def _as_utf8(data: bytes, fmt: str) -> bytes:
 def _convert_raw(data: bytes, fmt: str):
     """The docling call itself, split out so the classification above can be
     tested without a real missing library."""
-    from docling_rs import DocumentConverter, DocumentStream
-
     if fmt == "pdf" and not configure_pdf_runtime():
         # Raised before the call so the message names the real problem. Left
         # to docling, this surfaces as "the pdfium library is not installed"
@@ -498,6 +512,15 @@ def _convert_raw(data: bytes, fmt: str):
         raise ExtractionUnavailable(
             f"PDF extraction unavailable: {pdf_unavailable_reason()}"
         )
+
+    try:
+        from docling_rs import DocumentConverter, DocumentStream
+    except ImportError as e:
+        # The file isn't at fault, so this must not read as unparseable and
+        # spend its retry budget. Real case: docling-rs 1.104.3's Linux wheels
+        # need glibc 2.38 despite their manylinux_2_28 tag, so on Ubuntu 22.04
+        # the native library won't load, and an OS upgrade fixes it.
+        raise ExtractionUnavailable(f"docling could not load: {e}") from e
 
     converter = DocumentConverter(do_ocr=False)
     # The synthesized name is the whole point: docling routes on this

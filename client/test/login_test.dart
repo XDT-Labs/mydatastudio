@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/models/tables/app_user.dart';
 import 'package:mydatastudio/database_manager.dart';
@@ -30,9 +29,6 @@ void main() {
 
     databaseManager = DatabaseManager.instance;
     await databaseManager.initializeDatabase();
-
-    // Mock Secure Storage
-    FlutterSecureStorage.setMockInitialValues({});
   });
 
   tearDown(() async {

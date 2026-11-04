@@ -37,6 +37,8 @@ remaining: [windows-runner-scaffold, plugin-audit, email-body-view, webview-flut
      platform**, macOS included, so there's one code path (`pdf_preview_widget.dart` and its
      test controller). **The Windows build needs Developer Mode enabled** on the CI runner
      (pdfrx requirement). Upgrade Flutter if pdfrx needs it.
+     - **2026-11-03:** the shared migration landed with the Linux work (no test controller any
+       more). Still to do here: Developer Mode on the runner and checking it on Windows.
    - `media_kit`: ✓ (bundles libmpv). `window_manager`,
      `screen_retriever`, `desktop_window`, `window_to_front`, `url_launcher`, `file_picker`,
      `flutter_secure_storage`, `package_info_plus`: ✓.

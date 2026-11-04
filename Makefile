@@ -4,9 +4,9 @@
 # Usage:
 #   make all            - Build everything (models, python, client)
 #   make models         - Download GGUF models from Hugging Face
-#   make pdfium         - Vendor the macOS pdfium library (needed for PDF text)
+#   make pdfium         - Vendor this platform's pdfium library (needed for PDF text)
 #   make build-python   - Build and zip the Python aiserver service
-#   make build-client   - Build the Flutter Desktop client (macOS release)
+#   make build-client   - Build the Flutter Desktop client (release, for this platform)
 #   make notarize       - Notarize the macOS build (requires APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID env vars)
 #   make clean          - Remove all build artifacts
 # ==============================================================================
@@ -27,11 +27,29 @@ PYTHON_DIR = aiserver
 # layer converts without it in no-OCR mode and this archive has no scanned
 # pages (§18b, §18h-6).
 PDFIUM_RELEASE = chromium/7999
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_S),Linux)
+ifeq ($(UNAME_M),x86_64)
+PDFIUM_ASSET = pdfium-linux-x64.tgz
+else
+PDFIUM_ASSET = pdfium-linux-arm64.tgz
+endif
+PDFIUM_LIB = libpdfium.so
+PDFIUM_FORMAT = ELF
+else
 PDFIUM_ASSET = pdfium-mac-arm64.tgz
+PDFIUM_LIB = libpdfium.dylib
+PDFIUM_FORMAT = Mach-O
+endif
 PDFIUM_URL = https://github.com/bblanchon/pdfium-binaries/releases/download/$(PDFIUM_RELEASE)/$(PDFIUM_ASSET)
 PDFIUM_DIR = $(PYTHON_DIR)/vendor/pdfium
 APP_DIR = client/app
+ifeq ($(UNAME_S),Linux)
+APP_ZIP_NAME = aiserver-linux.zip
+else
 APP_ZIP_NAME = aiserver-macos.zip
+endif
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = ggml-org/gemma-4-12B-it-GGUF
 HF_FILE = gemma-4-12B-it-Q4_0.gguf
@@ -94,24 +112,46 @@ models:
 .PHONY: pdfium
 pdfium:
 	@echo "--- 📄 Checking/Downloading pdfium ---"
-	@if [ -f $(PDFIUM_DIR)/lib/libpdfium.dylib ]; then \
-		echo "libpdfium.dylib already vendored, skipping download."; \
+	@if [ -f $(PDFIUM_DIR)/lib/$(PDFIUM_LIB) ]; then \
+		echo "$(PDFIUM_LIB) already vendored, skipping download."; \
 	else \
 		mkdir -p $(PDFIUM_DIR); \
 		echo "Downloading $(PDFIUM_ASSET) ($(PDFIUM_RELEASE))..."; \
 		curl -sSLf -o /tmp/$(PDFIUM_ASSET) $(PDFIUM_URL) && \
-		tar xzf /tmp/$(PDFIUM_ASSET) -C $(PDFIUM_DIR) lib/libpdfium.dylib; \
+		tar xzf /tmp/$(PDFIUM_ASSET) -C $(PDFIUM_DIR) lib/$(PDFIUM_LIB); \
 		rm -f /tmp/$(PDFIUM_ASSET); \
 	fi
-	@if ! file $(PDFIUM_DIR)/lib/libpdfium.dylib | grep -q Mach-O; then \
-		echo "ERROR: vendored pdfium is not a Mach-O object. PDF extraction would"; \
+	@if ! file $(PDFIUM_DIR)/lib/$(PDFIUM_LIB) | grep -q $(PDFIUM_FORMAT); then \
+		echo "ERROR: vendored pdfium is not a $(PDFIUM_FORMAT) object. PDF extraction would"; \
 		echo "       fail at runtime with a misleading \"not installed\" error."; \
 		exit 1; \
 	fi
-	@echo "pdfium ready: $$(file $(PDFIUM_DIR)/lib/libpdfium.dylib | cut -d: -f2-)"
+	@echo "pdfium ready: $$(file $(PDFIUM_DIR)/lib/$(PDFIUM_LIB) | cut -d: -f2-)"
 
 # 2. Build Python Service
 .PHONY: build-python
+ifeq ($(UNAME_S),Linux)
+# Linux installs from an export of the lock rather than `pdm install`: the lock
+# was resolved with PyPI's torch, which on Linux pulls ~5 GB of CUDA libraries
+# the CPU build can't use. Everything else stays at its locked version, and
+# torch at its locked version from PyTorch's CPU index.
+build-python: pdfium
+	@echo "--- 🐍 Building Python aiserver service (Linux, CPU) ---"
+	@cd $(PYTHON_DIR) && \
+		TORCH=$$(sed -n '/^name = "torch"$$/{n;s/version = "\(.*\)"/\1/p;}' pdm.lock) && \
+		VISION=$$(sed -n '/^name = "torchvision"$$/{n;s/version = "\(.*\)"/\1/p;}' pdm.lock) && \
+		test -n "$$TORCH" && test -n "$$VISION" && \
+		python3.11 -m venv --clear .venv && \
+		pdm export --dev --no-hashes -f requirements -o build-linux-requirements.txt && \
+		sed -i -E '/^(cuda-|nvidia-|triton|torch==|torchvision==)/d' build-linux-requirements.txt && \
+		.venv/bin/python -m pip install --upgrade pip && \
+		.venv/bin/python -m pip install "torch==$$TORCH" "torchvision==$$VISION" --index-url https://download.pytorch.org/whl/cpu && \
+		FORCE_CMAKE=1 CMAKE_ARGS="$${CMAKE_ARGS:--DGGML_NATIVE=off}" .venv/bin/python -m pip install -r build-linux-requirements.txt && \
+		PYTHONPATH=src .venv/bin/python -m PyInstaller -y main.spec
+	@mkdir -p client/app
+	@cd $(PYTHON_DIR)/dist/aiserver && zip -qryFS $(CURDIR)/client/app/$(APP_ZIP_NAME) .
+	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
+else
 build-python: pdfium
 	@echo "--- 🐍 Building Python aiserver service ---"
 	@cd $(PYTHON_DIR) && \
@@ -160,10 +200,23 @@ build-python: pdfium
 	@rm -f client/app/$(APP_ZIP_NAME)
 	@ditto -c -k --sequesterRsrc $(PYTHON_DIR)/dist/aiserver client/app/$(APP_ZIP_NAME)
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
+endif
 
 
 # 3. Build Flutter Desktop Client
 .PHONY: build-client
+ifeq ($(UNAME_S),Linux)
+build-client:
+	@echo "--- 🚀 Building Flutter Desktop client (Linux) ---"
+	@REALM=$$(cat .realm_name 2>/dev/null | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \
+	cd $(FLUTTER_DIR) && \
+		cp pubspec.prod.yaml pubspec.yaml && \
+		flutter pub get && \
+		python3 tool/linux_without_flutter_angle.py && \
+		flutter pub get && \
+		REALM_NAME=$$REALM flutter build linux --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
+	@echo "--- ✅ Flutter build complete ---"
+else
 build-client:
 	@echo "--- 🚀 Building Flutter Desktop client (macOS) ---"
 	@REALM=$$(cat .realm_name 2>/dev/null | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \
@@ -177,6 +230,7 @@ build-client:
 		echo "--- 🚀 Copy release build to Applications folder ---"; \
 		cp -r $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app /Applications/MyDataStudio.app; \
 	fi
+endif
 
 
 # Local Install (Testing)

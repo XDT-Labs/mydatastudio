@@ -147,14 +147,20 @@ class ThreeJsStlRenderer implements StlRenderer {
 }
 
 class StlPreviewWidget extends StatefulWidget {
-  const StlPreviewWidget({
+  StlPreviewWidget({
     super.key,
     required this.file,
     required this.previewHeight,
     required this.resolvedPath,
     this.onDownloadGDrive,
     @visibleForTesting this.rendererFactory,
-  });
+    @visibleForTesting bool? isLinux,
+  }) : isLinux = isLinux ?? io.Platform.isLinux;
+
+  /// Shown instead of the preview on Linux, whose build leaves out
+  /// flutter_angle's native plugin (it doesn't compile there; see
+  /// `tool/linux_without_flutter_angle.py`).
+  static const unavailableOnLinux = "3D preview isn't available on Linux.";
 
   final File file;
   final double previewHeight;
@@ -163,6 +169,9 @@ class StlPreviewWidget extends StatefulWidget {
 
   /// Injected in tests to avoid platform channels / OpenGL.
   final StlRenderer Function(File)? rendererFactory;
+
+  /// Injected in tests; defaults to `Platform.isLinux`.
+  final bool isLinux;
 
   @override
   State<StlPreviewWidget> createState() => _StlPreviewWidgetState();
@@ -194,6 +203,10 @@ class _StlPreviewWidgetState extends State<StlPreviewWidget> {
   }
 
   void _createRenderer() {
+    if (widget.isLinux) {
+      _loading = false;
+      return;
+    }
     if (widget.rendererFactory != null) {
       _renderer = widget.rendererFactory!(widget.file);
       setState(() => _loading = false);
@@ -236,6 +249,13 @@ class _StlPreviewWidgetState extends State<StlPreviewWidget> {
               child: _renderer!.build(context),
             ),
           if (_loading) const Center(child: CircularProgressIndicator()),
+          if (widget.isLinux)
+            const Center(
+              child: Text(
+                StlPreviewWidget.unavailableOnLinux,
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
           if (_error != null)
             Center(
               child: Padding(

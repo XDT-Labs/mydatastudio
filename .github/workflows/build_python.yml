@@ -18,8 +18,9 @@ jobs:
             cmake_args: '-DGGML_METAL=on -DGGML_NATIVE=off'
           # - os: windows-latest
           #   cmake_args: ''
-          # - os: ubuntu-latest
-          #   cmake_args: ''
+          # The oldest supported Ubuntu, so the binary runs on newer glibc too.
+          - os: ubuntu-22.04
+            cmake_args: '-DGGML_NATIVE=off'
 
     steps:
     - uses: actions/checkout@v4
@@ -34,9 +35,9 @@ jobs:
       with:
         python-version: '3.11'
 
-    # - name: Install Build Tools (Ubuntu)
-    #   if: matrix.os == 'ubuntu-latest'
-    #   run: sudo apt-get update -y && sudo apt-get install -y cmake ninja-build build-essential
+    - name: Install Build Tools (Ubuntu)
+      if: matrix.os == 'ubuntu-22.04'
+      run: sudo apt-get update -y && sudo apt-get install -y cmake ninja-build build-essential zip file
 
     - name: Install Build Tools (macOS)
       if: matrix.os == 'macos-latest'
@@ -46,7 +47,15 @@ jobs:
     #   if: matrix.os == 'windows-latest'
     #   run: choco install cmake ninja -y
 
+    # Linux installs CPU-only torch through the Makefile; see build-python there.
+    - name: Build (Linux)
+      if: matrix.os == 'ubuntu-22.04'
+      run: make build-python
+      env:
+        CMAKE_ARGS: ${{ matrix.cmake_args }}
+
     - name: Install Python Dependencies
+      if: matrix.os == 'macos-latest'
       working-directory: aiserver
       run: pdm install --dev
       env:
@@ -54,6 +63,7 @@ jobs:
         CMAKE_ARGS: ${{ matrix.cmake_args }}
 
     - name: Build with PyInstaller
+      if: matrix.os == 'macos-latest'
       working-directory: aiserver
       run: pdm run pyinstaller -y main.spec
 
@@ -71,9 +81,9 @@ jobs:
     #     name: aiserver-windows
     #     path: aiserver/dist/aiserver.exe
 
-    # - name: Upload Artifact (Linux)
-    #   if: matrix.os == 'ubuntu-latest'
-    #   uses: actions/upload-artifact@v4
-    #   with:
-    #     name: aiserver-linux
-    #     path: aiserver/dist/aiserver
+    - name: Upload Artifact (Linux)
+      if: matrix.os == 'ubuntu-22.04'
+      uses: actions/upload-artifact@v4
+      with:
+        name: aiserver-linux
+        path: client/app/aiserver-linux.zip

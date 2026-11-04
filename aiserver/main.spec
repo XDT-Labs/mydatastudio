@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import sys
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 datas = []
@@ -51,12 +52,13 @@ for pkg in ['langchain_google_genai', 'langchain_openai', 'langchain_anthropic']
 # macOS and reports success (search plan §18d-1). `make pdfium` vendors it and
 # verifies the Mach-O header; this copies it in. The Makefile's signing pass
 # picks it up with every other Mach-O file in dist/.
-_pdfium = os.path.join(os.path.dirname(os.path.abspath(SPEC)), 'vendor', 'pdfium', 'lib', 'libpdfium.dylib')
+_pdfium_lib = 'libpdfium.so' if sys.platform.startswith('linux') else 'libpdfium.dylib'
+_pdfium = os.path.join(os.path.dirname(os.path.abspath(SPEC)), 'vendor', 'pdfium', 'lib', _pdfium_lib)
 if os.path.exists(_pdfium):
     binaries += [(_pdfium, 'vendor/pdfium/lib')]
     print(f"  - Bundling pdfium from {_pdfium}")
 else:
-    print("Warning: vendor/pdfium/lib/libpdfium.dylib missing — PDF extraction "
+    print(f"Warning: vendor/pdfium/lib/{_pdfium_lib} missing — PDF extraction "
           "will be disabled in this build. Run `make pdfium`.")
 
 # Models are deliberately NOT bundled. They live beside the extracted server
