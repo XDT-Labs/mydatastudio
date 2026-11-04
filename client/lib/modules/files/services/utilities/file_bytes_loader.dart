@@ -103,8 +103,7 @@ class FileBytesLoader {
   /// `docling-rs` reads both natively with no model download, so an exported
   /// Workspace document chunks through exactly the same path as any other —
   /// heading paths for the footnote included (§18a). Exporting to PDF would
-  /// need the vendored pdfium (§18d-1) and would throw away the structure the
-  /// chunker uses, to represent a document that never had pages to begin with.
+  /// throw away the structure the chunker uses, to represent a document that never had pages to begin with.
   ///
   /// Forms, Drawings, Sites and Shortcuts are absent deliberately: their
   /// exports are either unavailable or not documents.

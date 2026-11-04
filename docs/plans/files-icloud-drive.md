@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: in-progress
 adr: none
-remaining: [detect-folder, dataless-handling, legacy-icloud-stubs, app-folders, full-disk-access-check]
+remaining: [download-for-indexing, full-disk-access-check]
 ---
 
 # Plan: iCloud Drive (sync folder only)

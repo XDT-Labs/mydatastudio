@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: in-progress
 adr: none
-remaining: [sync-folder-card, dataless-handling, watch-sdk]
+remaining: [verify-folder-name, dataless-handling, watch-sdk]
 ---
 
 # Plan: Proton Drive (sync folder; SDK later)

@@ -397,8 +397,8 @@ class DocumentChunkIsolate {
         return null;
       }
 
-      // 503 means the *server* cannot read this format yet — a missing
-      // pdfium, an undownloaded model. The document is fine and will extract
+      // 503 means the *server* cannot read this format yet — an
+      // undownloaded model, say. The document is fine and will extract
       // once the dependency lands, so this must cost no attempt: five of these
       // would retire the file permanently before the feature that reads it
       // ever ships. Returning null is exactly the unreachable-file path.

@@ -24,23 +24,20 @@ The endpoint takes bytes rather than a path, matching the thumbnail endpoint's
 structural fix for AUDIT H2 — the server never becomes a local-file read
 oracle, and the client keeps the job of resolving cloud files (§18i).
 
-**PDF is not wired up here.** Everything in this module works on PDFs already,
-but they additionally need docling's model pack *and* a macOS ``libpdfium``
-this project must vendor itself — docling's own downloader ships a Linux
-binary and reports success (§18d-1). We vendor a macOS arm64
-``libpdfium.dylib`` instead and point ``PDFIUM_DYNAMIC_LIB_PATH`` at it — see
-``configure_pdf_runtime`` below. Without it a PDF comes back as a **503**
-(``ExtractionUnavailable``), deliberately not a 422, so it does not spend its
-retry budget waiting for a library.
+**PDFs are read from their text layer alone, and need no model pack.** The 2 GB
+ONNX pack buys OCR and layout/table analysis, and §18b measured **zero** scanned
+pages in this archive, so a born-digital PDF's embedded text is all we read.
+That takes ``text_layer_only=True``. ``do_ocr=False`` used to be enough, but
+docling-rs redefined it to match Python docling: layout analysis and TableFormer
+still run and only OCR is skipped, so without the flag every PDF fails on a
+missing ``layout_heron.onnx``. The cost is flat paragraphs, with no headings or
+tables recovered from a PDF; page provenance is kept. A page with no text layer
+comes back empty, which ``_warn_if_scanned`` reports.
 
-**The 2 GB model pack is not required.** Measured 2026-08-13: with
-``do_ocr=False`` and an empty ``artifacts_path``, both sampled archive PDFs
-converted completely and with full page provenance. The ONNX pack buys OCR and
-layout/table analysis, and §18b measured **zero** scanned pages in this
-archive — so a born-digital PDF's embedded text layer is all we read, and
-pdfium alone reads it. That turns step 5 from "ship a 2 GB opt-in download"
-into "vendor 3.4 MB", and an earlier draft of §18d that treated the pack as a
-prerequisite is corrected in §18h-6.
+**pdfium is not used.** Measured 2026-11-03 against docling-rs 1.104.3: its
+text-layer parser is pure Rust, ``pdfium`` is an off-by-default cargo feature
+that neither our macOS build nor the Linux wheel enables, and conversion gives
+the same result with no library present. So this project no longer vendors one.
 """
 from __future__ import annotations
 
@@ -90,13 +87,17 @@ class ExtractionUnavailable(Exception):
 # Substrings that mark a docling failure as environmental rather than about the
 # document. Matched on the message because the Rust bindings raise one
 # ConversionError for everything — there is no exception type to switch on.
+#
+# Don't add "pdfium" here. docling reports a PDF its parser cannot read as "pdfium
+# support is not compiled in", because pdfium is its optional last resort for such
+# files. That names a library but is about the document: nothing can be installed
+# to fix it, and since a 503 costs no attempt the client would retry the file
+# forever instead of retiring it.
 _UNAVAILABLE_MARKERS = (
-    "pdfium",
     "library is not installed",
     "model not found",
     "download_dependencies",
 )
-
 
 @dataclass
 class Chunk:
@@ -117,103 +118,6 @@ class Extraction:
     # Only the description path (§18l) asks for the text itself; the chunking
     # path reads it through `chunks` and would pay to send it twice.
     markdown: Optional[str] = None
-
-
-# ── PDF runtime ──────────────────────────────────────────────────────────────
-
-# Where the vendored dylib lands: beside the frozen binary under PyInstaller,
-# and in the source tree during development. `make pdfium` populates the
-# latter; main.spec copies it into the former.
-_PDFIUM_SUBDIR = os.path.join("vendor", "pdfium", "lib")
-_PDFIUM_LIB = "libpdfium.dylib"
-
-# Set once, at import, and read by the Rust side on first PDF.
-_pdf_ready: Optional[bool] = None
-_pdf_reason: str = "not configured"
-
-
-def _pdfium_search_roots() -> List[str]:
-    """Directories that may hold the vendored pdfium, most specific first."""
-    roots = []
-    # PyInstaller one-file/one-dir: assets are unpacked beside the executable.
-    meipass = getattr(__import__("sys"), "_MEIPASS", None)
-    if meipass:
-        roots.append(os.path.join(meipass, _PDFIUM_SUBDIR))
-    # Running from source: aiserver/vendor/pdfium/lib
-    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    roots.append(os.path.join(here, _PDFIUM_SUBDIR))
-    return roots
-
-
-def _is_macho(path: str) -> bool:
-    """True if `path` is a Mach-O object.
-
-    Checked rather than assumed because the failure this guards against
-    already happened once: docling's own downloader wrote a **Linux ELF**
-    pdfium, reported success, and every PDF then failed with "the pdfium
-    library is not installed" — a message that describes the wrong problem and
-    cost an afternoon to see through (§18d-1). A four-byte read makes the next
-    occurrence say what is actually wrong.
-    """
-    try:
-        with open(path, "rb") as handle:
-            magic = handle.read(4)
-    except OSError:
-        return False
-    # 64-bit Mach-O, little- and big-endian, plus the universal-binary wrapper.
-    return magic in (
-        b"\xcf\xfa\xed\xfe",
-        b"\xfe\xed\xfa\xcf",
-        b"\xca\xfe\xba\xbe",
-        b"\xbe\xba\xfe\xca",
-    )
-
-
-def configure_pdf_runtime() -> bool:
-    """Point docling at the vendored pdfium. Idempotent; returns readiness.
-
-    Deliberately does *not* configure `artifacts_path`. The ONNX pack is only
-    needed for OCR and layout analysis, and this archive has no scanned pages
-    (§18b) — see the module docstring.
-    """
-    global _pdf_ready, _pdf_reason
-    if _pdf_ready is not None:
-        return _pdf_ready
-
-    # An explicit override wins: a developer pointing at their own build should
-    # not have it silently replaced by whatever happens to be vendored.
-    if os.environ.get("PDFIUM_DYNAMIC_LIB_PATH"):
-        _pdf_ready, _pdf_reason = True, "PDFIUM_DYNAMIC_LIB_PATH set externally"
-        return True
-
-    for root in _pdfium_search_roots():
-        candidate = os.path.join(root, _PDFIUM_LIB)
-        if not os.path.exists(candidate):
-            continue
-        if not _is_macho(candidate):
-            _pdf_reason = (
-                f"{candidate} is not a Mach-O object — wrong platform build; "
-                "PDF extraction disabled"
-            )
-            print(f"[ERROR] extract-text: {_pdf_reason}", flush=True)
-            _pdf_ready = False
-            return False
-        os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = root
-        _pdf_ready, _pdf_reason = True, candidate
-        print(f"[INFO] extract-text: pdfium at {candidate}", flush=True)
-        return True
-
-    _pdf_reason = (
-        f"no {_PDFIUM_LIB} in {_pdfium_search_roots()} — run `make pdfium`"
-    )
-    print(f"[WARN] extract-text: {_pdf_reason}", flush=True)
-    _pdf_ready = False
-    return False
-
-
-def pdf_unavailable_reason() -> str:
-    """Why PDFs cannot be read, for the 503 body."""
-    return _pdf_reason
 
 
 # ── Sniffing ─────────────────────────────────────────────────────────────────
@@ -379,9 +283,9 @@ def _tokenizer_path() -> Optional[str]:
 def _convert(data: bytes, fmt: str):
     """Bytes → DoclingDocument, routed by the format we sniffed.
 
-    ``do_ocr=False`` because §18b found no scanned pages in this archive and
-    OCR is the expensive path; a scanned PDF yields little text instead of
-    costing minutes, and §18b's tripwire is what notices.
+    No OCR or layout analysis, because §18b found no scanned pages in this
+    archive and they are the expensive path; a scanned PDF yields little text
+    instead of costing minutes, and §18b's tripwire is what notices.
     """
     if fmt == "wpd":
         return _convert_wordperfect(data)
@@ -491,15 +395,9 @@ def _convert_raw(data: bytes, fmt: str):
     tested without a real missing library."""
     from docling_rs import DocumentConverter, DocumentStream
 
-    if fmt == "pdf" and not configure_pdf_runtime():
-        # Raised before the call so the message names the real problem. Left
-        # to docling, this surfaces as "the pdfium library is not installed"
-        # even when the library is present and simply built for Linux.
-        raise ExtractionUnavailable(
-            f"PDF extraction unavailable: {pdf_unavailable_reason()}"
-        )
-
-    converter = DocumentConverter(do_ocr=False)
+    # `do_ocr=False` alone still runs layout analysis, which needs the model
+    # pack; `text_layer_only` is what skips the ML stack. See the module docstring.
+    converter = DocumentConverter(do_ocr=False, text_layer_only=True)
     # The synthesized name is the whole point: docling routes on this
     # extension, and it is the sniffed format rather than the caller's.
     source = DocumentStream(name=f"document.{fmt}", stream=io.BytesIO(data))

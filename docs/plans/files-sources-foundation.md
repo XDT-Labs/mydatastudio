@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: in-progress
 adr: none
-remaining: [cloud-file-scanner-refactor, change-cursor-sync, sync-folder-connector, dataless-detection, content-policy, shared-oauth, content-hash-dedupe, setup-ui]
+remaining: [provider-hint, download-for-indexing]
 ---
 
 # Plan: File sharing sources: shared foundation

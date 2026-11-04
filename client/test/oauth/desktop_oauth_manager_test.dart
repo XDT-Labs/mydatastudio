@@ -69,11 +69,13 @@ void main() {
     expect(m.login(), throwsA(isA<ProviderConfigurationException>()));
   });
 
-  test('Google keeps requiring a secret; Microsoft is a public client', () {
+  test('only Google requires a secret; the rest are public clients', () {
     expect(LoginProviders.google.requiresClientSecret, isTrue);
     expect(LoginProviders.googleDrive.requiresClientSecret, isTrue);
     expect(LoginProviders.outlook.requiresClientSecret, isFalse);
     expect(LoginProviders.azure.requiresClientSecret, isFalse);
+    expect(LoginProviders.oneDrive.requiresClientSecret, isFalse);
+    expect(LoginProviders.dropbox.requiresClientSecret, isFalse);
   });
 
   group('Outlook as a public client', () {

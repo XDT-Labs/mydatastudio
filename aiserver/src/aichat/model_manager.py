@@ -328,6 +328,17 @@ def load_embedding_model(model_id: str, filename: str, local_dir: str) -> Any:
     return llm, None
 
 
+def _root_cause(error: BaseException) -> BaseException:
+    """Follow explicit and implicit exception chaining to the original error."""
+    seen = {id(error)}
+    while True:
+        next_error = error.__cause__ or error.__context__
+        if next_error is None or id(next_error) in seen:
+            return error
+        seen.add(id(next_error))
+        error = next_error
+
+
 def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
     """
     Load an EmbeddingGemma 2 model using SentenceTransformer.
@@ -356,8 +367,13 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
         try:
             from sentence_transformers import SentenceTransformer as _ST
             st_cls = _ST
-        except ImportError:
-            raise RuntimeError("sentence-transformers is required to load this embedding model.")
+        except ImportError as e:
+            # The package may be present but failing to import; name the real
+            # error, which transformers wraps in a generic ImportError.
+            root_cause = _root_cause(e)
+            raise RuntimeError(
+                f"sentence-transformers could not be imported: {type(root_cause).__name__}: {root_cause}"
+            ) from e
 
     model = st_cls(model_path, device=device, model_kwargs={"torch_dtype": dtype})
 
