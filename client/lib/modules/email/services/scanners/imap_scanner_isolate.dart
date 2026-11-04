@@ -1687,20 +1687,24 @@ class ImapScannerIsolateWorker {
     required String year,
     required DateTime msgDate,
   }) async {
-    final labelAbsPath = p.normalize(p.join(extractionRoot, labelName));
+    // One row per level: the file browser walks down from the root, so a
+    // missing level ([Gmail] holds no mail of its own) hides everything below.
+    var labelAbsPath = extractionRoot;
+    for (final segment in labelName.split('/')) {
+      labelAbsPath = p.normalize(p.join(labelAbsPath, segment));
+      await writeViaMain(
+        clientPort,
+        'folder',
+        _createFolderObj(
+          absPath: labelAbsPath,
+          extractionRoot: extractionRoot,
+          name: segment,
+          collectionId: collection.id,
+          date: msgDate,
+        ),
+      );
+    }
     final yearAbsPath = p.normalize(p.join(labelAbsPath, year));
-
-    await writeViaMain(
-      clientPort,
-      'folder',
-      _createFolderObj(
-        absPath: labelAbsPath,
-        extractionRoot: extractionRoot,
-        name: labelName,
-        collectionId: collection.id,
-        date: msgDate,
-      ),
-    );
     await writeViaMain(
       clientPort,
       'folder',

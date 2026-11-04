@@ -226,6 +226,38 @@ void main() {
   );
 
   imapTest(
+    'local copies in a nested folder can be browsed down to from the root',
+    () async {
+      // The file browser only lists the children of the folder it is in, so a
+      // missing level hides everything below it. Gmail's [Gmail] container
+      // never holds mail of its own, so without a row for it, every attachment
+      // in the account would be unreachable.
+      final c = await persisted(EmailDeletePolicy.keep);
+      c.downloadLocalCopy = true;
+      await seeder!.createMailbox(nestedParent);
+      await seeder!.createMailbox(nestedChild);
+      await seedMessages(seeder!, nestedChild, [msg('browse')]);
+
+      await sync(c);
+
+      Future<List<Map<String, Object?>>> childrenOf(String parent) =>
+          manager.database!.select(
+            'SELECT name, path FROM folders '
+            'WHERE collection_id = ? AND parent = ?',
+            [c.id, parent],
+          );
+      final top = await childrenOf('');
+      expect(top.map((f) => f['name']), contains(nestedParent));
+      final parentPath =
+          top.singleWhere((f) => f['name'] == nestedParent)['path'] as String;
+      final middle = await childrenOf(parentPath);
+      expect(middle.map((f) => f['name']), ['Child']);
+      final years = await childrenOf(middle.single['path'] as String);
+      expect(years.map((f) => f['name']), ['2026']);
+    },
+  );
+
+  imapTest(
     'mail already stored from a now-skipped folder is left untouched',
     () async {
       final c = await persisted(EmailDeletePolicy.remove);
