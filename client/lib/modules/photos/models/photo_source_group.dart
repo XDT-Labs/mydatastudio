@@ -32,8 +32,6 @@ PhotoSourceGroup photoSourceGroupFor(
       return PhotoSourceGroup.local;
     case AppConstants.scannerFileGDrive:
       return PhotoSourceGroup.gdrive;
-    case AppConstants.scannerEmailGmail:
-      return PhotoSourceGroup.gmail;
     case AppConstants.scannerEmailYahoo:
       return PhotoSourceGroup.yahoo;
     // Live IMAP and PST import are one source as far as the user is concerned.

@@ -6,8 +6,8 @@ import 'package:mydatastudio/models/tables/email_delete_policy.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 
 /// Whether the account's scanner honours [EmailDeletePolicy]. Only the IMAP
-/// scanners reconcile server-side deletions; the Gmail API scanner and PST
-/// imports do not, so the setting is hidden for them.
+/// scanners reconcile server-side deletions; PST imports do not, so the setting
+/// is hidden for them.
 bool supportsEmailDeletePolicy(String scanner) =>
     scanner == AppConstants.scannerEmailImap ||
     scanner == AppConstants.scannerEmailYahoo ||

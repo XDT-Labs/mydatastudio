@@ -27,8 +27,6 @@ EmailAccordionSection emailAccordionSectionFor(
   String? emailProviderId,
 ) {
   switch (scanner) {
-    case AppConstants.scannerEmailGmail:
-      return EmailAccordionSection.gmail;
     case AppConstants.scannerEmailYahoo:
       return EmailAccordionSection.yahoo;
     case AppConstants.scannerEmailOutlook:

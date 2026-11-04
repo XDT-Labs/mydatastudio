@@ -116,7 +116,8 @@ class ImapScannerIsolate {
 
     receivePort.listen((message) {
       if (relayIsolateLog(logger, message, '[ImapScan]')) return;
-      // Queued rather than handled inline — see gmail_scanner_isolate.dart.
+      // Queued rather than handled inline: listen callbacks don't await each
+      // other, so writes could otherwise run out of order.
       if (tryHandleScanWrite(message, writeQueue)) return;
       if (message is Map) {
         if (message['type'] == 'refresh') {

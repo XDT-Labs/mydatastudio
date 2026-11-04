@@ -24,7 +24,11 @@ void main() {
   late _FakeTester tester0;
   late List<Collection> created;
 
-  Future<void> pumpTab(WidgetTester tester) async {
+  Future<void> pumpTab(
+    WidgetTester tester, {
+    EmailProvider? initialProvider,
+    String? initialEmail,
+  }) async {
     tester.view.physicalSize = const Size(1200, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -40,6 +44,8 @@ void main() {
             oauthBuilder: (context, provider) => Text('oauth-${provider.id}'),
             onOpenUrl: (_) async {},
             successDelay: Duration.zero,
+            initialProvider: initialProvider,
+            initialEmail: initialEmail,
           ),
         ),
       ),
@@ -354,5 +360,58 @@ void main() {
 
     expect(created.single.userId, 'me@example.org');
     expect(tester0.requests.single.username, 'me@example.org');
+  });
+
+  group('opened from a provider card', () {
+    testWidgets('asks for what that provider needs before any address', (
+      tester,
+    ) async {
+      await pumpTab(tester, initialProvider: EmailProviderRegistry.gmail);
+
+      expect(find.text('App Password'), findsOneWidget);
+      expect(find.byKey(const Key('host-field')), findsNothing);
+    });
+
+    testWidgets('a custom domain stays on the card the user picked', (
+      tester,
+    ) async {
+      // Google Workspace addresses can't be recognised from their domain, so
+      // the card is the only thing saying this mailbox is Gmail.
+      await pumpTab(tester, initialProvider: EmailProviderRegistry.gmail);
+      await enterEmail(tester, 'me@acme-corp.example');
+      await tester.enterText(find.byKey(const Key('password-field')), 'pw');
+      await tester.pump();
+      await tester.tap(find.byType(ElevatedButton).first);
+      await tester.pumpAndSettle();
+
+      expect(tester0.requests.single.host, EmailProviderRegistry.gmail.imapHost);
+    });
+
+    testWidgets('a recognised address overrides the card', (tester) async {
+      // The GMX card covers two servers; only the address says which one.
+      await pumpTab(tester, initialProvider: EmailProviderRegistry.gmxCom);
+      await enterEmail(tester, 'me@gmx.de');
+      await tester.enterText(find.byKey(const Key('password-field')), 'pw');
+      await tester.pump();
+      await tester.tap(find.byType(ElevatedButton).first);
+      await tester.pumpAndSettle();
+
+      expect(tester0.requests.single.host, EmailProviderRegistry.gmxDe.imapHost);
+    });
+
+    testWidgets('an address typed in the catalog search carries through', (
+      tester,
+    ) async {
+      await pumpTab(
+        tester,
+        initialProvider: EmailProviderRegistry.aol,
+        initialEmail: 'me@verizon.net',
+      );
+
+      final field = tester.widget<TextFormField>(
+        find.byKey(const Key('email-field')),
+      );
+      expect(field.controller?.text, 'me@verizon.net');
+    });
   });
 }

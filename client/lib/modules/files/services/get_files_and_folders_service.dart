@@ -56,7 +56,6 @@ class GetFileAndFoldersService
       AppConstants.scannerEmailOutlookPst,
       AppConstants.scannerEmailYahoo,
       AppConstants.scannerEmailImap,
-      AppConstants.scannerEmailGmail,
     };
 
     if (emailScanners.contains(command.collection.scanner)) {

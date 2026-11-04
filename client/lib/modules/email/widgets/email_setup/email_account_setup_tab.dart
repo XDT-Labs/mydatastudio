@@ -26,6 +26,8 @@ class EmailAccountSetupTab extends StatefulWidget {
     required this.onDone,
     required this.oauthBuilder,
     required this.onOpenUrl,
+    this.initialProvider,
+    this.initialEmail,
     this.successDelay = const Duration(milliseconds: 900),
   });
 
@@ -38,10 +40,17 @@ class EmailAccountSetupTab extends StatefulWidget {
   /// Called after the success view has been shown.
   final void Function(BuildContext context) onDone;
 
-  /// Content for OAuth providers (Outlook; Gmail points at its own tab).
+  /// Content for OAuth providers (Outlook).
   final Widget Function(BuildContext context, EmailProvider provider)
   oauthBuilder;
   final Future<void> Function(Uri url) onOpenUrl;
+
+  /// The provider the user picked. Used until the address names a different
+  /// one, and kept for addresses it can't place, such as a custom domain.
+  final EmailProvider? initialProvider;
+
+  /// An address the user has already typed, to save typing it again.
+  final String? initialEmail;
   final Duration successDelay;
 
   @override
@@ -65,6 +74,24 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
   String? _authHint;
   String? _connectedEmail;
 
+  @override
+  void initState() {
+    super.initState();
+    _provider = widget.initialProvider ?? _provider;
+    final email = widget.initialEmail;
+    if (email != null) {
+      _email.text = email;
+      _provider = _providerFor(email);
+    }
+  }
+
+  EmailProvider _providerFor(String email) {
+    final detected = EmailProviderRegistry.detectFromEmail(email);
+    return detected.id == EmailProviderRegistry.other.id
+        ? widget.initialProvider ?? detected
+        : detected;
+  }
+
   /// What the last failed test was run with, kept so a Yandex account whose
   /// new app password is not active yet can be saved anyway.
   ImapConnectionRequest? _failedRequest;
@@ -84,7 +111,7 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
   void _onEmailChanged(String value) {
     setState(() {
       if (!_providerOverridden) {
-        _provider = EmailProviderRegistry.detectFromEmail(value);
+        _provider = _providerFor(value);
         _regionHost = null;
       }
     });
@@ -309,7 +336,9 @@ class _EmailAccountSetupTabState extends State<EmailAccountSetupTab> {
                 security: _security,
                 regionHost: _regionHost,
                 showProviderSection:
-                    _providerOverridden || _email.text.contains('@'),
+                    widget.initialProvider != null ||
+                    _providerOverridden ||
+                    _email.text.contains('@'),
                 onEmailChanged: _onEmailChanged,
                 onProviderChanged: _onProviderChanged,
                 onSecurityChanged: _onSecurityChanged,

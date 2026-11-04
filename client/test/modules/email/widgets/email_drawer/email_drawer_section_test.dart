@@ -32,10 +32,6 @@ void main() {
 
     test('legacy scanners keep their sections', () {
       expect(
-        emailAccordionSectionFor(AppConstants.scannerEmailGmail, null),
-        EmailAccordionSection.gmail,
-      );
-      expect(
         emailAccordionSectionFor(AppConstants.scannerEmailYahoo, null),
         EmailAccordionSection.yahoo,
       );

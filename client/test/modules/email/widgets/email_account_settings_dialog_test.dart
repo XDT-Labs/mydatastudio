@@ -41,11 +41,10 @@ Future<void> _open(
 
 void main() {
   group('supportsEmailDeletePolicy', () {
-    test('true only for IMAP-backed scanners (Gmail API scanner ignores it)', () {
+    test('true only for IMAP-backed scanners (PST imports see no deletions)', () {
       expect(supportsEmailDeletePolicy(AppConstants.scannerEmailImap), isTrue);
       expect(supportsEmailDeletePolicy(AppConstants.scannerEmailYahoo), isTrue);
       expect(supportsEmailDeletePolicy(AppConstants.scannerEmailOutlook), isTrue);
-      expect(supportsEmailDeletePolicy(AppConstants.scannerEmailGmail), isFalse);
       expect(supportsEmailDeletePolicy(AppConstants.scannerEmailOutlookPst), isFalse);
     });
   });

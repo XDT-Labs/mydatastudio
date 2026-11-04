@@ -11,7 +11,7 @@ class AuthDialogManager {
   void init() {
     GetCollectionsService.instance.sink.listen((value) {
       for (var c in value) {
-        if (c.needsReAuth && c.oauthService == 'google') {
+        if (c.needsReAuth && c.oauthService == 'google' && c.type != 'email') {
           _showGoogleAuthDialog(c);
         }
       }
@@ -19,9 +19,6 @@ class AuthDialogManager {
   }
 
   void _showGoogleAuthDialog(Collection collection) {
-    final isEmail = collection.type == 'email';
-    final typeLabel = isEmail ? 'Gmail' : 'Google Drive';
-    final icon = isEmail ? Icons.email : Icons.cloud;
 
     showDialog<SimpleDialog>(
       context: _globalNavigationKey.currentState!.context,
@@ -32,7 +29,7 @@ class AuthDialogManager {
             SimpleDialogOption(
               onPressed: null,
               child: Text(
-                "Your Google OAuth token has expired or been revoked for '$typeLabel'.\nClick the button to re-authenticate.",
+                "Your Google OAuth token has expired or been revoked for 'Google Drive'.\nClick the button to re-authenticate.",
               ),
             ),
             SimpleDialogOption(
@@ -41,20 +38,13 @@ class AuthDialogManager {
                 width: 225,
                 height: 48,
                 child: ElevatedButton.icon(
-                  icon: Icon(icon),
-                  label: Text("Login with Google ($typeLabel)"),
+                  icon: const Icon(Icons.cloud),
+                  label: const Text("Login with Google (Google Drive)"),
                   onPressed: () async {
-                    if (isEmail) {
-                      await LoginProviderExtension.handleGoogleMail(
-                        context,
-                        existing: collection,
-                      );
-                    } else {
-                      await LoginProviderExtension.handleGoogleDrive(
-                        context,
-                        existing: collection,
-                      );
-                    }
+                    await LoginProviderExtension.handleGoogleDrive(
+                      context,
+                      existing: collection,
+                    );
                     if (context.mounted) {
                       Navigator.of(context).pop();
                     }

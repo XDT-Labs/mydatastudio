@@ -385,7 +385,7 @@ class EmailProviderRegistry {
   }
 
   /// Maps a legacy IMAP `Collection.scanner` value to its provider; null for
-  /// anything else (Gmail uses its API scanner, not IMAP).
+  /// anything else.
   static EmailProvider? forLegacyScanner(String scanner) {
     switch (scanner) {
       case AppConstants.scannerEmailYahoo:
