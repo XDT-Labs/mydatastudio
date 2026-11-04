@@ -32,7 +32,7 @@ dependencies = [
     "accelerate",
     "libpff-python",
     "rawpy==0.26.1",
-    "docling-rs>=1.7.0,<2",  # 2.x native lib fails to load on macOS (missing ___isPlatformVersionAtLeast)
+    "docling-rs>=1.104.3,<2",  # text_layer_only is required; 2.x native lib fails to load on macOS (missing ___isPlatformVersionAtLeast)
 ]
 
 requires-python = ">=3.11,<3.15"

@@ -80,5 +80,5 @@ aiserver/aichat.egg-info/
 client/data/
 app support db.session.sql
 
-# Vendored by `make pdfium` — a 3.4 MB binary, fetched not tracked.
+# Old `make pdfium` output, no longer used. Still ignored so a leftover copy isn't committed.
 aiserver/vendor/
