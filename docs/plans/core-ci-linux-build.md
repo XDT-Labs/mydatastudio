@@ -145,8 +145,8 @@ bundle.
      comes from the prebuilt ONNX Runtime, so building from source doesn't fix it. On 22.04,
      `/util/extract-text` returns 503 and files stay retryable, and the rest works. 24.04 extracts
      text.
-   - **Not Linux-specific:** PDFs fail on every platform with this docling-rs version, asking for
-     `layout_heron.onnx` even with `do_ocr=False` (also reproduced on macOS).
+   - **PDFs:** after merging develop's `text_layer_only` fix, a real born-digital PDF returns its
+     text from the frozen binary on 24.04. There's no vendored pdfium any more.
    - **Runtime need:** `PythonManager` calls the `unzip` command, which packaging has to provide
      or declare.
    - **Not checked:** x86_64, `build_python.yml` itself (needs a real run), the full app past
@@ -187,9 +187,23 @@ bundle.
 6. **Packaging:** a **tar.gz** of the bundle first. Then **AppImage** (one file, any distro) or
    **Flatpak** (sandboxing complicates spawning the aiserver and reading arbitrary folders, so
    prefer AppImage) **(decide)**. The `.deb` is optional.
-   - **tar.gz written 2026-11-03** (`MyDataStudio-<tag>-linux-<arch>.tar.gz`, 482 MB on arm64, with
-     a top-level `MyDataStudio/` folder). **AppImage is still undecided.** Either way, users need
-     `unzip` and libmpv, which a tar.gz can't provide (see task 4).
+   - **AppImage chosen and written 2026-11-03, not ticked until a real tag run passes.**
+     `.github/scripts/build_appimage.sh` builds a self-contained tree, and the job publishes
+     `MyDataStudio-<tag>-linux-<arch>.AppImage` (554 MB on arm64) and a `.tar.gz` of the same tree.
+   - **Why both come from that tree:** a bare bundle built on 22.04 links `libmpv.so.1`, which
+     isn't on newer distros (24.04 ships `libmpv.so.2`). So libmpv and its dependencies (154
+     libraries, 202 MB) and `unzip` are bundled and found through RUNPATH. `LD_LIBRARY_PATH` would
+     leak into what the app launches, such as a browser through `xdg-open`.
+   - **Users must have:** glibc 2.35+, GTK 3, and the GL stack (EGL, GLES, GBM), which has to match
+     their drivers. The list is `SYSTEM_LIBS` in the script. It's a named list because treating
+     "whatever GTK links to" as the system's share failed on Debian and Fedora.
+   - **Checked on arm64:** the smoke test passes on clean Ubuntu 22.04 and 24.04, Debian 12 and 13,
+     and Fedora 45, and on an Ubuntu 24.04 desktop package set, where bundled and system libraries
+     could conflict. The app starts through a real FUSE mount on 24.04. After merging develop,
+     it was rebuilt from the merged code and retested on 22.04 and clean 24.04.
+   - **Not checked:** x86_64, a real desktop session with a GPU, video and audio playback through
+     the bundled libmpv, and file dialogs (the system's zenity).
+   - The `.deb` and Flatpak aren't built. Document extraction still needs Ubuntu 24.04+.
 7. **arm64:** a second job on GitHub's **`ubuntu-24.04-arm`** runners for arm64 Linux, which
    also covers ARM-based Synology models and a Raspberry Pi.
    - **Written 2026-11-03** as a matrix entry on the same job, not ticked until a real tag run

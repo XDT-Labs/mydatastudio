@@ -4,10 +4,12 @@
 # Usage:
 #   make all            - Build everything (models, python, client)
 #   make models         - Download GGUF models from Hugging Face
-#   make pdfium         - Vendor this platform's pdfium library (needed for PDF text)
 #   make build-python   - Build and zip the Python aiserver service
 #   make build-client   - Build the Flutter Desktop client (release, for this platform)
 #   make notarize       - Notarize the macOS build (requires APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID env vars)
+#   make imap-test-up   - Start the disposable Dovecot IMAP test server (Docker)
+#   make imap-test-down - Stop the IMAP test server
+#   make test-imap      - Run the `imap`-tagged integration tests against it
 #   make clean          - Remove all build artifacts
 # ==============================================================================
 
@@ -20,30 +22,7 @@ IMAGE_REPO = cloud-run-source-deploy
 # Python/AI Chat Config
 PYTHON_DIR = aiserver
 
-# pdfium — vendored, not downloaded at runtime. docling's own model downloader
-# ships a Linux x86-64 build on macOS and reports success, so PDFs fail with a
-# message describing the wrong problem (search plan §18d-1). 3.4 MB; the 2 GB
-# ONNX pack is deliberately NOT fetched, because a born-digital PDF's text
-# layer converts without it in no-OCR mode and this archive has no scanned
-# pages (§18b, §18h-6).
-PDFIUM_RELEASE = chromium/7999
 UNAME_S := $(shell uname -s)
-UNAME_M := $(shell uname -m)
-ifeq ($(UNAME_S),Linux)
-ifeq ($(UNAME_M),x86_64)
-PDFIUM_ASSET = pdfium-linux-x64.tgz
-else
-PDFIUM_ASSET = pdfium-linux-arm64.tgz
-endif
-PDFIUM_LIB = libpdfium.so
-PDFIUM_FORMAT = ELF
-else
-PDFIUM_ASSET = pdfium-mac-arm64.tgz
-PDFIUM_LIB = libpdfium.dylib
-PDFIUM_FORMAT = Mach-O
-endif
-PDFIUM_URL = https://github.com/bblanchon/pdfium-binaries/releases/download/$(PDFIUM_RELEASE)/$(PDFIUM_ASSET)
-PDFIUM_DIR = $(PYTHON_DIR)/vendor/pdfium
 APP_DIR = client/app
 ifeq ($(UNAME_S),Linux)
 APP_ZIP_NAME = aiserver-linux.zip
@@ -108,26 +87,6 @@ models:
 	
 
 
-# 1b. Vendor pdfium (PDF text extraction)
-.PHONY: pdfium
-pdfium:
-	@echo "--- 📄 Checking/Downloading pdfium ---"
-	@if [ -f $(PDFIUM_DIR)/lib/$(PDFIUM_LIB) ]; then \
-		echo "$(PDFIUM_LIB) already vendored, skipping download."; \
-	else \
-		mkdir -p $(PDFIUM_DIR); \
-		echo "Downloading $(PDFIUM_ASSET) ($(PDFIUM_RELEASE))..."; \
-		curl -sSLf -o /tmp/$(PDFIUM_ASSET) $(PDFIUM_URL) && \
-		tar xzf /tmp/$(PDFIUM_ASSET) -C $(PDFIUM_DIR) lib/$(PDFIUM_LIB); \
-		rm -f /tmp/$(PDFIUM_ASSET); \
-	fi
-	@if ! file $(PDFIUM_DIR)/lib/$(PDFIUM_LIB) | grep -q $(PDFIUM_FORMAT); then \
-		echo "ERROR: vendored pdfium is not a $(PDFIUM_FORMAT) object. PDF extraction would"; \
-		echo "       fail at runtime with a misleading \"not installed\" error."; \
-		exit 1; \
-	fi
-	@echo "pdfium ready: $$(file $(PDFIUM_DIR)/lib/$(PDFIUM_LIB) | cut -d: -f2-)"
-
 # 2. Build Python Service
 .PHONY: build-python
 ifeq ($(UNAME_S),Linux)
@@ -135,7 +94,7 @@ ifeq ($(UNAME_S),Linux)
 # was resolved with PyPI's torch, which on Linux pulls ~5 GB of CUDA libraries
 # the CPU build can't use. Everything else stays at its locked version, and
 # torch at its locked version from PyTorch's CPU index.
-build-python: pdfium
+build-python:
 	@echo "--- 🐍 Building Python aiserver service (Linux, CPU) ---"
 	@cd $(PYTHON_DIR) && \
 		TORCH=$$(sed -n '/^name = "torch"$$/{n;s/version = "\(.*\)"/\1/p;}' pdm.lock) && \
@@ -152,7 +111,7 @@ build-python: pdfium
 	@cd $(PYTHON_DIR)/dist/aiserver && zip -qryFS $(CURDIR)/client/app/$(APP_ZIP_NAME) .
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
 else
-build-python: pdfium
+build-python:
 	@echo "--- 🐍 Building Python aiserver service ---"
 	@cd $(PYTHON_DIR) && \
 		pdm install && \
@@ -223,7 +182,7 @@ build-client:
 	cd $(FLUTTER_DIR) && \
 		cp pubspec.prod.yaml pubspec.yaml && \
 		flutter pub get && \
-		flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
+		flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM --dart-define=OUTLOOK_CLIENT_ID=$$OUTLOOK_CLIENT_ID
 	@echo "--- ✅ Flutter build complete ---"
 	@BRANCH=$$(git branch --show-current); \
 	if [ "$$BRANCH" = "main" ] && [ -z "$$CI" ]; then \
@@ -298,6 +257,25 @@ notarize:
 	#   --password "<password>" \
 	#   --team-id "TTM6V47DL9"
 
+
+# IMAP integration-test server (Dovecot in Docker; see client/test/integration/imap_server/)
+IMAP_TEST_COMPOSE = docker compose -f $(FLUTTER_DIR)/test/integration/imap_server/docker-compose.yml
+
+.PHONY: imap-test-up
+imap-test-up:
+	@echo "--- 📬 Starting IMAP test server ---"
+	$(IMAP_TEST_COMPOSE) up -d --wait --force-recreate
+
+.PHONY: imap-test-down
+imap-test-down:
+	@echo "--- 🛑 Stopping IMAP test server ---"
+	$(IMAP_TEST_COMPOSE) down -v
+
+.PHONY: test-imap
+test-imap:
+	$(MAKE) imap-test-up
+	(cd $(FLUTTER_DIR) && flutter test -t imap --concurrency=1 test/integration); \
+	  status=$$?; $(MAKE) imap-test-down; exit $$status
 
 # Cleanup
 .PHONY: clean

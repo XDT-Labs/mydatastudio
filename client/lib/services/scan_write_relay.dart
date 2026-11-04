@@ -7,6 +7,7 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/imap/imap_sync_writer.dart';
 import 'package:mydatastudio/modules/files/services/batch_file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
@@ -91,6 +92,12 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       );
       return const {};
 
+    case 'emailSync':
+      // IMAP incremental-sync bookkeeping (folder state, membership, flags,
+      // remote removals) — see ImapSyncWriter.
+      await ImapSyncWriter.handle(db, payload as Map);
+      return const {};
+
     case 'fileThumbnail':
       final map = payload as Map;
       final result = await retryOnLock(
@@ -158,6 +165,17 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       );
       return const {};
 
+    case 'collectionTokens':
+      // Refreshed OAuth tokens (access, refresh, expiration only).
+      final map = payload as Map;
+      await CollectionRepository(db).updateOAuthTokens(
+        map['collectionId'] as String,
+        accessToken: map['accessToken'] as String,
+        refreshToken: map['refreshToken'] as String,
+        expiration: map['expiration'] as DateTime,
+      );
+      return const {};
+
     case 'collectionStatus':
       // A targeted update (scan_status, last_scan_date only) — not the full
       // Collection object the isolate read at scan start, which would
@@ -166,7 +184,7 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       await CollectionRepository(db).updateScanStatus(
         map['collectionId'] as String,
         map['scanStatus'] as String,
-        map['lastScanDate'] as DateTime,
+        map['lastScanDate'] as DateTime?,
       );
       return const {};
 

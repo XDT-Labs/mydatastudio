@@ -9,11 +9,9 @@ import 'package:mydatastudio/modules/files/services/scanners/dropbox_file_scanne
 import 'package:mydatastudio/modules/files/services/scanners/onedrive_file_scanner.dart';
 import 'package:mydatastudio/modules/files/services/scanners/google_file_scanner.dart';
 import 'package:mydatastudio/modules/files/services/scanners/local_file_isolate.dart';
-import 'package:mydatastudio/modules/email/services/scanners/gmail_scanner.dart';
 import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
-import 'package:mydatastudio/modules/email/services/scanners/outlook_scanner.dart';
+import 'package:mydatastudio/modules/email/services/scanners/imap_scanner.dart';
 
-import 'package:mydatastudio/modules/email/services/scanners/yahoo_scanner.dart';
 import 'package:mydatastudio/scanners/collection_scanner.dart';
 
 typedef ScannerFactory = Future<CollectionScanner> Function(Collection c);
@@ -102,7 +100,7 @@ class ScannerManager {
       }
       await Future.delayed(const Duration(seconds: 1));
       logger.i('Registering scanner for ${c.name} | ${c.path}');
-      await registerScanner(c);
+      await _registerOrLog(c);
     }
 
     //listen for new collections and add them at runtime
@@ -117,7 +115,7 @@ class ScannerManager {
           continue;
         }
         if (getScanner(c) == null) {
-          registerScanner(c);
+          _registerOrLog(c);
         }
       }
 
@@ -169,6 +167,16 @@ class ScannerManager {
       _pendingScanners.clear();
     } catch (error) {
       logger.e("Error stopping scanners: $error");
+    }
+  }
+
+  /// One account whose scanner can't be created, such as a row left by a
+  /// scanner that no longer exists, must not stop the others from starting.
+  Future<void> _registerOrLog(Collection c) async {
+    try {
+      await registerScanner(c);
+    } catch (e) {
+      logger.e("Could not register a scanner for ${c.name}: $e");
     }
   }
 
@@ -261,35 +269,11 @@ class ScannerManager {
           );
           break;
 
-        case AppConstants.scannerEmailGmail:
-          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          scanner = GmailScanner(
-            dbPath: p.join(
-              DatabaseManager.instance.databaseDirectoryPath!,
-              'data',
-              AppConstants.dbName,
-            ),
-            collection: c,
-            appDir: DatabaseManager.instance.storagePath!,
-          );
-          break;
-
+        case AppConstants.scannerEmailImap:
         case AppConstants.scannerEmailYahoo:
-          logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          scanner = YahooScanner(
-            dbPath: p.join(
-              DatabaseManager.instance.databaseDirectoryPath!,
-              'data',
-              AppConstants.dbName,
-            ),
-            collection: c,
-            appDir: DatabaseManager.instance.storagePath!,
-          );
-          break;
-
         case AppConstants.scannerEmailOutlook:
           logger.i("Register '${c.scanner}' scanner for ${c.name} | ${c.path}");
-          scanner = OutlookScanner(
+          scanner = ImapScanner(
             dbPath: p.join(
               DatabaseManager.instance.databaseDirectoryPath!,
               'data',

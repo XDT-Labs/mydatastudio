@@ -1,6 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
-import sys
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 datas = []
@@ -29,7 +28,10 @@ hiddenimports = [
 ]
 
 # Collect all for complex packages
-for pkg in ['llama_cpp', 'uvicorn', 'fastapi', 'langchain', 'langchain_community', 'langchain_core', 'langchain_google_genai', 'langchain_openai', 'langchain_anthropic', 'rawpy', 'pillow_heif', 'sentence_transformers']:
+# torchvision is here for its native ops (_C_stable): the contrib hook still asks
+# for the pre-0.29 name `_C`, so without this they are silently left out and
+# importing transformers fails in the frozen app.
+for pkg in ['llama_cpp', 'uvicorn', 'fastapi', 'langchain', 'langchain_community', 'langchain_core', 'langchain_google_genai', 'langchain_openai', 'langchain_anthropic', 'rawpy', 'pillow_heif', 'sentence_transformers', 'torchvision']:
     try:
         print(f"Collecting {pkg}...")
         tmp_ret = collect_all(pkg)
@@ -45,21 +47,6 @@ for pkg in ['langchain_google_genai', 'langchain_openai', 'langchain_anthropic']
         datas += copy_metadata(pkg)
     except Exception as e:
         print(f"Warning: Failed to copy metadata for {pkg}: {e}")
-
-# pdfium IS bundled, unlike the models below, and the asymmetry is the point.
-# It is 3.4 MB, and it cannot be a runtime download the way models are: the
-# only downloader available is docling's, which serves a Linux x86-64 build on
-# macOS and reports success (search plan §18d-1). `make pdfium` vendors it and
-# verifies the Mach-O header; this copies it in. The Makefile's signing pass
-# picks it up with every other Mach-O file in dist/.
-_pdfium_lib = 'libpdfium.so' if sys.platform.startswith('linux') else 'libpdfium.dylib'
-_pdfium = os.path.join(os.path.dirname(os.path.abspath(SPEC)), 'vendor', 'pdfium', 'lib', _pdfium_lib)
-if os.path.exists(_pdfium):
-    binaries += [(_pdfium, 'vendor/pdfium/lib')]
-    print(f"  - Bundling pdfium from {_pdfium}")
-else:
-    print(f"Warning: vendor/pdfium/lib/{_pdfium_lib} missing — PDF extraction "
-          "will be disabled in this build. Run `make pdfium`.")
 
 # Models are deliberately NOT bundled. They live beside the extracted server
 # (Application Support/models, via AICHAT_MODELS_DIR) so that re-extracting

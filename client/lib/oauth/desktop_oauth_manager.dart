@@ -36,7 +36,8 @@ class DesktopOAuthManager extends DesktopLoginManager {
       'localhost',
       loginProvider.redirectPort ?? 0,
     );
-    final redirectURL = 'http://localhost:${redirectServer!.port}/auth';
+    final redirectURL =
+        'http://localhost:${redirectServer!.port}${loginProvider.redirectPath}';
     var client = await _getOAuth2Client(
       Uri.parse(redirectURL),
       customParameters: customParameters,

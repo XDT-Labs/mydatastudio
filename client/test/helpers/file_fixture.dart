@@ -56,6 +56,7 @@ Collection makeTestCollection({
   String scanStatus = 'idle',
   bool needsReAuth = false,
   String? localCopyPath,
+  String? emailProviderId,
 }) {
   return Collection(
     id: id ?? _uuid.v4(),
@@ -66,5 +67,6 @@ Collection makeTestCollection({
     scanStatus: scanStatus,
     needsReAuth: needsReAuth,
     localCopyPath: localCopyPath,
+    emailProviderId: emailProviderId,
   );
 }

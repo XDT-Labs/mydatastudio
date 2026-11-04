@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:path/path.dart' as p;
 import 'package:resqlite/resqlite.dart';
@@ -279,6 +280,12 @@ class DatabaseManager {
     final generation = ++_startGeneration;
 
     logger.i("Starting background isolates and scanners (vault unlocked)...");
+
+    try {
+      await CollectionRepository(appDatabase!).deletePendingDiskPaths();
+    } catch (e) {
+      logger.e("Could not finish deleting old collection files: $e");
+    }
 
     // 1. Start scanners
     await _startScanners();
@@ -566,6 +573,14 @@ class AppDatabase {
       await _seedAichatModels(_db);
       await _seedAichatSkills(_db);
     }
+    // Folders of deleted collections, relative to the storage root, not yet
+    // removed from disk. Here rather than in schemaDDL so that existing
+    // archives get it too.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS pending_disk_deletes (
+        path TEXT PRIMARY KEY
+      );
+    ''');
     await _db.execute('''
       CREATE TABLE IF NOT EXISTS emails_embeddings (
         email_id TEXT NOT NULL,
@@ -784,6 +799,14 @@ class AppDatabase {
     await _db.execute(
       'CREATE INDEX IF NOT EXISTS idx_files_content_hash '
       'ON files (content_hash);',
+    );
+
+    // Message-ID dedupe lookups for IMAP sync. Here rather than in schemaDDL
+    // for the same reason as the index above: schemaDDL reaches fresh installs
+    // only.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS email_message_id_idx '
+      'ON emails (collection_id, message_id);',
     );
 
     await _reapOrphanedArtifacts();
@@ -1607,6 +1630,8 @@ class AppDatabase {
         'source_deleted_date': 'INTEGER',
       },
       'collections': {
+        // When the collection was added (epoch ms). NULL on legacy rows.
+        'date_created': 'INTEGER',
         // Provider change-feed position (Drive page token etc.). NULL means
         // "no baseline yet": the next sync is a full walk that stores one.
         'change_cursor': 'TEXT',
@@ -1616,6 +1641,18 @@ class AppDatabase {
         // ContentPolicy JSON (what to download / whether to index). NULL =
         // derive from download_local_copy.
         'content_policy': 'TEXT',
+        // IMAP email config; see EmailProviderRegistry. imap_settings is JSON
+        // (host/port/security/username) and never holds a password.
+        'email_provider_id': 'TEXT',
+        'imap_settings': 'TEXT',
+        'email_delete_policy': "TEXT NOT NULL DEFAULT 'keep'",
+      },
+      'email_folders': {
+        'path': 'TEXT',
+        'uid_validity': 'INTEGER',
+        'uid_next': 'INTEGER',
+        'highest_modseq': 'INTEGER',
+        'last_synced_uid': 'INTEGER',
       },
       'albums': {'description': 'TEXT', 'cover_file_id': 'TEXT'},
       // Which embedding pipeline produced the vector in this row. See
@@ -2156,9 +2193,13 @@ class AppDatabase {
       user_id TEXT,
       expiration INTEGER,
       last_scan_date INTEGER,
+      date_created INTEGER,
       needs_re_auth INTEGER NOT NULL DEFAULT 0,
       download_local_copy INTEGER NOT NULL DEFAULT 0,
       local_copy_path TEXT,
+      email_provider_id TEXT,
+      imap_settings TEXT,
+      email_delete_policy TEXT NOT NULL DEFAULT 'keep',
       change_cursor TEXT,
       keep_deleted_files INTEGER NOT NULL DEFAULT 0,
       content_policy TEXT
@@ -2204,6 +2245,11 @@ class AppDatabase {
       messages_total INTEGER NOT NULL,
       messages_unread INTEGER NOT NULL,
       parent_id TEXT,
+      path TEXT,
+      uid_validity INTEGER,
+      uid_next INTEGER,
+      highest_modseq INTEGER,
+      last_synced_uid INTEGER,
       PRIMARY KEY (id, collection_id),
       FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
     );

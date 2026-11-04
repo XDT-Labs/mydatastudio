@@ -5,6 +5,7 @@ import 'package:mydatastudio/helpers/sql_chunks.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/search/services/email_contact_repository.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/modules/email/services/searchable_body.dart';
 
@@ -224,75 +225,16 @@ class EmailRepository {
     await database.transaction((tx) async {
       for (final chunk in sqlChunks(ids)) {
         final placeholders = List.filled(chunk.length, '?').join(',');
+        final addressRows = await tx.select(
+          'SELECT "from", "to", cc FROM emails WHERE id IN ($placeholders)',
+          chunk,
+        );
+        await EmailContactRepository.unindex(tx, addressRows);
         await tx.execute(
           "DELETE FROM emails WHERE id IN ($placeholders)",
           chunk,
         );
       }
     });
-  }
-
-  Future<void> cleanupDeletedYahoo(
-    Collection collection,
-    String folder,
-    List<int> remoteUids,
-  ) async {
-    final rows = await database.select(
-      "SELECT id, uid FROM emails WHERE collection_id = ? AND folder_id = ?",
-      [collection.id, folder],
-    );
-    final localEmails =
-        rows
-            .map((row) => (id: row['id'] as String, uid: row['uid'] as int?))
-            .toList();
-
-    final remoteUidSet = remoteUids.toSet();
-    final toDeleteIds =
-        localEmails
-            .where((e) {
-              if (e.uid == null) return false;
-              return !remoteUidSet.contains(e.uid);
-            })
-            .map((e) => e.id)
-            .toList();
-
-    if (toDeleteIds.isNotEmpty) {
-      logger.i(
-        "Cleanup: Deleting ${toDeleteIds.length} emails locally that were removed from Yahoo folder $folder.",
-      );
-      await deleteEmails(toDeleteIds, collection: collection);
-    }
-  }
-
-  Future<void> cleanupDeletedOutlook(
-    Collection collection,
-    String folder,
-    List<int> remoteUids,
-  ) async {
-    final rows = await database.select(
-      "SELECT id, uid FROM emails WHERE collection_id = ? AND folder_id = ?",
-      [collection.id, folder],
-    );
-    final localEmails =
-        rows
-            .map((row) => (id: row['id'] as String, uid: row['uid'] as int?))
-            .toList();
-
-    final remoteUidSet = remoteUids.toSet();
-    final toDeleteIds =
-        localEmails
-            .where((e) {
-              if (e.uid == null) return false;
-              return !remoteUidSet.contains(e.uid);
-            })
-            .map((e) => e.id)
-            .toList();
-
-    if (toDeleteIds.isNotEmpty) {
-      logger.i(
-        "Cleanup: Deleting ${toDeleteIds.length} emails locally that were removed from Outlook folder $folder.",
-      );
-      await deleteEmails(toDeleteIds, collection: collection);
-    }
   }
 }

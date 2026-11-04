@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/file_sources/sync_folder/sync_folder_detector.dart';
+import 'package:mydatastudio/widgets/source_tile.dart';
 
 enum FileSourceGroup {
   thisMac('Folders on this Mac'),
@@ -211,27 +212,15 @@ class _FileSourceCatalogState extends State<FileSourceCatalog> {
           padding: EdgeInsets.only(bottom: 12),
           child: LinearProgressIndicator(),
         ),
-      LayoutBuilder(
-        builder: (context, constraints) {
-          const gap = 12.0;
-          final columns = constraints.maxWidth >= 520 ? 2 : 1;
-          final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
-          return Wrap(
-            spacing: gap,
-            runSpacing: gap,
-            children: [
-              for (final s in items)
-                SizedBox(
-                  width: width,
-                  child: FileSourceTile(
-                    key: ValueKey('source-${s.id}'),
-                    source: s,
-                    onTap: s.available ? () => widget.onSelected(s) : null,
-                  ),
-                ),
-            ],
-          );
-        },
+      SourceTileGrid(
+        children: [
+          for (final s in items)
+            FileSourceTile(
+              key: ValueKey('source-${s.id}'),
+              source: s,
+              onTap: s.available ? () => widget.onSelected(s) : null,
+            ),
+        ],
       ),
       const SizedBox(height: 28),
     ];
@@ -245,110 +234,17 @@ class FileSourceTile extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final enabled = onTap != null;
-    return Material(
-      color: scheme.surfaceContainerLow,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: scheme.outlineVariant),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  source.icon,
-                  size: 22,
-                  color: enabled ? scheme.primary : scheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            source.title,
-                            style: theme.textTheme.titleSmall,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (source.alreadyAdded)
-                          _Badge(
-                            'Added',
-                            scheme.surfaceContainerHighest,
-                            scheme.onSurfaceVariant,
-                          )
-                        else if (source.detected != null)
-                          _Badge(
-                            'Found',
-                            scheme.primaryContainer,
-                            scheme.onPrimaryContainer,
-                          ),
-                        if (source.comingSoon)
-                          _Badge(
-                            'Soon',
-                            scheme.surfaceContainerHighest,
-                            scheme.onSurfaceVariant,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      source.subtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge(this.label, this.background, this.foreground);
-  final String label;
-  final Color background;
-  final Color foreground;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.only(left: 8),
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-    decoration: BoxDecoration(
-      color: background,
-      borderRadius: BorderRadius.circular(6),
-    ),
-    child: Text(
-      label,
-      style: Theme.of(
-        context,
-      ).textTheme.labelSmall?.copyWith(color: foreground),
-    ),
+  Widget build(BuildContext context) => SourceTile(
+    title: source.title,
+    subtitle: source.subtitle,
+    icon: source.icon,
+    onTap: onTap,
+    badges: [
+      if (source.alreadyAdded)
+        const SourceBadge('Added')
+      else if (source.detected != null)
+        const SourceBadge('Found', highlighted: true),
+      if (source.comingSoon) const SourceBadge('Soon'),
+    ],
   );
 }
