@@ -410,6 +410,14 @@ class PythonManager {
             p.join(Directory.current.path, 'app', zipName),
             // when running from a built executable next to an `app` folder
             p.join(p.dirname(Platform.resolvedExecutable), 'app', zipName),
+            // inside a Linux bundle's data folder
+            p.join(
+              p.dirname(Platform.resolvedExecutable),
+              'data',
+              'flutter_assets',
+              'app',
+              zipName,
+            ),
             // inside a macOS .app bundle Frameworks flutter_assets folder (release build)
             p.join(
               p.dirname(Platform.resolvedExecutable),

@@ -653,3 +653,14 @@ class TestDetectionCost:
 
         assert text is not None
         assert "login,id" in text and "mats,R" in text
+
+
+class TestDoclingUnavailable:
+    def test_docling_failing_to_load_is_unavailable_not_unparseable(
+        self, monkeypatch
+    ):
+        # Ubuntu 22.04's glibc can't load the docling-rs wheel. Those files are
+        # fine, so they must stay retryable for when the OS is upgraded.
+        monkeypatch.setitem(de.sys.modules, "docling_rs", None)
+        with pytest.raises(de.ExtractionUnavailable, match="could not load"):
+            de._convert_raw(b"hello", "txt")

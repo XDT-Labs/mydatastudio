@@ -5,7 +5,7 @@
 #   make all            - Build everything (models, python, client)
 #   make models         - Download GGUF models from Hugging Face
 #   make build-python   - Build and zip the Python aiserver service
-#   make build-client   - Build the Flutter Desktop client (macOS release)
+#   make build-client   - Build the Flutter Desktop client (release, for this platform)
 #   make notarize       - Notarize the macOS build (requires APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID env vars)
 #   make imap-test-up   - Start the disposable Dovecot IMAP test server (Docker)
 #   make imap-test-down - Stop the IMAP test server
@@ -22,8 +22,13 @@ IMAGE_REPO = cloud-run-source-deploy
 # Python/AI Chat Config
 PYTHON_DIR = aiserver
 
+UNAME_S := $(shell uname -s)
 APP_DIR = client/app
+ifeq ($(UNAME_S),Linux)
+APP_ZIP_NAME = aiserver-linux.zip
+else
 APP_ZIP_NAME = aiserver-macos.zip
+endif
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = ggml-org/gemma-4-12B-it-GGUF
 HF_FILE = gemma-4-12B-it-Q4_0.gguf
@@ -84,6 +89,27 @@ models:
 
 # 2. Build Python Service
 .PHONY: build-python
+ifeq ($(UNAME_S),Linux)
+# Linux installs from an export of the lock rather than `pdm install`: the lock
+# was resolved with PyPI's torch, which on Linux pulls ~5 GB of CUDA libraries
+# the CPU build can't use. Everything else stays at its locked version, and
+# torch at its locked version from PyTorch's CPU index.
+build-python:
+	@echo "--- 🐍 Building Python aiserver service (Linux, CPU) ---"
+	@cd $(PYTHON_DIR) && \
+		TORCH=$$(python3.11 -c "import tomllib; print(next(p['version'] for p in tomllib.load(open('pdm.lock', 'rb'))['package'] if p['name'] == 'torch'))") && \
+		VISION=$$(python3.11 -c "import tomllib; print(next(p['version'] for p in tomllib.load(open('pdm.lock', 'rb'))['package'] if p['name'] == 'torchvision'))") && \
+		python3.11 -m venv --clear .venv && \
+		pdm export --dev --no-hashes -f requirements -o build-linux-requirements.txt && \
+		sed -i -E '/^(cuda-|nvidia-|triton|torch==|torchvision==)/d' build-linux-requirements.txt && \
+		.venv/bin/python -m pip install --upgrade pip && \
+		.venv/bin/python -m pip install "torch==$$TORCH" "torchvision==$$VISION" --index-url https://download.pytorch.org/whl/cpu && \
+		FORCE_CMAKE=1 CMAKE_ARGS="$${CMAKE_ARGS:--DGGML_NATIVE=off}" .venv/bin/python -m pip install -r build-linux-requirements.txt && \
+		PYTHONPATH=src .venv/bin/python -m PyInstaller -y main.spec
+	@mkdir -p client/app
+	@cd $(PYTHON_DIR)/dist/aiserver && zip -qryFS $(CURDIR)/client/app/$(APP_ZIP_NAME) .
+	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
+else
 build-python:
 	@echo "--- 🐍 Building Python aiserver service ---"
 	@cd $(PYTHON_DIR) && \
@@ -132,10 +158,23 @@ build-python:
 	@rm -f client/app/$(APP_ZIP_NAME)
 	@ditto -c -k --sequesterRsrc $(PYTHON_DIR)/dist/aiserver client/app/$(APP_ZIP_NAME)
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
+endif
 
 
 # 3. Build Flutter Desktop Client
 .PHONY: build-client
+ifeq ($(UNAME_S),Linux)
+build-client:
+	@echo "--- 🚀 Building Flutter Desktop client (Linux) ---"
+	@REALM=$$(cat .realm_name 2>/dev/null | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \
+	cd $(FLUTTER_DIR) && \
+		cp pubspec.prod.yaml pubspec.yaml && \
+		flutter pub get && \
+		python3 tool/linux_without_flutter_angle.py && \
+		flutter pub get && \
+		REALM_NAME=$$REALM flutter build linux --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
+	@echo "--- ✅ Flutter build complete ---"
+else
 build-client:
 	@echo "--- 🚀 Building Flutter Desktop client (macOS) ---"
 	@REALM=$$(cat .realm_name 2>/dev/null | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \
@@ -149,6 +188,7 @@ build-client:
 		echo "--- 🚀 Copy release build to Applications folder ---"; \
 		cp -r $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app /Applications/MyDataStudio.app; \
 	fi
+endif
 
 
 # Local Install (Testing)

@@ -5,7 +5,9 @@ name: Build and Release
 # The tag is the version: the app is built as 1.2.3 and published to the
 # GitHub release named after the tag. A tag with a pre-release suffix
 # (v1.2.3-beta.1) is published as a pre-release, which the in-app update
-# checker ignores.
+# checker ignores. Production tags must be on main and pre-release tags on
+# develop; verify-tag fails the run otherwise. Every platform must succeed
+# before anything is published.
 on:
   push:
     tags: ["v*"]
@@ -14,33 +16,32 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  build:
-    name: Build macOS Release
-    runs-on: macos-latest
+  # Validate the tag first so a bad one fails in seconds, not after a full build.
+  verify-tag:
+    name: Verify Tag
+    runs-on: ubuntu-latest
     outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
-
     steps:
-      # Validate the tag first so a malformed one fails in seconds, not after
-      # a full build.
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Resolve Version from Tag
         id: version
         env:
           TAG: ${{ github.ref_name }}
-        run: |
-          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Error: tag '$TAG' is not a version tag (expected vX.Y.Z or vX.Y.Z-suffix)"
-            exit 1
-          fi
-          # macOS wants CFBundleShortVersionString to be plain X.Y.Z, so the
-          # pre-release suffix stays on the tag/release name only.
-          echo "version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
-          if [ -n "${BASH_REMATCH[2]}" ]; then
-            echo "prerelease=true" >> $GITHUB_OUTPUT
-          else
-            echo "prerelease=false" >> $GITHUB_OUTPUT
-          fi
+        run: .github/scripts/verify_tag.sh
 
+  build:
+    name: Build macOS Release
+    needs: verify-tag
+    runs-on: macos-latest
+
+    steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -106,7 +107,7 @@ jobs:
       # `<version>+<build>` stamp re-extracts the bundled aiserver.
       - name: Update Version in pubspec.prod.yaml
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.verify-tag.outputs.version }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
           if ! grep -qE '^version:' client/pubspec.prod.yaml; then
@@ -234,7 +235,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: latest
+          # Not "latest": newer npm blocks the install scripts that build
+          # appdmg's native modules, so appdmg fails when it starts.
+          node-version: "22"
 
       - name: Install appdmg
         run: npm install -g appdmg
@@ -264,9 +267,117 @@ jobs:
           security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
           rm -f ~/Library/MobileDevice/Provisioning\ Profiles/build_pp.mobileprovision 2>/dev/null || true
 
+  build-linux:
+    name: Build Linux Release (${{ matrix.arch }})
+    needs: verify-tag
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # Nothing is published unless every platform builds, so stop early.
+      fail-fast: true
+      matrix:
+        include:
+          # 22.04 on both, because the binary only runs on this glibc or newer.
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Update Version in pubspec.prod.yaml
+        env:
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          if ! grep -qE '^version:' client/pubspec.prod.yaml; then
+            echo "Error: Could not find version line in pubspec.prod.yaml"
+            exit 1
+          fi
+          sed -i -E "s/^version:.*/version: ${VERSION}+${BUILD_NUMBER}/" client/pubspec.prod.yaml
+          grep '^version:' client/pubspec.prod.yaml
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PDM
+        uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Build Tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev libmpv-dev mpv zip unzip file curl xvfb \
+            patchelf desktop-file-utils
+
+      - name: Build Python Service
+        run: make build-python
+        env:
+          CMAKE_ARGS: "-DGGML_NATIVE=off"
+
+      - name: Clean up Python build to free space
+        run: |
+          df -h
+          rm -rf aiserver/build aiserver/dist aiserver/.venv
+          df -h
+
+      # From git because Flutter publishes no arm64 Linux SDK. Same version as
+      # the macOS job above.
+      - name: Set up Flutter
+        run: |
+          git clone --depth 1 --branch 3.47.0 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter/bin/flutter" precache --linux
+
+      - name: Build Flutter Client
+        run: make build-client
+
+      - name: Build AppImage
+        env:
+          APPIMAGE: MyDataStudio-${{ needs.verify-tag.outputs.tag }}-linux-${{ matrix.arch }}.AppImage
+        run: |
+          .github/scripts/build_appimage.sh "client/build/linux/${{ matrix.arch }}/release/bundle" AppDir "$APPIMAGE"
+
+      - name: Smoke Test
+        timeout-minutes: 10
+        run: .github/scripts/linux_smoke_test.sh AppDir
+
+      # A newer distro than the build machine, with only what the app leaves to
+      # the system. This is what catches a library that should have been bundled.
+      - name: Smoke Test on Clean Ubuntu 24.04
+        timeout-minutes: 15
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" -w /repo ubuntu:24.04 bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq libgtk-3-0t64 libegl1 libgles2 libgbm1 xvfb curl unzip > /dev/null
+            .github/scripts/linux_smoke_test.sh AppDir'
+
+      - name: Package Tarball
+        env:
+          ARCHIVE: MyDataStudio-${{ needs.verify-tag.outputs.tag }}-linux-${{ matrix.arch }}.tar.gz
+        run: |
+          tar --transform 's,^AppDir,MyDataStudio,' -czf "$ARCHIVE" AppDir
+          ls -la "$ARCHIVE"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: |
+            MyDataStudio-*.AppImage
+            MyDataStudio-*.tar.gz
+          compression-level: 0
+
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [verify-tag, build, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -284,7 +395,12 @@ jobs:
           files: |
             artifacts/macos-dmg/*.dmg
             artifacts/aiserver-macos/*.zip
-          prerelease: ${{ needs.build.outputs.prerelease == 'true' }}
+            artifacts/linux-x64/*.AppImage
+            artifacts/linux-x64/*.tar.gz
+            artifacts/linux-arm64/*.AppImage
+            artifacts/linux-arm64/*.tar.gz
+          fail_on_unmatched_files: true
+          prerelease: ${{ needs.verify-tag.outputs.prerelease == 'true' }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

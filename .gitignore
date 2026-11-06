@@ -82,3 +82,8 @@ app support db.session.sql
 
 # Old `make pdfium` output, no longer used. Still ignored so a leftover copy isn't committed.
 aiserver/vendor/
+
+# Written by client/tool/linux_without_flutter_angle.py for Linux builds
+client/pubspec_overrides.yaml
+# Written by `make build-python` on Linux
+aiserver/build-linux-requirements.txt

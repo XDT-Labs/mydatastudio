@@ -63,5 +63,34 @@ void main() {
       // FakeStlRenderer.build returns Text('render_error') when shouldFail=true.
       expect(find.text('render_error'), findsOneWidget);
     });
+
+    // The Linux build leaves out flutter_angle's native plugin (it doesn't
+    // compile there), so any renderer would hit a missing platform channel.
+    testWidgets('on Linux, shows a notice and never creates a renderer', (
+      tester,
+    ) async {
+      var created = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StlPreviewWidget(
+              file: makeTestFile(name: 'model.stl'),
+              previewHeight: 300,
+              resolvedPath: '/tmp/model.stl',
+              isLinux: true,
+              rendererFactory: (_) {
+                created++;
+                return FakeStlRenderer();
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(created, 0);
+      expect(find.text(StlPreviewWidget.unavailableOnLinux), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
   });
 }
