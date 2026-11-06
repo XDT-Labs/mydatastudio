@@ -235,7 +235,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: latest
+          # Not "latest": newer npm blocks the install scripts that build
+          # appdmg's native modules, so appdmg fails when it starts.
+          node-version: "22"
 
       - name: Install appdmg
         run: npm install -g appdmg
