@@ -1,7 +1,7 @@
 ---
 status: in-progress
 adr: none
-remaining: [ci-job, packaging, arm64]
+remaining: [desktop-check]
 ---
 
 # Plan: Build the Linux desktop app in GitHub Actions
@@ -151,7 +151,7 @@ bundle.
      or declare.
    - **Not checked:** x86_64, `build_python.yml` itself (needs a real run), the full app past
      onboarding, and real Gemma or EmbeddingGemma models.
-5. **CI job:**
+5. [x] **CI job:**
    - **Build on an old-enough base** so the binary runs on most distros: glibc is
      forward-compatible but not backward. Build on `ubuntu-22.04`, or inside a Debian 12
      container. Match the NAS image's base.
@@ -192,7 +192,11 @@ bundle.
      `client/linux/CMakeLists.txt` now turns off the JDK search. Reproduced and fixed on arm64
      with CMake 3.31.6 and a Temurin JDK: build, AppImage and smoke test pass, and nothing links
      `libjvm`.
-6. **Packaging:** a **tar.gz** of the bundle first. Then **AppImage** (one file, any distro) or
+   - **Done 2026-11-07: second tag run (`v1.2.3-beta.3`, run 42403166226) passed.** Every job
+     succeeded: verify-tag, macOS (36 min), x64 (18 min), arm64 (15 min), and the release job,
+     which published a pre-release with the DMG, `aiserver-macos.zip`, and an AppImage and tar.gz
+     per Linux architecture. The smoke test passed on both runners.
+6. [x] **Packaging:** a **tar.gz** of the bundle first. Then **AppImage** (one file, any distro) or
    **Flatpak** (sandboxing complicates spawning the aiserver and reading arbitrary folders, so
    prefer AppImage) **(decide)**. The `.deb` is optional.
    - **AppImage chosen and written 2026-11-03, not ticked until a real tag run passes.**
@@ -212,11 +216,15 @@ bundle.
    - **Not checked:** x86_64, a real desktop session with a GPU, video and audio playback through
      the bundled libmpv, and file dialogs (the system's zenity).
    - The `.deb` and Flatpak aren't built. Document extraction still needs Ubuntu 24.04+.
-7. **arm64:** a second job on GitHub's **`ubuntu-24.04-arm`** runners for arm64 Linux, which
+   - **Done 2026-11-07:** the `v1.2.3-beta.3` run built both on GitHub: x64 588 MB AppImage
+     (156 bundled libraries), arm64 537 MB. Still not checked: the x64 AppImage on a real
+     desktop.
+7. [x] **arm64:** a second job on GitHub's **`ubuntu-24.04-arm`** runners for arm64 Linux, which
    also covers ARM-based Synology models and a Raspberry Pi.
    - **Written 2026-11-03** as a matrix entry on the same job, not ticked until a real tag run
      passes. It uses **`ubuntu-22.04-arm`**, not 24.04, so arm64 keeps the same glibc 2.35 floor as
      x86_64. Local builds and tests so far have all been arm64, but not on GitHub's runner.
+   - **Done 2026-11-07:** built and smoke-tested on `ubuntu-22.04-arm` in the `v1.2.3-beta.3` run.
 
 ## Done when
 
