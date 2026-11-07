@@ -1,85 +1,35 @@
+import 'dart:math';
+
 import 'package:material_ui/material_ui.dart';
-import 'package:pdfx/pdfx.dart';
+import 'package:pdfrx/pdfrx.dart';
 
 class PdfPreviewWidget extends StatefulWidget {
   const PdfPreviewWidget({
     super.key,
     required this.filePath,
     required this.previewHeight,
-    @visibleForTesting this.testController,
   });
 
   final String filePath;
   final double previewHeight;
-  final PdfController? testController;
 
   @override
   State<PdfPreviewWidget> createState() => _PdfPreviewWidgetState();
 }
 
 class _PdfPreviewWidgetState extends State<PdfPreviewWidget> {
-  PdfController? _pdfController;
+  PdfViewerController _controller = PdfViewerController();
   int _currentPage = 1;
   int _totalPages = 0;
-  bool _loading = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.testController != null) {
-      _pdfController = widget.testController;
-      _loading = false;
-    } else {
-      _initPdf();
-    }
-  }
 
   @override
   void didUpdateWidget(PdfPreviewWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.filePath != widget.filePath) {
-      _pdfController?.dispose();
-      _pdfController = null;
+      _controller = PdfViewerController();
       _currentPage = 1;
       _totalPages = 0;
-      _error = null;
-      if (widget.testController != null) {
-        setState(() {
-          _pdfController = widget.testController;
-          _loading = false;
-        });
-      } else {
-        setState(() => _loading = true);
-        _initPdf();
-      }
     }
-  }
-
-  Future<void> _initPdf() async {
-    try {
-      final doc = await PdfDocument.openFile(widget.filePath);
-      final controller = PdfController(document: Future.value(doc));
-      if (mounted) {
-        setState(() {
-          _pdfController = controller;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _pdfController?.dispose();
-    super.dispose();
   }
 
   @override
@@ -92,7 +42,12 @@ class _PdfPreviewWidgetState extends State<PdfPreviewWidget> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(height: widget.previewHeight, child: _buildViewer()),
-            if (_totalPages > 0) _buildNavBar(),
+            if (_totalPages > 0)
+              PdfPageNavBar(
+                currentPage: _currentPage,
+                totalPages: _totalPages,
+                onGoToPage: _goToPage,
+              ),
           ],
         ),
       ),
@@ -100,41 +55,89 @@ class _PdfPreviewWidgetState extends State<PdfPreviewWidget> {
   }
 
   Widget _buildViewer() {
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, color: Colors.red, size: 32),
-              const SizedBox(height: 8),
-              Text(
-                'Error loading PDF: $_error',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Colors.red),
+    return PdfViewer.file(
+      widget.filePath,
+      key: ValueKey(widget.filePath),
+      controller: _controller,
+      params: PdfViewerParams(
+        backgroundColor: Colors.grey.shade100,
+        layoutPages: layoutPagesInARow,
+        loadingBannerBuilder:
+            (context, bytesDownloaded, totalBytes) =>
+                const Center(child: CircularProgressIndicator()),
+        errorBannerBuilder:
+            (context, error, stackTrace, documentRef) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.error_outline,
+                      color: Colors.red,
+                      size: 32,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Error loading PDF: $error',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 12, color: Colors.red),
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
-        ),
-      );
-    }
-    if (_loading || _pdfController == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    return PdfView(
-      controller: _pdfController!,
-      scrollDirection: Axis.horizontal,
-      onDocumentLoaded: (doc) {
-        if (mounted) setState(() => _totalPages = doc.pagesCount);
-      },
-      onPageChanged: (page) {
-        if (mounted) setState(() => _currentPage = page);
-      },
+            ),
+        onViewerReady: (document, controller) {
+          if (mounted) setState(() => _totalPages = document.pages.length);
+        },
+        onPageChanged: (page) {
+          if (mounted && page != null) setState(() => _currentPage = page);
+        },
+      ),
     );
   }
 
-  Widget _buildNavBar() {
+  void _goToPage(int pageNumber) {
+    _controller.goToPage(
+      pageNumber: pageNumber,
+      duration: const Duration(milliseconds: 300),
+    );
+  }
+}
+
+/// Keeps the preview's left-to-right paging; pdfrx stacks pages vertically
+/// by default.
+@visibleForTesting
+PdfPageLayout layoutPagesInARow(List<PdfPage> pages, PdfViewerParams params) {
+  final height =
+      pages.fold(0.0, (tallest, page) => max(tallest, page.height)) +
+      params.margin * 2;
+  final layouts = <Rect>[];
+  var x = params.margin;
+  for (final page in pages) {
+    layouts.add(
+      Rect.fromLTWH(x, (height - page.height) / 2, page.width, page.height),
+    );
+    x += page.width + params.margin;
+  }
+  return PdfPageLayout(pageLayouts: layouts, documentSize: Size(x, height));
+}
+
+@visibleForTesting
+class PdfPageNavBar extends StatelessWidget {
+  const PdfPageNavBar({
+    super.key,
+    required this.currentPage,
+    required this.totalPages,
+    required this.onGoToPage,
+  });
+
+  final int currentPage;
+  final int totalPages;
+  final void Function(int pageNumber) onGoToPage;
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       color: Colors.grey.shade200,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -148,16 +151,11 @@ class _PdfPreviewWidgetState extends State<PdfPreviewWidget> {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
             onPressed:
-                _currentPage > 1
-                    ? () => _pdfController?.previousPage(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                    )
-                    : null,
+                currentPage > 1 ? () => onGoToPage(currentPage - 1) : null,
           ),
           const SizedBox(width: 8),
           Text(
-            'Page $_currentPage of $_totalPages',
+            'Page $currentPage of $totalPages',
             style: const TextStyle(fontSize: 12),
           ),
           const SizedBox(width: 8),
@@ -168,11 +166,8 @@ class _PdfPreviewWidgetState extends State<PdfPreviewWidget> {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
             onPressed:
-                _currentPage < _totalPages
-                    ? () => _pdfController?.nextPage(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                    )
+                currentPage < totalPages
+                    ? () => onGoToPage(currentPage + 1)
                     : null,
           ),
         ],

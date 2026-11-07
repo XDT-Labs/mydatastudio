@@ -5,8 +5,9 @@ import 'package:mydatastudio/app_logger.dart';
 ///
 /// Dart has no cross-platform API for this and `io.File.delete()` is a
 /// permanent unlink, so the actual move happens in native code behind a method
-/// channel. macOS is implemented (`NSFileManager.trashItem`); Windows and Linux
-/// are not — see docs/plans/windows-recycle-bin.md.
+/// channel. macOS (`NSFileManager.trashItem`) and Linux (GIO's `g_file_trash`,
+/// the freedesktop.org Trash spec) are implemented; Windows is not — see
+/// docs/plans/windows-recycle-bin.md.
 ///
 /// On a platform with no implementation this returns false and **leaves the
 /// file alone**. It deliberately does not fall back to deleting: the user was
@@ -30,8 +31,8 @@ class SystemTrash {
       });
       return ok ?? false;
     } on MissingPluginException {
-      // No native implementation on this platform. Expected on Windows and
-      // Linux until their runners implement the channel.
+      // No native implementation on this platform. Expected on Windows until
+      // its runner implements the channel.
       _logger.w(
         'SystemTrash: no implementation on this platform; leaving $path '
         'on disk',

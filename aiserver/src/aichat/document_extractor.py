@@ -393,7 +393,14 @@ def _as_utf8(data: bytes, fmt: str) -> bytes:
 def _convert_raw(data: bytes, fmt: str):
     """The docling call itself, split out so the classification above can be
     tested without a real missing library."""
-    from docling_rs import DocumentConverter, DocumentStream
+    try:
+        from docling_rs import DocumentConverter, DocumentStream
+    except ImportError as e:
+        # The file isn't at fault, so this must not read as unparseable and
+        # spend its retry budget. Real case: docling-rs 1.104.3's Linux wheels
+        # need glibc 2.38 despite their manylinux_2_28 tag, so on Ubuntu 22.04
+        # the native library won't load, and an OS upgrade fixes it.
+        raise ExtractionUnavailable(f"docling could not load: {e}") from e
 
     # `do_ocr=False` alone still runs layout analysis, which needs the model
     # pack; `text_layer_only` is what skips the ML stack. See the module docstring.
