@@ -162,7 +162,8 @@ bundle.
      `flutter build linux --release --dart-define=REALM_NAME=…`, and bundle `aiserver-linux.zip`.
    - **Written 2026-11-03, not ticked until a real tag run passes.** A new `verify-tag` job runs
      first (`.github/scripts/verify_tag.sh`) and is where every platform gets its version:
-     production tags must be on main and pre-release tags on develop. It outputs plain `X.Y.Z`
+     any branch can be tagged (from 2026-11-07; it first required main or develop), and a suffix
+     makes a pre-release. It outputs plain `X.Y.Z`
      because macOS requires that; the suffix stays on the tag and release name. The macOS job's
      steps are unchanged apart from reading that output. `build-linux` needs `verify-tag`, and
      `release` needs every platform, so one failed build publishes nothing. `make build-client`
