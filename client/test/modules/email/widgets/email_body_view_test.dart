@@ -27,14 +27,17 @@ Future<void> _tapOpenInBrowser(WidgetTester tester, bool Function() reached) =>
     });
 
 void main() {
-  test('Linux gets the HTML widget, other platforms the WebView', () {
+  // webview_flutter only has a macOS implementation among the desktops. On
+  // Linux and Windows a WebViewWidget would throw at build time, so the mail
+  // would not show at all.
+  test('only macOS gets the WebView; Linux and Windows the HTML widget', () {
     expect(
-      EmailBodyView.forPlatform(_htmlBody, isLinux: true),
-      isA<HtmlEmailBodyView>(),
+      EmailBodyView.forPlatform(_htmlBody, isMacOS: true),
+      isA<WebViewEmailBodyView>(),
     );
     expect(
-      EmailBodyView.forPlatform(_htmlBody, isLinux: false),
-      isA<WebViewEmailBodyView>(),
+      EmailBodyView.forPlatform(_htmlBody, isMacOS: false),
+      isA<HtmlEmailBodyView>(),
     );
   });
 

@@ -54,15 +54,22 @@ const _syncComNote = "Vault content isn't on this Mac, so it isn't indexed.";
 /// `~/Library/CloudStorage`, legacy folders such as `~/Dropbox`, and iCloud
 /// Drive (not the app containers beside it).
 class SyncFolderDetector {
-  /// [homeDir] is injectable for tests; defaults to `$HOME`.
-  SyncFolderDetector({String? homeDir})
-    : _home = homeDir ?? Platform.environment['HOME'] ?? '';
+  /// [homeDir] is injectable for tests; defaults to `$HOME`, or `USERPROFILE`
+  /// on Windows, read from [environment] (the process's by default).
+  SyncFolderDetector({String? homeDir, Map<String, String>? environment})
+    : _home = homeDir ?? _homeFrom(environment ?? Platform.environment);
+
+  static String _homeFrom(Map<String, String> env) =>
+      env['HOME'] ?? env['USERPROFILE'] ?? '';
 
   final String _home;
 
   /// Each real directory is reported once, even when reachable through a
   /// symlink (e.g. `~/Dropbox` pointing into `~/Library/CloudStorage`).
   List<DetectedSyncFolder> detect() {
+    // Without a home folder every path below would be relative to the working
+    // directory.
+    if (_home.isEmpty) return const [];
     final seen = <String>{};
     return [
       ..._detectCloudStorage(),

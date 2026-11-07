@@ -22,7 +22,7 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import require_token
@@ -187,6 +187,23 @@ app.post("/util/thumbnail", summary="Generate image thumbnail (incl. RAW formats
 app.post("/util/extract-text", summary="Extract a document to markdown and chunk it")(routes.extract_text)
 app.post("/util/import/pst", summary="Stream-parse an Outlook PST file")(routes.import_pst)
 
+# The running uvicorn server, set by main(). None under a test client.
+_server = None
+
+
+@app.post("/shutdown", summary="Stop the server cleanly")
+def request_shutdown():
+    """Ends the server as SIGTERM does on macOS and Linux.
+
+    Windows has no SIGTERM: the client's Process.kill is TerminateProcess
+    there, which stops the server mid-write. So the client calls this first
+    and kills only if the server is still running a few seconds later.
+    """
+    if _server is None:
+        raise HTTPException(status_code=503, detail="Server is not running")
+    _server.should_exit = True
+    return {"status": "shutting down"}
+
 
 def main() -> None:
     # Debug builds (script) default to debug; frozen binaries default to info.
@@ -236,14 +253,20 @@ def main() -> None:
     # which then crosses the pipe into the client's log too. Failures are still
     # reported: exceptions surface through the route handlers and uvicorn.error,
     # neither of which is affected by this flag.
-    uvicorn.run(
+    # A Server rather than uvicorn.run(), so POST /shutdown can reach it.
+    global _server
+    _server = uvicorn.Server(uvicorn.Config(
         app,
         host="127.0.0.1",
         port=port,
         log_level=log_level,
         reload=False,
         access_log=False,
-    )
+    ))
+    _server.run()
+    # uvicorn.run() exits with 3 when the server fails to start; keep that.
+    if not _server.started:
+        sys.exit(3)
 
 
 if __name__ == "__main__":

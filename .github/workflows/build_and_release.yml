@@ -376,9 +376,133 @@ jobs:
             MyDataStudio-*.tar.gz
           compression-level: 0
 
+  build-windows:
+    name: Build Windows Release (x64)
+    needs: verify-tag
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Update Version in pubspec.prod.yaml
+        env:
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          if ! grep -qE '^version:' client/pubspec.prod.yaml; then
+            echo "Error: Could not find version line in pubspec.prod.yaml"
+            exit 1
+          fi
+          sed -i -E "s/^version:.*/version: ${VERSION}+${BUILD_NUMBER}/" client/pubspec.prod.yaml
+          grep '^version:' client/pubspec.prod.yaml
+
+      - name: Resolve Realm
+        id: realm
+        run: |
+          realm=$(cut -d= -f2 .realm_name 2>/dev/null || true)
+          echo "realm=${realm:-com.xdtlabs.mydatastudio}" >> "$GITHUB_OUTPUT"
+
+      # pdfrx needs symlink support, which Developer Mode turns on.
+      - name: Enable Developer Mode
+        shell: pwsh
+        run: reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
+
+      - name: Ensure make
+        run: command -v make || choco install make -y --no-progress
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PDM
+        uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: "3.11"
+
+      - name: Build Python Service
+        run: make build-python
+        env:
+          CMAKE_ARGS: "-DGGML_NATIVE=off"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          channel: 'stable'
+
+      - name: Build Flutter Client
+        run: make build-client
+
+      # Flutter doesn't bundle the MSVC runtime the app and its plugins link
+      # against, and not every Windows install has it.
+      - name: Bundle the VC++ Runtime
+        run: |
+          bundle=client/build/windows/x64/runner/Release
+          for dll in msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do
+            cp "/c/Windows/System32/$dll" "$bundle/"
+          done
+          ls "$bundle"
+
+      - name: Build Installer
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+          OUTPUT_NAME: MyDataStudio-${{ needs.verify-tag.outputs.tag }}-windows-x64-setup
+        run: |
+          $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          } else { $iscc = $iscc.Source }
+          & $iscc "/DAppVersion=$env:VERSION" `
+            "/DSourceDir=$env:GITHUB_WORKSPACE\client\build\windows\x64\runner\Release" `
+            "/DOutputDir=$env:GITHUB_WORKSPACE" "/DOutputName=$env:OUTPUT_NAME" `
+            client\windows\installer\mydatastudio.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Item "$env:OUTPUT_NAME.exe"
+
+      # Tests the installer too: the smoke test runs against what it installed.
+      - name: Install Silently
+        shell: pwsh
+        run: |
+          $setup = Get-Item MyDataStudio-*-setup.exe
+          $proc = Start-Process -FilePath $setup.FullName -Wait -PassThru -ArgumentList `
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=$env:RUNNER_TEMP\install"
+          if ($proc.ExitCode -ne 0) { throw "installer exited with $($proc.ExitCode)" }
+          if (-not (Test-Path "$env:RUNNER_TEMP\install\mydatastudio.exe")) { throw 'mydatastudio.exe was not installed' }
+
+      - name: Smoke Test
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          REALM: ${{ steps.realm.outputs.realm }}
+        run: .github/scripts/windows_smoke_test.ps1 "$env:RUNNER_TEMP\install" "$env:REALM"
+
+      - name: Package Portable Zip
+        shell: pwsh
+        env:
+          ARCHIVE: MyDataStudio-${{ needs.verify-tag.outputs.tag }}-windows-x64.zip
+        run: |
+          Compress-Archive -Path client\build\windows\x64\runner\Release\* -DestinationPath $env:ARCHIVE
+          Get-Item $env:ARCHIVE
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            MyDataStudio-*-setup.exe
+            MyDataStudio-*-windows-x64.zip
+          compression-level: 0
+
   release:
     name: Create GitHub Release
-    needs: [verify-tag, build, build-linux]
+    needs: [verify-tag, build, build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -400,6 +524,8 @@ jobs:
             artifacts/linux-x64/*.tar.gz
             artifacts/linux-arm64/*.AppImage
             artifacts/linux-arm64/*.tar.gz
+            artifacts/windows-x64/*.exe
+            artifacts/windows-x64/*.zip
           fail_on_unmatched_files: true
           prerelease: ${{ needs.verify-tag.outputs.prerelease == 'true' }}
           generate_release_notes: true

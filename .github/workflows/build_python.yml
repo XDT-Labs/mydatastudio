@@ -16,8 +16,8 @@ jobs:
         include:
           - os: macos-latest
             cmake_args: '-DGGML_METAL=on -DGGML_NATIVE=off'
-          # - os: windows-latest
-          #   cmake_args: ''
+          - os: windows-latest
+            cmake_args: '-DGGML_NATIVE=off'
           # The oldest supported Ubuntu, so the binary runs on newer glibc too.
           - os: ubuntu-22.04
             cmake_args: '-DGGML_NATIVE=off'
@@ -43,9 +43,19 @@ jobs:
       if: matrix.os == 'macos-latest'
       run: brew install cmake ninja
 
-    # - name: Install Build Tools (Windows)
-    #   if: matrix.os == 'windows-latest'
-    #   run: choco install cmake ninja -y
+    # CMake and MSVC are on the image already; make may not be.
+    - name: Install Build Tools (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: bash
+      run: command -v make || choco install make -y --no-progress
+
+    # CPU build; see build-python in the Makefile.
+    - name: Build (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: bash
+      run: make build-python
+      env:
+        CMAKE_ARGS: ${{ matrix.cmake_args }}
 
     # Linux installs CPU-only torch through the Makefile; see build-python there.
     - name: Build (Linux)
@@ -74,12 +84,12 @@ jobs:
         name: aiserver-macos
         path: aiserver/dist/aiserver
 
-    # - name: Upload Artifact (Windows)
-    #   if: matrix.os == 'windows-latest'
-    #   uses: actions/upload-artifact@v4
-    #   with:
-    #     name: aiserver-windows
-    #     path: aiserver/dist/aiserver.exe
+    - name: Upload Artifact (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: aiserver-windows
+        path: client/app/aiserver-windows.zip
 
     - name: Upload Artifact (Linux)
       if: matrix.os == 'ubuntu-22.04'

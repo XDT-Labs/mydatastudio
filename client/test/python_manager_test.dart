@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:mydatastudio/python_manager.dart';
 import 'package:path/path.dart' as p;
 
@@ -308,4 +310,54 @@ void main() {
       );
     });
   }, skip: !Platform.isMacOS ? 'needs macOS ditto to build the fixture' : null);
+
+  // Windows has no SIGTERM: Process.kill is TerminateProcess there, which
+  // stops the aiserver mid-write. The client asks it to stop over HTTP first,
+  // and falls back to the kill whenever that request didn't succeed.
+  group('PythonManager.requestShutdown', () {
+    test('posts to /shutdown with the bearer token', () async {
+      late http.Request sent;
+      final client = MockClient((request) async {
+        sent = request;
+        return http.Response('{"status": "shutting down"}', 200);
+      });
+
+      final ok = await PythonManager.requestShutdown(
+        url: 'http://127.0.0.1:5000',
+        token: 'tok',
+        client: client,
+      );
+
+      expect(ok, isTrue);
+      expect(sent.method, 'POST');
+      expect(sent.url.toString(), 'http://127.0.0.1:5000/shutdown');
+      expect(sent.headers['Authorization'], 'Bearer tok');
+    });
+
+    test('reports failure on a refusal, so the caller kills instead', () async {
+      final client = MockClient((_) async => http.Response('', 503));
+      expect(
+        await PythonManager.requestShutdown(
+          url: 'http://127.0.0.1:5000',
+          token: 'tok',
+          client: client,
+        ),
+        isFalse,
+      );
+    });
+
+    test('reports failure when the server is unreachable', () async {
+      final client = MockClient(
+        (_) async => throw http.ClientException('connection refused'),
+      );
+      expect(
+        await PythonManager.requestShutdown(
+          url: 'http://127.0.0.1:5000',
+          token: 'tok',
+          client: client,
+        ),
+        isFalse,
+      );
+    });
+  });
 }
