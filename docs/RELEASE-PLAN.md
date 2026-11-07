@@ -47,7 +47,7 @@ flowchart TD
 | Wave | Social | Email | Files | Social release no.* |
 |---|---|---|---|---|
 | 0 | Shared social foundation, setup panel, spikes | IMAP engine | `CloudFileScanner`, change cursors, sync-folder connector, dataless detection | — |
-| 1 | — | — | Sync folders (iCloud Drive, Dropbox, OneDrive, Google Drive, Box Drive); Dropbox, OneDrive and Box APIs; Google Drive Changes API | — |
+| 1 | — | — | Sync folders (iCloud Drive, Dropbox, OneDrive, Google Drive, Box Drive, pCloud Drive, Proton Drive, MEGA, Sync.com); Dropbox, OneDrive and Box APIs; Google Drive Changes API | — |
 | 2 | Bluesky, Mastodon | Yahoo (migrate), AOL, iCloud, Fastmail, Yandex, GMX, Zoho, Outlook, Gmail over IMAP | — | 1 |
 | 3 | Facebook, Instagram, Threads | MBOX/EML file imports (Takeout, Apple Mail, Thunderbird), Proton, Tuta | — | 2 |
 | 4 | Snapchat Memories, Flickr, YouTube, X | — | Google Photos via Takeout | 3–4 |
@@ -153,35 +153,41 @@ From [files-sources-foundation.md](plans/files-sources-foundation.md):
       assessment covering `gmail.readonly` and `drive.readonly`? Cost and timeline → decides
       Wave 1's Google Drive public-release path
 - [ ] **Sync folders:** real folder names under `~/Library/CloudStorage/` for each provider app
-      (Box Drive); whether our entitlements can read
+      (Box Drive, Proton Drive, pCloud Drive, MEGA); whether our entitlements can read
       `~/Library/Mobile Documents` → gates Wave 1's sync-folder cards. **Open:** the cards were
-      built ahead of the spike (#42), including cards for the deferred pCloud, Proton Drive and
-      MEGA, whose folder names are guesses. The app can read `Mobile Documents` on the dev Mac.
+      built ahead of the spike (#42) and match pCloud, Proton Drive and MEGA names by guess;
+      confirming those three is deferred (lower priority). The app can read `Mobile Documents`
+      on the dev Mac.
 - [ ] **Box:** does token exchange require a client secret (→ token service)? →
-      gates Wave 1's Box API
+      gates Wave 1's Box API (the pCloud API is deferred)
 
 ---
 
 ## Wave 1: Cloud file sources
 
-The most popular cloud storage services, as sync folders and through their APIs. pCloud, Proton
-Drive, MEGA and Sync.com moved to Deferred: lower priority than these.
+The most popular cloud storage services, as sync folders and through their APIs.
 
 **Depends on:** the Wave 0 file-source foundation, the sync-folder spike, and the Box spike
 (for the Box API). Google Drive (Changes API) and the Box API moved up from Waves 3 and 5.
 
-**Status:** the sync-folder cards, the Dropbox API and the OneDrive API are built and in review
-in #42 (which also built cards for the deferred pCloud, Proton Drive, MEGA and Sync.com). Nothing
-is ticked until it is merged and checked against real accounts or real sync-app folders.
+**Status:** the sync-folder cards and the Dropbox and OneDrive APIs are built in #42; the Google
+Drive Changes API and the Box API are not started. Nothing is ticked until it is merged and checked
+against real accounts or real sync-app folders.
 
 - [ ] **Sync-folder cards** (no sign-in), one per detected app:
-  - [ ] **iCloud Drive**, including legacy stubs
-        ([files-icloud-drive.md](plans/files-icloud-drive.md)). App containers are no longer
-        listed: one "iCloud Drive" card is rooted at `com~apple~CloudDocs`, by product decision
+  - [ ] **iCloud Drive** ([files-icloud-drive.md](plans/files-icloud-drive.md)). App
+        containers are no longer listed: one "iCloud Drive" card is rooted at
+        `com~apple~CloudDocs`, by product decision
   - [ ] **Dropbox** folder ([files-dropbox.md](plans/files-dropbox.md))
   - [ ] **OneDrive** folder ([files-onedrive.md](plans/files-onedrive.md))
   - [ ] **Google Drive** folder ([files-google-drive.md](plans/files-google-drive.md))
   - [ ] **Box Drive** folder ([files-box.md](plans/files-box.md))
+  - Lower priority: these cards are built (#42), but further work on them is deferred,
+    including confirming the pCloud, Proton Drive and MEGA folder names (guesses today):
+    - [ ] **pCloud Drive** folder ([files-pcloud.md](plans/files-pcloud.md))
+    - [ ] **Proton Drive** folder ([files-proton-drive.md](plans/files-proton-drive.md))
+    - [ ] **MEGA** folder ([files-mega.md](plans/files-mega.md))
+    - [ ] **Sync.com** folder ([files-sync-com.md](plans/files-sync-com.md))
 - [ ] **Dropbox API**: PKCE app, `list_folder` cursor, batch thumbnails; **production approval
       before 50 linked users** ([files-dropbox.md](plans/files-dropbox.md)). Built: PKCE,
       cursor sync, cursor reset, 429 backoff. Not built: thumbnails. App registration and
@@ -385,8 +391,6 @@ Built only when the gate opens, and only if users need what the shipped path can
 | Proton Drive SDK | Proton supporting third-party auth | [files-proton-drive.md](plans/files-proton-drive.md) |
 | MEGAcmd for cloud-only MEGA content | Users asking; SDK licence check | [files-mega.md](plans/files-mega.md) |
 | Dropbox long-poll / instant sync | After 30-minute polling is stable | [files-dropbox.md](plans/files-dropbox.md) |
-| pCloud (pCloud Drive folder + API) | Lower priority; users asking | [files-pcloud.md](plans/files-pcloud.md) |
-| Proton Drive sync folder | Lower priority; users asking | [files-proton-drive.md](plans/files-proton-drive.md) |
-| MEGA sync folder | Lower priority; users asking | [files-mega.md](plans/files-mega.md) |
-| Sync.com sync folder | Lower priority; users asking | [files-sync-com.md](plans/files-sync-com.md) |
+| pCloud API | Lower priority; users asking | [files-pcloud.md](plans/files-pcloud.md) |
+| Confirming the pCloud, Proton Drive and MEGA sync-folder names (cards built on guesses in #42) | Lower priority; users reporting a missed folder | [files-sources-foundation.md](plans/files-sources-foundation.md) |
 | Amazon Photos / Amazon Drive | No public API (Drive API shut down) | [files-sources-foundation.md](plans/files-sources-foundation.md) |
