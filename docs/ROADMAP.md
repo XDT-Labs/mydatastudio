@@ -20,7 +20,7 @@ parts lists each wave (`1, 4`). Within each section, rows are ordered by wave.
 
 | Feature | Status | Wave | Plan | ADR | Notes |
 |---|---|---|---|---|---|
-| Releases cut from version tags | `in-progress` | any | [core-ci-linux-build.md](plans/core-ci-linux-build.md) | — | `verify-tag` job written 2026-11-03: every platform takes its version from it; any branch can be tagged (2026-11-07), and a suffix makes a pre-release. Not yet run on GitHub. |
+| Releases cut from version tags | `in-progress` | any | [core-ci-linux-build.md](plans/core-ci-linux-build.md) | — | `verify-tag` job written 2026-11-03: every platform takes its version from it; production tags must be on main, and pre-release tags work on any branch (2026-11-07). Not yet run on GitHub. |
 | Glassmorphism elevation model | `ready` | — | [glassmorphism-elevation.md](plans/glassmorphism-elevation.md) | — | Decision made 2026-08-01 to build out `DESIGN.md`'s spec. |
 | Tier 2 auto-update (Sparkle) | `proposed` | — | [sparkle-auto-update.md](plans/sparkle-auto-update.md) | — | Probably needs an ADR (EdDSA key custody, appcast hosting). |
 | Fix hanging `TagsAndLandmarksSection` widget test | `proposed` | — | [fix-tags-landmarks-widget-test.md](plans/fix-tags-landmarks-widget-test.md) | — | Test is `skip: true`; investigation notes in the plan. |

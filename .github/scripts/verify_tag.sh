@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Decides what a version tag releases, before any platform spends time building.
 #
-#   vX.Y.Z         a production release
-#   vX.Y.Z-suffix  a pre-release
+#   vX.Y.Z         a production release, which must be on main
+#   vX.Y.Z-suffix  a pre-release, from any branch
 #
-# Any branch can be tagged, so a branch's builds can be tested before it merges.
-# Needs TAG. Writes `tag`, `version`
+# Pre-releases can come from any branch so a branch's builds can be tested
+# before it merges. Production releases are offered to every user by the in-app
+# update checker, so they only come from main.
+# Needs TAG and full git history with origin/main fetched. Writes `tag`, `version`
 # (plain X.Y.Z, which CFBundleShortVersionString requires) and `prerelease` to
 # $GITHUB_OUTPUT.
 set -euo pipefail
@@ -20,6 +22,12 @@ if [ -n "${BASH_REMATCH[2]}" ]; then
   prerelease=true
 else
   prerelease=false
+  commit=$(git rev-parse "refs/tags/$TAG^{commit}")
+  if ! git merge-base --is-ancestor "$commit" origin/main; then
+    echo "Error: $TAG ($commit) is not on main."
+    echo "Production tags (vX.Y.Z) come from main. To test a branch, add a suffix (vX.Y.Z-beta.1)."
+    exit 1
+  fi
 fi
 
 {

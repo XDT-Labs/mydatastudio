@@ -5,9 +5,10 @@ name: Build and Release
 # The tag is the version: the app is built as 1.2.3 and published to the
 # GitHub release named after the tag. A tag with a pre-release suffix
 # (v1.2.3-beta.1) is published as a pre-release, which the in-app update
-# checker ignores. Any branch can be tagged, so a branch's builds can be
-# tested before it merges. Every platform must succeed before anything is
-# published.
+# checker ignores. Pre-release tags work on any branch, so a branch's builds
+# can be tested before it merges; production tags must be on main, and
+# verify-tag fails the run otherwise. Every platform must succeed before
+# anything is published.
 on:
   push:
     tags: ["v*"]
@@ -27,6 +28,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Resolve Version from Tag
         id: version

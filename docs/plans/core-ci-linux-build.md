@@ -162,8 +162,8 @@ bundle.
      `flutter build linux --release --dart-define=REALM_NAME=…`, and bundle `aiserver-linux.zip`.
    - **Written 2026-11-03, not ticked until a real tag run passes.** A new `verify-tag` job runs
      first (`.github/scripts/verify_tag.sh`) and is where every platform gets its version:
-     any branch can be tagged (from 2026-11-07; it first required main or develop), and a suffix
-     makes a pre-release. It outputs plain `X.Y.Z`
+     production tags must be on main, and pre-release tags (with a suffix) work on any branch
+     (from 2026-11-07; pre-releases first had to be on develop). It outputs plain `X.Y.Z`
      because macOS requires that; the suffix stays on the tag and release name. The macOS job's
      steps are unchanged apart from reading that output. `build-linux` needs `verify-tag`, and
      `release` needs every platform, so one failed build publishes nothing. `make build-client`
@@ -185,6 +185,13 @@ bundle.
    - **Needs a real tag run:** the workflow itself, all of x86_64, GitHub's runners and their disk
      space, `build_python.yml`, artifact upload, the release job, and the macOS job after this
      change.
+   - **First tag run (`v1.2.3-beta.2`, 2026-11-07):** macOS passed, including the DMG. arm64
+     failed compiling the `jni` plugin, and x64 was cancelled before building. GitHub's image has
+     CMake 3.31.6 and JDKs, so CMake finds JNI and builds the plugin. The local image's CMake 3.22
+     doesn't. `jni` comes in through `path_provider_android` and is only used on Android, so
+     `client/linux/CMakeLists.txt` now turns off the JDK search. Reproduced and fixed on arm64
+     with CMake 3.31.6 and a Temurin JDK: build, AppImage and smoke test pass, and nothing links
+     `libjvm`.
 6. **Packaging:** a **tar.gz** of the bundle first. Then **AppImage** (one file, any distro) or
    **Flatpak** (sandboxing complicates spawning the aiserver and reading arbitrary folders, so
    prefer AppImage) **(decide)**. The `.deb` is optional.

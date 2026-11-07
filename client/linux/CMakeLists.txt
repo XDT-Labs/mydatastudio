@@ -76,6 +76,12 @@ set_target_properties(${BINARY_NAME}
 )
 
 
+# The jni plugin (pulled in by path_provider_android) only builds when CMake
+# finds a JDK. It's only used on Android, it links the app to Java's libjvm.so,
+# and it doesn't compile on arm64, so don't look for a JDK: GitHub's runners
+# have one.
+set(CMAKE_DISABLE_FIND_PACKAGE_JNI TRUE)
+
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)
