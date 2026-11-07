@@ -62,7 +62,7 @@ if ($status -ne '401') { Fail "/shutdown without a token returned $status, expec
 $status = Status 'POST' "$url/shutdown" 'smoke'
 if ($status -ne '200') { Fail "/shutdown returned $status, expected 200" $log }
 if (-not $server.WaitForExit(15000)) {
-  Stop-Process -Id $server.Id -Force
+  Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
   Fail 'aiserver kept running after /shutdown' $log
 }
 
@@ -75,6 +75,8 @@ $app = Start-Process -FilePath (Join-Path $InstallDir 'mydatastudio.exe') -PassT
 Start-Sleep -Seconds 20
 if ($app.HasExited) { Fail "the app exited during startup (code $($app.ExitCode))" "$work\app.err.log" }
 $created = Test-Path $support
-Stop-Process -Id $app.Id -Force
+# The app may exit on its own between the check above and here; that mustn't
+# fail the run.
+Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
 if (-not $created) { Fail "the app created no support directory at $support" "$work\app.err.log" }
 Write-Host 'Smoke test passed'
