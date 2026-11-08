@@ -207,6 +207,9 @@ bundle.
    - **AppImage chosen and written 2026-11-03, not ticked until a real tag run passes.**
      `.github/scripts/build_appimage.sh` builds a self-contained tree, and the job publishes
      `MyDataStudio-<tag>-linux-<arch>.AppImage` (554 MB on arm64) and a `.tar.gz` of the same tree.
+     Since 2026-11-08 the `.tar.gz` is off by default: set `LINUX_TARBALL: "true"` in
+     `build_and_release.yml` to publish it again (for example for the NAS image or machines
+     without FUSE). `--appimage-extract` gives the same tree meanwhile.
    - **Why both come from that tree:** a bare bundle built on 22.04 links `libmpv.so.1`, which
      isn't on newer distros (24.04 ships `libmpv.so.2`). So libmpv and its dependencies (154
      libraries, 202 MB) and `unzip` are bundled and found through RUNPATH. `LD_LIBRARY_PATH` would

@@ -41,7 +41,7 @@ and the GPU default.
   installed copy (aiserver auth, `/shutdown`, the app starts and creates `%APPDATA%\<realm>`).
 - [x] **installer:** **Inno Setup** (decided 2026-11-07): an unsigned MSIX won't install at
   all, an unsigned `.exe` installs after a SmartScreen warning. Per-user install, no admin.
-  Also a portable zip.
+  The portable zip was dropped on 2026-11-08: the installer is the only download.
 - [ ] **gpu-default:** **Vulkan** (decided 2026-11-08), one build for every GPU vendor and
   the CPU. CI installs LunarG's SDK 1.4.363.1 (`install_vulkan_sdk.sh`) and builds
   llama.cpp with `-DGGML_VULKAN=on`; `main.spec` bundles `vulkan-1.dll` next to ggml-vulkan so

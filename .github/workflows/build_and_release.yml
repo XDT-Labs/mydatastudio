@@ -15,6 +15,9 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Also publish a .tar.gz of the Linux bundle (the AppImage's contents), e.g.
+  # for machines without FUSE. Off: `--appimage-extract` gives the same tree.
+  LINUX_TARBALL: "false"
 
 jobs:
   # Validate the tag first so a bad one fails in seconds, not after a full build.
@@ -256,12 +259,6 @@ jobs:
           name: macos-dmg
           path: client/build/macos/Build/Products/Release/MyDataStudio.dmg
 
-      - name: Upload Python Service Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aiserver-macos
-          path: client/app/aiserver-macos.zip
-
       - name: Clean up keychain and provisioning profile
         if: always()
         run: |
@@ -377,6 +374,7 @@ jobs:
             .github/scripts/linux_smoke_test.sh AppDir'
 
       - name: Package Tarball
+        if: env.LINUX_TARBALL == 'true'
         env:
           ARCHIVE: MyDataStudio-${{ needs.verify-tag.outputs.tag }}-linux-${{ matrix.arch }}.tar.gz
         run: |
@@ -506,21 +504,11 @@ jobs:
           SMOKE_GGUF: smoke/tiny.gguf
         run: .github/scripts/windows_smoke_test.ps1 "$env:RUNNER_TEMP\install" "$env:REALM"
 
-      - name: Package Portable Zip
-        shell: pwsh
-        env:
-          ARCHIVE: MyDataStudio-${{ needs.verify-tag.outputs.tag }}-windows-x64.zip
-        run: |
-          Compress-Archive -Path client\build\windows\x64\runner\Release\* -DestinationPath $env:ARCHIVE
-          Get-Item $env:ARCHIVE
-
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-x64
-          path: |
-            MyDataStudio-*-setup.exe
-            MyDataStudio-*-windows-x64.zip
+          path: MyDataStudio-*-setup.exe
           compression-level: 0
 
   release:
@@ -542,13 +530,9 @@ jobs:
           name: MyDataStudio ${{ github.ref_name }}
           files: |
             artifacts/macos-dmg/*.dmg
-            artifacts/aiserver-macos/*.zip
-            artifacts/linux-x64/*.AppImage
-            artifacts/linux-x64/*.tar.gz
-            artifacts/linux-arm64/*.AppImage
-            artifacts/linux-arm64/*.tar.gz
+            artifacts/linux-x64/*
+            artifacts/linux-arm64/*
             artifacts/windows-x64/*.exe
-            artifacts/windows-x64/*.zip
           fail_on_unmatched_files: true
           prerelease: ${{ needs.verify-tag.outputs.prerelease == 'true' }}
           generate_release_notes: true
