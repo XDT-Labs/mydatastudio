@@ -60,7 +60,9 @@ if vulkan_sdk:
         candidates = [os.path.join(vulkan_sdk, 'Bin', 'vulkan-1.dll'),
                       os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'vulkan-1.dll')]
     else:
-        candidates = [os.path.join(vulkan_sdk, 'lib', 'libvulkan.so.1')]
+        # LunarG's Linux SDK keeps the loader under lib/VulkanLoader/lib.
+        candidates = [os.path.join(vulkan_sdk, 'lib', 'VulkanLoader', 'lib', 'libvulkan.so.1'),
+                      os.path.join(vulkan_sdk, 'lib', 'libvulkan.so.1')]
     loader = next((c for c in candidates if os.path.isfile(c)), None)
     if loader is None:
         raise SystemExit(f"VULKAN_SDK is set but no Vulkan loader was found in {candidates}")
