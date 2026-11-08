@@ -450,6 +450,55 @@ void main() {
     });
   });
 
+  group('thumbnails', () {
+    test(
+      'fetches the medium thumbnail through the redirect, no token on',
+      () async {
+        final a = api((r) async {
+          expect(
+            r.url.path,
+            '/v1.0/me/drive/items/${r.url.pathSegments[4]}/thumbnails/0/medium/content',
+          );
+          return http.Response(
+            '',
+            302,
+            headers: {
+              'location': 'https://thumbs.example.net/${r.url.pathSegments[4]}',
+            },
+          );
+        }, plain: (r) async => http.Response.bytes([1, 2], 200));
+        final out = await a.thumbnails(['A', 'B']);
+        expect(out.keys, unorderedEquals(['A', 'B']));
+        expect(out['A'], [1, 2]);
+        expect(
+          plainRequests.any((r) => r.headers.containsKey('Authorization')),
+          isFalse,
+        );
+      },
+    );
+
+    test('an item with no thumbnail (404) is skipped, the rest kept', () async {
+      final a = api((r) async {
+        if (r.url.path.contains('/items/A/')) return _json({'error': {}}, 404);
+        return http.Response.bytes([5], 200);
+      });
+      final out = await a.thumbnails(['A', 'B']);
+      expect(out.keys, ['B']);
+    });
+
+    test('other failures throw rather than read as "no thumbnail"', () {
+      final a = api((r) async => _json({'error': {}}, 500));
+      expect(a.thumbnails(['A']), throwsA(isA<OneDriveApiException>()));
+    });
+
+    test('images and videos are asked for, documents are not', () {
+      final a = api((r) async => _json({}));
+      expect(a.offersThumbnail('IMG_1.HEIC', 'image/heic'), isTrue);
+      expect(a.offersThumbnail('clip.mov', 'video/quicktime'), isTrue);
+      expect(a.offersThumbnail('report.pdf', 'application/pdf'), isFalse);
+    });
+  });
+
   group('token refresh', () {
     test('sends client_id, refresh token and scope, no secret', () async {
       late http.Request seen;

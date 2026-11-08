@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:mime/mime.dart' as mime;
@@ -9,6 +10,7 @@ import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart'
 import 'package:mydatastudio/oauth/login_providers.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_sync_estimator.dart';
+import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 import 'package:mydatastudio/scanners/cloud/refreshing_bearer_client.dart';
 
 /// Microsoft Graph rejected a request in a way no caller-side retry fixes.
@@ -34,7 +36,8 @@ class OneDriveApiException implements Exception {
 /// Change feed: the cursor is a complete `@odata.deltaLink` URL. Delta returns
 /// the latest state of each item rather than every event, which is what the
 /// scanner's "last change per id wins" handling expects.
-class OneDriveFileApi implements CloudFileApi, WholeDriveListing {
+class OneDriveFileApi
+    implements CloudFileApi, WholeDriveListing, ServerThumbnails {
   static const _graph = 'https://graph.microsoft.com/v1.0';
   static const _graphHost = 'graph.microsoft.com';
 
@@ -253,35 +256,7 @@ class OneDriveFileApi implements CloudFileApi, WholeDriveListing {
 
   @override
   Future<void> download(String id, String destPath) async {
-    // `/content` answers 302 with a short-lived pre-authenticated URL. Follow
-    // it by hand so the bearer token goes to Graph only, never to the storage
-    // host the redirect points at.
-    var response =
-        await _send(
-              () =>
-                  http.Request('GET', Uri.parse('${_itemUrl(id)}/content'))
-                    ..followRedirects = false,
-              stream: true,
-              accept: _okOrRedirect,
-            )
-            as http.StreamedResponse;
-    if (response.statusCode != 200) {
-      final location = response.headers['location'];
-      await response.stream.drain<void>();
-      if (location == null) {
-        throw OneDriveApiException(
-          response.statusCode,
-          'redirect without a Location',
-        );
-      }
-      response =
-          await _send(
-                () => http.Request('GET', Uri.parse(location)),
-                stream: true,
-                client: _redirectClient,
-              )
-              as http.StreamedResponse;
-    }
+    final response = await _getContent('${_itemUrl(id)}/content');
     final sink = io.File(destPath).openWrite();
     try {
       await response.stream.pipe(sink);
@@ -289,6 +264,67 @@ class OneDriveFileApi implements CloudFileApi, WholeDriveListing {
       await sink.flush();
       await sink.close();
     }
+  }
+
+  /// Graph renders thumbnails for images and videos (and some documents, which
+  /// aren't asked for here).
+  @override
+  bool offersThumbnail(String name, String? mimeType) {
+    final cat = ContentPolicy.categorize(mimeType, name);
+    return cat == ContentCategory.images || cat == ContentCategory.videos;
+  }
+
+  /// Graph has no batch thumbnail call that returns bytes, so a "batch" is a
+  /// few single requests in parallel.
+  @override
+  int get thumbnailBatchSize => 4;
+
+  @override
+  Future<Map<String, Uint8List>> thumbnails(List<String> ids) async {
+    final out = <String, Uint8List>{};
+    await Future.wait([
+      for (final id in ids)
+        () async {
+          try {
+            final response = await _getContent(
+              '${_itemUrl(id)}/thumbnails/0/medium/content',
+            );
+            out[id] = await response.stream.toBytes();
+          } on OneDriveApiException catch (e) {
+            // No thumbnail for this item (404); anything else is a real error.
+            if (e.status != 404) rethrow;
+          }
+        }(),
+    ]);
+    return out;
+  }
+
+  /// GETs a Graph `/content` URL. Graph answers 302 with a short-lived
+  /// pre-authenticated URL; follow it by hand so the bearer token goes to
+  /// Graph only, never to the storage host the redirect points at.
+  Future<http.StreamedResponse> _getContent(String url) async {
+    final response =
+        await _send(
+              () => http.Request('GET', Uri.parse(url))..followRedirects = false,
+              stream: true,
+              accept: _okOrRedirect,
+            )
+            as http.StreamedResponse;
+    if (response.statusCode == 200) return response;
+    final location = response.headers['location'];
+    await response.stream.drain<void>();
+    if (location == null) {
+      throw OneDriveApiException(
+        response.statusCode,
+        'redirect without a Location',
+      );
+    }
+    return await _send(
+          () => http.Request('GET', Uri.parse(location)),
+          stream: true,
+          client: _redirectClient,
+        )
+        as http.StreamedResponse;
   }
 
   // ---------------------------------------------------------------------------

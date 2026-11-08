@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:mime/mime.dart' as mime;
@@ -32,7 +33,8 @@ typedef DropboxIdsForPath = Future<List<String>> Function(String webLink);
 /// Identity: an item's id is Dropbox's `id:...` string, which is also a valid
 /// `path` argument everywhere, so ids are used directly to list and download.
 /// The collection root is the alias `root` (Dropbox's empty path).
-class DropboxFileApi implements CloudFileApi, WholeDriveListing {
+class DropboxFileApi
+    implements CloudFileApi, WholeDriveListing, ServerThumbnails {
   static const _api = 'https://api.dropboxapi.com/2';
   static const _content = 'https://content.dropboxapi.com/2';
   static const _webHome = 'https://www.dropbox.com/home';
@@ -264,6 +266,67 @@ class DropboxFileApi implements CloudFileApi, WholeDriveListing {
       await sink.flush();
       await sink.close();
     }
+  }
+
+  /// Extensions `files/get_thumbnail_batch` renders (Dropbox API docs);
+  /// anything else fails per entry, so it isn't asked for.
+  static const _thumbnailExtensions = {
+    'jpg',
+    'jpeg',
+    'png',
+    'tiff',
+    'tif',
+    'gif',
+    'webp',
+    'ppm',
+    'bmp',
+  };
+
+  @override
+  int get thumbnailBatchSize => 25;
+
+  @override
+  bool offersThumbnail(String name, String? mimeType) {
+    final dot = name.lastIndexOf('.');
+    return dot >= 0 &&
+        _thumbnailExtensions.contains(name.substring(dot + 1).toLowerCase());
+  }
+
+  @override
+  Future<Map<String, Uint8List>> thumbnails(List<String> ids) async {
+    if (ids.isEmpty) return const {};
+    final response =
+        await _send(
+              () =>
+                  http.Request(
+                      'POST',
+                      Uri.parse('$_content/files/get_thumbnail_batch'),
+                    )
+                    ..headers['Content-Type'] = 'application/json'
+                    ..body = jsonEncode({
+                      'entries': [
+                        for (final id in ids)
+                          {
+                            'path': id,
+                            'format': 'jpeg',
+                            'size': 'w256h256',
+                            'mode': 'bestfit',
+                          },
+                      ],
+                    }),
+            )
+            as http.Response;
+    final r = jsonDecode(response.body) as Map<String, dynamic>;
+    final out = <String, Uint8List>{};
+    for (final e in (r['entries'] as List? ?? const [])) {
+      final m = e as Map<String, dynamic>;
+      if (m['.tag'] != 'success') continue;
+      final id = (m['metadata'] as Map?)?['id'] as String?;
+      final data = m['thumbnail'] as String?;
+      if (id == null || data == null) continue;
+      out[id] = base64Decode(data);
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------------------

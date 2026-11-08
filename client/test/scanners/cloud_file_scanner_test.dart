@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:io' as io;
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_scanner.dart';
 import 'package:mydatastudio/scanners/cloud/content_policy.dart';
@@ -97,6 +99,45 @@ class FakeCloudFileApi implements CloudFileApi {
   }
 }
 
+/// A provider that renders thumbnails server-side (Dropbox, OneDrive).
+class FakeThumbnailApi extends FakeCloudFileApi implements ServerThumbnails {
+  final List<List<String>> thumbnailCalls = [];
+
+  /// Ids the provider can't render; they are absent from the result.
+  final Set<String> missing;
+
+  FakeThumbnailApi(super.tree, {super.changePages, this.missing = const {}});
+
+  @override
+  int get thumbnailBatchSize => 2;
+
+  @override
+  bool offersThumbnail(String name, String? mimeType) => name.endsWith('.jpg');
+
+  @override
+  Future<Map<String, Uint8List>> thumbnails(List<String> ids) async {
+    thumbnailCalls.add(ids);
+    return {
+      for (final id in ids)
+        if (!missing.contains(id)) id: Uint8List.fromList(id.codeUnits),
+    };
+  }
+}
+
+File _row(String id, String name) => File(
+  id: 'c1:$id',
+  collectionId: 'c1',
+  name: name,
+  path: 'fake://$id',
+  parent: '',
+  dateCreated: DateTime(2024),
+  dateLastModified: DateTime(2024),
+  lastScannedDate: DateTime(2024),
+  isDeleted: false,
+  size: 5,
+  contentType: 'image/jpeg',
+);
+
 CloudFileEntry _file(String id, {String mime = 'text/plain'}) =>
     CloudFileEntry(id: id, name: '$id.txt', mimeType: mime, size: 5);
 CloudFileEntry _folder(String id) =>
@@ -162,6 +203,7 @@ void main() {
 
   CloudFileScannerWorker worker({
     List<File> toDownload = const [],
+    List<File> withoutThumbnail = const [],
     Map<String, String> knownFolders = const {},
   }) => CloudFileScannerWorker(
     _MockDb(),
@@ -169,6 +211,7 @@ void main() {
     port.sendPort,
     collectionExists: (_) async => true,
     filesToDownload: (_) async => toDownload,
+    filesWithoutThumbnail: (_) async => withoutThumbnail,
     knownFolders: (_) async => knownFolders,
   );
 
@@ -809,4 +852,89 @@ void main() {
       expect(of('fileLocalPath'), hasLength(1));
     },
   );
+
+  group('server-side thumbnails', () {
+    Map<String, String> thumbnailWrites() => {
+      for (final w in of('fileThumbnail'))
+        (w['payload'] as Map)['fileId'] as String:
+            (w['payload'] as Map)['thumbnailKey'] as String,
+    };
+
+    test(
+      'images without a thumbnail are cached on disk and keyed on the row',
+      () async {
+        final api = FakeThumbnailApi({});
+        await run(
+          worker(
+            withoutThumbnail: [
+              _row('a', 'a.jpg'),
+              _row('b', 'b.jpg'),
+              _row('c', 'c.jpg'),
+              _row('t', 'notes.txt'),
+            ],
+          ),
+          api,
+          args(),
+        );
+
+        // Batched at the provider's size; files it can't render aren't asked.
+        expect(api.thumbnailCalls, [
+          ['a', 'b'],
+          ['c'],
+        ]);
+        final cache = ThumbnailCache(tmp);
+        final writes = thumbnailWrites();
+        expect(writes.keys, unorderedEquals(['c1:a', 'c1:b', 'c1:c']));
+        // The row stores the cache key the UI resolves, and the bytes are there.
+        expect(writes['c1:a'], cache.keyFor('c1', 'c1:a'));
+        expect(cache.fileForKey(writes['c1:a']!).readAsStringSync(), 'a');
+      },
+    );
+
+    test('an item the provider could not render gets no row write', () async {
+      final api = FakeThumbnailApi({}, missing: {'b'});
+      await run(
+        worker(withoutThumbnail: [_row('a', 'a.jpg'), _row('b', 'b.jpg')]),
+        api,
+        args(),
+      );
+      expect(thumbnailWrites().keys, ['c1:a']);
+    });
+
+    test(
+      'a changed image is fetched again even though it has a thumbnail',
+      () async {
+        // The stored thumbnail shows the old content. Only the change feed
+        // knows the file changed: it isn't in the "no thumbnail" query.
+        final api = FakeThumbnailApi(
+          {},
+          changePages: [
+            [
+              CloudChange(
+                'p1',
+                entry: const CloudFileEntry(
+                  id: 'p1',
+                  name: 'p1.jpg',
+                  parentIds: ['REALROOT'],
+                ),
+              ),
+            ],
+          ],
+        );
+        await run(worker(), api, args(force: false, cursor: 'old'));
+        expect(api.thumbnailCalls, [
+          ['p1'],
+        ]);
+        expect(thumbnailWrites().keys, ['c1:p1']);
+      },
+    );
+
+    test('a provider without server thumbnails is never asked', () async {
+      final api = FakeCloudFileApi({
+        'root': [_file('a')],
+      });
+      await run(worker(withoutThumbnail: [_row('a', 'a.jpg')]), api, args());
+      expect(of('fileThumbnail'), isEmpty);
+    });
+  });
 }

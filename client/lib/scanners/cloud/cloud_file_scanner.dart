@@ -10,6 +10,7 @@ import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 import 'package:mydatastudio/scanners/collection_scanner.dart';
@@ -270,6 +271,7 @@ class CloudFileScannerWorker {
   /// without a database.
   final Future<bool> Function(String collectionId) _collectionExists;
   final Future<List<File>> Function(String collectionId) _filesToDownload;
+  final Future<List<File>> Function(String collectionId) _filesWithoutThumbnail;
 
   /// Folder rows already stored for a collection: provider folder id -> parent
   /// provider folder id ('' = collection root). Defines which change-feed
@@ -288,6 +290,10 @@ class CloudFileScannerWorker {
 
   // Download management
   final List<File> _downloadQueue = [];
+
+  /// Files the change feed reported as changed this run. Their stored
+  /// thumbnail (if any) shows the old content, so it is fetched again.
+  final List<File> _changedFiles = [];
   static const int _maxConcurrentDownloads = 3;
   static const int _batchSize = 100;
   bool _isScanning = false;
@@ -298,8 +304,12 @@ class CloudFileScannerWorker {
     this.port, {
     Future<bool> Function(String collectionId)? collectionExists,
     Future<List<File>> Function(String collectionId)? filesToDownload,
+    Future<List<File>> Function(String collectionId)? filesWithoutThumbnail,
     Future<Map<String, String>> Function(String collectionId)? knownFolders,
-  }) : _knownFolders =
+  }) : _filesWithoutThumbnail =
+           filesWithoutThumbnail ??
+           ((id) => FileDesktopRepository(appDb).getFilesWithoutThumbnail(id)),
+       _knownFolders =
            knownFolders ??
            ((id) async => {
              for (final r in await appDb.select(
@@ -561,6 +571,15 @@ class CloudFileScannerWorker {
       _isScanning = false;
       port.send({'type': 'scan_complete'});
 
+      if (api is ServerThumbnails && appDir != null) {
+        await _fetchThumbnails(
+          api as ServerThumbnails,
+          api.scheme,
+          collectionId,
+          appDir,
+        );
+      }
+
       if (policy.downloadsAnything && appDir != null) {
         // Query DB for files with null localPath
         logger.i('CloudFileIsolate: querying DB for files needing download...');
@@ -768,16 +787,16 @@ class CloudFileScannerWorker {
         continue;
       }
       count++;
-      fileBatch.add(
-        _toFile(
-          api: api,
-          entry: e,
-          collectionId: collectionId,
-          collectionPath: collectionPath,
-          parentId: isRoot(parent!) ? collectionPath : parent,
-          scanStartTime: scanStartTime,
-        ),
+      final file = _toFile(
+        api: api,
+        entry: e,
+        collectionId: collectionId,
+        collectionPath: collectionPath,
+        parentId: isRoot(parent!) ? collectionPath : parent,
+        scanStartTime: scanStartTime,
       );
+      fileBatch.add(file);
+      _changedFiles.add(file);
       logger.i('Found NEW/CHANGED file: ${e.name} (${e.id})');
       if (fileBatch.length >= _batchSize) await _flushBatch(fileBatch);
     }
@@ -931,6 +950,78 @@ class CloudFileScannerWorker {
     } while (pageToken != null);
 
     return count;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Server-side thumbnails
+  // ---------------------------------------------------------------------------
+
+  /// Fetches provider-rendered thumbnails for files that have none, plus files
+  /// that changed this run, into the on-disk [ThumbnailCache], and stores each
+  /// cache key on its row. Thumbnails don't depend on the content policy: they
+  /// are small and are what makes cloud photos browsable without a download.
+  Future<void> _fetchThumbnails(
+    ServerThumbnails api,
+    String scheme,
+    String collectionId,
+    String appDir,
+  ) async {
+    final List<File> candidates;
+    try {
+      candidates =
+          {
+            for (final f in [
+              ...await _filesWithoutThumbnail(collectionId),
+              ..._changedFiles,
+            ])
+              if (api.offersThumbnail(f.name, f.contentType)) f.id: f,
+          }.values.toList();
+    } catch (e) {
+      logger.e('CloudFileIsolate: could not list files needing thumbnails: $e');
+      return;
+    }
+    if (candidates.isEmpty) return;
+    logger.i('CloudFileIsolate: fetching ${candidates.length} thumbnails');
+
+    final cache = ThumbnailCache(appDir);
+    for (var i = 0; i < candidates.length; i += api.thumbnailBatchSize) {
+      if (_isScanning) return; // a new scan started; it will pick these up
+      final batch = candidates.sublist(
+        i,
+        (i + api.thumbnailBatchSize).clamp(0, candidates.length),
+      );
+      final byRemoteId = {
+        for (final f in batch) f.path.replaceFirst('$scheme://', ''): f,
+      };
+      final Map<String, Uint8List> images;
+      try {
+        images = await _retryNetworkOp(
+          () => api.thumbnails(byRemoteId.keys.toList()),
+        );
+      } on CloudAuthException catch (e) {
+        logger.e('CloudFileIsolate: thumbnails stopped, auth failed: $e');
+        return;
+      } catch (e) {
+        logger.w('CloudFileIsolate: thumbnail batch failed, skipping: $e');
+        continue;
+      }
+      for (final MapEntry(key: remoteId, value: bytes) in images.entries) {
+        final file = byRemoteId[remoteId];
+        if (file == null || bytes.isEmpty) continue;
+        final key = cache.keyFor(collectionId, file.id);
+        try {
+          await cache.writeBytes(key, bytes);
+          await writeViaMain(port, 'fileThumbnail', {
+            'fileId': file.id,
+            'thumbnailKey': key,
+          });
+        } catch (e) {
+          logger.w(
+            'CloudFileIsolate: could not save thumbnail for ${file.name}: $e',
+          );
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------

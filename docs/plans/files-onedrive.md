@@ -1,7 +1,7 @@
 ---
 status: in-progress
 adr: none
-remaining: [entra-scope, thumbnails, business-and-sharepoint, provider-ui-actions]
+remaining: [entra-scope, business-and-sharepoint, provider-ui-actions]
 ---
 
 # Plan: OneDrive (personal, work/school) and SharePoint

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:mydatastudio/database_manager.dart';
 
 /// Provider-neutral description of one item (file or folder) in a cloud drive.
@@ -153,4 +155,20 @@ abstract class CloudFileApi {
 
   /// Streams the item's bytes to [destPath] (parent directory already exists).
   Future<void> download(String id, String destPath);
+}
+
+/// Optional capability: a provider that renders thumbnails server-side, so
+/// images get one without downloading the full file. Providers whose listings
+/// carry a public thumbnail URL (Drive's `thumbnailLink`) don't need this.
+abstract class ServerThumbnails {
+  /// Most ids [thumbnails] accepts in one call.
+  int get thumbnailBatchSize;
+
+  /// Whether the provider can render a thumbnail for this file at all, so
+  /// files it never will aren't asked for again on every sync.
+  bool offersThumbnail(String name, String? mimeType);
+
+  /// JPEG thumbnail bytes keyed by item id. Ids the provider couldn't render
+  /// are absent; a failure of the whole call throws.
+  Future<Map<String, Uint8List>> thumbnails(List<String> ids);
 }

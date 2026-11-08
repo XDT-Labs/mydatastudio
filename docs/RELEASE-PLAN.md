@@ -121,7 +121,7 @@ From [files-sources-foundation.md](plans/files-sources-foundation.md):
       limit; the estimate before the first sync). Merged in #40.
 - [ ] **Sync-folder connector**: detect `~/Library/CloudStorage/*`, iCloud Drive and legacy
       folders; `providerHint`; **dataless (`SF_DATALESS`) detection via FFI `stat`**; legacy
-      `.icloud` stubs; the bounded "download for indexing" option. **Partly done:** detection,
+      `.icloud` stubs; the bounded "download for indexing" option. **Pending testing.** Detection,
       `SF_DATALESS` and `.icloud` stubs merged in #40 and #42. Still to do: `providerHint`
       and "download for indexing".
 - [x] **OAuth:** relax `DesktopOAuthManager`'s "secret required" check per provider (PKCE
@@ -174,7 +174,8 @@ The most popular cloud storage services, as sync folders and through their APIs.
 Drive Changes API and the Box API are not started. Nothing is ticked until it is merged and checked
 against real accounts or real sync-app folders.
 
-- [ ] **Sync-folder cards** (no sign-in), one per detected app:
+- [ ] **Sync-folder cards** (no sign-in), one per detected app. **Pending testing:** each card
+      still needs checking against a real sync-app folder.
   - [ ] **iCloud Drive** ([files-icloud-drive.md](plans/files-icloud-drive.md)). App
         containers are no longer listed: one "iCloud Drive" card is rooted at
         `com~apple~CloudDocs`, by product decision
@@ -190,11 +191,11 @@ against real accounts or real sync-app folders.
     - [ ] **Sync.com** folder ([files-sync-com.md](plans/files-sync-com.md))
 - [ ] **Dropbox API**: PKCE app, `list_folder` cursor, batch thumbnails; **production approval
       before 50 linked users** ([files-dropbox.md](plans/files-dropbox.md)). Built: PKCE,
-      cursor sync, cursor reset, 429 backoff. Not built: thumbnails. App registration and
+      cursor sync, cursor reset, 429 backoff, batch thumbnails. App registration and
       production approval still to do.
 - [ ] **OneDrive API**: the Outlook Entra app plus `Files.Read`, Graph `delta`, personal and
       work accounts ([files-onedrive.md](plans/files-onedrive.md)). Built: `/common` PKCE sign-in,
-      delta sync, 410 resync. Not built: thumbnails. Not tested: work accounts.
+      delta sync, 410 resync, thumbnails. Not tested: work accounts.
 - [ ] **Google Drive:** move to the Changes API (deletes and moves), narrow to `drive.readonly`,
       export Google-native files for text, shared drives. The public-release path follows the
       restricted-scope spike; until then, the sync folder ([files-google-drive.md](plans/files-google-drive.md))

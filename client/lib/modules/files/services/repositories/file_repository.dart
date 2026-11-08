@@ -445,6 +445,15 @@ class FileDesktopRepository {
     return rows.map((r) => File.fromDbMap(r)).toList();
   }
 
+  /// Live files of a collection that have no thumbnail yet.
+  Future<List<File>> getFilesWithoutThumbnail(String collectionId) async {
+    final rows = await db.select(
+      "SELECT * FROM files WHERE collection_id = ? AND thumbnail IS NULL AND is_deleted = 0 AND is_user_deleted = 0 AND source_deleted_date IS NULL",
+      [collectionId],
+    );
+    return rows.map((r) => File.fromDbMap(r)).toList();
+  }
+
   Future<List<File>> getScanMetadata(String collectionId) async {
     final rows = await db.select(
       "SELECT * FROM files WHERE collection_id = ?",
