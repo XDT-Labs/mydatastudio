@@ -43,8 +43,8 @@ class DetectedSyncFolder {
 }
 
 const _iCloudNote =
-    'iCloud Drive syncs through macOS. Online-only files are listed but not '
-    'downloaded.';
+    'iCloud Drive syncs through macOS. Online-only files are downloaded '
+    'briefly to index and archive them, then returned to online-only.';
 const _protonNote =
     'Proton Drive is end-to-end encrypted. We index the files the Proton '
     'Drive app has decrypted on this Mac.';

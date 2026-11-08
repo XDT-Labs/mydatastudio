@@ -1,4 +1,6 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/content_policy_controls.dart';
+import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 
 class LocalFilesTabView extends StatelessWidget {
   const LocalFilesTabView({
@@ -10,6 +12,8 @@ class LocalFilesTabView extends StatelessWidget {
     required this.onSave,
     required this.onCancel,
     this.intro = 'Select folder to add.',
+    this.policy,
+    this.onPolicyChanged,
   });
 
   /// Owned by the page, so it can validate on save and light up both fields'
@@ -23,6 +27,11 @@ class LocalFilesTabView extends StatelessWidget {
 
   /// Line shown above the fields; varies by source (network drive, etc.).
   final String intro;
+
+  /// Which files get an archive copy. Shown for cloud sync folders only: a
+  /// plain local folder already is the copy.
+  final ContentPolicy? policy;
+  final ValueChanged<ContentPolicy>? onPolicyChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -86,6 +95,10 @@ class LocalFilesTabView extends StatelessWidget {
               ),
             ],
           ),
+          if (policy != null && onPolicyChanged != null) ...[
+            const SizedBox(height: 16),
+            ContentPolicyControls(policy: policy!, onChanged: onPolicyChanged!),
+          ],
           const SizedBox(height: 32),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,

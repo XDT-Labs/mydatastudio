@@ -2,7 +2,10 @@ import 'dart:io' as io;
 
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/file_sources/sync_folder/file_evictor.dart';
+import 'package:mydatastudio/file_sources/sync_folder/online_only_checker.dart';
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
@@ -81,12 +84,18 @@ class FileBytesLoader {
     'onedrive': OneDriveFileApi.create,
   };
 
-  /// [cloudApis] replaces [defaultCloudApis], for tests.
+  static final OnlineOnlyChecker _defaultOnlineOnly = FfiOnlineOnlyChecker();
+  static final FileEvictor _defaultEvictor = OsascriptFileEvictor();
+
+  /// [cloudApis] replaces [defaultCloudApis], and [onlineOnly] and [evictor]
+  /// replace the macOS sync-folder defaults, for tests.
   static Future<FileBytes> loadDetailed(
     File file,
     DatabaseRepository repo,
     AppLogger logger, {
     Map<String, CloudFileApiFactory>? cloudApis,
+    OnlineOnlyChecker? onlineOnly,
+    FileEvictor? evictor,
   }) async {
     // A cloud file the user chose to keep a copy of is read from that copy:
     // no network, no token, and the same bytes the provider would send.
@@ -119,8 +128,12 @@ class FileBytesLoader {
         return _loadFromCloudApi(file, scheme.last, factory, repo, logger);
       }
     }
-    final bytes = await _loadFromDisk(file, logger);
-    return bytes == null ? const FileBytes.transient() : FileBytes.ok(bytes);
+    return _loadFromDisk(
+      file,
+      logger,
+      onlineOnly ?? _defaultOnlineOnly,
+      evictor ?? _defaultEvictor,
+    );
   }
 
   /// What a Google Workspace file should be exported as, or null if nothing
@@ -166,13 +179,50 @@ class FileBytesLoader {
       mimeType.startsWith('application/vnd.google-apps.') &&
       mimeType != 'application/vnd.google-apps.folder';
 
-  static Future<List<int>?> _loadFromDisk(File file, AppLogger logger) async {
+  /// Reads a file on disk, including an online-only file in a cloud sync
+  /// folder: reading it makes macOS download it, so once the bytes are in
+  /// hand it is evicted again. Search covers the whole sync folder while the
+  /// user's disk holds only what it held before.
+  static Future<FileBytes> _loadFromDisk(
+    File file,
+    AppLogger logger,
+    OnlineOnlyChecker onlineOnly,
+    FileEvictor evictor,
+  ) async {
     final ioFile = io.File(file.path);
     if (!ioFile.existsSync()) {
+      // A legacy iCloud placeholder (`.foo.pdf.icloud`) stands in for a file
+      // that is not on disk. macOS 15+, the oldest this app runs on, no longer
+      // downloads those, so no later pass can read it either.
+      final stub = io.File(
+        p.join(p.dirname(file.path), '.${p.basename(file.path)}.icloud'),
+      );
+      if (stub.existsSync()) {
+        logger.w('Legacy iCloud placeholder, cannot download: ${file.path}');
+        return const FileBytes.permanent();
+      }
       logger.w("File not found: ${file.path}");
-      return null;
+      return const FileBytes.transient();
     }
-    return ioFile.readAsBytes();
+
+    // Checked at read time rather than taken from the scan: the provider may
+    // have evicted or downloaded the file since. Only a file that was
+    // online-only is evicted afterwards; one the user downloaded stays put.
+    if (!onlineOnly.isOnlineOnly(file.path)) {
+      return FileBytes.ok(await ioFile.readAsBytes());
+    }
+    final List<int> bytes;
+    try {
+      bytes = await ioFile.readAsBytes();
+    } on io.FileSystemException catch (e) {
+      // The provider could not download it (offline, signed out): try later.
+      logger.w('Could not download online-only file ${file.path}: $e');
+      return const FileBytes.transient();
+    }
+    if (!await evictor.evict(file.path)) {
+      logger.w('Could not return ${file.path} to online-only');
+    }
+    return FileBytes.ok(bytes);
   }
 
   static Future<FileBytes> _loadFromGDrive(

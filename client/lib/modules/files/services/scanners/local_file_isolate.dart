@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io' as io;
 import 'dart:isolate';
 import 'package:mydatastudio/file_sources/sync_folder/online_only_checker.dart';
+import 'package:mydatastudio/file_sources/sync_folder/sync_folder_archiver.dart';
+import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 import 'package:mydatastudio/helpers/content_hasher.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
@@ -443,6 +445,12 @@ class LocalFileIsolateWorker {
       }
     }
 
+    // A sync folder's archive copies, after a full scan only: a targeted scan
+    // (browsing one folder) must not start copying the whole collection.
+    if (col != null && path == rootPath) {
+      await _archiveSyncFolder(appDb, col, rootPath);
+    }
+
     // Wait for any remaining thumbnails to finish generating
     if (_activeThumbnailJobs > 0 || _thumbnailQueue.isNotEmpty) {
       logger?.i(
@@ -455,6 +463,41 @@ class LocalFileIsolateWorker {
     // return file count
     logger?.i('LocalScan: Exiting isolate with count $fileCount');
     Isolate.exit(receiverPort, fileCount);
+  }
+
+  /// Copies the collection's files into the archive when it has a content
+  /// policy that keeps local copies. Only sync-folder collections are given
+  /// one; a plain local folder already is the copy.
+  Future<void> _archiveSyncFolder(
+    AppDatabase appDb,
+    Collection col,
+    String rootPath,
+  ) async {
+    final dir = appDir;
+    if (dir == null || col.contentPolicy == null) return;
+    final policy = ContentPolicy.resolve(
+      json: col.contentPolicy,
+      downloadLocalCopy: col.downloadLocalCopy,
+    );
+    if (!policy.downloadsAnything) return;
+    try {
+      final archiver = SyncFolderArchiver(
+        archiveDir: p.join(dir, 'files', 'sync', col.name),
+        policy: policy,
+        recordCopy: (id, localPath) async {
+          await writeViaMain(receiverPort, 'fileLocalPath', {
+            'fileId': id,
+            'localPath': localPath,
+          });
+        },
+        logger: logger,
+      );
+      final files = await FileDesktopRepository(appDb).getLiveFiles(col.id);
+      final copied = await archiver.archiveAll(rootPath, files);
+      logger?.i('LocalScan: archived $copied file(s) from ${col.name}');
+    } catch (e) {
+      logger?.e('LocalScan: archive copy failed for ${col.name}: $e');
+    }
   }
 
   Future<Map<String, int>> _scanDir(

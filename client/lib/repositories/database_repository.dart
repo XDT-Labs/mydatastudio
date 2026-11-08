@@ -350,8 +350,6 @@ class DatabaseRepository {
   /// query* rather than skipped after it, which is the difference between a
   /// disconnected NAS costing nothing and it filling every batch of [limit]
   /// with files that cannot be read, starving the ones that can.
-  // Every file-reading queue below leaves out `is_online_only` rows: reading a
-  // sync folder's online-only file makes macOS download it (see File).
   Future<List<File>> getFilesWithMissingEmbeddings({
     int limit = 10,
     Set<String> excludeCollections = const {},
@@ -375,7 +373,6 @@ class DatabaseRepository {
         AND f.is_deleted = 0
         AND f.is_user_deleted = 0
         AND f.is_inline = 0
-        AND f.is_online_only = 0
         AND $collectionIndexed
         AND f.embedding_attempts < ?
         $exclusion
@@ -498,7 +495,6 @@ class DatabaseRepository {
       INNER JOIN collections c ON c.id = f.collection_id
       WHERE f.is_deleted = 0
         AND f.is_inline = 0
-        AND f.is_online_only = 0
         AND (
               ($extensionFilter
                AND f.content_type NOT LIKE 'application/vnd.google-apps.%')
@@ -594,7 +590,6 @@ class DatabaseRepository {
         AND f.is_deleted = 0
         AND f.is_user_deleted = 0
         AND f.is_inline = 0
-        AND f.is_online_only = 0
         AND $collectionIndexed
         AND f.description_attempts < ?
       LIMIT ?

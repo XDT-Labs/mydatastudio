@@ -121,9 +121,11 @@ From [files-sources-foundation.md](plans/files-sources-foundation.md):
       limit; the estimate before the first sync). Merged in #40.
 - [ ] **Sync-folder connector**: detect `~/Library/CloudStorage/*`, iCloud Drive and legacy
       folders; `providerHint`; **dataless (`SF_DATALESS`) detection via FFI `stat`**; legacy
-      `.icloud` stubs; the bounded "download for indexing" option. **Pending testing.** Detection,
-      `SF_DATALESS` and `.icloud` stubs merged in #40 and #42. Still to do: `providerHint`
-      and "download for indexing".
+      `.icloud` stubs; indexing online-only files. **Pending testing.** Detection,
+      `SF_DATALESS` and `.icloud` stubs merged in #40 and #42. Online-only files are now
+      indexed: each is read (which downloads it), then evicted again. Sync-folder cards offer
+      "Save a local copy of" (all ticked by default), which copies files into the archive and
+      evicts the ones that were online-only. Still to do: `providerHint`.
 - [x] **OAuth:** relax `DesktopOAuthManager`'s "secret required" check per provider (PKCE
       public clients). Merged in #40.
 - [x] **`files.content_hash`** + cross-source dedupe. Merged in #40; the EmbeddingGemma

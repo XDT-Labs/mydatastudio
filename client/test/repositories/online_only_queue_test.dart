@@ -9,12 +9,12 @@ import 'package:mydatastudio/modules/files/services/repositories/file_repository
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 
-/// An online-only file in a sync folder (iCloud, Dropbox, OneDrive...) is
-/// downloaded by macOS the moment anything reads it. The embedding, chunking
-/// and description queues all read the files they are handed, so an
-/// online-only file must not be handed to them: indexing would otherwise pull
-/// down the whole cloud library. Once the file is on disk, a rescan clears the
-/// flag and it is queued like any other.
+/// Search has to cover every file in a sync folder (iCloud, Dropbox,
+/// OneDrive...), including the online-only ones macOS has not downloaded.
+/// The embedding, chunking and description queues must therefore hand those
+/// files out like any other; the loader downloads each one and makes it
+/// online-only again (see FileBytesLoader). A queue that filtered them out
+/// would leave most of a large cloud library unsearchable.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -70,43 +70,40 @@ void main() {
   Future<void> scan(List<File> files) =>
       FileDesktopRepository(db).upsertAll(files);
 
-  test('online-only images are left out of the embedding queue', () async {
+  test('online-only images are queued for embedding', () async {
     await scan([
       file('local.jpg', 'image/jpeg', onlineOnly: false),
       file('cloud.jpg', 'image/jpeg', onlineOnly: true),
     ]);
     final queued = await DatabaseRepository(db).getFilesWithMissingEmbeddings();
-    expect(queued.map((f) => f.name), ['local.jpg']);
+    expect(
+      queued.map((f) => f.name),
+      unorderedEquals(['local.jpg', 'cloud.jpg']),
+    );
   });
 
-  test('online-only images are left out of the description queue', () async {
+  test('online-only images are queued for descriptions', () async {
     await scan([
       file('local.jpg', 'image/jpeg', onlineOnly: false),
       file('cloud.jpg', 'image/jpeg', onlineOnly: true),
     ]);
     final queued =
         await DatabaseRepository(db).getFilesWithMissingDescriptions();
-    expect(queued.map((f) => f.name), ['local.jpg']);
+    expect(
+      queued.map((f) => f.name),
+      unorderedEquals(['local.jpg', 'cloud.jpg']),
+    );
   });
 
-  test('online-only documents are left out of the chunk queue', () async {
+  test('online-only documents are queued for chunking', () async {
     await scan([
       file('local.pdf', 'application/pdf', onlineOnly: false),
       file('cloud.pdf', 'application/pdf', onlineOnly: true),
     ]);
     final queued = await DatabaseRepository(db).getFilesWithMissingChunks();
-    expect(queued.map((f) => f.name), ['local.pdf']);
-  });
-
-  test('a file downloaded since the last scan is queued again', () async {
-    await scan([file('photo.jpg', 'image/jpeg', onlineOnly: true)]);
     expect(
-      await DatabaseRepository(db).getFilesWithMissingEmbeddings(),
-      isEmpty,
+      queued.map((f) => f.name),
+      unorderedEquals(['local.pdf', 'cloud.pdf']),
     );
-
-    await scan([file('photo.jpg', 'image/jpeg', onlineOnly: false)]);
-    final queued = await DatabaseRepository(db).getFilesWithMissingEmbeddings();
-    expect(queued.map((f) => f.name), ['photo.jpg']);
   });
 }

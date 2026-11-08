@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/file_sources/sync_folder/sync_folder_detector.dart';
 import 'package:mydatastudio/modules/files/pages/new_file_collection_page.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/content_policy_controls.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/file_source_catalog.dart';
 
 class _FakeDetector extends SyncFolderDetector {
@@ -281,6 +282,31 @@ void main() {
         find.byType(TextFormField),
       );
       expect(fields.map((f) => f.controller!.text), ['', '']);
+    });
+  });
+
+  // A sync folder is not a backup on its own, so its form offers archive
+  // copies, all ticked by default. A plain folder already is the copy.
+  group('archive copies', () {
+    testWidgets('a found sync folder offers them, everything ticked', (
+      tester,
+    ) async {
+      await pump(tester, found: [_dropboxFolder]);
+      await tester.tap(_tile('Dropbox folder'));
+      await tester.pump();
+      expect(find.byType(ContentPolicyControls), findsOneWidget);
+      final boxes = tester.widgetList<CheckboxListTile>(
+        find.byType(CheckboxListTile),
+      );
+      expect(boxes, isNotEmpty);
+      expect(boxes.every((b) => b.value == true), isTrue);
+    });
+
+    testWidgets('a plain folder does not', (tester) async {
+      await pump(tester);
+      await tester.tap(_tile('Any folder'));
+      await tester.pump();
+      expect(find.byType(ContentPolicyControls), findsNothing);
     });
   });
 }

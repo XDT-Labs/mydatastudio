@@ -11,6 +11,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/file_sources/sync_folder/file_evictor.dart';
+import 'package:mydatastudio/file_sources/sync_folder/online_only_checker.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/file_bytes_loader.dart';
@@ -44,6 +46,27 @@ class _FakeDrive implements CloudFileApi {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// Reports the paths in [paths] as online-only.
+class _FakeOnlineOnly implements OnlineOnlyChecker {
+  final Set<String> paths;
+  _FakeOnlineOnly(this.paths);
+
+  @override
+  bool isOnlineOnly(String path) => paths.contains(path);
+}
+
+class _FakeEvictor implements FileEvictor {
+  final bool succeeds;
+  final List<String> evicted = [];
+  _FakeEvictor({this.succeeds = true});
+
+  @override
+  Future<bool> evict(String path) async {
+    evicted.add(path);
+    return succeeds;
+  }
 }
 
 void main() {
@@ -306,5 +329,114 @@ void main() {
         expect(r.permanent, isFalse);
       },
     );
+  });
+
+  // Search has to cover a whole sync folder, but reading an online-only file
+  // makes macOS download it. Indexing a large iCloud or Dropbox library must
+  // not leave all of it on the user's disk, so each online-only file is
+  // evicted again once its bytes are read.
+  group('sync-folder files', () {
+    late io.Directory dir;
+    final logger = AppLogger(null);
+    final repo = _MockRepo();
+
+    setUp(() => dir = io.Directory.systemTemp.createTempSync('mds_sync_'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    File syncFile(String path) => File(
+      id: 'icloud:x',
+      name: 'photo.jpg',
+      path: path,
+      parent: '',
+      dateCreated: DateTime(2026),
+      dateLastModified: DateTime(2026),
+      collectionId: 'icloud',
+      contentType: 'image/jpeg',
+      size: 3,
+      isDeleted: false,
+    );
+
+    String write(String name) {
+      final path = '${dir.path}/$name';
+      io.File(path).writeAsBytesSync([7, 8, 9]);
+      return path;
+    }
+
+    test('an online-only file is read, then made online-only again', () async {
+      final path = write('photo.jpg');
+      final evictor = _FakeEvictor();
+      // The row says "on disk" (scanned before the provider evicted it): the
+      // read-time check is what decides.
+      final r = await FileBytesLoader.loadDetailed(
+        syncFile(path),
+        repo,
+        logger,
+        onlineOnly: _FakeOnlineOnly({path}),
+        evictor: evictor,
+      );
+      expect(r.bytes, [7, 8, 9]);
+      expect(evictor.evicted, [path]);
+    });
+
+    test('a file the user downloaded is never evicted', () async {
+      final path = write('photo.jpg');
+      final evictor = _FakeEvictor();
+      final r = await FileBytesLoader.loadDetailed(
+        syncFile(path),
+        repo,
+        logger,
+        onlineOnly: _FakeOnlineOnly({}),
+        evictor: evictor,
+      );
+      expect(r.bytes, [7, 8, 9]);
+      expect(evictor.evicted, isEmpty);
+    });
+
+    test('a failed eviction still indexes the file', () async {
+      final path = write('photo.jpg');
+      final r = await FileBytesLoader.loadDetailed(
+        syncFile(path),
+        repo,
+        logger,
+        onlineOnly: _FakeOnlineOnly({path}),
+        evictor: _FakeEvictor(succeeds: false),
+      );
+      expect(r.bytes, [7, 8, 9]);
+    });
+
+    test(
+      'a download that fails is transient, and nothing is evicted',
+      () async {
+        // A directory stands in for a file the provider cannot download
+        // (offline, signed out): reading it throws FileSystemException.
+        final path = '${dir.path}/offline.jpg';
+        io.Directory(path).createSync();
+        final evictor = _FakeEvictor();
+        final r = await FileBytesLoader.loadDetailed(
+          syncFile(path),
+          repo,
+          logger,
+          onlineOnly: _FakeOnlineOnly({path}),
+          evictor: evictor,
+        );
+        expect(r.ok, isFalse);
+        expect(r.permanent, isFalse);
+        expect(evictor.evicted, isEmpty);
+      },
+    );
+
+    test('a legacy iCloud placeholder is permanent', () async {
+      // macOS 15+ cannot download a `.photo.jpg.icloud` stub, so retrying it
+      // would only hold up the rest of the folder.
+      write('.photo.jpg.icloud');
+      final r = await FileBytesLoader.loadDetailed(
+        syncFile('${dir.path}/photo.jpg'),
+        repo,
+        logger,
+        onlineOnly: _FakeOnlineOnly({}),
+        evictor: _FakeEvictor(),
+      );
+      expect(r.permanent, isTrue);
+    });
   });
 }

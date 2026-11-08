@@ -439,6 +439,16 @@ class FileDesktopRepository {
     return files;
   }
 
+  /// Files of a collection that are still at the source and not deleted by
+  /// the user.
+  Future<List<File>> getLiveFiles(String collectionId) async {
+    final rows = await db.select(
+      "SELECT * FROM files WHERE collection_id = ? AND is_deleted = 0 AND is_user_deleted = 0 AND source_deleted_date IS NULL",
+      [collectionId],
+    );
+    return rows.map((r) => File.fromDbMap(r)).toList();
+  }
+
   Future<List<File>> getFilesToDownload(String collectionId) async {
     final rows = await db.select(
       "SELECT * FROM files WHERE collection_id = ? AND local_path IS NULL AND is_deleted = 0 AND is_user_deleted = 0 AND source_deleted_date IS NULL",

@@ -1,7 +1,7 @@
 ---
 status: in-progress
 adr: none
-remaining: [download-for-indexing, full-disk-access-check]
+remaining: [full-disk-access-check]
 ---
 
 # Plan: iCloud Drive (sync folder only)
@@ -17,17 +17,18 @@ route is the folder macOS already syncs: the
   it, appear inside iCloud Drive.
 - **Online-only files are the norm.** Since macOS Sonoma, iCloud Drive uses **dataless files**
   (File Provider), and "Optimise Mac Storage" evicts them. So:
-  - detect `SF_DATALESS` via the FFI `stat` and index metadata only;
+  - detect `SF_DATALESS` via the FFI `stat`; the scan reads metadata only;
   - handle **legacy stubs** (`.<name>.<ext>.icloud` hidden files) on older systems, shown under
-    their real name;
-  - offer the optional bounded "download for indexing", explaining that it uses disk space.
+    their real name (metadata only: macOS 15+ can't download them);
+  - index online-only files by reading each one and evicting it again, and keep archive copies
+    per the card's "Save a local copy of" choice (see the foundation plan).
 - **Permissions:** the app may need the user to grant access to `~/Library/Mobile Documents`
   (a folder picker grant, or Full Disk Access if sandboxed) **(verify for our entitlements)**.
   Detect a denial and show the steps.
 - **Photos:** iCloud **Photos** is a different service (the Photos library, not iCloud Drive).
   It's out of scope here. Users can point a local collection at an exported folder.
-- **Card copy:** "iCloud Drive syncs through macOS. We index what's on this Mac. Online-only files
-  are listed but not downloaded unless you choose."
+- **Card copy:** "iCloud Drive syncs through macOS. Online-only files are downloaded briefly to
+  index and archive them, then returned to online-only."
 
 ## Done when
 
