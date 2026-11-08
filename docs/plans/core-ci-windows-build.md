@@ -42,7 +42,13 @@ and the GPU default.
 - [x] **installer:** **Inno Setup** (decided 2026-11-07): an unsigned MSIX won't install at
   all, an unsigned `.exe` installs after a SmartScreen warning. Per-user install, no admin.
   Also a portable zip.
-- [ ] **gpu-default:** decide whether to ship a Vulkan or CUDA aiserver as well.
+- [ ] **gpu-default:** **Vulkan** (decided 2026-11-08), one build for every GPU vendor and
+  the CPU. CI installs LunarG's SDK 1.4.363.1 (`install_vulkan_sdk.sh`) and builds
+  llama.cpp with `-DGGML_VULKAN=on`; `main.spec` bundles `vulkan-1.dll` next to ggml-vulkan so
+  a PC with no GPU driver still loads it and falls back to the CPU. Chat loads with
+  `n_gpu_layers=-1` and retries on the CPU if that fails. Embeddings stay on CPU torch
+  (PyPI torch has no GPU build for Windows). The smoke test now loads a 1 MB GGUF on the
+  GPU-less runner. Open until a tag run passes; not tried on a real GPU.
 - [ ] **signing:** not started; needs a decision and secrets from the owner.
 - [ ] **desktop-check:** the "Done when" checks on Windows 11.
 - Sync folders: `SyncFolderDetector` falls back to `USERPROFILE` (Windows has no `HOME`), so

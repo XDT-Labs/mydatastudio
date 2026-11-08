@@ -174,6 +174,32 @@ class TestModelManager:
         # Text-only unless an mmproj path is supplied.
         assert init_kwargs["chat_handler"] is None
 
+    # With Vulkan on Windows and Linux, n_gpu_layers=-1 offloads to whatever GPU
+    # is there, and a small integrated one can't hold a 12B model. That must
+    # cost speed, not the chat feature: the CPU could always load it before.
+    @patch('llama_cpp.Llama')
+    def test_load_local_model_retries_on_cpu_when_the_gpu_load_fails(self, mock_llamacpp):
+        mock_instance = Mock()
+        mock_llamacpp.side_effect = [
+            ValueError("Failed to load model from file: /fake/path/model.gguf"),
+            mock_instance,
+        ]
+
+        result = load_local_model("bartowski/gemma", "/fake/path/model.gguf")
+
+        assert result == mock_instance
+        layers = [c.kwargs["n_gpu_layers"] for c in mock_llamacpp.call_args_list]
+        assert layers == [-1, 0]
+
+    @patch('llama_cpp.Llama')
+    def test_load_local_model_reports_a_cpu_failure(self, mock_llamacpp):
+        # A file that can't load anywhere is still an error, not a silent retry loop.
+        mock_llamacpp.side_effect = ValueError("Failed to load model from file")
+
+        with pytest.raises(ValueError):
+            load_local_model("bartowski/gemma", "/fake/path/model.gguf")
+        assert mock_llamacpp.call_count == 2
+
     @patch('llama_cpp.Llama')
     def test_load_local_model_sizes_sliding_window_cache_to_the_window(self, mock_llamacpp):
         """swa_full must be False.

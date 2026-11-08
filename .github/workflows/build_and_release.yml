@@ -278,10 +278,16 @@ jobs:
       matrix:
         include:
           # 22.04 on both, because the binary only runs on this glibc or newer.
+          # Vulkan (GPU) on x64 only: LunarG publishes no arm64 Linux SDK and
+          # 22.04 has no glslc package, so arm64 stays CPU.
           - arch: x64
             runner: ubuntu-22.04
+            vulkan: true
+            cmake_args: "-DGGML_NATIVE=off -DGGML_VULKAN=on"
           - arch: arm64
             runner: ubuntu-22.04-arm
+            vulkan: false
+            cmake_args: "-DGGML_NATIVE=off"
 
     steps:
       - name: Checkout Code
@@ -316,10 +322,14 @@ jobs:
             libgtk-3-dev liblzma-dev libstdc++-12-dev libmpv-dev mpv zip unzip file curl xvfb \
             patchelf desktop-file-utils
 
+      - name: Install Vulkan SDK
+        if: matrix.vulkan
+        run: .github/scripts/install_vulkan_sdk.sh
+
       - name: Build Python Service
         run: make build-python
         env:
-          CMAKE_ARGS: "-DGGML_NATIVE=off"
+          CMAKE_ARGS: ${{ matrix.cmake_args }}
 
       - name: Clean up Python build to free space
         run: |
@@ -344,16 +354,22 @@ jobs:
         run: |
           .github/scripts/build_appimage.sh "client/build/linux/${{ matrix.arch }}/release/bundle" AppDir "$APPIMAGE"
 
+      - name: Fetch Smoke-Test Model
+        run: .github/scripts/fetch_smoke_model.sh smoke/tiny.gguf
+
       - name: Smoke Test
         timeout-minutes: 10
+        env:
+          SMOKE_GGUF: smoke/tiny.gguf
         run: .github/scripts/linux_smoke_test.sh AppDir
 
       # A newer distro than the build machine, with only what the app leaves to
-      # the system. This is what catches a library that should have been bundled.
+      # the system. This is what catches a library that should have been bundled
+      # (the Vulkan loader too: nothing installs one here).
       - name: Smoke Test on Clean Ubuntu 24.04
         timeout-minutes: 15
         run: |
-          docker run --rm -v "$PWD:/repo:ro" -w /repo ubuntu:24.04 bash -c '
+          docker run --rm -e SMOKE_GGUF=smoke/tiny.gguf -v "$PWD:/repo:ro" -w /repo ubuntu:24.04 bash -c '
             set -e
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq
@@ -424,10 +440,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install Vulkan SDK
+        run: .github/scripts/install_vulkan_sdk.sh
+
       - name: Build Python Service
         run: make build-python
         env:
-          CMAKE_ARGS: "-DGGML_NATIVE=off"
+          CMAKE_ARGS: "-DGGML_NATIVE=off -DGGML_VULKAN=on"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -476,11 +495,15 @@ jobs:
           if ($proc.ExitCode -ne 0) { throw "installer exited with $($proc.ExitCode)" }
           if (-not (Test-Path "$env:RUNNER_TEMP\install\mydatastudio.exe")) { throw 'mydatastudio.exe was not installed' }
 
+      - name: Fetch Smoke-Test Model
+        run: .github/scripts/fetch_smoke_model.sh smoke/tiny.gguf
+
       - name: Smoke Test
         timeout-minutes: 10
         shell: pwsh
         env:
           REALM: ${{ steps.realm.outputs.realm }}
+          SMOKE_GGUF: smoke/tiny.gguf
         run: .github/scripts/windows_smoke_test.ps1 "$env:RUNNER_TEMP\install" "$env:REALM"
 
       - name: Package Portable Zip

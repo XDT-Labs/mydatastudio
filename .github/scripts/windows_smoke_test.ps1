@@ -36,6 +36,14 @@ Expand-Archive -Path $zip -DestinationPath "$work\aiserver" -Force
 $exe = "$work\aiserver\aiserver.exe"
 if (-not (Test-Path $exe)) { Fail 'aiserver.exe is not at the root of the zip' }
 
+# Placed as the default model, so the server loads it at startup with
+# n_gpu_layers=-1: with no GPU here, that proves the GPU build falls back.
+if ($env:SMOKE_GGUF) {
+  $modelDir = "$work\models\ggml-org-gemma-4-12B-it-GGUF-local"
+  New-Item -ItemType Directory -Path $modelDir -Force | Out-Null
+  Copy-Item $env:SMOKE_GGUF "$modelDir\gemma-4-12B-it-Q4_0.gguf"
+}
+
 $env:AISERVER_TOKEN = 'smoke'
 $env:APP_SUPPORT_DIR = $work
 $env:AICHAT_MODELS_DIR = "$work\models"
@@ -52,6 +60,12 @@ for ($i = 0; $i -lt 180 -and -not $url; $i++) {
 }
 if (-not $url) { Fail 'aiserver printed no URL' $log }
 Write-Host "aiserver at $url"
+
+if ($env:SMOKE_GGUF) {
+  $text = (Get-Content $log, "$work\aiserver.err.log" -Raw -ErrorAction SilentlyContinue) -join "`n"
+  $text -split "`n" | Select-String -Pattern 'ggml_vulkan|loaded successfully|Failed to load|retrying on the CPU' | ForEach-Object { Write-Host $_ }
+  if ($text -notmatch "Model 'gemma4:12b' loaded successfully") { Fail "the aiserver didn't load the test model" "$work\aiserver.err.log" }
+}
 
 $status = Status 'GET' "$url/skills" $null
 if ($status -ne '401') { Fail "/skills without a token returned $status, expected 401" $log }

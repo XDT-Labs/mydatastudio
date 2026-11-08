@@ -16,11 +16,12 @@ jobs:
         include:
           - os: macos-latest
             cmake_args: '-DGGML_METAL=on -DGGML_NATIVE=off'
+          # Vulkan (GPU) on Windows and Linux; see install_vulkan_sdk.sh.
           - os: windows-latest
-            cmake_args: '-DGGML_NATIVE=off'
+            cmake_args: '-DGGML_NATIVE=off -DGGML_VULKAN=on'
           # The oldest supported Ubuntu, so the binary runs on newer glibc too.
           - os: ubuntu-22.04
-            cmake_args: '-DGGML_NATIVE=off'
+            cmake_args: '-DGGML_NATIVE=off -DGGML_VULKAN=on'
 
     steps:
     - uses: actions/checkout@v4
@@ -42,6 +43,11 @@ jobs:
     - name: Install Build Tools (macOS)
       if: matrix.os == 'macos-latest'
       run: brew install cmake ninja
+
+    - name: Install Vulkan SDK
+      if: matrix.os != 'macos-latest'
+      shell: bash
+      run: .github/scripts/install_vulkan_sdk.sh
 
     # CMake and MSVC are on the image already; make may not be.
     - name: Install Build Tools (Windows)

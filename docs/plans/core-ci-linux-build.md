@@ -135,6 +135,11 @@ bundle.
      of CUDA libraries and leaves the lock and the macOS build alone. The zip is 465 MB (1.3 GB
      unpacked). Vulkan and CUDA variants aren't built. `pubspec.prod.yaml` now bundles `app/`,
      which holds only the current platform's zip.
+   - **Vulkan (2026-11-08):** x64 builds llama.cpp with `-DGGML_VULKAN=on` against LunarG's SDK
+     and bundles `libvulkan.so.1` in `llama_cpp/lib`, so it falls back to the CPU on machines
+     with no Vulkan driver. **arm64 stays CPU:** LunarG ships no arm64 Linux SDK, and Ubuntu
+     22.04 (the build base, for glibc reach) has no `glslc` package. Building glslc from source
+     would lift this. Embeddings stay on CPU torch.
    - **Checked on arm64 (Ubuntu 22.04 build):** on clean 22.04 and 24.04 images the binary starts,
      enforces the token and stops on SIGTERM. On clean 22.04, thumbnails and a real GGUF chat
      completion (CPU) work. In the Linux app bundle, the production `PythonManager` finds, unzips

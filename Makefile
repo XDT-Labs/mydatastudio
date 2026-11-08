@@ -93,7 +93,9 @@ models:
 .PHONY: build-python
 ifeq ($(OS),Windows_NT)
 # Windows (Git Bash): PyPI's torch is CPU-only there, so the lock installs as
-# is. llama-cpp-python has no Windows wheel and compiles with MSVC (CPU only).
+# is. llama-cpp-python has no Windows wheel and compiles with MSVC: CPU by
+# default, Vulkan (GPU) when CMAKE_ARGS adds -DGGML_VULKAN=on with the SDK
+# installed, as CI does (.github/scripts/install_vulkan_sdk.sh).
 # Zipped with Python because Git Bash has no zip; ZIP64 is handled.
 build-python:
 	@echo "--- 🐍 Building Python aiserver service (Windows, CPU) ---"
