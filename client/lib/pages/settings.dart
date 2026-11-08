@@ -1,14 +1,18 @@
 import 'dart:async';
 import 'package:material_ui/material_ui.dart';
+import 'package:mydatastudio/pages/google_oauth_setup_guide.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/provider.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, this.expandGoogleSetup = false});
+
+  /// Opens the Google OAuth setup steps, for users sent here from the Add
+  /// Source page (`/settings?setup=google`).
+  final bool expandGoogleSetup;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -202,35 +206,8 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(height: 16),
             if (service == 'google') ...[
-              const Text(
-                'To connect to Google services, you must provide your own OAuth Client ID and Client Secret. Ensure your OAuth consent screen is configured with the following scopes:\n'
-                '• https://www.googleapis.com/auth/userinfo.email\n'
-                '• https://www.googleapis.com/auth/userinfo.profile\n'
-                '• https://www.googleapis.com/auth/drive\n'
-                '• https://www.googleapis.com/auth/user.emails.read\n'
-                '• https://www.googleapis.com/auth/gmail.readonly\n\n'
-                'Note: Ensure that the Google People API and Google Drive API are enabled in your Google Cloud Console project.',
-                style: TextStyle(fontSize: 14, height: 1.4),
-              ),
-              const SizedBox(height: 8),
-              Semantics(
-                link: true,
-                child: InkWell(
-                  onTap:
-                      () => launchUrl(
-                        Uri.parse(
-                          'https://console.cloud.google.com/apis/credentials',
-                        ),
-                      ),
-                  child: const Text(
-                    'Get Credentials from Google Cloud Console',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.blue,
-                      decoration: TextDecoration.underline,
-                    ),
-                  ),
-                ),
+              GoogleOAuthSetupGuide(
+                initiallyExpanded: widget.expandGoogleSetup,
               ),
               const SizedBox(height: 16),
             ],

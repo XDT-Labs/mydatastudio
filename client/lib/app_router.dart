@@ -104,10 +104,13 @@ class AppRouter {
           GoRoute(
             path: '/settings',
             pageBuilder: (BuildContext context, GoRouterState state) {
-              return const RoutePage(
+              return RoutePage(
                 body: NavigationWrapper(
-                  body: SettingsPage(),
-                  drawer: SettingsDrawer(),
+                  body: SettingsPage(
+                    expandGoogleSetup:
+                        state.uri.queryParameters['setup'] == 'google',
+                  ),
+                  drawer: const SettingsDrawer(),
                 ),
               );
             },

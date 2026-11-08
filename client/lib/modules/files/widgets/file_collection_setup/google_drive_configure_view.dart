@@ -1,3 +1,4 @@
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/cloud_account_branding.dart';
@@ -115,6 +116,17 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
             height: 1.5,
           ),
         ),
+        if (b.setupGuideRoute case final route?) ...[
+          const SizedBox(height: 12),
+          Center(
+            child: OutlinedButton.icon(
+              key: const ValueKey('setup-guide-link'),
+              onPressed: () => GoRouter.of(context).go(route),
+              icon: const Icon(Icons.menu_book_outlined),
+              label: const Text('Show me how to create one'),
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         Semantics(
           link: true,

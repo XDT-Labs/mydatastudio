@@ -19,6 +19,7 @@ class CloudAccountBranding {
     required this.credentialsUrl,
     required this.credentialsLinkText,
     required this.configureIntro,
+    this.setupGuideRoute,
     this.idLabel = 'Client ID',
   });
 
@@ -44,6 +45,10 @@ class CloudAccountBranding {
   final String credentialsLinkText;
   final String configureIntro;
 
+  /// In-app page with step-by-step instructions for creating the OAuth
+  /// client, when there is one.
+  final String? setupGuideRoute;
+
   /// Label of the OAuth client id field ("App key" for Dropbox).
   final String idLabel;
 
@@ -64,6 +69,7 @@ class CloudAccountBranding {
     credentialsLinkText: 'Get Credentials from Google Cloud Console',
     configureIntro:
         'To connect to Google Drive, you must provide your own OAuth Client ID and Secret.',
+    setupGuideRoute: '/settings?setup=google',
   );
 
   static final dropbox = CloudAccountBranding(
