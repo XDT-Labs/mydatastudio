@@ -88,6 +88,17 @@ class CloudCursorExpiredException implements Exception {
   String toString() => 'CloudCursorExpiredException: $message';
 }
 
+/// The item no longer exists at the provider. Retrying can't help, unlike a
+/// network or auth failure.
+class CloudFileNotFoundException implements Exception {
+  final String id;
+
+  const CloudFileNotFoundException(this.id);
+
+  @override
+  String toString() => 'CloudFileNotFoundException: $id';
+}
+
 /// Thrown by a [CloudFileApiFactory] when credentials can't be refreshed.
 /// [needsReAuth] true means the refresh token is dead and the user must
 /// reconnect (the scanner flags the collection); false is a transient failure.
@@ -154,6 +165,7 @@ abstract class CloudFileApi {
   bool isDownloadableMimeType(String mimeType);
 
   /// Streams the item's bytes to [destPath] (parent directory already exists).
+  /// Throws [CloudFileNotFoundException] when the item is gone.
   Future<void> download(String id, String destPath);
 }
 

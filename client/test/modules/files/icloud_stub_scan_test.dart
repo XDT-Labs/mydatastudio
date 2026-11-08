@@ -2,6 +2,7 @@ import 'dart:io' as io;
 import 'dart:isolate';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/file_sources/sync_folder/online_only_checker.dart';
 import 'package:mydatastudio/modules/files/services/scanners/local_file_isolate.dart';
 import 'package:path/path.dart' as p;
@@ -74,6 +75,53 @@ void main() {
     expect(r['contentReadable'], isFalse);
     expect(r['file'].contentHash, isNull);
   });
+
+  test('a dataless file is stored as online-only', () async {
+    // The embedding queues read every file they are handed, and reading a
+    // dataless file downloads it. The row flag is what keeps it out of them.
+    final dataless = LocalFileIsolateWorker(
+      null,
+      port.sendPort,
+      root.path,
+      'test.db',
+      port.sendPort,
+      onlineOnlyChecker: _AllOnlineOnly(),
+    );
+    final f = touch('notes.pdf');
+    final first = await dataless.validateFileForTest('c1', f, root.path);
+    expect(first['file'].isOnlineOnly, isTrue);
+
+    // An unchanged file rescans through the cache-hit path, which builds its
+    // own row: it must carry the current state too, or a file evicted after
+    // its first scan would never be flagged.
+    final cached = first['file'] as File;
+    final again = await dataless.validateFileForTest(
+      'c1',
+      f,
+      root.path,
+      metadataCache: {cached.id: cached..isOnlineOnly = false},
+    );
+    expect(again['isCacheHit'], isTrue);
+    expect(again['file'].isOnlineOnly, isTrue);
+  });
+
+  test(
+    'a file that is on disk is not online-only, even from the cache',
+    () async {
+      final f = touch('notes.pdf');
+      final first = await worker.validateFileForTest('c1', f, root.path);
+      expect(first['file'].isOnlineOnly, isFalse);
+      // Downloaded since the last scan: the cached row still says online-only.
+      final cached = (first['file'] as File)..isOnlineOnly = true;
+      final again = await worker.validateFileForTest(
+        'c1',
+        f,
+        root.path,
+        metadataCache: {cached.id: cached},
+      );
+      expect(again['file'].isOnlineOnly, isFalse);
+    },
+  );
 
   test('a local image stays readable', () async {
     final r = await worker.validateFileForTest(

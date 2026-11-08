@@ -441,8 +441,16 @@ void main() {
       expect(plainRequests, isEmpty);
     });
 
-    test('a failed download throws', () {
+    test('a file that is gone is CloudFileNotFoundException', () {
       final a = api((r) async => _json({'error': {}}, 404));
+      expect(
+        a.download('A', '/tmp/never'),
+        throwsA(isA<CloudFileNotFoundException>()),
+      );
+    });
+
+    test('a failed download throws', () {
+      final a = api((r) async => _json({'error': {}}, 500));
       expect(
         a.download('A', '/tmp/never'),
         throwsA(isA<OneDriveApiException>()),

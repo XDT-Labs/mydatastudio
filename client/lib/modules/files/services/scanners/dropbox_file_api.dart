@@ -253,12 +253,20 @@ class DropboxFileApi
 
   @override
   Future<void> download(String id, String destPath) async {
-    final response = await _send(
-      () =>
-          http.Request('POST', Uri.parse('$_content/files/download'))
-            ..headers['Dropbox-API-Arg'] = jsonEncode({'path': id}),
-      stream: true,
-    );
+    final http.BaseResponse response;
+    try {
+      response = await _send(
+        () =>
+            http.Request('POST', Uri.parse('$_content/files/download'))
+              ..headers['Dropbox-API-Arg'] = jsonEncode({'path': id}),
+        stream: true,
+      );
+    } on DropboxApiException catch (e) {
+      if (e.status == 409 && e.message.contains('not_found')) {
+        throw CloudFileNotFoundException(id);
+      }
+      rethrow;
+    }
     final sink = io.File(destPath).openWrite();
     try {
       await (response as http.StreamedResponse).stream.pipe(sink);

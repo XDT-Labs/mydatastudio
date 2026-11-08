@@ -311,8 +311,8 @@ class FileDesktopRepository {
           "INSERT INTO files (id, name, path, parent, date_created, date_last_modified, "
           "last_scanned_date, collection_id, content_type, size, is_deleted, thumbnail, "
           "download_url, email_id, latitude, longitude, local_path, content_id, is_inline, "
-          "is_hidden, is_user_deleted, content_hash) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+          "is_hidden, is_user_deleted, content_hash, is_online_only) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
           // is_hidden and is_user_deleted are absent from the DO UPDATE clause
           // on purpose. The
           // importer sets it once to keep spacer GIFs and banners out of the
@@ -347,6 +347,7 @@ class FileDesktopRepository {
           // row it loaded without the hash, or a source that cannot supply
           // one) must not erase a hash an earlier scan computed.
           "content_hash = COALESCE(excluded.content_hash, files.content_hash), "
+          "is_online_only = excluded.is_online_only, "
           "is_deleted = 0, "
           // Back at the source (restored from trash, or moved back in).
           "source_deleted_date = NULL",
@@ -373,6 +374,7 @@ class FileDesktopRepository {
             f.isHidden ? 1 : 0,
             f.isUserDeleted ? 1 : 0,
             f.contentHash,
+            f.isOnlineOnly ? 1 : 0,
           ],
         );
       }

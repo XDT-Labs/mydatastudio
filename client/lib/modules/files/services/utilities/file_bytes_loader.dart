@@ -7,7 +7,10 @@ import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart'
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/modules/files/services/scanners/dropbox_file_api.dart';
+import 'package:mydatastudio/modules/files/services/scanners/onedrive_file_api.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 
 /// The outcome of a byte load, which is not the same question as "did I get
 /// bytes".
@@ -53,7 +56,8 @@ class FileBytes {
   bool get ok => bytes != null;
 }
 
-/// Loads the raw bytes of [file] from local disk or Google Drive.
+/// Loads the raw bytes of [file]: its downloaded local copy when there is one,
+/// otherwise local disk, Google Drive, Dropbox or OneDrive.
 ///
 /// Shared by the embedding and description isolates so both read a file's
 /// contents the same way instead of duplicating GDrive token-refresh and
@@ -70,11 +74,27 @@ class FileBytesLoader {
     AppLogger logger,
   ) async => (await loadDetailed(file, repo, logger)).bytes;
 
+  /// Adapters for the cloud schemes whose bytes come through [CloudFileApi],
+  /// keyed by `files.path` scheme.
+  static final Map<String, CloudFileApiFactory> defaultCloudApis = {
+    'dropbox': DropboxFileApi.create,
+    'onedrive': OneDriveFileApi.create,
+  };
+
+  /// [cloudApis] replaces [defaultCloudApis], for tests.
   static Future<FileBytes> loadDetailed(
     File file,
     DatabaseRepository repo,
-    AppLogger logger,
-  ) async {
+    AppLogger logger, {
+    Map<String, CloudFileApiFactory>? cloudApis,
+  }) async {
+    // A cloud file the user chose to keep a copy of is read from that copy:
+    // no network, no token, and the same bytes the provider would send.
+    final localPath = file.localPath;
+    if (localPath != null && io.File(localPath).existsSync()) {
+      return FileBytes.ok(await io.File(localPath).readAsBytes());
+    }
+
     // Decided before any network call, because this is a property of the
     // format rather than of the request. Google Docs, Sheets and Slides are
     // not stored as files at all; Drive's media endpoint refuses them by
@@ -91,6 +111,13 @@ class FileBytesLoader {
     }
     if (file.path.startsWith('gdrive://')) {
       return _loadFromGDrive(file, repo, logger, export: export);
+    }
+    final scheme = file.path.split('://');
+    if (scheme.length == 2) {
+      final factory = (cloudApis ?? defaultCloudApis)[scheme.first];
+      if (factory != null) {
+        return _loadFromCloudApi(file, scheme.last, factory, repo, logger);
+      }
     }
     final bytes = await _loadFromDisk(file, logger);
     return bytes == null ? const FileBytes.transient() : FileBytes.ok(bytes);
@@ -253,6 +280,59 @@ class FileBytesLoader {
       }
       logger.e("Error downloading GDrive file: $e");
       return const FileBytes.transient();
+    }
+  }
+
+  /// Fetches a Dropbox or OneDrive file through its [CloudFileApi] into a
+  /// temporary file and reads it back. The access token is refreshed in
+  /// memory by the factory, as the scanner does.
+  static Future<FileBytes> _loadFromCloudApi(
+    File file,
+    String remoteId,
+    CloudFileApiFactory factory,
+    DatabaseRepository repo,
+    AppLogger logger,
+  ) async {
+    final collection = await repo.getCollection(file.collectionId);
+    final accessToken = collection?.accessToken;
+    final refreshToken = collection?.refreshToken;
+    if (collection == null || accessToken == null || refreshToken == null) {
+      logger.w('No credentials for ${file.path}; skipping for now');
+      return const FileBytes.transient();
+    }
+
+    io.Directory? tmp;
+    try {
+      final api = await factory(
+        CloudFileApiCredentials(
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+          expiry: collection.expiration,
+          db: repo.db,
+        ),
+      );
+      tmp = await io.Directory.systemTemp.createTemp('mds_fetch_');
+      final dest = io.File('${tmp.path}/content');
+      await api
+          .download(remoteId, dest.path)
+          .timeout(const Duration(minutes: 5));
+      return FileBytes.ok(await dest.readAsBytes());
+    } on CloudFileNotFoundException {
+      // Gone at the source; the next sync marks the row deleted. Retrying
+      // can't help, and a transient result would back the collection off.
+      logger.w('${file.name} no longer exists at the provider');
+      return const FileBytes.permanent();
+    } on CloudAuthException catch (e) {
+      logger.e('Token refresh failed for ${file.path}: $e');
+      if (e.needsReAuth) await _flagNeedsReAuth(collection, repo, logger);
+      return const FileBytes.transient();
+    } catch (e) {
+      logger.e('Error downloading ${file.path}: $e');
+      return const FileBytes.transient();
+    } finally {
+      try {
+        await tmp?.delete(recursive: true);
+      } catch (_) {}
     }
   }
 

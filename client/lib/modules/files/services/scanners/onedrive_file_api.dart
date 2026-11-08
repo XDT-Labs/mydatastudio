@@ -256,7 +256,13 @@ class OneDriveFileApi
 
   @override
   Future<void> download(String id, String destPath) async {
-    final response = await _getContent('${_itemUrl(id)}/content');
+    final http.StreamedResponse response;
+    try {
+      response = await _getContent('${_itemUrl(id)}/content');
+    } on OneDriveApiException catch (e) {
+      if (e.status == 404) throw CloudFileNotFoundException(id);
+      rethrow;
+    }
     final sink = io.File(destPath).openWrite();
     try {
       await response.stream.pipe(sink);
@@ -305,7 +311,8 @@ class OneDriveFileApi
   Future<http.StreamedResponse> _getContent(String url) async {
     final response =
         await _send(
-              () => http.Request('GET', Uri.parse(url))..followRedirects = false,
+              () =>
+                  http.Request('GET', Uri.parse(url))..followRedirects = false,
               stream: true,
               accept: _okOrRedirect,
             )

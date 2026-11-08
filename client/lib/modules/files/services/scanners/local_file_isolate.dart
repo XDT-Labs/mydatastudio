@@ -682,8 +682,15 @@ class LocalFileIsolateWorker {
   Future<Map<String, dynamic>> validateFileForTest(
     String collectionId,
     io.File file,
-    String rootPath,
-  ) => _validateFile(collectionId, file, rootPath, DateTime.now());
+    String rootPath, {
+    Map<String, File>? metadataCache,
+  }) => _validateFile(
+    collectionId,
+    file,
+    rootPath,
+    DateTime.now(),
+    metadataCache: metadataCache,
+  );
 
   /// Validate files. Compute relative path for storage.
   Future<Map<String, dynamic>> _validateFile(
@@ -801,6 +808,9 @@ class LocalFileIsolateWorker {
           longitude: longitude,
           localPath: cached.localPath,
           contentHash: cached.contentHash,
+          // Current state, not the cached row's: the file may have been
+          // downloaded or evicted since the last scan.
+          isOnlineOnly: !contentReadable,
         );
         return result;
       }
@@ -841,6 +851,7 @@ class LocalFileIsolateWorker {
       latitude: latitude,
       longitude: longitude,
       contentHash: contentHash,
+      isOnlineOnly: !contentReadable,
     );
 
     return result;

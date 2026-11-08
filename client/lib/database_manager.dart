@@ -1615,6 +1615,11 @@ class AppDatabase {
         // DatabaseRepository.maxEmbeddingAttempts — because an unreadable
         // file says nothing about whether the model could embed it.
         'embedding_attempts': 'INTEGER NOT NULL DEFAULT 0',
+        // The file is in a sync folder but its bytes are only in the cloud.
+        // Reading it downloads it, so the embedding, chunk and description
+        // queues leave it out. Written by the local scanner on every scan, so
+        // it clears once the file is on disk.
+        'is_online_only': 'INTEGER NOT NULL DEFAULT 0',
         // The user deleted this file from the app. Distinct from both
         // `is_deleted`, which the scanner owns and resets to 0 whenever the
         // source still has the file, and `is_hidden`, which only takes a photo

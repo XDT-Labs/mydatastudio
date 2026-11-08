@@ -355,6 +355,22 @@ void main() {
       await a.download('id:a', dest);
       expect(await io.File(dest).readAsBytes(), [1, 2, 3, 4]);
     });
+
+    test('a file that is gone is CloudFileNotFoundException', () {
+      final a = api(
+        (r) async => _json({
+          'error_summary': 'path/not_found/..',
+          'error': {
+            '.tag': 'path',
+            'path': {'.tag': 'not_found'},
+          },
+        }, 409),
+      );
+      expect(
+        a.download('id:a', '/tmp/never'),
+        throwsA(isA<CloudFileNotFoundException>()),
+      );
+    });
   });
 
   group('thumbnails', () {
