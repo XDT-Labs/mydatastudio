@@ -10,6 +10,7 @@ import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:path/path.dart' as p;
+import 'package:resqlite/resqlite.dart';
 
 class FileDesktopRepository {
   AppLogger logger = AppLogger(null);
@@ -302,11 +303,21 @@ class FileDesktopRepository {
     });
   }
 
-  Future<void> upsertAll(List<File> fileList) async {
+  /// Inserts or updates [fileList] in one transaction.
+  ///
+  /// With [replaceChangedContent] (cloud syncs), a stored row whose content
+  /// changed at the source loses its local copy and everything indexed from
+  /// the old bytes — see [_dropStaleContent]. Off by default: other scanners
+  /// own `local_path` differently and never pass content they did not re-read.
+  Future<void> upsertAll(
+    List<File> fileList, {
+    bool replaceChangedContent = false,
+  }) async {
     if (fileList.isEmpty) return;
 
     await db.transaction((tx) async {
       for (final f in fileList) {
+        if (replaceChangedContent) await _dropStaleContent(tx, f);
         await tx.execute(
           "INSERT INTO files (id, name, path, parent, date_created, date_last_modified, "
           "last_scanned_date, collection_id, content_type, size, is_deleted, thumbnail, "
@@ -379,6 +390,44 @@ class FileDesktopRepository {
         );
       }
     });
+  }
+
+  /// Drops what the stored row of [f] derived from content the source no
+  /// longer has, when [f] says that content changed.
+  ///
+  /// Clearing `local_path` puts the file back on the download queue (the
+  /// downloader overwrites the old copy). Deleting its embeddings and chunks
+  /// and nulling its description — with the attempt budgets reset, since the
+  /// new bytes have not failed anything — puts it back on every indexing queue
+  /// in `DatabaseRepository`, which select on exactly those being absent.
+  /// Tags and landmarks are left alone: user tags share the table.
+  ///
+  /// Matching content hashes win over a new modified time: Drive bumps the
+  /// time on a rename, which changes nothing derived from the bytes. Without
+  /// both hashes, a different modified time or size counts as a change.
+  Future<void> _dropStaleContent(Transaction tx, File f) async {
+    final rows = await tx.select(
+      'SELECT date_last_modified, size, content_hash FROM files WHERE id = ?',
+      [f.id],
+    );
+    if (rows.isEmpty) return;
+    final stored = rows.single;
+    final storedHash = stored['content_hash'] as String?;
+    final changed =
+        storedHash != null && f.contentHash != null
+            ? storedHash != f.contentHash
+            : stored['date_last_modified'] !=
+                    f.dateLastModified.millisecondsSinceEpoch ||
+                stored['size'] != f.size;
+    if (!changed) return;
+
+    await tx.execute(
+      'UPDATE files SET local_path = NULL, description = NULL, '
+      'embedding_attempts = 0, description_attempts = 0 WHERE id = ?',
+      [f.id],
+    );
+    await tx.execute('DELETE FROM files_embeddings WHERE file_id = ?', [f.id]);
+    await tx.execute('DELETE FROM file_chunks WHERE file_id = ?', [f.id]);
   }
 
   /// Other live files with the same bytes as [f] — in any collection.

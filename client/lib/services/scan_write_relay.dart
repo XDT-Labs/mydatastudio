@@ -68,6 +68,18 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       );
       return const {};
 
+    case 'cloudFileBatch':
+      // Cloud sync rows: a file whose content changed at the provider also
+      // loses its stale local copy and index entries.
+      await BatchFileUpsertService.instance.invoke(
+        BatchFileUpsertServiceCommand(
+          List<File>.from(payload as List),
+          db,
+          replaceChangedContent: true,
+        ),
+      );
+      return const {};
+
     case 'folder':
       await FolderUpsertService.instance.invoke(
         FolderUpsertServiceCommand(payload as Folder, db),

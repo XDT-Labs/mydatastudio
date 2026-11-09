@@ -248,7 +248,9 @@ void main() {
       ],
     });
     await run(worker(), api, args());
-    final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+    final files = of(
+      'cloudFileBatch',
+    ).expand((w) => w['payload'] as List<File>);
     expect(files.single.contentHash, 'abc123');
   });
 
@@ -265,7 +267,9 @@ void main() {
     expect(folders.map((f) => f.path), ['a', 'b']);
     // Top-level folder has an empty parent (collection root); nested keeps id.
     expect(folders.map((f) => f.parent), ['', 'a']);
-    final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+    final files = of(
+      'cloudFileBatch',
+    ).expand((w) => w['payload'] as List<File>);
     expect(
       files.map((f) => f.path),
       unorderedEquals(['fake://f1', 'fake://f2', 'fake://f3']),
@@ -291,7 +295,9 @@ void main() {
       'root': [for (var i = 0; i < 5; i++) _file('f$i')],
     }, pageSize: 2);
     await run(worker(), api, args());
-    final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+    final files = of(
+      'cloudFileBatch',
+    ).expand((w) => w['payload'] as List<File>);
     expect(files.length, 5);
   });
 
@@ -302,7 +308,7 @@ void main() {
         'root': [for (var i = 0; i < 250; i++) _file('f$i')],
       });
       await run(worker(), api, args());
-      expect(of('batchFile').map((w) => (w['payload'] as List).length), [
+      expect(of('cloudFileBatch').map((w) => (w['payload'] as List).length), [
         100,
         100,
         50,
@@ -319,7 +325,7 @@ void main() {
       await run(worker(), api, args());
       final services = writes.map((w) => w['service']).toList();
       expect(services, [
-        'batchFile',
+        'cloudFileBatch',
         'cleanupDeletedFiles',
         'collectionChangeCursor',
         'collectionStatus',
@@ -348,13 +354,13 @@ void main() {
         final services = writes.map((w) => w['service']).toList();
         expect(
           services.indexOf('collectionChangeCursor'),
-          greaterThan(services.indexOf('batchFile')),
+          greaterThan(services.indexOf('cloudFileBatch')),
         );
       },
     );
 
     test('a failed batch leaves the cursor unwritten', () async {
-      failService = 'batchFile';
+      failService = 'cloudFileBatch';
       final api = FakeCloudFileApi({
         'root': [_file('f1')],
       });
@@ -396,7 +402,7 @@ void main() {
         await run(worker(), api, args(force: false, cursor: 'old'));
         expect(api.listedFolders, isEmpty);
         expect(of('cleanupDeletedFiles'), isEmpty);
-        final f = (of('batchFile').single['payload'] as List<File>).single;
+        final f = (of('cloudFileBatch').single['payload'] as List<File>).single;
         expect(
           f.parent,
           '',
@@ -433,7 +439,9 @@ void main() {
         ],
       );
       await run(worker(), api, args(force: false, cursor: 'old'));
-      final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+      final files = of(
+        'cloudFileBatch',
+      ).expand((w) => w['payload'] as List<File>);
       expect(files.map((f) => f.path), ['fake://a', 'fake://b']);
       expect(cursorWrites(), ['c-new']);
     });
@@ -448,7 +456,7 @@ void main() {
       await run(worker(), api, args(force: false, cursor: 'old'));
       expect(removal()['itemIds'], ['c1:gone']);
       expect(removal()['keepDeleted'], false);
-      expect(of('batchFile'), isEmpty);
+      expect(of('cloudFileBatch'), isEmpty);
     });
 
     test(
@@ -490,7 +498,7 @@ void main() {
         api,
         args(force: false, cursor: 'old'),
       );
-      final f = (of('batchFile').single['payload'] as List<File>).single;
+      final f = (of('cloudFileBatch').single['payload'] as List<File>).single;
       expect(f.parent, 'a');
     });
 
@@ -542,7 +550,7 @@ void main() {
         api,
         args(force: false, cursor: 'old', root: 'a'),
       );
-      expect(of('batchFile'), isEmpty);
+      expect(of('cloudFileBatch'), isEmpty);
       expect(of('folder'), isEmpty);
     });
 
@@ -576,7 +584,7 @@ void main() {
         api,
         args(force: false, cursor: 'old'),
       );
-      expect(of('batchFile'), isEmpty);
+      expect(of('cloudFileBatch'), isEmpty);
       final r = removal();
       expect(r['itemIds'], containsAll(['c1:f', 'c1:a', 'c1:b']));
       expect(
@@ -631,7 +639,9 @@ void main() {
         args(force: false, cursor: 'old'),
       );
       expect(api.listedFolders, ['n']);
-      final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+      final files = of(
+        'cloudFileBatch',
+      ).expand((w) => w['payload'] as List<File>);
       expect(files.map((f) => f.path), ['fake://x']);
     });
 
@@ -663,7 +673,9 @@ void main() {
           ],
         );
         await run(worker(), api, args(force: false, cursor: 'old'));
-        final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+        final files = of(
+          'cloudFileBatch',
+        ).expand((w) => w['payload'] as List<File>);
         expect(files.single.parent, 'n');
       },
     );
@@ -671,7 +683,7 @@ void main() {
     test(
       'a failed write keeps the old cursor so the next run replays',
       () async {
-        failService = 'batchFile';
+        failService = 'cloudFileBatch';
         final api = FakeCloudFileApi(
           {},
           changePages: [
@@ -727,7 +739,7 @@ void main() {
   });
 
   test('a failed batch write skips the deleted-file sweep', () async {
-    failService = 'batchFile';
+    failService = 'cloudFileBatch';
     final api = FakeCloudFileApi({
       'root': [_file('f1')],
     });
@@ -859,6 +871,106 @@ void main() {
       await run(worker(toDownload: [row]), api, args(download: true));
       expect(io.File(dest).readAsStringSync(), 'bytes of x');
       expect(of('fileLocalPath'), hasLength(1));
+    },
+  );
+
+  test(
+    'a queued file whose old copy is on disk is downloaded over it',
+    () async {
+      // The main isolate clears local_path when the provider reports new
+      // content, so a queued file with a copy already in place is a file that
+      // changed. Keeping that copy would archive and index the old bytes.
+      final api = FakeCloudFileApi({});
+      final row = File(
+        id: 'c1:x',
+        name: 'x.txt',
+        path: 'fake://x',
+        parent: '',
+        dateCreated: DateTime(2024),
+        dateLastModified: DateTime(2025),
+        collectionId: 'c1',
+        contentType: 'text/plain',
+        isDeleted: false,
+        size: 1,
+      );
+      final dest = p.join(tmp, 'files', 'fake', 'My Drive', 'x.txt');
+      io.File(dest)
+        ..createSync(recursive: true)
+        ..writeAsStringSync('old bytes');
+
+      await run(worker(toDownload: [row]), api, args(download: true));
+
+      expect(api.downloaded, ['x']);
+      expect(io.File(dest).readAsStringSync(), 'bytes of x');
+      expect(io.File('$dest.part').existsSync(), isFalse);
+      expect((of('fileLocalPath').single['payload'] as Map)['localPath'], dest);
+    },
+  );
+
+  test('a failed re-download keeps the old copy and records nothing', () async {
+    final api = FakeCloudFileApi({})..failDownloadsLeft = 3;
+    final row = File(
+      id: 'c1:x',
+      name: 'x.txt',
+      path: 'fake://x',
+      parent: '',
+      dateCreated: DateTime(2024),
+      dateLastModified: DateTime(2025),
+      collectionId: 'c1',
+      contentType: 'text/plain',
+      isDeleted: false,
+      size: 1,
+    );
+    final dest = p.join(tmp, 'files', 'fake', 'My Drive', 'x.txt');
+    io.File(dest)
+      ..createSync(recursive: true)
+      ..writeAsStringSync('old bytes');
+
+    await run(worker(toDownload: [row]), api, args(download: true));
+
+    // local_path stays null, so the next sync retries the download.
+    expect(of('fileLocalPath'), isEmpty);
+    expect(io.File(dest).readAsStringSync(), 'old bytes');
+    expect(io.File('$dest.part').existsSync(), isFalse);
+  });
+
+  test(
+    'file rows go through the cloud batch write on full and incremental syncs',
+    () async {
+      // Only that write compares against the stored row and drops a stale
+      // local copy and index; the plain batchFile write keeps them.
+      await run(
+        worker(),
+        FakeCloudFileApi({
+          'root': [_file('f1')],
+        }),
+        args(),
+      );
+      await run(
+        worker(),
+        FakeCloudFileApi(
+          {},
+          changePages: [
+            [
+              CloudChange(
+                'f2',
+                entry: CloudFileEntry(
+                  id: 'f2',
+                  name: 'f2.txt',
+                  parentIds: const ['root'],
+                  size: 5,
+                ),
+              ),
+            ],
+          ],
+        ),
+        args(cursor: 'c-old'),
+      );
+      final ids = of(
+        'cloudFileBatch',
+      ).expand((w) => w['payload'] as List<File>).map((f) => f.id);
+      expect(ids, ['c1:f1', 'c1:f2']);
+      expect(of('batchFile'), isEmpty);
     },
   );
 

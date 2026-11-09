@@ -37,7 +37,7 @@ import 'package:path/path.dart' as p;
 /// 5. [Targeted Scanning vs Full Sync] Scanners MUST support both full collection
 ///    syncs (path == null) and targeted folder scans (path != null).
 ///
-/// Relays `batchFile`, `folder`, `cleanupDeletedFiles`, and `collectionStatus`
+/// Relays `cloudFileBatch`, `folder`, `cleanupDeletedFiles`, and `collectionStatus`
 /// writes to the main isolate via [writeViaMain] instead of writing through
 /// its own connection — see `scan_write_relay.dart`'s
 /// `handleScanWriteMessage` for where they're actually executed.
@@ -614,7 +614,7 @@ class CloudFileScannerWorker {
       'CloudFileIsolate: Sending batch of ${batch.length} files to DB writer',
     );
     try {
-      await writeViaMain(port, 'batchFile', List<File>.from(batch));
+      await writeViaMain(port, 'cloudFileBatch', List<File>.from(batch));
     } catch (e) {
       _failedBatches++;
       logger.e(
@@ -1108,16 +1108,11 @@ class CloudFileScannerWorker {
         );
         final destPath = p.join(destDir, file.name);
 
+        // A copy already at destPath is not reused: queued files have no
+        // local_path, and the main isolate clears it when the provider reports
+        // new content, so that copy holds the old bytes. The rename below
+        // replaces it only once the new download is complete.
         final destFile = io.File(destPath);
-        if (await destFile.exists()) {
-          logger.d('File already exists on disk: $destPath');
-          await writeViaMain(port, 'fileLocalPath', {
-            'fileId': file.id,
-            'localPath': destPath,
-          });
-          return;
-        }
-
         await destFile.parent.create(recursive: true);
         logger.i(
           'Downloading: ${file.name} to $destPath (attempt $attempt/$maxRetries)',
