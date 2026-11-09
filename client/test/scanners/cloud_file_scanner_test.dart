@@ -106,7 +106,15 @@ class FakeThumbnailApi extends FakeCloudFileApi implements ServerThumbnails {
   /// Ids the provider can't render; they are absent from the result.
   final Set<String> missing;
 
-  FakeThumbnailApi(super.tree, {super.changePages, this.missing = const {}});
+  /// Thrown by every thumbnail call, when set.
+  final Object? error;
+
+  FakeThumbnailApi(
+    super.tree, {
+    super.changePages,
+    this.missing = const {},
+    this.error,
+  });
 
   @override
   int get thumbnailBatchSize => 2;
@@ -117,6 +125,7 @@ class FakeThumbnailApi extends FakeCloudFileApi implements ServerThumbnails {
   @override
   Future<Map<String, Uint8List>> thumbnails(List<String> ids) async {
     thumbnailCalls.add(ids);
+    if (error case final e?) throw e;
     return {
       for (final id in ids)
         if (!missing.contains(id)) id: Uint8List.fromList(id.codeUnits),
@@ -888,6 +897,27 @@ void main() {
         // The row stores the cache key the UI resolves, and the bytes are there.
         expect(writes['c1:a'], cache.keyFor('c1', 'c1:a'));
         expect(cache.fileForKey(writes['c1:a']!).readAsStringSync(), 'a');
+      },
+    );
+
+    test(
+      'an expired sign-in during thumbnails asks the user to reconnect',
+      () async {
+        // Otherwise thumbnails stop silently and nothing prompts a reconnect.
+        final api = FakeThumbnailApi(
+          {},
+          error: const CloudAuthException('revoked', needsReAuth: true),
+        );
+        await run(
+          worker(withoutThumbnail: [_row('a', 'a.jpg'), _row('b', 'b.jpg')]),
+          api,
+          args(),
+        );
+        expect(api.thumbnailCalls, hasLength(1), reason: 'stops at the first');
+        expect(
+          of('needsReAuth').map((w) => (w['payload'] as Map)['collectionId']),
+          ['c1'],
+        );
       },
     );
 

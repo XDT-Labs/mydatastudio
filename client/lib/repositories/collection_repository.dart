@@ -1,4 +1,5 @@
 import 'dart:io' as io;
+import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
@@ -300,6 +301,16 @@ class CollectionRepository {
     if (collection.type == 'file' && collection.scanner.contains('gdrive'))
       // Google Drive files are saved under files/gdrive/{collection.name}
       p.join('files', 'gdrive', collection.name),
+    // Dropbox and OneDrive local copies, the same way.
+    if (collection.type == 'file' && collection.scanner.contains('dropbox'))
+      p.join('files', 'dropbox', collection.name),
+    if (collection.type == 'file' && collection.scanner.contains('onedrive'))
+      p.join('files', 'onedrive', collection.name),
+    // A sync folder's archive copies (SyncFolderArchiver). Only the app's own
+    // copies: the synced folder itself lives outside the storage root.
+    if (collection.type == 'file' &&
+        collection.scanner == AppConstants.scannerFileLocal)
+      p.join('files', 'sync', collection.id),
     p.join('thumbnails', collection.id),
   ];
 

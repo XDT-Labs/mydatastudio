@@ -24,10 +24,14 @@ class _MockRepo extends Mock implements DatabaseRepository {}
 class _MockDb extends Mock implements AppDatabase {}
 
 /// A cloud drive that serves fixed bytes, or throws [error] on download.
-class _FakeDrive implements CloudFileApi {
+class _FakeDrive implements CloudFileApi, ClosableCloudFileApi {
   final Object? error;
   final List<String> downloaded = [];
   CloudFileApiCredentials? credentials;
+  bool closed = false;
+
+  @override
+  void close() => closed = true;
 
   _FakeDrive({this.error});
 
@@ -310,6 +314,47 @@ void main() {
       );
       expect(r.ok, isFalse);
       expect(r.permanent, isFalse);
+    });
+
+    test('the provider client is closed after every load', () async {
+      // The loader runs in long-lived embedding isolates: an unclosed client
+      // per file keeps sockets open, and closing is what aborts a download
+      // the timeout gave up on.
+      final ok = _FakeDrive();
+      await FileBytesLoader.loadDetailed(
+        cloudFile('dropbox://id:a'),
+        repo,
+        logger,
+        cloudApis: drives(ok),
+      );
+      final failed = _FakeDrive(error: const io.SocketException('down'));
+      await FileBytesLoader.loadDetailed(
+        cloudFile('dropbox://id:a'),
+        repo,
+        logger,
+        cloudApis: drives(failed),
+      );
+      expect(ok.closed, isTrue);
+      expect(failed.closed, isTrue);
+    });
+
+    test('an unreadable local copy falls back to the provider', () async {
+      final dir = io.Directory.systemTemp.createTempSync('mds_copy_');
+      addTearDown(() {
+        io.Process.runSync('chmod', ['644', '${dir.path}/photo.jpg']);
+        dir.deleteSync(recursive: true);
+      });
+      final copy = io.File('${dir.path}/photo.jpg')..writeAsBytesSync([9]);
+      io.Process.runSync('chmod', ['000', copy.path]);
+      final d = _FakeDrive();
+      final r = await FileBytesLoader.loadDetailed(
+        cloudFile('dropbox://id:a', localPath: copy.path),
+        repo,
+        logger,
+        cloudApis: drives(d),
+      );
+      expect(r.bytes, [1, 2, 3]);
+      expect(d.downloaded, ['id:a']);
     });
 
     test(

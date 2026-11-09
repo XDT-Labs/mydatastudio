@@ -494,8 +494,19 @@ void main() {
       expect(out.keys, ['B']);
     });
 
-    test('other failures throw rather than read as "no thumbnail"', () {
-      final a = api((r) async => _json({'error': {}}, 500));
+    test('one item Graph cannot render does not lose the batch', () async {
+      // The rest of the batch is saved; the failed item has no thumbnail, so
+      // the next sync asks for it again.
+      final a = api((r) async {
+        if (r.url.path.contains('/items/A/')) return _json({'error': {}}, 500);
+        return http.Response.bytes([5], 200);
+      });
+      final out = await a.thumbnails(['A', 'B']);
+      expect(out.keys, ['B']);
+    });
+
+    test('throttling still fails the batch, for the scanner to retry', () {
+      final a = api((r) async => _json({'error': {}}, 429));
       expect(a.thumbnails(['A']), throwsA(isA<OneDriveApiException>()));
     });
 

@@ -101,7 +101,12 @@ class FileBytesLoader {
     // no network, no token, and the same bytes the provider would send.
     final localPath = file.localPath;
     if (localPath != null && io.File(localPath).existsSync()) {
-      return FileBytes.ok(await io.File(localPath).readAsBytes());
+      try {
+        return FileBytes.ok(await io.File(localPath).readAsBytes());
+      } on io.FileSystemException catch (e) {
+        // An unreadable copy is not the file: carry on to the source.
+        logger.w('Could not read local copy $localPath, using the source: $e');
+      }
     }
 
     // Decided before any network call, because this is a property of the
@@ -352,8 +357,9 @@ class FileBytesLoader {
     }
 
     io.Directory? tmp;
+    CloudFileApi? api;
     try {
-      final api = await factory(
+      api = await factory(
         CloudFileApiCredentials(
           accessToken: accessToken,
           refreshToken: refreshToken,
@@ -380,6 +386,9 @@ class FileBytesLoader {
       logger.e('Error downloading ${file.path}: $e');
       return const FileBytes.transient();
     } finally {
+      // Closing also aborts a download the timeout gave up on, so a stalled
+      // transfer doesn't keep its socket open in this long-lived isolate.
+      if (api case final ClosableCloudFileApi closable) closable.close();
       try {
         await tmp?.delete(recursive: true);
       } catch (_) {}

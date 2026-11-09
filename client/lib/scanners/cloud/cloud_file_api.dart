@@ -140,6 +140,13 @@ typedef CloudFileApiFactory =
 
 /// The small surface a cloud provider (Drive, Dropbox, OneDrive, Box...) has to
 /// implement for the generic `CloudFileScanner`.
+/// A [CloudFileApi] that holds network clients its owner must release.
+/// Short-lived users (one download, then done) close it; a scan isolate's
+/// clients go with the isolate.
+abstract class ClosableCloudFileApi {
+  void close();
+}
+
 abstract class CloudFileApi {
   /// URI scheme used for `files.path` (`<scheme>://<id>`) and the local copy
   /// directory (`files/<scheme>/...`), e.g. `gdrive`.

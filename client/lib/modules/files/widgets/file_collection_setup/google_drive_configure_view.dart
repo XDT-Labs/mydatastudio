@@ -121,7 +121,9 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
           Center(
             child: OutlinedButton.icon(
               key: const ValueKey('setup-guide-link'),
-              onPressed: () => GoRouter.of(context).go(route),
+              // push, not go: Back returns to this form with what was
+              // already typed.
+              onPressed: () => GoRouter.of(context).push(route),
               icon: const Icon(Icons.menu_book_outlined),
               label: const Text('Show me how to create one'),
             ),

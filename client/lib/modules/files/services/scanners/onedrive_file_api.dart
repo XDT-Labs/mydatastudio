@@ -37,7 +37,11 @@ class OneDriveApiException implements Exception {
 /// the latest state of each item rather than every event, which is what the
 /// scanner's "last change per id wins" handling expects.
 class OneDriveFileApi
-    implements CloudFileApi, WholeDriveListing, ServerThumbnails {
+    implements
+        CloudFileApi,
+        WholeDriveListing,
+        ServerThumbnails,
+        ClosableCloudFileApi {
   static const _graph = 'https://graph.microsoft.com/v1.0';
   static const _graphHost = 'graph.microsoft.com';
 
@@ -66,6 +70,12 @@ class OneDriveFileApi
   }) : _redirectClient = redirectClient ?? http.Client(),
        _sleep = sleep ?? Future.delayed,
        _maxRateLimitRetries = maxRateLimitRetries;
+
+  @override
+  void close() {
+    _client.close();
+    _redirectClient.close();
+  }
 
   /// [CloudFileApiFactory] for OneDrive: refreshes the access token when it is
   /// within 5 minutes of expiry, then builds a client that keeps refreshing it.
@@ -297,8 +307,13 @@ class OneDriveFileApi
             );
             out[id] = await response.stream.toBytes();
           } on OneDriveApiException catch (e) {
-            // No thumbnail for this item (404); anything else is a real error.
-            if (e.status != 404) rethrow;
+            // Throttling applies to the whole batch, so it goes up to the
+            // scanner's retry. Any other failure (404: no thumbnail; 500: a
+            // file Graph can't render) belongs to this item alone: skip it
+            // and keep the rest. It has no thumbnail, so the next sync asks
+            // again. Auth failures arrive as CloudAuthException and still
+            // stop the batch.
+            if (e.status == 429 || e.status == 503) rethrow;
           }
         }(),
     ]);

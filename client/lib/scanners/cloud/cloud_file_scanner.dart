@@ -956,6 +956,8 @@ class CloudFileScannerWorker {
   // Server-side thumbnails
   // ---------------------------------------------------------------------------
 
+  static const _thumbnailBatchTimeout = Duration(seconds: 60);
+
   /// Fetches provider-rendered thumbnails for files that have none, plus files
   /// that changed this run, into the on-disk [ThumbnailCache], and stores each
   /// cache key on its row. Thumbnails don't depend on the content policy: they
@@ -995,11 +997,23 @@ class CloudFileScannerWorker {
       };
       final Map<String, Uint8List> images;
       try {
+        // A deadline per batch: a stalled response must not hold the scan
+        // back from the local-copy downloads that follow this pass.
         images = await _retryNetworkOp(
-          () => api.thumbnails(byRemoteId.keys.toList()),
+          () => api
+              .thumbnails(byRemoteId.keys.toList())
+              .timeout(_thumbnailBatchTimeout),
         );
       } on CloudAuthException catch (e) {
         logger.e('CloudFileIsolate: thumbnails stopped, auth failed: $e');
+        if (e.needsReAuth) {
+          // Same as a failed sync: the reconnect dialog needs the flag.
+          try {
+            await writeViaMain(port, 'needsReAuth', {
+              'collectionId': collectionId,
+            });
+          } catch (_) {}
+        }
         return;
       } catch (e) {
         logger.w('CloudFileIsolate: thumbnail batch failed, skipping: $e');

@@ -79,7 +79,10 @@ class SyncFolderArchiver {
       await part.setLastModified(f.dateLastModified);
       await part.rename(dest);
     } catch (_) {
-      if (part.existsSync()) part.deleteSync();
+      // A failed cleanup must not replace the error that caused it.
+      try {
+        if (part.existsSync()) part.deleteSync();
+      } catch (_) {}
       rethrow;
     }
     if (wasOnlineOnly && !await evictor.evict(source)) {

@@ -482,7 +482,9 @@ class LocalFileIsolateWorker {
     if (!policy.downloadsAnything) return;
     try {
       final archiver = SyncFolderArchiver(
-        archiveDir: p.join(dir, 'files', 'sync', col.name),
+        // The id, not the name: two collections can share a name, and a name
+        // can hold characters that are not safe in a path.
+        archiveDir: p.join(dir, 'files', 'sync', col.id),
         policy: policy,
         recordCopy: (id, localPath) async {
           await writeViaMain(receiverPort, 'fileLocalPath', {

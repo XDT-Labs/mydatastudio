@@ -173,12 +173,19 @@ class GoogleDriveFileApi implements CloudFileApi, WholeDriveListing {
 
   @override
   Future<void> download(String id, String destPath) async {
-    final media =
-        await _drive.files.get(
-              id,
-              downloadOptions: drive.DownloadOptions.fullMedia,
-            )
-            as drive.Media;
+    final drive.Media media;
+    try {
+      media =
+          await _drive.files.get(
+                id,
+                downloadOptions: drive.DownloadOptions.fullMedia,
+              )
+              as drive.Media;
+    } on drive.DetailedApiRequestError catch (e) {
+      // Drive answers 404 for a file that is gone (or no longer shared).
+      if (e.status == 404) throw CloudFileNotFoundException(id);
+      rethrow;
+    }
     final sink = io.File(destPath).openWrite();
     try {
       await media.stream.pipe(sink);

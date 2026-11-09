@@ -67,7 +67,13 @@ void main() {
           ),
           GoRoute(
             path: '/settings',
-            builder: (_, state) => Text('settings ${state.uri.query}'),
+            builder:
+                (context, state) => Scaffold(
+                  body: TextButton(
+                    onPressed: () => GoRouter.of(context).pop(),
+                    child: Text('settings ${state.uri.query}'),
+                  ),
+                ),
           ),
         ],
       );
@@ -79,9 +85,15 @@ void main() {
       tester,
     ) async {
       await pumpConfigure(tester, CloudAccountBranding.googleDrive);
+      await tester.enterText(find.byType(TextField).first, 'typed-id');
       await tester.tap(find.byKey(const ValueKey('setup-guide-link')));
       await tester.pumpAndSettle();
       expect(find.text('settings setup=google'), findsOne);
+
+      // Back returns to the form with what was typed, not to the home page.
+      await tester.tap(find.text('settings setup=google'));
+      await tester.pumpAndSettle();
+      expect(find.text('typed-id'), findsOne);
     });
 
     testWidgets('Dropbox has no Google setup link', (tester) async {

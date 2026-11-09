@@ -800,6 +800,12 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_files_content_hash '
       'ON files (content_hash);',
     );
+    // Scanners, sync and the per-collection queues all select a collection's
+    // files; without this each of those is a full scan of `files`.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_files_collection '
+      'ON files (collection_id);',
+    );
 
     // Message-ID dedupe lookups for IMAP sync. Here rather than in schemaDDL
     // for the same reason as the index above: schemaDDL reaches fresh installs

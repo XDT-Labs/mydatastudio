@@ -108,7 +108,7 @@ download about 41 GB of photos and documents."
     app). A file the user downloaded themselves is never evicted.
   - **Archive copies.** Sync-folder cards show "Save a local copy of" (all categories ticked by
     default), stored as the collection's content policy. After each full scan the files it
-    covers are copied into `<storage>/files/sync/<collection>/`, and any that were online-only
+    covers are copied into `<storage>/files/sync/<collection id>/`, and any that were online-only
     are evicted again. Indexing then reads the copy.
   - Legacy `.icloud` stubs can't be downloaded on macOS 15+, so they stay metadata-only.
   - The local scanner stops following symlinks out of the sync root.

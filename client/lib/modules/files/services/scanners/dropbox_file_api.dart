@@ -34,7 +34,11 @@ typedef DropboxIdsForPath = Future<List<String>> Function(String webLink);
 /// `path` argument everywhere, so ids are used directly to list and download.
 /// The collection root is the alias `root` (Dropbox's empty path).
 class DropboxFileApi
-    implements CloudFileApi, WholeDriveListing, ServerThumbnails {
+    implements
+        CloudFileApi,
+        WholeDriveListing,
+        ServerThumbnails,
+        ClosableCloudFileApi {
   static const _api = 'https://api.dropboxapi.com/2';
   static const _content = 'https://content.dropboxapi.com/2';
   static const _webHome = 'https://www.dropbox.com/home';
@@ -68,6 +72,9 @@ class DropboxFileApi
   }) : _idsForPath = idsForPath,
        _sleep = sleep ?? Future.delayed,
        _maxRateLimitRetries = maxRateLimitRetries;
+
+  @override
+  void close() => _client.close();
 
   /// [CloudFileApiFactory] for Dropbox: refreshes the access token when it is
   /// within 5 minutes of expiry, then builds a client that keeps refreshing it.
