@@ -1,19 +1,24 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/cloud_account_branding.dart';
 
 class GoogleDriveLoadingView extends StatelessWidget {
-  const GoogleDriveLoadingView({super.key});
+  const GoogleDriveLoadingView({super.key, this.branding});
+
+  /// Defaults to Google Drive.
+  final CloudAccountBranding? branding;
 
   @override
   Widget build(BuildContext context) {
+    final b = branding ?? CloudAccountBranding.googleDrive;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Image.asset('assets/images/google-drive.png', height: 72),
+        b.logo,
         const SizedBox(height: 28),
         const CircularProgressIndicator(),
         const SizedBox(height: 20),
-        const Text(
-          'Connecting to Google Drive…',
+        Text(
+          'Connecting to ${b.name}…',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
         ),
         const SizedBox(height: 6),

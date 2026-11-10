@@ -3,7 +3,10 @@ import 'dart:io' as io;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'dart:convert';
+
 import 'package:mydatastudio/modules/aichat/pages/aichat_page.dart';
+import 'package:mydatastudio/modules/aichat/services/chat_tool_support.dart';
 import 'package:mydatastudio/modules/search/services/query_parser.dart';
 import 'package:mydatastudio/modules/search/services/result_set_summarizer.dart';
 import 'package:mydatastudio/repositories/aichat_repository.dart';
@@ -114,6 +117,47 @@ void main() {
     expect(shown, contains('Summarized the 18 most relevant of about 412'));
     expect(shown, contains('They discussed the contract.'));
     expect(history, hasLength(3));
+    await db.close();
+  });
+
+  test('a tool-using turn reloads as history the model can continue from', () async {
+    // docs/plans/llm-tools.md, Phase 4: tool turns are saved, so "open the
+    // second one" still works after the app restarts.
+    final db = await _freshDb('tool_turn_${DateTime.now().microsecondsSinceEpoch}.db');
+    final repo = AichatRepository(db);
+    final conv = await repo.createConversation(name: 'lease', model: 'gemma4:12b');
+    final call = {
+      'id': 'c1',
+      'type': 'function',
+      'function': {'name': 'search', 'arguments': '{"query": "lease"}'},
+    };
+    final result = jsonEncode({
+      'total': 1,
+      'results': [
+        {'id': 'email:e1', 'type': 'email', 'title': 'Lease renewal', 'date': '2024-04-02'},
+      ],
+    });
+
+    await repo.addMessage(conversationId: conv.id, role: 'user', content: 'find the lease');
+    // Written back to back, as the page does: usually the same millisecond.
+    for (final m in [
+      {'role': 'assistant', 'content': null, 'tool_calls': [call]},
+      {'role': 'tool', 'tool_call_id': 'c1', 'content': result},
+    ]) {
+      final stored = toStoredToolMessage(m);
+      await repo.addMessage(conversationId: conv.id, role: stored.role, content: stored.content);
+    }
+    await repo.addMessage(conversationId: conv.id, role: 'assistant', content: 'It renews May 1.');
+
+    final (:transcript, :history) = splitConversation(await repo.getMessages(conv.id));
+
+    // The model sees the whole exchange, in order.
+    expect(history.map((m) => m['role']), ['user', 'assistant', 'tool', 'assistant']);
+    expect(history[1]['tool_calls'], [call]);
+    expect(history[2]['tool_call_id'], 'c1');
+    // The reader sees only the question and the answer, with its source.
+    expect(transcript.map((t) => t.text), ['find the lease', 'It renews May 1.']);
+    expect(transcript.last.sources.single.id, 'email:e1');
     await db.close();
   });
 }

@@ -10,6 +10,7 @@ import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:path/path.dart' as p;
+import 'package:resqlite/resqlite.dart';
 
 class FileDesktopRepository {
   AppLogger logger = AppLogger(null);
@@ -204,14 +205,23 @@ class FileDesktopRepository {
     bool recursive = true,
     bool isCloud = false,
     bool isFullScan = false,
+    bool keepDeleted = false,
   }) async {
     String searchPath = scannedPath;
     if (!searchPath.endsWith('/')) {
       searchPath += '/';
     }
 
-    String query = "UPDATE files SET is_deleted = 1 WHERE collection_id = ? ";
-    List<dynamic> args = [collectionId];
+    // keepDeleted: record when the source lost the file instead of hiding it.
+    String query =
+        keepDeleted
+            ? "UPDATE files SET source_deleted_date = ? "
+                "WHERE source_deleted_date IS NULL AND collection_id = ? "
+            : "UPDATE files SET is_deleted = 1 WHERE collection_id = ? ";
+    List<dynamic> args = [
+      if (keepDeleted) DateTime.now().millisecondsSinceEpoch,
+      collectionId,
+    ];
 
     if (isCloud) {
       if (recursive && isFullScan) {
@@ -237,17 +247,83 @@ class FileDesktopRepository {
     await db.execute(query, args);
   }
 
-  Future<void> upsertAll(List<File> fileList) async {
+  /// Applies source-side removals reported by a change feed. Matches rows by
+  /// [itemIds] (file row ids) or by [parentIds] (provider folder ids whose
+  /// contents left the collection). With [keepDeleted] the rows stay visible
+  /// and only `source_deleted_date` is set, and folder rows are kept so the
+  /// kept files remain browsable; otherwise files are marked `is_deleted` and
+  /// matching folder rows are removed.
+  ///
+  /// Ids are applied in chunks inside one transaction to stay under SQLite's
+  /// bound-parameter limit.
+  Future<void> applyCloudRemovals(
+    String collectionId, {
+    required List<String> itemIds,
+    required List<String> parentIds,
+    required bool keepDeleted,
+    required DateTime at,
+    int chunkSize = 500,
+  }) async {
+    if (itemIds.isEmpty && parentIds.isEmpty) return;
+    String marks(int n) => List.filled(n, '?').join(',');
+    Iterable<List<String>> chunks(List<String> l) sync* {
+      for (var i = 0; i < l.length; i += chunkSize) {
+        yield l.sublist(i, i + chunkSize > l.length ? l.length : i + chunkSize);
+      }
+    }
+
+    await db.transaction((tx) async {
+      for (final (column, ids) in [('id', itemIds), ('parent', parentIds)]) {
+        for (final chunk in chunks(ids)) {
+          if (keepDeleted) {
+            await tx.execute(
+              "UPDATE files SET source_deleted_date = ? "
+              "WHERE collection_id = ? AND source_deleted_date IS NULL "
+              "AND $column IN (${marks(chunk.length)})",
+              [at.millisecondsSinceEpoch, collectionId, ...chunk],
+            );
+          } else {
+            await tx.execute(
+              "UPDATE files SET is_deleted = 1 WHERE collection_id = ? "
+              "AND $column IN (${marks(chunk.length)})",
+              [collectionId, ...chunk],
+            );
+          }
+        }
+      }
+      if (!keepDeleted) {
+        for (final chunk in chunks(itemIds)) {
+          await tx.execute(
+            "DELETE FROM folders WHERE collection_id = ? "
+            "AND id IN (${marks(chunk.length)})",
+            [collectionId, ...chunk],
+          );
+        }
+      }
+    });
+  }
+
+  /// Inserts or updates [fileList] in one transaction.
+  ///
+  /// With [replaceChangedContent] (cloud syncs), a stored row whose content
+  /// changed at the source loses its local copy and everything indexed from
+  /// the old bytes — see [_dropStaleContent]. Off by default: other scanners
+  /// own `local_path` differently and never pass content they did not re-read.
+  Future<void> upsertAll(
+    List<File> fileList, {
+    bool replaceChangedContent = false,
+  }) async {
     if (fileList.isEmpty) return;
 
     await db.transaction((tx) async {
       for (final f in fileList) {
+        if (replaceChangedContent) await _dropStaleContent(tx, f);
         await tx.execute(
           "INSERT INTO files (id, name, path, parent, date_created, date_last_modified, "
           "last_scanned_date, collection_id, content_type, size, is_deleted, thumbnail, "
           "download_url, email_id, latitude, longitude, local_path, content_id, is_inline, "
-          "is_hidden, is_user_deleted) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+          "is_hidden, is_user_deleted, content_hash, is_online_only) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
           // is_hidden and is_user_deleted are absent from the DO UPDATE clause
           // on purpose. The
           // importer sets it once to keep spacer GIFs and banners out of the
@@ -278,7 +354,14 @@ class FileDesktopRepository {
           "longitude = excluded.longitude, "
           "content_id = excluded.content_id, "
           "is_inline = excluded.is_inline, "
-          "is_deleted = 0",
+          // COALESCE: a scanner that did not hash this time (cache hit on a
+          // row it loaded without the hash, or a source that cannot supply
+          // one) must not erase a hash an earlier scan computed.
+          "content_hash = COALESCE(excluded.content_hash, files.content_hash), "
+          "is_online_only = excluded.is_online_only, "
+          "is_deleted = 0, "
+          // Back at the source (restored from trash, or moved back in).
+          "source_deleted_date = NULL",
           [
             f.id,
             f.name,
@@ -301,10 +384,79 @@ class FileDesktopRepository {
             f.isInline ? 1 : 0,
             f.isHidden ? 1 : 0,
             f.isUserDeleted ? 1 : 0,
+            f.contentHash,
+            f.isOnlineOnly ? 1 : 0,
           ],
         );
       }
     });
+  }
+
+  /// Drops what the stored row of [f] derived from content the source no
+  /// longer has, when [f] says that content changed.
+  ///
+  /// Clearing `local_path` puts the file back on the download queue (the
+  /// downloader overwrites the old copy). Deleting its embeddings and chunks
+  /// and nulling its description — with the attempt budgets reset, since the
+  /// new bytes have not failed anything — puts it back on every indexing queue
+  /// in `DatabaseRepository`, which select on exactly those being absent.
+  /// Tags and landmarks are left alone: user tags share the table.
+  ///
+  /// Matching content hashes win over a new modified time: Drive bumps the
+  /// time on a rename, which changes nothing derived from the bytes. Without
+  /// both hashes, a different modified time or size counts as a change.
+  Future<void> _dropStaleContent(Transaction tx, File f) async {
+    final rows = await tx.select(
+      'SELECT date_last_modified, size, content_hash FROM files WHERE id = ?',
+      [f.id],
+    );
+    if (rows.isEmpty) return;
+    final stored = rows.single;
+    final storedHash = stored['content_hash'] as String?;
+    final changed =
+        storedHash != null && f.contentHash != null
+            ? storedHash != f.contentHash
+            : stored['date_last_modified'] !=
+                    f.dateLastModified.millisecondsSinceEpoch ||
+                stored['size'] != f.size;
+    if (!changed) return;
+
+    await tx.execute(
+      'UPDATE files SET local_path = NULL, description = NULL, '
+      'embedding_attempts = 0, description_attempts = 0 WHERE id = ?',
+      [f.id],
+    );
+    await tx.execute('DELETE FROM files_embeddings WHERE file_id = ?', [f.id]);
+    await tx.execute('DELETE FROM file_chunks WHERE file_id = ?', [f.id]);
+  }
+
+  /// Other live files with the same bytes as [f] — in any collection.
+  /// Empty when [f] has not been hashed.
+  Future<List<File>> duplicatesOf(File f) async {
+    final hash = f.contentHash;
+    if (hash == null) return [];
+    final rows = await db.select(
+      "SELECT * FROM files WHERE content_hash = ? AND id <> ? "
+      "AND is_deleted = 0 AND is_user_deleted = 0 ORDER BY id",
+      [hash, f.id],
+    );
+    return rows.map((r) => File.fromDbMap(r)).toList();
+  }
+
+  /// Every set of two or more live files sharing a content hash, keyed by hash.
+  Future<Map<String, List<File>>> duplicateGroups() async {
+    final rows = await db.select(
+      "SELECT * FROM files WHERE is_deleted = 0 AND is_user_deleted = 0 "
+      "AND content_hash IN (SELECT content_hash FROM files "
+      "WHERE content_hash IS NOT NULL AND is_deleted = 0 AND is_user_deleted = 0 "
+      "GROUP BY content_hash HAVING COUNT(*) > 1) ORDER BY content_hash, id",
+    );
+    final groups = <String, List<File>>{};
+    for (final r in rows) {
+      final file = File.fromDbMap(r);
+      groups.putIfAbsent(file.contentHash!, () => []).add(file);
+    }
+    return groups;
   }
 
   Future<List<File>> getByEmailId(String emailId) async {
@@ -336,9 +488,28 @@ class FileDesktopRepository {
     return files;
   }
 
+  /// Files of a collection that are still at the source and not deleted by
+  /// the user.
+  Future<List<File>> getLiveFiles(String collectionId) async {
+    final rows = await db.select(
+      "SELECT * FROM files WHERE collection_id = ? AND is_deleted = 0 AND is_user_deleted = 0 AND source_deleted_date IS NULL",
+      [collectionId],
+    );
+    return rows.map((r) => File.fromDbMap(r)).toList();
+  }
+
   Future<List<File>> getFilesToDownload(String collectionId) async {
     final rows = await db.select(
-      "SELECT * FROM files WHERE collection_id = ? AND local_path IS NULL AND is_deleted = 0 AND is_user_deleted = 0",
+      "SELECT * FROM files WHERE collection_id = ? AND local_path IS NULL AND is_deleted = 0 AND is_user_deleted = 0 AND source_deleted_date IS NULL",
+      [collectionId],
+    );
+    return rows.map((r) => File.fromDbMap(r)).toList();
+  }
+
+  /// Live files of a collection that have no thumbnail yet.
+  Future<List<File>> getFilesWithoutThumbnail(String collectionId) async {
+    final rows = await db.select(
+      "SELECT * FROM files WHERE collection_id = ? AND thumbnail IS NULL AND is_deleted = 0 AND is_user_deleted = 0 AND source_deleted_date IS NULL",
       [collectionId],
     );
     return rows.map((r) => File.fromDbMap(r)).toList();

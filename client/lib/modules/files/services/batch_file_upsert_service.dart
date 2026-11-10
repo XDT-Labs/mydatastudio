@@ -39,7 +39,10 @@ class BatchFileUpsertService
 
     try {
       await retryOnLock(
-        () => repo.upsertAll(command.files),
+        () => repo.upsertAll(
+          command.files,
+          replaceChangedContent: command.replaceChangedContent,
+        ),
         label: 'BatchFileUpsertService',
       );
       sink.add(command.files);
@@ -56,5 +59,12 @@ class BatchFileUpsertService
 class BatchFileUpsertServiceCommand implements RxCommand {
   List<File> files;
   AppDatabase database;
-  BatchFileUpsertServiceCommand(this.files, this.database);
+
+  /// See [FileDesktopRepository.upsertAll].
+  bool replaceChangedContent;
+  BatchFileUpsertServiceCommand(
+    this.files,
+    this.database, {
+    this.replaceChangedContent = false,
+  });
 }

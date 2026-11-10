@@ -12,6 +12,7 @@ class CollectionTileWidget extends StatelessWidget {
     required this.onSync,
     required this.onDelete,
     this.showSync = true,
+    this.onSettings,
   });
 
   final Collection collection;
@@ -25,6 +26,9 @@ class CollectionTileWidget extends StatelessWidget {
   /// Whether to offer the "Sync" action. Hidden for immutable sources (e.g. a
   /// PST archive) that are imported once and never re-synced.
   final bool showSync;
+
+  /// When non-null, a "Settings" menu item is offered that calls this.
+  final VoidCallback? onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -83,6 +87,7 @@ class CollectionTileWidget extends StatelessWidget {
           ),
           onSelected: (value) {
             if (value == 'sync') onSync();
+            if (value == 'settings') onSettings?.call();
             if (value == 'delete') onDelete();
           },
           itemBuilder:
@@ -91,6 +96,11 @@ class CollectionTileWidget extends StatelessWidget {
                   const PopupMenuItem<String>(
                     value: 'sync',
                     child: Text('Sync'),
+                  ),
+                if (onSettings != null)
+                  const PopupMenuItem<String>(
+                    value: 'settings',
+                    child: Text('Settings'),
                   ),
                 const PopupMenuItem<String>(
                   value: 'delete',

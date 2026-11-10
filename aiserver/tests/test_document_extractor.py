@@ -1,4 +1,4 @@
-"""Document extraction for search Phase 7 (SEARCH_PLAN §18).
+"""Document extraction for search Phase 7 (docs/plans/unified-search.md §18).
 
 Each test here encodes a decision that was *measured* during the §18h step 0
 spike, not a guess about how the library behaves. Where a test looks
@@ -326,60 +326,22 @@ def test_extract_markdown_still_refuses_what_policy_excludes(monkeypatch):
             de.extract_markdown(OLE2_MAGIC + b"\x00" * 64, hint)
 
 
-# ── PDF runtime (search plan §18h-6) ─────────────────────────────────────────
-
-class TestPdfRuntime:
-    """Guards on the vendored pdfium.
-
-    The failure these exist for already happened: docling's downloader wrote a
-    Linux ELF, reported success, and every PDF failed with "the pdfium library
-    is not installed" — a message describing the wrong problem entirely
-    (§18d-1). The point is that a wrong-platform binary must be *loud*.
-    """
-
-    def _reset(self):
-        de._pdf_ready = None
-        de._pdf_reason = "not configured"
-
-    def test_accepts_a_macho_object(self, tmp_path):
-        lib = tmp_path / "libpdfium.dylib"
-        lib.write_bytes(b"\xcf\xfa\xed\xfe" + b"\0" * 64)
-        assert de._is_macho(str(lib))
-
-    def test_rejects_a_linux_elf(self, tmp_path):
-        # Exactly what docling's own download_models() writes on macOS.
-        lib = tmp_path / "libpdfium.so"
-        lib.write_bytes(b"\x7fELF" + b"\0" * 64)
-        assert not de._is_macho(str(lib))
-
-    def test_rejects_a_missing_file(self, tmp_path):
-        assert not de._is_macho(str(tmp_path / "absent.dylib"))
-
-    def test_an_external_override_is_honoured(self, monkeypatch):
-        # A developer pointing at their own build should not have it silently
-        # replaced by whatever happens to be vendored.
-        self._reset()
-        monkeypatch.setenv("PDFIUM_DYNAMIC_LIB_PATH", "/somewhere/of/my/own")
-        try:
-            assert de.configure_pdf_runtime() is True
-        finally:
-            self._reset()
-
-    def test_a_pdf_without_pdfium_is_unavailable_not_unparseable(
-        self, monkeypatch
-    ):
-        # 503, never 422: a missing library says nothing about the document,
-        # and counting it would retire every PDF in the archive (§18h-4).
-        self._reset()
-        monkeypatch.delenv("PDFIUM_DYNAMIC_LIB_PATH", raising=False)
-        monkeypatch.setattr(
-            de, "_pdfium_search_roots", lambda: ["/nonexistent"]
+def test_a_pdf_the_parser_cannot_read_spends_an_attempt(monkeypatch):
+    """docling's message for an unreadable PDF names pdfium, but nothing can be
+    installed to fix it. As a 503 it would cost no attempt, and the client would
+    retry the file forever instead of retiring it."""
+    def _raise(data, fmt):
+        raise RuntimeError(
+            "parse error: pdf: pdf: pdfium support is not compiled in "
+            "(docling-pdf feature `pdfium`)"
         )
-        try:
-            with pytest.raises(de.ExtractionUnavailable):
-                de._convert_raw(b"%PDF-1.4 ...", "pdf")
-        finally:
-            self._reset()
+
+    monkeypatch.setattr(de, "_convert_raw", _raise)
+
+    with pytest.raises(RuntimeError) as exc:
+        de._convert(b"%PDF-1.4", "pdf")
+
+    assert not isinstance(exc.value, de.ExtractionUnavailable)
 
 
 class TestScannedTripwire:
@@ -495,8 +457,8 @@ class TestLegacyRecovery:
         assert converter.calls == ["doc"]
 
     def test_a_format_textutil_cannot_help_is_not_retried(self, monkeypatch):
-        """Recovery is scoped to what was measured. A failed PDF is a pdfium
-        problem, and running a Word converter over it would only turn one
+        """Recovery is scoped to what was measured. A failed PDF is not a
+        Word file, and running a Word converter over it would only turn one
         honest error into two."""
         converter = _RecordingConverter(RuntimeError("parse error: pdf: broken xref"))
         monkeypatch.setattr(de, "_convert_raw", converter)
@@ -691,3 +653,14 @@ class TestDetectionCost:
 
         assert text is not None
         assert "login,id" in text and "mats,R" in text
+
+
+class TestDoclingUnavailable:
+    def test_docling_failing_to_load_is_unavailable_not_unparseable(
+        self, monkeypatch
+    ):
+        # Ubuntu 22.04's glibc can't load the docling-rs wheel. Those files are
+        # fine, so they must stay retryable for when the OS is upgraded.
+        monkeypatch.setitem(de.sys.modules, "docling_rs", None)
+        with pytest.raises(de.ExtractionUnavailable, match="could not load"):
+            de._convert_raw(b"hello", "txt")

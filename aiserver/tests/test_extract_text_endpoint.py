@@ -5,10 +5,9 @@ run bytes through the actual library so the wiring is pinned too — the
 sniff → synthesized-name → convert → chunk path is exactly where a library
 upgrade would break silently.
 
-Only formats that need no model download are used here (txt/csv/rtf), so the
-suite stays runnable on a machine that has never fetched docling's 2 GB pack.
-PDF is deliberately absent: it additionally needs a vendored macOS pdfium
-(SEARCH_PLAN §18d-1) and belongs with the step-5 work.
+Only paths that need no model download are used here, so the suite stays
+runnable on a machine that has never fetched docling's 2 GB pack. That now
+includes PDF: see ``TestBornDigitalPdf``.
 """
 import base64
 
@@ -119,6 +118,115 @@ async def test_missing_dependency_reports_unavailable_not_unprocessable(
         await _extract(b"%PDF-1.5\n", "invoice.pdf")
 
     assert exc.value.status_code == 503
+
+
+def _pdf_with_text_layer(pages: list[str]) -> bytes:
+    """A real PDF, xref table and all, with one line of Helvetica per page.
+
+    An empty string makes a page with no text layer, which is what a scanned
+    page looks like to a reader that does not OCR.
+    """
+    font = 3 + 2 * len(pages)
+    kids = " ".join(f"{3 + 2 * i} 0 R" for i in range(len(pages)))
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        f"<< /Type /Pages /Kids [{kids}] /Count {len(pages)} >>".encode(),
+    ]
+    for i, text in enumerate(pages):
+        objects.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            f"/Contents {4 + 2 * i} 0 R "
+            f"/Resources << /Font << /F1 {font} 0 R >> >> >>".encode()
+        )
+        content = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
+        objects.append(
+            b"<< /Length %d >>\nstream\n%s\nendstream" % (len(content), content)
+        )
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+    out = b"%PDF-1.4\n"
+    offsets = []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    return out + (
+        b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n"
+        % (len(objects) + 1, xref)
+    )
+
+
+class TestBornDigitalPdf:
+    """The PDF path against the real library, with no models available.
+
+    docling-rs changed what ``do_ocr=False`` means under this code: it used to
+    skip the whole ML stack and now only skips OCR, so every PDF began failing
+    on a missing layout model. Nothing noticed, because the failure is a
+    retryable 503 and no test here converted an actual PDF. An upgrade that
+    moves this behaviour again has to fail here rather than quietly stop PDFs
+    being indexed.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_models_and_no_pdfium(self, tmp_path, monkeypatch):
+        try:
+            import docling_rs  # noqa: F401
+        except ImportError as e:
+            pytest.skip(f"docling_rs cannot load here: {e}")
+
+        # Every place docling looks for a model is empty, so a dev machine that
+        # happens to have the pack cannot make these pass by accident: a
+        # relative `.models/` under the cwd, the cache dir, and the override.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("DOCLING_RS_CACHE", str(tmp_path))
+        monkeypatch.delenv("DOCLING_LAYOUT_ONNX", raising=False)
+        monkeypatch.delenv("PDFIUM_DYNAMIC_LIB_PATH", raising=False)
+        # With a tokenizer, HybridChunker merges these short pages into a single
+        # chunk citing page 1, so what a test could assert would depend on
+        # whether this machine has downloaded the embedding model.
+        monkeypatch.setattr(de, "_tokenizer_path", lambda: None)
+
+    async def test_a_born_digital_pdf_returns_chunks_with_their_pages(self):
+        pdf = _pdf_with_text_layer(
+            [
+                "Alpha page mentions the quarterly invoice total.",
+                "Beta page mentions the renewal deadline.",
+            ]
+        )
+
+        result = await _extract(pdf, "report.pdf")
+
+        assert result["format"] == "pdf"
+        pages_by_word = {
+            word: chunk["page"]
+            for chunk in result["chunks"]
+            for word in ("invoice", "renewal")
+            if word in chunk["text"]
+        }
+        # The page is what a search result links the reader to, so reading the
+        # text but losing where it came from would still be a regression.
+        assert pages_by_word == {"invoice": 1, "renewal": 2}
+
+    async def test_a_pdf_with_no_text_layer_is_empty_rather_than_an_error(self):
+        """Scanned pages must not fail: the file is fine, it has nothing to
+        read without OCR, and `_warn_if_scanned` is what reports that."""
+        result = await _extract(_pdf_with_text_layer(["", ""]), "scan.pdf")
+
+        assert result["format"] == "pdf"
+        assert not "".join(c["text"] for c in result["chunks"]).strip()
+
+    async def test_a_corrupt_pdf_is_unprocessable_not_unavailable(self):
+        """A file the parser cannot read is reported as "pdfium support is not
+        compiled in", because pdfium is docling's optional last resort for such
+        files. It must not read as a missing dependency: there is nothing to
+        install, and a 503 costs no attempt, so the client would retry this
+        file forever instead of retiring it."""
+        with pytest.raises(HTTPException) as exc:
+            await _extract(b"%PDF-1.4\nnot really a pdf at all\n", "broken.pdf")
+
+        assert exc.value.status_code == 422
 
 
 async def test_invalid_base64_is_rejected_before_any_extraction():

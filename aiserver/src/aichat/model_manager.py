@@ -13,8 +13,15 @@ from PIL import Image
 import base64
 import io
 from typing import Any, List, Optional
-from transformers import AutoModelForImageTextToText, AutoProcessor
-from qwen_vl_utils import process_vision_info
+
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:
+    SentenceTransformer = None
+
+EMBEDDING_DIMENSION = 768
+QUERY_PROMPT = "task: search result | query: "
+DOCUMENT_PROMPT = "title: none | text: "
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
@@ -257,13 +264,64 @@ def load_local_model(
         quiet_mtmd_logging()
         chat_handler = handler_cls(clip_model_path=clip_model_path, verbose=False)
 
-    return llama_cpp.Llama(
-        model_path=model_path,
-        n_ctx=32768,
-        n_gpu_layers=-1,
-        verbose=False,
-        chat_handler=chat_handler,
-    )
+    def build(n_gpu_layers: int):
+        return llama_cpp.Llama(
+            model_path=model_path,
+            n_ctx=32768,
+            n_gpu_layers=n_gpu_layers,
+            verbose=False,
+            chat_handler=chat_handler,
+            # Size sliding-window layers' KV cache to their window, not to n_ctx.
+            # For Gemma 4 12B that is 480 MiB instead of 10,240 MiB, with the same
+            # answers and speed (measured; see test_model_manager). Models without
+            # sliding-window attention are unaffected.
+            swa_full=False,
+        )
+
+    # All layers on the GPU (Metal, or Vulkan on Windows and Linux). A GPU too
+    # small for the model, such as an integrated one, fails the load; the CPU
+    # can still run it, just slower. Without a GPU this offloads nothing.
+    try:
+        return build(-1)
+    except Exception as e:
+        print(f"[LOADER] Loading on the GPU failed ({e}); retrying on the CPU.")
+        return build(0)
+
+
+def is_transformers_embedding_model(model_id: str) -> bool:
+    """Check if the model ID corresponds to an EmbeddingGemma Transformers model."""
+    if not model_id:
+        return False
+    return "embeddinggemma" in model_id.lower()
+
+
+def select_embedding_device() -> str:
+    """CUDA, else Metal (MPS) on Apple Silicon, else the CPU.
+
+    MPS was checked against the CPU on EmbeddingGemma 2 in float32: the vectors
+    match to six decimal places, so embeddings stored before this change stay
+    comparable with new ones. On Windows and Linux the bundled torch is
+    CPU-only, so this is the CPU there.
+    """
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def select_embedding_dtype(device: str) -> torch.dtype:
+    """
+    Select the precision for loading the embedding model.
+
+    Returns torch.bfloat16 only when device == "cuda" and torch.cuda.is_bf16_supported(),
+    otherwise torch.float32.
+
+    NEVER use float16: activations overflow fp16 and silently produce NaN/garbage vectors.
+    """
+    if device == "cuda" and torch.cuda.is_bf16_supported():
+        return torch.bfloat16
+    return torch.float32
 
 
 def load_embedding_model(model_id: str, filename: str, local_dir: str) -> Any:
@@ -272,8 +330,8 @@ def load_embedding_model(model_id: str, filename: str, local_dir: str) -> Any:
     """
     print(f"[EMBEDDING] Attempting to load embedding model: {model_id}")
     
-    # Check if it's the Qwen-VL Transformers model
-    if "VL" in model_id:
+    # Check if it's a Transformers model snapshot (no filename) or EmbeddingGemma
+    if filename is None or is_transformers_embedding_model(model_id):
         return load_transformers_embedding_model(model_id, local_dir)
     
     # Default to LlamaCpp for GGUF models
@@ -295,20 +353,24 @@ def load_embedding_model(model_id: str, filename: str, local_dir: str) -> Any:
     return llm, None
 
 
+def _root_cause(error: BaseException) -> BaseException:
+    """Follow explicit and implicit exception chaining to the original error."""
+    seen = {id(error)}
+    while True:
+        next_error = error.__cause__ or error.__context__
+        if next_error is None or id(next_error) in seen:
+            return error
+        seen.add(id(next_error))
+        error = next_error
+
+
 def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
     """
-    Load a Qwen-VL Embedding model using Transformers.
+    Load an EmbeddingGemma 2 model using SentenceTransformer.
     """
     print(f"[EMBEDDING] Loading Transformers model: {model_id} from {local_dir}")
     
-    # MPS (Metal Performance Shaders) on Apple Silicon has PyTorch memory allocation
-    # bugs with Qwen-VL 3D position embeddings (mrope), causing "RuntimeError: Invalid buffer size: XX GiB".
-    # Use CUDA if available, otherwise CPU.
-    if torch.cuda.is_available():
-        device = "cuda"
-    else:
-        device = "cpu"
-    print(f"[EMBEDDING] Using device: {device}")
+    device = select_embedding_device()
 
     # The Makefile downloads the full repo into models/<org>/<model_name>/
     # so local_dir is already the parent, just use it directly.
@@ -318,45 +380,53 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
         model_path = model_id
 
     print(f"[EMBEDDING] Loading from {model_path}...")
-    # AutoModel is wrong for this checkpoint and fails *silently*. Qwen3-VL
-    # Embedding declares Qwen3VLForConditionalGeneration, whose state dict nests
-    # the language model under `model.language_model.*`; AutoModel resolves to
-    # the bare Qwen3VLModel, which expects `language_model.*`. Every one of the
-    # 625 language-model tensors therefore fails to match, gets dropped, and is
-    # replaced by a fresh random initialisation — so the model still loads, still
-    # returns 2048 normalised floats, and every one of them is noise.
-    model, loading_info = AutoModelForImageTextToText.from_pretrained(
-        model_path,
-        dtype=torch.float16 if device != "cpu" else torch.float32,
-        output_loading_info=True,
-    )
-    model = model.to(device)
+    st_cls = SentenceTransformer
+    if st_cls is None:
+        try:
+            from sentence_transformers import SentenceTransformer as _ST
+            st_cls = _ST
+        except ImportError as e:
+            # The package may be present but failing to import; name the real
+            # error, which transformers wraps in a generic ImportError.
+            root_cause = _root_cause(e)
+            raise RuntimeError(
+                f"sentence-transformers could not be imported: {type(root_cause).__name__}: {root_cause}"
+            ) from e
 
-    # Fail loudly rather than serve noise. Randomly-initialised weights are not
-    # a degraded mode: the embeddings are meaningless, they are meaningless
-    # *differently* on every process launch (so vectors written by one run can
-    # never be compared with another's), and nothing downstream can detect it —
-    # cosine similarity over garbage still returns plausible-looking numbers.
-    missing = loading_info.get("missing_keys") or []
-    if missing:
+    print(f"[EMBEDDING] Using device: {device}")
+    try:
+        model = st_cls(model_path, device=device,
+                       model_kwargs={"torch_dtype": select_embedding_dtype(device)})
+    except Exception as e:
+        if device == "cpu":
+            raise
+        # A GPU that can't take the model (out of memory, a missing MPS op)
+        # costs speed, not embeddings.
+        print(f"[EMBEDDING] Loading on {device} failed ({e}); using the CPU.")
+        model = st_cls(model_path, device="cpu",
+                       model_kwargs={"torch_dtype": select_embedding_dtype("cpu")})
+
+    # Fail loudly rather than serve noise. Check the dimension immediately after loading.
+    dim = model.get_sentence_embedding_dimension()
+    if dim != EMBEDDING_DIMENSION:
         raise RuntimeError(
-            f"Embedding model {model_id} loaded with {len(missing)} randomly "
-            f"initialised tensors (e.g. {missing[:3]}). Its embeddings would be "
-            "noise. This means the checkpoint does not match the model class."
+            f"Embedding model {model_id} reported dimension {dim}, expected {EMBEDDING_DIMENSION}. "
+            "Its embeddings would be incompatible or noise."
         )
 
-    processor = AutoProcessor.from_pretrained(model_path)
-
     print(f"[EMBEDDING] Transformers model {model_id} loaded successfully.")
-    return model, processor
+    return model, None
 
 
 def generate_embeddings(
     model: Any,
-    processor: Any,
+    processor: Any = None,
     texts: Optional[List[str]] = None,
     images_base64: Optional[List[str]] = None,
-    filename: Optional[str] = None
+    filename: Optional[str] = None,
+    audios_base64: Optional[List[str]] = None,
+    videos_base64: Optional[List[str]] = None,
+    task: str = "document"
 ) -> List[List[float]]:
     """
     Universal embedding generator that handles both LlamaCpp and Transformers.
@@ -365,156 +435,130 @@ def generate_embeddings(
     single item send a list of one — a uniform shape beats a singular and a
     plural path that can drift apart.
     """
-    # Which route is taken is a property of the loaded model, not of the call,
-    # so it was logging the same line thousands of times per import.
+    # Which route is taken is a property of the loaded model, not of the call.
     if hasattr(model, 'client') and hasattr(model.client, 'embed'):
-        # LlamaCpp path (Text only). No batching available here — llama.cpp's
-        # embed is one string at a time — so the list is honoured by looping.
-        if images_base64:
-            raise ValueError("LlamaCpp does not support image embeddings in this implementation.")
+        # LlamaCpp path (Text only). No multimodal support here.
+        if images_base64 or audios_base64 or videos_base64:
+            raise ValueError("LlamaCpp does not support multimodal embeddings (images, audios, videos) in this implementation.")
         return [generate_text_embedding(text, model, processor) for text in (texts or [])]
 
     # Transformers path
-    return generate_transformers_multimodal_embedding(model, processor, texts, images_base64, filename)
-
-
-def last_token_indices(attention_mask: "torch.Tensor") -> "torch.Tensor":
-    """Index of each row's final real (non-padding) token.
-
-    This exists because the checkpoint pools with `lasttoken` — it reads one
-    position out of the sequence and calls that the embedding. Taking position
-    `-1` is only that token when nothing is padded, which was true while every
-    call embedded exactly one item and stops being true the moment a batch
-    holds two different lengths.
-
-    Getting it wrong does not raise: a row would be handed the hidden state of
-    a PAD token, producing a confident, normalized, meaningless vector for
-    every item in the batch except the longest. Search results would just
-    quietly get worse.
-
-    Derived from the mask rather than from a padding-side setting, because
-    nothing in this codebase sets `padding_side` — it inherits whatever the
-    processor's tokenizer config happens to carry, so depending on it would be
-    depending on a default we do not control. Counting from the right works
-    under either convention.
-    """
-    # Number of trailing zeros per row: argmax on the reversed mask finds the
-    # first 1 from the end. `flip` costs nothing at these sizes.
-    trailing_pad = attention_mask.flip(dims=[1]).argmax(dim=1)
-    return attention_mask.shape[1] - 1 - trailing_pad
-
-
-def _pool_last_token(last_hidden_state: "torch.Tensor", attention_mask: "torch.Tensor") -> "torch.Tensor":
-    """Last-token pooling, then L2 normalization — per the checkpoint's own
-    1_Pooling/config.json ("pooling_mode": "lasttoken")."""
-    indices = last_token_indices(attention_mask)
-    pooled = last_hidden_state[torch.arange(last_hidden_state.shape[0]), indices]
-    return torch.nn.functional.normalize(pooled, p=2, dim=1)
+    return generate_transformers_multimodal_embedding(
+        model=model,
+        texts=texts,
+        images_base64=images_base64,
+        filename=filename,
+        audios_base64=audios_base64,
+        videos_base64=videos_base64,
+        task=task,
+    )
 
 
 def generate_transformers_multimodal_embedding(
     model: Any,
-    processor: Any,
     texts: Optional[List[str]] = None,
     images_base64: Optional[List[str]] = None,
-    filename: Optional[str] = None
+    filename: Optional[str] = None,
+    audios_base64: Optional[List[str]] = None,
+    videos_base64: Optional[List[str]] = None,
+    task: str = "document"
 ) -> List[List[float]]:
     """
-    Generate embeddings using Qwen3-VL Transformers model.
+    Generate embeddings using EmbeddingGemma 2 Transformers model via SentenceTransformer.
 
-    Text is embedded as a true batch — one forward pass over all of it. That is
-    the whole point of the list: at ~500 tokens per chunk, per-call overhead
-    (kernel launches, the processor's Python work, the HTTP round trip) costs
-    more than the matmuls, so N separate calls cost far more than one call with
-    N rows. Email body chunks are a uniform 2,000 characters, so they pad
-    against each other with little waste.
+    Inputs are packed in strict modality order: texts (each prefixed with QUERY_PROMPT
+    if task == 'query' else DOCUMENT_PROMPT), then images (dict {"image": PIL.Image}),
+    then audios (dict {"audio": path} pointing to temporary file), then videos
+    (dict {"video": path} pointing to temporary file).
 
-    Images are looped rather than batched, and callers send a list of one. Two
-    photos of different dimensions expand to different numbers of vision
-    tokens, so batching them is a real piece of work with no demand behind it
-    — one image per file, and the file corpus is not the slow part.
+    Prefixes apply to TEXT ONLY. Images, audios, and videos get no prefix.
+    Temporary files created for audio/video decoding are deleted in a finally block.
+    Output order strictly matches input order.
+
+    Raises:
+        ValueError: If task is not 'query' or 'document'.
+        ValueError: If model outputs NaN values (guards against float16 overflow).
     """
-    device = next(model.parameters()).device
+    import tempfile
+    import numpy as np
 
-    if images_base64:
-        return [
-            _embed_one_multimodal(model, processor, device, image_base64=image, filename=filename)
-            for image in images_base64
-        ]
+    if task not in ("query", "document"):
+        raise ValueError(f"Invalid task '{task}'. Expected 'query' or 'document'.")
 
-    messages_batch = [
-        [{"role": "user", "content": [{"type": "text", "text": text}]}]
-        for text in (texts or [])
-    ]
-    prompts = [
-        processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
-        for messages in messages_batch
-    ]
-
-    inputs = processor(
-        text=prompts,
-        images=None,
-        videos=None,
-        padding=True,
-        return_tensors="pt"
-    ).to(device)
-
-    return _encode(model, inputs, device)
-
-
-def _embed_one_multimodal(
-    model: Any,
-    processor: Any,
-    device: Any,
-    image_base64: str,
-    filename: Optional[str] = None
-) -> List[float]:
-    """One image through the vision path, returning a single vector."""
-    # Decode and validate base64 image into a loaded PIL Image
-    pil_image = decode_base64_image(image_base64, filename)
-    messages = [{"role": "user", "content": [{"type": "image", "image": pil_image}]}]
-
-    # Prepare inputs using Qwen-VL utilities and processor
-    image_inputs, video_inputs = process_vision_info(messages)
-
-    # Use chat template to ensure multimodal tokens (<|image_pad|>, etc.) are correctly inserted
-    prompt = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
-
-    inputs = processor(
-        text=[prompt],
-        images=image_inputs,
-        videos=video_inputs,
-        padding=True,
-        return_tensors="pt"
-    ).to(device)
-
-    return _encode(model, inputs, device)[0]
-
-
-def _encode(model: Any, inputs: Any, device: Any) -> List[List[float]]:
-    """Run the encoder and pool, with the existing CPU fallback for device errors."""
-    # `.model` rather than the model itself: the checkpoint's class is a
-    # generation head, whose forward returns vocabulary logits. The embedding
-    # lives one level down, in the base model's hidden states.
-    encoder = model.model
-
+    temp_files: List[str] = []
     try:
-        with torch.no_grad():
-            outputs = encoder(**inputs)
-            embeddings = _pool_last_token(outputs.last_hidden_state, inputs["attention_mask"])
+        inputs: List[Any] = []
 
-        return embeddings.tolist()
-    except Exception as e:
-        if "buffer size" in str(e).lower() or "out of memory" in str(e).lower() or "mps" in str(e).lower():
-            print(f"[EMBEDDING] Device error on {device} ({e}). Falling back to CPU...")
-            cpu_device = torch.device("cpu")
-            model.to(cpu_device)
-            inputs_cpu = {k: (v.to(cpu_device) if isinstance(v, torch.Tensor) else v) for k, v in inputs.items()}
-            with torch.no_grad():
-                outputs = model.model(**inputs_cpu)
-                embeddings = _pool_last_token(outputs.last_hidden_state, inputs_cpu["attention_mask"])
-            return embeddings.tolist()
-        raise
+        if texts:
+            prefix = QUERY_PROMPT if task == "query" else DOCUMENT_PROMPT
+            inputs.extend([f"{prefix}{t}" for t in texts])
+
+        if images_base64:
+            for b64 in images_base64:
+                img = decode_base64_image(b64, filename)
+                inputs.append({"image": img})
+
+        if audios_base64:
+            ext = ".wav"
+            if filename:
+                f_ext = os.path.splitext(filename)[1].lower()
+                if f_ext:
+                    ext = f_ext
+            for b64 in audios_base64:
+                raw_b64 = b64.split(",", 1)[1] if b64.startswith("data:") else b64
+                try:
+                    audio_bytes = base64.b64decode(raw_b64)
+                except Exception as e:
+                    raise ValueError(f"Invalid base64 audio data: {e}")
+                tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+                try:
+                    tmp.write(audio_bytes)
+                finally:
+                    tmp.close()
+                temp_files.append(tmp.name)
+                inputs.append({"audio": tmp.name})
+
+        if videos_base64:
+            ext = ".mp4"
+            if filename:
+                f_ext = os.path.splitext(filename)[1].lower()
+                if f_ext:
+                    ext = f_ext
+            for b64 in videos_base64:
+                raw_b64 = b64.split(",", 1)[1] if b64.startswith("data:") else b64
+                try:
+                    video_bytes = base64.b64decode(raw_b64)
+                except Exception as e:
+                    raise ValueError(f"Invalid base64 video data: {e}")
+                tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+                try:
+                    tmp.write(video_bytes)
+                finally:
+                    tmp.close()
+                temp_files.append(tmp.name)
+                inputs.append({"video": tmp.name})
+
+        if not inputs:
+            return []
+
+        embeddings = model.encode(inputs, normalize_embeddings=True, convert_to_numpy=True)
+        arr = np.asarray(embeddings)
+
+        if np.isnan(arr).any():
+            raise ValueError("Model output contains NaN values. Ensure bfloat16 or float32 precision is used.")
+
+        if arr.ndim == 1:
+            arr = np.expand_dims(arr, axis=0)
+
+        return arr.tolist()
+
+    finally:
+        for path in temp_files:
+            try:
+                if os.path.exists(path):
+                    os.unlink(path)
+            except OSError:
+                pass
 
 
 def generate_text_embedding(text: str, model: Any, processor: Any) -> List[float]:

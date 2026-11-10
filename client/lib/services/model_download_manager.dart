@@ -8,6 +8,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 import 'package:mydatastudio/repositories/aichat_model_repository.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 
 /// Local-only checks (`/util/model-status`) should return near-instantly —
 /// bound them so a hung connection surfaces as a fast error instead of an
@@ -74,9 +75,9 @@ class ModelDownloadManager {
       mmprojFilename: 'mmproj-gemma-4-12B-it-Q8_0.gguf',
     ),
     ModelDownloadItem(
-      alias: 'qwen3-vl-embedding:2b',
-      label: 'Qwen 3 VL Embedding (file & photo search)',
-      hfRepo: 'Qwen/Qwen3-VL-Embedding-2B',
+      alias: 'embeddinggemma-2',
+      label: 'EmbeddingGemma 2 (multimodal search)',
+      hfRepo: EmbeddingModel.modelName,
     ),
   ]);
 

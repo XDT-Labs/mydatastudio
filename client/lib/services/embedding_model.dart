@@ -17,20 +17,32 @@
 /// up on their own.
 class EmbeddingModel {
   /// The model every embedding in this app is computed with.
-  static const modelName = 'Qwen/Qwen3-VL-Embedding-2B';
+  static const modelName = 'google/embeddinggemma-2';
+
+  /// Output dimensionality of [modelName] embeddings (768-d L2-normalized).
+  ///
+  /// Single source of truth for vector dimensions across the client.
+  static const dimension = 768;
 
   /// Bumped whenever stored vectors stop being comparable with new ones.
   ///
-  /// The model name alone is not enough — the loader bug changed what the
-  /// vectors *meant* without changing which model produced them. Anything that
-  /// alters the output space belongs here: a different checkpoint, different
-  /// pooling, a different prompt template, or a fix like that one.
+  /// The model name alone is not enough — changes in pooling, prompt templates,
+  /// or checkpoint loading alter what vectors mean even under the same model.
+  /// Anything that alters the output space belongs here.
   ///
+  /// Revision restarts at 1 because the underlying model changed from Qwen
+  /// to EmbeddingGemma 2 (`google/embeddinggemma-2`).
+  ///
+  /// Historical revisions for `google/embeddinggemma-2`:
+  /// - `1` — initial migration to EmbeddingGemma 2 (768-d L2-normalized vectors
+  ///   supporting text, image, audio, video).
+  ///
+  /// Older revisions under legacy `Qwen/Qwen3-VL-Embedding-2B`:
   /// - `1` — original; `AutoModel` silently discarded the language model and
-  ///   replaced it with random weights. Every such vector is noise.
-  /// - `2` — loads via the checkpoint's declared class, and raises rather than
-  ///   serving noise if any tensor comes back randomly initialised.
-  static const revision = 2;
+  ///   replaced it with random weights. Every such vector was noise.
+  /// - `2` — loaded via the checkpoint's declared class, raising rather than
+  ///   serving noise if any tensor came back randomly initialised.
+  static const revision = 1;
 
   /// What lands in the `model_version` column.
   static const current = '$modelName@$revision';

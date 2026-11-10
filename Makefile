@@ -4,10 +4,12 @@
 # Usage:
 #   make all            - Build everything (models, python, client)
 #   make models         - Download GGUF models from Hugging Face
-#   make pdfium         - Vendor the macOS pdfium library (needed for PDF text)
 #   make build-python   - Build and zip the Python aiserver service
-#   make build-client   - Build the Flutter Desktop client (macOS release)
+#   make build-client   - Build the Flutter Desktop client (release, for this platform)
 #   make notarize       - Notarize the macOS build (requires APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID env vars)
+#   make imap-test-up   - Start the disposable Dovecot IMAP test server (Docker)
+#   make imap-test-down - Stop the IMAP test server
+#   make test-imap      - Run the `imap`-tagged integration tests against it
 #   make clean          - Remove all build artifacts
 # ==============================================================================
 
@@ -20,24 +22,21 @@ IMAGE_REPO = cloud-run-source-deploy
 # Python/AI Chat Config
 PYTHON_DIR = aiserver
 
-# pdfium — vendored, not downloaded at runtime. docling's own model downloader
-# ships a Linux x86-64 build on macOS and reports success, so PDFs fail with a
-# message describing the wrong problem (search plan §18d-1). 3.4 MB; the 2 GB
-# ONNX pack is deliberately NOT fetched, because a born-digital PDF's text
-# layer converts without it in no-OCR mode and this archive has no scanned
-# pages (§18b, §18h-6).
-PDFIUM_RELEASE = chromium/7999
-PDFIUM_ASSET = pdfium-mac-arm64.tgz
-PDFIUM_URL = https://github.com/bblanchon/pdfium-binaries/releases/download/$(PDFIUM_RELEASE)/$(PDFIUM_ASSET)
-PDFIUM_DIR = $(PYTHON_DIR)/vendor/pdfium
+UNAME_S := $(shell uname -s)
 APP_DIR = client/app
+ifeq ($(OS),Windows_NT)
+APP_ZIP_NAME = aiserver-windows.zip
+else ifeq ($(UNAME_S),Linux)
+APP_ZIP_NAME = aiserver-linux.zip
+else
 APP_ZIP_NAME = aiserver-macos.zip
+endif
 APP_ZIP_PATH = $(APP_DIR)/$(APP_ZIP_NAME)
 HF_MODEL = ggml-org/gemma-4-12B-it-GGUF
 HF_FILE = gemma-4-12B-it-Q4_0.gguf
 HF_MMPROJ_FILE = mmproj-gemma-4-12B-it-Q8_0.gguf
-HF_QWEN3_VL_MODEL = Qwen/Qwen3-VL-Embedding-2B
-HF_QWEN3_VL_DIR = $(PYTHON_DIR)/models/Qwen-Qwen3-VL-Embedding-2B-local
+HF_EMBEDDING_MODEL = google/embeddinggemma-2
+HF_EMBEDDING_DIR = $(PYTHON_DIR)/models/google-embeddinggemma-2-local
 
 # Apple config
 APPLE_ID = mike@xdtlabs.com
@@ -80,39 +79,56 @@ models:
 	else \
 		echo "$(HF_MMPROJ_FILE) already exists, skipping download."; \
 	fi
-	@if [ ! -d $(HF_QWEN3_VL_DIR) ]; then \
-		echo "Downloading Qwen3-VL-Embedding-2B model (Transformers)..."; \
-		hf download $(HF_QWEN3_VL_MODEL) --local-dir $(HF_QWEN3_VL_DIR); \
+	@if [ ! -d $(HF_EMBEDDING_DIR) ]; then \
+		echo "Downloading EmbeddingGemma 2 model (Transformers)..."; \
+		hf download $(HF_EMBEDDING_MODEL) --local-dir $(HF_EMBEDDING_DIR); \
 	else \
-		echo "Qwen3-VL-Embedding-2B model already exists, skipping download."; \
+		echo "EmbeddingGemma 2 model already exists, skipping download."; \
 	fi
 
 	
 
 
-# 1b. Vendor pdfium (PDF text extraction)
-.PHONY: pdfium
-pdfium:
-	@echo "--- 📄 Checking/Downloading pdfium ---"
-	@if [ -f $(PDFIUM_DIR)/lib/libpdfium.dylib ]; then \
-		echo "libpdfium.dylib already vendored, skipping download."; \
-	else \
-		mkdir -p $(PDFIUM_DIR); \
-		echo "Downloading $(PDFIUM_ASSET) ($(PDFIUM_RELEASE))..."; \
-		curl -sSLf -o /tmp/$(PDFIUM_ASSET) $(PDFIUM_URL) && \
-		tar xzf /tmp/$(PDFIUM_ASSET) -C $(PDFIUM_DIR) lib/libpdfium.dylib; \
-		rm -f /tmp/$(PDFIUM_ASSET); \
-	fi
-	@if ! file $(PDFIUM_DIR)/lib/libpdfium.dylib | grep -q Mach-O; then \
-		echo "ERROR: vendored pdfium is not a Mach-O object. PDF extraction would"; \
-		echo "       fail at runtime with a misleading \"not installed\" error."; \
-		exit 1; \
-	fi
-	@echo "pdfium ready: $$(file $(PDFIUM_DIR)/lib/libpdfium.dylib | cut -d: -f2-)"
-
 # 2. Build Python Service
 .PHONY: build-python
-build-python: pdfium
+ifeq ($(OS),Windows_NT)
+# Windows (Git Bash): PyPI's torch is CPU-only there, so the lock installs as
+# is. llama-cpp-python has no Windows wheel and compiles with MSVC: CPU by
+# default, Vulkan (GPU) when CMAKE_ARGS adds -DGGML_VULKAN=on with the SDK
+# installed, as CI does (.github/scripts/install_vulkan_sdk.sh).
+# Zipped with Python because Git Bash has no zip; ZIP64 is handled.
+build-python:
+	@echo "--- 🐍 Building Python aiserver service (Windows, CPU) ---"
+	@cd $(PYTHON_DIR) && \
+		FORCE_CMAKE=1 CMAKE_ARGS="$${CMAKE_ARGS:--DGGML_NATIVE=off}" pdm install && \
+		pdm run pyinstaller -y main.spec
+	@mkdir -p client/app
+	@rm -f client/app/$(APP_ZIP_NAME)
+	@cd $(PYTHON_DIR)/dist/aiserver && \
+		python -c "import shutil, sys; shutil.make_archive(sys.argv[1], 'zip', '.')" ../../../client/app/aiserver-windows
+	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
+else ifeq ($(UNAME_S),Linux)
+# Linux installs from an export of the lock rather than `pdm install`: the lock
+# was resolved with PyPI's torch, which on Linux pulls ~5 GB of CUDA libraries
+# the CPU build can't use. Everything else stays at its locked version, and
+# torch at its locked version from PyTorch's CPU index.
+build-python:
+	@echo "--- 🐍 Building Python aiserver service (Linux, CPU) ---"
+	@cd $(PYTHON_DIR) && \
+		TORCH=$$(python3.11 -c "import tomllib; print(next(p['version'] for p in tomllib.load(open('pdm.lock', 'rb'))['package'] if p['name'] == 'torch'))") && \
+		VISION=$$(python3.11 -c "import tomllib; print(next(p['version'] for p in tomllib.load(open('pdm.lock', 'rb'))['package'] if p['name'] == 'torchvision'))") && \
+		python3.11 -m venv --clear .venv && \
+		pdm export --dev --no-hashes -f requirements -o build-linux-requirements.txt && \
+		sed -i -E '/^(cuda-|nvidia-|triton|torch==|torchvision==)/d' build-linux-requirements.txt && \
+		.venv/bin/python -m pip install --upgrade pip && \
+		.venv/bin/python -m pip install "torch==$$TORCH" "torchvision==$$VISION" --index-url https://download.pytorch.org/whl/cpu && \
+		FORCE_CMAKE=1 CMAKE_ARGS="$${CMAKE_ARGS:--DGGML_NATIVE=off}" .venv/bin/python -m pip install -r build-linux-requirements.txt && \
+		PYTHONPATH=src .venv/bin/python -m PyInstaller -y main.spec
+	@mkdir -p client/app
+	@cd $(PYTHON_DIR)/dist/aiserver && zip -qryFS $(CURDIR)/client/app/$(APP_ZIP_NAME) .
+	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
+else
+build-python:
 	@echo "--- 🐍 Building Python aiserver service ---"
 	@cd $(PYTHON_DIR) && \
 		pdm install && \
@@ -160,23 +176,46 @@ build-python: pdfium
 	@rm -f client/app/$(APP_ZIP_NAME)
 	@ditto -c -k --sequesterRsrc $(PYTHON_DIR)/dist/aiserver client/app/$(APP_ZIP_NAME)
 	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
+endif
 
 
 # 3. Build Flutter Desktop Client
 .PHONY: build-client
+ifeq ($(OS),Windows_NT)
+build-client:
+	@echo "--- 🚀 Building Flutter Desktop client (Windows) ---"
+	@REALM=$$(cat .realm_name 2>/dev/null | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \
+	cd $(FLUTTER_DIR) && \
+		cp pubspec.prod.yaml pubspec.yaml && \
+		flutter pub get && \
+		REALM_NAME=$$REALM flutter build windows --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
+	@echo "--- ✅ Flutter build complete ---"
+else ifeq ($(UNAME_S),Linux)
+build-client:
+	@echo "--- 🚀 Building Flutter Desktop client (Linux) ---"
+	@REALM=$$(cat .realm_name 2>/dev/null | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \
+	cd $(FLUTTER_DIR) && \
+		cp pubspec.prod.yaml pubspec.yaml && \
+		flutter pub get && \
+		python3 tool/linux_without_flutter_angle.py && \
+		flutter pub get && \
+		REALM_NAME=$$REALM flutter build linux --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
+	@echo "--- ✅ Flutter build complete ---"
+else
 build-client:
 	@echo "--- 🚀 Building Flutter Desktop client (macOS) ---"
 	@REALM=$$(cat .realm_name 2>/dev/null | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \
 	cd $(FLUTTER_DIR) && \
 		cp pubspec.prod.yaml pubspec.yaml && \
 		flutter pub get && \
-		flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
+		flutter build macos --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM --dart-define=OUTLOOK_CLIENT_ID=$$OUTLOOK_CLIENT_ID
 	@echo "--- ✅ Flutter build complete ---"
 	@BRANCH=$$(git branch --show-current); \
 	if [ "$$BRANCH" = "main" ] && [ -z "$$CI" ]; then \
 		echo "--- 🚀 Copy release build to Applications folder ---"; \
 		cp -r $(FLUTTER_DIR)/build/macos/Build/Products/Release/MyDataStudio.app /Applications/MyDataStudio.app; \
 	fi
+endif
 
 
 # Local Install (Testing)
@@ -244,6 +283,25 @@ notarize:
 	#   --password "<password>" \
 	#   --team-id "TTM6V47DL9"
 
+
+# IMAP integration-test server (Dovecot in Docker; see client/test/integration/imap_server/)
+IMAP_TEST_COMPOSE = docker compose -f $(FLUTTER_DIR)/test/integration/imap_server/docker-compose.yml
+
+.PHONY: imap-test-up
+imap-test-up:
+	@echo "--- 📬 Starting IMAP test server ---"
+	$(IMAP_TEST_COMPOSE) up -d --wait --force-recreate
+
+.PHONY: imap-test-down
+imap-test-down:
+	@echo "--- 🛑 Stopping IMAP test server ---"
+	$(IMAP_TEST_COMPOSE) down -v
+
+.PHONY: test-imap
+test-imap:
+	$(MAKE) imap-test-up
+	(cd $(FLUTTER_DIR) && flutter test -t imap --concurrency=1 test/integration); \
+	  status=$$?; $(MAKE) imap-test-down; exit $$status
 
 # Cleanup
 .PHONY: clean

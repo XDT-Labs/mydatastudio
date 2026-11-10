@@ -7,16 +7,15 @@ import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/oauth/login_providers.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 
-/// Manages Google OAuth token lifecycle for all Google collections
-/// (Gmail and Drive).
+/// Manages Google OAuth token lifecycle for Google Drive collections.
 ///
 /// Responsible for:
 /// - Checking whether the stored access token is still valid.
 /// - Refreshing the token using the stored refresh token (PKCE, no client_secret).
 /// - Persisting the new token back to the [Collection] record in the DB.
 ///
-/// Used by [GoogleDriveProvider] (UI actions), [CloudFileIsolateWorker]
-/// (Drive background scanning), and [GmailScannerIsolateWorker] (email scanning).
+/// Used by [GoogleDriveProvider] (UI actions) and [CloudFileScannerWorker]
+/// (Drive background scanning).
 /// The isolate version uses [refreshTokens] with raw token strings.
 class GoogleAuthService {
   static final AppLogger _logger = AppLogger(null);
@@ -197,7 +196,7 @@ class GoogleAuthException implements Exception {
 
 /// Simple authenticated HTTP client that injects a Bearer token header.
 ///
-/// Use this to create API clients (DriveApi, GmailApi) from a valid
+/// Use this to create API clients (DriveApi) from a valid
 /// access token. This replaces the legacy GoogleAuthClient class.
 class AuthenticatedHttpClient extends http.BaseClient {
   final Map<String, String> _headers;

@@ -386,62 +386,141 @@ cd client && flutter test test/integration/file_browser_integration_test.dart
 
 ## CI/CD (GitHub Actions)
 
-GitHub Actions runs tests and builds on each push:
+### Release Workflow
+
+Releases are triggered by **pushing a version tag** matching `v*` (e.g., `v1.2.3` or `v1.2.3-beta.1`). Pushing to `main` does not build or release anything. Tags can be cut from any branch — e.g. a beta pre-release from `develop`.
+
+```bash
+# To release, tag and push:
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+The workflow:
+
+1. **Validates the tag** — Must match `vX.Y.Z` or `vX.Y.Z-suffix` format
+2. **Extracts version** — Numeric part (`X.Y.Z`) becomes the app version
+3. **Builds app** — Python binary + Flutter client (Metal GPU enabled, codesigned, notarized)
+4. **Creates GitHub Release** — Attaches DMG installer and aiserver zip
+5. **Pre-release handling** — Tags with suffix (e.g., `-beta.1`) are published as GitHub pre-releases and ignored by the in-app update checker
+
+**Example tags:**
+
+```bash
+v1.0.0              # → App version 1.0.0, full release
+v1.0.0-beta.1       # → App version 1.0.0, GitHub pre-release (update checker ignores)
+v1.2.3-rc.2         # → App version 1.2.3, GitHub pre-release
+```
+
+### Build & Release Pipeline
 
 ```yaml
 # .github/workflows/build_and_release.yml
 
 name: Build and Release
 
-on: [push, pull_request]
+on:
+  push:
+    tags: ["v*"]  # Only trigger on version tags
 
 jobs:
-  test:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.44.8
-      
-      - name: Flutter Tests
-        run: cd client && flutter test
-      
-      - name: Python Tests
-        run: |
-          cd aiserver
-          pdm install
-          PYTHONPATH=src pdm run pytest
-
   build:
-    needs: test
+    name: Build macOS Release
     runs-on: macos-latest
-    if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/checkout@v3
+      - name: Resolve Version from Tag
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Extract X.Y.Z from vX.Y.Z or vX.Y.Z-suffix
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Error: tag '$TAG' is not a version tag"
+            exit 1
+          fi
+          echo "version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+          # prerelease=true when the tag has a suffix, false otherwise
+
+      - uses: actions/checkout@v4
       
-      - name: Download Models
-        run: make models
+      - name: Free Disk Space (macOS)
+        run: |
+          sudo rm -rf /usr/local/share/dotnet
+          rm -rf ~/Library/Android/sdk
       
-      - name: Build Python
+      - name: Install Apple Certificate and Provisioning Profile
+        # Validation, certificate import, keychain setup
+      
+      - name: Update Version in pubspec.prod.yaml
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          sed -i '' -E "s/^version:.*/version: ${VERSION}+${BUILD_NUMBER}/" client/pubspec.prod.yaml
+      
+      - name: Build Python Service
         run: make build-python
+        env:
+          FORCE_CMAKE: "1"
+          CMAKE_ARGS: "-DGGML_METAL=on -DGGML_NATIVE=off"
       
-      - name: Build Flutter
+      - name: Build Flutter Client
         run: make build-client
       
-      - name: Sign & Notarize (if secrets available)
+      - name: Notarize macOS App
+        run: make notarize
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: make notarize
       
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Create DMG installer
+        run: npm install -g appdmg && appdmg client/installers/dmg_creator/config.json client/build/macos/Build/Products/Release/MyDataStudio.dmg
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
+          name: macos-dmg
+          path: client/build/macos/Build/Products/Release/MyDataStudio.dmg
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: MyDataStudio ${{ github.ref_name }}
           files: |
-            client/build/macos/Build/Products/Release/My Data Studio.app
+            artifacts/macos-dmg/*.dmg
+            artifacts/aiserver-macos/*.zip
+          prerelease: ${{ needs.build.outputs.prerelease == 'true' }}
+          generate_release_notes: true
 ```
+
+### Versioning & Build Numbers
+
+The workflow writes the version to `client/pubspec.prod.yaml` as `X.Y.Z+<github.run_number>`:
+
+- **X.Y.Z** — Extracted from tag (e.g., `v1.2.3` → `1.2.3`)
+- **+<build>** — GitHub Actions run number (always increasing)
+
+Example: Tag `v1.0.0` pushed as run #42 → version `1.0.0+42`
+
+This ensures:
+- Each release has a unique, increasing `CFBundleVersion`
+- `PythonManager` stamps the extracted aiserver with `<version>+<build>` and re-extracts the bundled zip whenever that stamp differs from the running app, so every release replaces the aiserver
+- The in-app update checker compares the latest GitHub release tag against the app version, which now always match
+
+### Retrying a Failed Release
+
+If the workflow fails partway through (e.g. a flaky notarization), **re-run the tag's workflow run** from the GitHub Actions UI. It rebuilds from the same tagged commit, and `softprops/action-gh-release` updates the existing release for that tag rather than creating a second one.
+
+If the failure needs a code fix, commit the fix and cut a new tag (e.g. `v1.2.4`) rather than moving the old one.
 
 ---
 

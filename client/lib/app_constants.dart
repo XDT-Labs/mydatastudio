@@ -28,11 +28,13 @@ class AppConstants {
   static const String secureStorageLocation = "storage-location";
 
   /// Scanner type constants — used in [Collection.scanner] and [FileSourceRegistry].
-  static const String scannerEmailGmail = "email.gmail";
   static const String scannerEmailOutlook = "email.outlook";
   static const String scannerEmailOutlookPst = "email.outlook.pst";
 
   static const String scannerEmailYahoo = "email.yahoo";
+
+  /// Any IMAP provider; the concrete provider is [Collection.emailProviderId].
+  static const String scannerEmailImap = "email.imap";
 
   // File source scanners
   static const String scannerFileLocal = "file.local";

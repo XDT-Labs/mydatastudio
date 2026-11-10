@@ -6,10 +6,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/search/services/result_ranking.dart';
 import 'package:mydatastudio/modules/search/services/search_service.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-const _dim = 2048;
+const _dim = EmbeddingModel.dimension;
 final _createdDbs = <String>[];
 final _recent = DateTime.utc(2026, 1, 1).millisecondsSinceEpoch;
 
@@ -62,7 +63,7 @@ Future<void> _addFile(
   );
   if (vector != null) {
     await db.rawDb.execute(
-      'INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding) '
+      'INSERT INTO files_embeddings (file_id, type, embeddinggemma2_embedding) '
       "VALUES (?, 'file', vector_as_f32(?))",
       [id, '[${vector.join(',')}]'],
     );
@@ -276,7 +277,7 @@ void main() {
         ['mail$i', _recent],
       );
       await db.rawDb.execute(
-        'INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding) '
+        'INSERT INTO emails_embeddings (email_id, embeddinggemma2_embedding) '
         'VALUES (?, vector_as_f32(?))',
         ['mail$i', '[${_vector(0, lean: 0.90 - i * 0.005).join(',')}]'],
       );
@@ -318,7 +319,7 @@ void main() {
       [_recent],
     );
     await db.rawDb.execute(
-      'INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding) '
+      'INSERT INTO emails_embeddings (email_id, embeddinggemma2_embedding) '
       'VALUES (?, vector_as_f32(?))',
       ['m1', '[${_vector(0).join(',')}]'],
     );

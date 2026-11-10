@@ -1,10 +1,12 @@
 // [ignoring loop detection]
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:mydatastudio/helpers/sql_chunks.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
 import 'package:mydatastudio/models/tables/collection.dart';
+import 'package:mydatastudio/modules/search/services/email_contact_repository.dart';
 import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/modules/email/services/searchable_body.dart';
 
@@ -39,12 +41,38 @@ class EmailRepository {
 
   EmailRepository(this.database);
 
+  /// The message's attachments, with each `path` made absolute.
+  ///
+  /// The IMAP scanner stores attachment paths relative to the collection's
+  /// extraction folder (`local_copy_path`); the PST importer stores absolute
+  /// ones. The email view reads the bytes straight from `path` (to inline
+  /// `cid:` images, draw thumbnails, open and save), so it needs the absolute
+  /// form either way. [FilePathResolver] leaves absolute paths unchanged.
   Future<List<model.File>> getAttachments(String emailId) async {
     final rows = await database.select(
-      "SELECT * FROM files WHERE email_id = ?",
+      "SELECT f.*, c.path AS col_path, c.local_copy_path AS col_local_copy_path, "
+      "c.scanner AS col_scanner "
+      "FROM files f LEFT JOIN collections c ON c.id = f.collection_id "
+      "WHERE f.email_id = ?",
       [emailId],
     );
-    return rows.map((r) => model.File.fromDbMap(r)).toList();
+    return rows.map((r) {
+      final file = model.File.fromDbMap(r);
+      file.path = FilePathResolver.absoluteFromPath(
+        file.path,
+        Collection(
+          id: file.collectionId,
+          name: '',
+          path: (r['col_path'] as String?) ?? '',
+          type: '',
+          scanner: (r['col_scanner'] as String?) ?? '',
+          scanStatus: '',
+          needsReAuth: false,
+          localCopyPath: r['col_local_copy_path'] as String?,
+        ),
+      );
+      return file;
+    }).toList();
   }
 
   Future<List<Email>> emails(
@@ -224,75 +252,16 @@ class EmailRepository {
     await database.transaction((tx) async {
       for (final chunk in sqlChunks(ids)) {
         final placeholders = List.filled(chunk.length, '?').join(',');
+        final addressRows = await tx.select(
+          'SELECT "from", "to", cc FROM emails WHERE id IN ($placeholders)',
+          chunk,
+        );
+        await EmailContactRepository.unindex(tx, addressRows);
         await tx.execute(
           "DELETE FROM emails WHERE id IN ($placeholders)",
           chunk,
         );
       }
     });
-  }
-
-  Future<void> cleanupDeletedYahoo(
-    Collection collection,
-    String folder,
-    List<int> remoteUids,
-  ) async {
-    final rows = await database.select(
-      "SELECT id, uid FROM emails WHERE collection_id = ? AND folder_id = ?",
-      [collection.id, folder],
-    );
-    final localEmails =
-        rows
-            .map((row) => (id: row['id'] as String, uid: row['uid'] as int?))
-            .toList();
-
-    final remoteUidSet = remoteUids.toSet();
-    final toDeleteIds =
-        localEmails
-            .where((e) {
-              if (e.uid == null) return false;
-              return !remoteUidSet.contains(e.uid);
-            })
-            .map((e) => e.id)
-            .toList();
-
-    if (toDeleteIds.isNotEmpty) {
-      logger.i(
-        "Cleanup: Deleting ${toDeleteIds.length} emails locally that were removed from Yahoo folder $folder.",
-      );
-      await deleteEmails(toDeleteIds, collection: collection);
-    }
-  }
-
-  Future<void> cleanupDeletedOutlook(
-    Collection collection,
-    String folder,
-    List<int> remoteUids,
-  ) async {
-    final rows = await database.select(
-      "SELECT id, uid FROM emails WHERE collection_id = ? AND folder_id = ?",
-      [collection.id, folder],
-    );
-    final localEmails =
-        rows
-            .map((row) => (id: row['id'] as String, uid: row['uid'] as int?))
-            .toList();
-
-    final remoteUidSet = remoteUids.toSet();
-    final toDeleteIds =
-        localEmails
-            .where((e) {
-              if (e.uid == null) return false;
-              return !remoteUidSet.contains(e.uid);
-            })
-            .map((e) => e.id)
-            .toList();
-
-    if (toDeleteIds.isNotEmpty) {
-      logger.i(
-        "Cleanup: Deleting ${toDeleteIds.length} emails locally that were removed from Outlook folder $folder.",
-      );
-      await deleteEmails(toDeleteIds, collection: collection);
-    }
   }
 }

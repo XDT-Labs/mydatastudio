@@ -55,7 +55,7 @@ class GetFileAndFoldersService
     const emailScanners = {
       AppConstants.scannerEmailOutlookPst,
       AppConstants.scannerEmailYahoo,
-      AppConstants.scannerEmailGmail,
+      AppConstants.scannerEmailImap,
     };
 
     if (emailScanners.contains(command.collection.scanner)) {

@@ -470,7 +470,7 @@ class TestMultimodalEmbedding:
             mock_get_embed.return_value = (None, None)
 
             with pytest.raises(HTTPException) as exc_info:
-                await generate_embedding(EmbeddingRequest(texts=["hi"], model_name="Qwen/Qwen3-VL-Embedding-2B"))
+                await generate_embedding(EmbeddingRequest(texts=["hi"], model_name="google/embeddinggemma-2"))
 
             assert exc_info.value.status_code == 503
             mock_downloaded.assert_called_once()
@@ -496,29 +496,29 @@ class TestMultimodalEmbedding:
 
 class TestEmbeddingModelDownloaded:
     """_embedding_model_downloaded() mirrors load_embedding_model()'s own
-    routing: VL models are Transformers snapshots, everything else is a
+    routing: EmbeddingGemma models are Transformers snapshots, everything else is a
     single GGUF file."""
 
-    def test_vl_model_checks_snapshot(self):
+    def test_embeddinggemma_model_checks_snapshot(self):
         from aichat.routes import _embedding_model_downloaded
 
-        # 1. Uppercase 'VL', filename is None
-        with patch('aichat.routes.get_local_path', return_value="/tmp/qwen-local"), \
+        # 1. Mixed-case 'EmbeddingGemma', filename is None
+        with patch('aichat.routes.get_local_path', return_value="/tmp/embeddinggemma-local"), \
              patch('aichat.routes.is_snapshot_downloaded', return_value=True) as mock_snapshot, \
              patch('aichat.routes.find_local_model') as mock_find:
-            assert _embedding_model_downloaded("Qwen/Qwen3-VL-Embedding-2B", None) is True
-            mock_snapshot.assert_called_once_with("Qwen/Qwen3-VL-Embedding-2B", "/tmp/qwen-local")
+            assert _embedding_model_downloaded("google/embeddinggemma-2", None) is True
+            mock_snapshot.assert_called_once_with("google/embeddinggemma-2", "/tmp/embeddinggemma-local")
             mock_find.assert_not_called()
 
-        # 2. Lowercase 'vl', filename is provided
-        with patch('aichat.routes.get_local_path', return_value="/tmp/qwen-local"), \
+        # 2. Lowercase 'embeddinggemma', filename is provided
+        with patch('aichat.routes.get_local_path', return_value="/tmp/embeddinggemma-local"), \
              patch('aichat.routes.is_snapshot_downloaded', return_value=True) as mock_snapshot, \
              patch('aichat.routes.find_local_model') as mock_find:
-            assert _embedding_model_downloaded("qwen/qwen3-vl-embedding-2b", "dummy.gguf") is True
-            mock_snapshot.assert_called_once_with("qwen/qwen3-vl-embedding-2b", "/tmp/qwen-local")
+            assert _embedding_model_downloaded("google/embeddinggemma-2", "dummy.gguf") is True
+            mock_snapshot.assert_called_once_with("google/embeddinggemma-2", "/tmp/embeddinggemma-local")
             mock_find.assert_not_called()
 
-        # 3. No 'vl', but filename is None (Transformers model check)
+        # 3. No 'embeddinggemma', but filename is None (Transformers model check)
         with patch('aichat.routes.get_local_path', return_value="/tmp/some-local"), \
              patch('aichat.routes.is_snapshot_downloaded', return_value=True) as mock_snapshot, \
              patch('aichat.routes.find_local_model') as mock_find:
@@ -589,21 +589,21 @@ class TestDeleteModel:
 
 class TestDownloadModel:
     """A null `filename` means "download the whole repo snapshot" (used for
-    multi-file Transformers models like Qwen3-VL-Embedding-2B) instead of a
+    multi-file Transformers models like google/embeddinggemma-2) instead of a
     single GGUF file."""
 
     @pytest.mark.asyncio
     async def test_null_filename_routes_to_snapshot_download(self):
-        request = DownloadModelRequest(model_name="Qwen/Qwen3-VL-Embedding-2B", filename=None)
+        request = DownloadModelRequest(model_name="google/embeddinggemma-2", filename=None)
 
-        with patch('aichat.routes.get_local_path', return_value="/tmp/qwen-local"), \
+        with patch('aichat.routes.get_local_path', return_value="/tmp/embeddinggemma-local"), \
              patch('aichat.routes.stream_download_snapshot') as mock_stream_snapshot, \
              patch('aichat.routes.stream_download_gguf') as mock_stream_gguf:
             mock_stream_snapshot.return_value = iter([])
 
             await download_model(request)
 
-        mock_stream_snapshot.assert_called_once_with("Qwen/Qwen3-VL-Embedding-2B", "/tmp/qwen-local", hf_token=None)
+        mock_stream_snapshot.assert_called_once_with("google/embeddinggemma-2", "/tmp/embeddinggemma-local", hf_token=None)
         mock_stream_gguf.assert_not_called()
 
     @pytest.mark.asyncio
@@ -628,19 +628,19 @@ class TestCheckModelStatus:
 
     @pytest.mark.asyncio
     async def test_snapshot_mode_reports_downloaded(self):
-        request = DownloadModelRequest(model_name="Qwen/Qwen3-VL-Embedding-2B", filename=None)
+        request = DownloadModelRequest(model_name="google/embeddinggemma-2", filename=None)
 
-        with patch('aichat.routes.get_local_path', return_value="/tmp/qwen-local"), \
+        with patch('aichat.routes.get_local_path', return_value="/tmp/embeddinggemma-local"), \
              patch('aichat.routes.is_snapshot_downloaded', return_value=True):
             result = await check_model_status(request)
 
-        assert result == {"exists": True, "model_path": "/tmp/qwen-local"}
+        assert result == {"exists": True, "model_path": "/tmp/embeddinggemma-local"}
 
     @pytest.mark.asyncio
     async def test_snapshot_mode_reports_not_downloaded(self):
-        request = DownloadModelRequest(model_name="Qwen/Qwen3-VL-Embedding-2B", filename=None)
+        request = DownloadModelRequest(model_name="google/embeddinggemma-2", filename=None)
 
-        with patch('aichat.routes.get_local_path', return_value="/tmp/qwen-local"), \
+        with patch('aichat.routes.get_local_path', return_value="/tmp/embeddinggemma-local"), \
              patch('aichat.routes.is_snapshot_downloaded', return_value=False):
             result = await check_model_status(request)
 
@@ -665,18 +665,58 @@ class TestGenerateEmbedding:
         from aichat.models import EmbeddingRequest
 
         req = EmbeddingRequest(
-            model_name="Qwen/Qwen3-VL-Embedding-2B",
+            model_name="google/embeddinggemma-2",
             images_base64=["invalid_or_eps_base64_data"],
             filename="Logo.mac"
         )
 
         with patch('aichat.routes._embedding_model_downloaded', return_value=True), \
-             patch('aichat.routes.get_embedding_model', return_value=(Mock(), Mock())), \
-             patch('aichat.routes.get_embedding_model_id', return_value="Qwen/Qwen3-VL-Embedding-2B"), \
+             patch('aichat.routes.get_embedding_model', return_value=(Mock(), None)), \
+             patch('aichat.routes.get_embedding_model_id', return_value="google/embeddinggemma-2"), \
              patch('aichat.routes.gen_emb_fn', side_effect=ValueError("Invalid image_base64 format provided: Unable to locate Ghostscript on paths")):
             with pytest.raises(HTTPException) as exc_info:
                 await generate_embedding(req)
 
             assert exc_info.value.status_code == 400
             assert "Ghostscript" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_generate_embedding_forwards_audios_videos_task(self):
+        with patch('aichat.routes.get_locks') as mock_locks, \
+             patch('aichat.routes.get_embedding_model') as mock_get_embed, \
+             patch('aichat.routes.gen_emb_fn') as mock_gen_embed, \
+             patch('aichat.routes.get_embedding_model_id') as mock_get_embed_id:
+
+            mock_locks.return_value = (AsyncMock(), AsyncMock())
+            mock_get_embed.return_value = (Mock(), None)
+            mock_gen_embed.return_value = [[0.1, 0.2]]
+            mock_get_embed_id.return_value = "google/embeddinggemma-2"
+
+            # 1. Audios forwarding
+            req_audio = EmbeddingRequest(
+                audios_base64=["audio_b64"],
+                filename="test.wav",
+                task="query",
+                model_name="google/embeddinggemma-2"
+            )
+            res_audio = await generate_embedding(req_audio)
+            assert res_audio["input_type"] == "audio"
+            assert res_audio["input_count"] == 1
+            assert mock_gen_embed.call_args.kwargs["audios_base64"] == ["audio_b64"]
+            assert mock_gen_embed.call_args.kwargs["filename"] == "test.wav"
+            assert mock_gen_embed.call_args.kwargs["task"] == "query"
+
+            # 2. Videos forwarding
+            req_video = EmbeddingRequest(
+                videos_base64=["video_b64_1", "video_b64_2"],
+                filename="test.mp4",
+                task="document",
+                model_name="google/embeddinggemma-2"
+            )
+            res_video = await generate_embedding(req_video)
+            assert res_video["input_type"] == "video"
+            assert res_video["input_count"] == 2
+            assert mock_gen_embed.call_args.kwargs["videos_base64"] == ["video_b64_1", "video_b64_2"]
+            assert mock_gen_embed.call_args.kwargs["filename"] == "test.mp4"
+            assert mock_gen_embed.call_args.kwargs["task"] == "document"
 

@@ -46,12 +46,12 @@ dependencies:
   flutter_breadcrumb: ^1.0.1
   path_provider: ^2.1.6
   file_picker: ^10.3.10
-  flutter_file_dialog: ^3.3.2
   open_filex: ^4.3.2
   timeline_tile: ^2.0.0
   progressive_image: ^2.0.0
   collection: ^1.16.0
   http: ^1.1.0
+  mime: ^2.0.0
   oauth2: ^2.0.1
   url_launcher: ^6.1.10
   window_to_front: ^1.0.0
@@ -59,7 +59,6 @@ dependencies:
   googleapis_auth: ^2.3.3
   moment_dart: ^5.3.0+1
   fluttertoast: ^9.1.0
-  flutter_secure_storage: ^10.3.1
   pointycastle: ^3.7.2
   rsa_encrypt: ^2.0.0
   convert: ^3.1.1
@@ -73,7 +72,6 @@ dependencies:
   flutter_form_builder: ^11.0.0
   form_builder_validators: ^11.0.0
   image: ^4.8.0
-  native_exif: ^0.8.0
   exif: ^3.1.4
   resqlite: ^0.7.0
   resqlite_vector: ^0.1.0
@@ -89,7 +87,7 @@ dependencies:
   google_fonts: ^8.2.0
   genui: ^0.7.0
 
-  pdfx: ^2.6.0
+  pdfrx: ^2.11.0
   flutter_map: ^8.3.1
   latlong2: ^0.10.1
   flutter_markdown_plus: ^1.0.12
@@ -100,6 +98,7 @@ dependencies:
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.7
   font_awesome_flutter: ^11.0.0
+  flutter_widget_from_html_core: ^0.17.4
   webview_flutter: ^4.14.1
   webview_flutter_wkwebview: ^3.26.0
   enough_mail: ^2.1.7
@@ -147,7 +146,8 @@ flutter:
   #   - images/a_dot_ham.jpeg
   assets:
     - assets/
-    - app/aiserver-macos.zip
+    # Holds only the current platform's aiserver-<platform>.zip.
+    - app/
     - assets/images/google-drive.png
     # Two embedded place lists, read by different features — see
     # assets/gazetteer/README.md for the sources and CC BY 4.0 attribution.

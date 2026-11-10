@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:mydatastudio/app_constants.dart';
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
 import 'package:path/path.dart' as p;
 import 'package:resqlite/resqlite.dart';
@@ -22,6 +23,7 @@ import 'package:mydatastudio/modules/email/services/email_embedding_isolate.dart
 import 'package:mydatastudio/modules/email/services/searchable_body.dart';
 import 'package:mydatastudio/modules/search/services/email_contact_repository.dart';
 import 'package:mydatastudio/modules/search/services/place_repository.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 import 'package:mydatastudio/services/vault_manager.dart';
 import 'package:uuid/uuid.dart';
 
@@ -279,6 +281,12 @@ class DatabaseManager {
 
     logger.i("Starting background isolates and scanners (vault unlocked)...");
 
+    try {
+      await CollectionRepository(appDatabase!).deletePendingDiskPaths();
+    } catch (e) {
+      logger.e("Could not finish deleting old collection files: $e");
+    }
+
     // 1. Start scanners
     await _startScanners();
 
@@ -497,13 +505,13 @@ class AppDatabase {
       indexes: [
         SqliteVectorIndex(
           table: 'files_embeddings',
-          column: 'qwen3_vl_embedding',
-          dimension: 2048,
+          column: 'embeddinggemma2_embedding',
+          dimension: EmbeddingModel.dimension,
         ),
         SqliteVectorIndex(
           table: 'emails_embeddings',
-          column: 'qwen3_vl_embedding',
-          dimension: 2048,
+          column: 'embeddinggemma2_embedding',
+          dimension: EmbeddingModel.dimension,
         ),
       ],
     );
@@ -565,11 +573,20 @@ class AppDatabase {
       await _seedAichatModels(_db);
       await _seedAichatSkills(_db);
     }
+    // Folders of deleted collections, relative to the storage root, not yet
+    // removed from disk. Here rather than in schemaDDL so that existing
+    // archives get it too.
+    await _db.execute('''
+      CREATE TABLE IF NOT EXISTS pending_disk_deletes (
+        path TEXT PRIMARY KEY
+      );
+    ''');
     await _db.execute('''
       CREATE TABLE IF NOT EXISTS emails_embeddings (
         email_id TEXT NOT NULL,
         chunk_index INTEGER NOT NULL DEFAULT 0,
         qwen3_vl_embedding BLOB,
+        embeddinggemma2_embedding BLOB,
         model_version TEXT,
         PRIMARY KEY (email_id, chunk_index),
         FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
@@ -777,6 +794,26 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_files_active_date '
       'ON files (is_deleted, is_inline, date_created);',
     );
+    // After _addMissingColumns for the same reason: an install that predates
+    // `content_hash` has no column to index until the ALTER has run.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_files_content_hash '
+      'ON files (content_hash);',
+    );
+    // Scanners, sync and the per-collection queues all select a collection's
+    // files; without this each of those is a full scan of `files`.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_files_collection '
+      'ON files (collection_id);',
+    );
+
+    // Message-ID dedupe lookups for IMAP sync. Here rather than in schemaDDL
+    // for the same reason as the index above: schemaDDL reaches fresh installs
+    // only.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS email_message_id_idx '
+      'ON emails (collection_id, message_id);',
+    );
 
     await _reapOrphanedArtifacts();
 
@@ -801,6 +838,7 @@ class AppDatabase {
     // takes the next `user_version` from the one that sets it.
     await _unretirePdfsRetiredByMissingPdfium();
     await _unretireDocsRetiredByAnIncompleteReader();
+    await _switchToEmbeddingGemma2();
   }
 
   /// Creates the gazetteer table and the name indexes `near:` looks places up in.
@@ -963,6 +1001,95 @@ class AppDatabase {
       );
     }
     await _db.execute('PRAGMA user_version = $docRecoveryVersion');
+  }
+
+  /// Runs the PDF recovery step alone, for tests.
+  ///
+  /// Opening a database runs every upgrade step through the latest version,
+  /// and [_switchToEmbeddingGemma2] (version 6) resets every file's attempts,
+  /// which hides what this step did. Tests set `user_version` just below this
+  /// step's version and call it directly.
+  @visibleForTesting
+  Future<void> runPdfRecoveryStep() => _unretirePdfsRetiredByMissingPdfium();
+
+  /// Runs the `.doc` recovery step alone, for tests. See [runPdfRecoveryStep].
+  @visibleForTesting
+  Future<void> runDocRecoveryStep() => _unretireDocsRetiredByAnIncompleteReader();
+
+  /// Migrates stored embeddings to Google's EmbeddingGemma 2.
+  ///
+  /// Replaces legacy Qwen3-VL embeddings (2048-d) with EmbeddingGemma 2
+  /// (768-d multimodal: text, image, audio, video). Vectors from the two
+  /// models inhabit incompatible vector spaces (2048 vs 768 dimensions) and
+  /// cannot be compared.
+  ///
+  /// Nulls out old `qwen3_vl_embedding` values on both `files_embeddings`
+  /// and `emails_embeddings`. Rows written by the old model also carry
+  /// `model_version` stamped with older revisions (e.g. `Qwen/...@2`), which no
+  /// longer equals [EmbeddingModel.current], so the background isolates will
+  /// re-embed them automatically; nulling is belt-and-braces and frees disk
+  /// space.
+  ///
+  /// Resets `embedding_attempts` on `files` to 0 because the failure budget
+  /// accumulated under the old model's server configuration and pipeline says
+  /// nothing about whether the new model and server can process the file.
+  ///
+  /// Deletes all rows from `photo_cluster_runs` (which cascades to cluster
+  /// nodes and members) because saved cluster centroids are 2048-dimensional
+  /// and cannot be compared to 768-dimensional vectors.
+  ///
+  /// Replaces the old embedding model row in `aichat_models` (`qwen3-vl-embedding:2b`)
+  /// with the new `embeddinggemma-2` model entry so [ModelDownloadManager]
+  /// downloads and tracks the correct checkpoint.
+  ///
+  /// Gated on `PRAGMA user_version`: running once on upgrade to version 6.
+  Future<void> _switchToEmbeddingGemma2() async {
+    const embeddingGemma2Version = 6;
+
+    final rows = await _db.select('PRAGMA user_version');
+    final current = rows.isEmpty ? 0 : (rows.first.values.first as int? ?? 0);
+    if (current >= embeddingGemma2Version) return;
+
+    await _db.transaction((tx) async {
+      await tx.execute('UPDATE files_embeddings SET qwen3_vl_embedding = NULL');
+      await tx.execute('UPDATE emails_embeddings SET qwen3_vl_embedding = NULL');
+      await tx.execute(
+        'UPDATE files SET embedding_attempts = 0 WHERE embedding_attempts > 0',
+      );
+      await tx.execute('DELETE FROM photo_cluster_runs');
+      await tx.execute(
+        "DELETE FROM aichat_models WHERE alias = 'qwen3-vl-embedding:2b'",
+      );
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await tx.execute(
+        'INSERT OR IGNORE INTO aichat_models ('
+        'id, alias, "group", name, description, file, mmproj, hf_repo, '
+        'chat_handler, type, base_url, enabled, created_at, updated_at'
+        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          const Uuid().v4(),
+          'embeddinggemma-2',
+          'embedding',
+          'EmbeddingGemma 2',
+          null,
+          null,
+          null,
+          EmbeddingModel.modelName,
+          null,
+          'transformers',
+          null,
+          0,
+          now,
+          now,
+        ],
+      );
+    });
+
+    await _db.execute('PRAGMA user_version = $embeddingGemma2Version');
+    logger.i(
+      'AppDatabase: switched embedding model to EmbeddingGemma 2 '
+      '(user_version $embeddingGemma2Version)',
+    );
   }
 
   /// Deletes cached thumbnails no `files` row references any more.
@@ -1371,6 +1498,7 @@ class AppDatabase {
           type TEXT NOT NULL DEFAULT 'file',
           sequence INTEGER NOT NULL DEFAULT 0,
           qwen3_vl_embedding BLOB,
+          embeddinggemma2_embedding BLOB,
           model_version TEXT,
           PRIMARY KEY (file_id, type, sequence),
           FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
@@ -1432,6 +1560,7 @@ class AppDatabase {
           email_id TEXT NOT NULL,
           chunk_index INTEGER NOT NULL DEFAULT 0,
           qwen3_vl_embedding BLOB,
+          embeddinggemma2_embedding BLOB,
           model_version TEXT,
           PRIMARY KEY (email_id, chunk_index),
           FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE
@@ -1455,6 +1584,10 @@ class AppDatabase {
         // Inline images in an HTML email are referenced as `cid:<content id>`;
         // without this the client can't tell which attachment a cid names.
         'content_id': 'TEXT',
+        // Lowercase sha256 hex of the file's bytes. Lets the same photo held
+        // in two collections or sources be recognised as one, so it is
+        // embedded once. NULL until a scanner has hashed it.
+        'content_hash': 'TEXT',
         // Whether the attachment is part of the message body — a spacer, logo
         // or tracking pixel — rather than something the sender attached.
         'is_inline': 'INTEGER NOT NULL DEFAULT 0',
@@ -1488,6 +1621,11 @@ class AppDatabase {
         // DatabaseRepository.maxEmbeddingAttempts — because an unreadable
         // file says nothing about whether the model could embed it.
         'embedding_attempts': 'INTEGER NOT NULL DEFAULT 0',
+        // The file is in a sync folder but its bytes are only in the cloud.
+        // Reading it downloads it, so the embedding, chunk and description
+        // queues leave it out. Written by the local scanner on every scan, so
+        // it clears once the file is on disk.
+        'is_online_only': 'INTEGER NOT NULL DEFAULT 0',
         // The user deleted this file from the app. Distinct from both
         // `is_deleted`, which the scanner owns and resets to 0 whenever the
         // source still has the file, and `is_hidden`, which only takes a photo
@@ -1497,6 +1635,35 @@ class AppDatabase {
         // without a flag the scanner owns nothing and one Sync click would undo
         // every delete the user made.
         'is_user_deleted': 'INTEGER NOT NULL DEFAULT 0',
+        // When the source deleted a file we kept (collections.keep_deleted_files
+        // on). NULL while the source still has it. Distinct from is_deleted,
+        // which hides the row.
+        'source_deleted_date': 'INTEGER',
+      },
+      'collections': {
+        // When the collection was added (epoch ms). NULL on legacy rows.
+        'date_created': 'INTEGER',
+        // Provider change-feed position (Drive page token etc.). NULL means
+        // "no baseline yet": the next sync is a full walk that stores one.
+        'change_cursor': 'TEXT',
+        // Keep rows and local copies of files the source deleted, instead of
+        // marking them is_deleted.
+        'keep_deleted_files': 'INTEGER NOT NULL DEFAULT 0',
+        // ContentPolicy JSON (what to download / whether to index). NULL =
+        // derive from download_local_copy.
+        'content_policy': 'TEXT',
+        // IMAP email config; see EmailProviderRegistry. imap_settings is JSON
+        // (host/port/security/username) and never holds a password.
+        'email_provider_id': 'TEXT',
+        'imap_settings': 'TEXT',
+        'email_delete_policy': "TEXT NOT NULL DEFAULT 'keep'",
+      },
+      'email_folders': {
+        'path': 'TEXT',
+        'uid_validity': 'INTEGER',
+        'uid_next': 'INTEGER',
+        'highest_modseq': 'INTEGER',
+        'last_synced_uid': 'INTEGER',
       },
       'albums': {'description': 'TEXT', 'cover_file_id': 'TEXT'},
       // Which embedding pipeline produced the vector in this row. See
@@ -1509,8 +1676,14 @@ class AppDatabase {
       // the column leaves them NULL, which reads as "unknown pipeline", which
       // the embedding isolates treat as work to redo. The archive re-embeds
       // itself on the next launch with no hand-written DELETE.
-      'files_embeddings': {'model_version': 'TEXT'},
-      'emails_embeddings': {'model_version': 'TEXT'},
+      'files_embeddings': {
+        'model_version': 'TEXT',
+        'embeddinggemma2_embedding': 'BLOB',
+      },
+      'emails_embeddings': {
+        'model_version': 'TEXT',
+        'embeddinggemma2_embedding': 'BLOB',
+      },
       'emails': {
         // The body text keyword search actually indexes: `plain_body` when the
         // sender provided one, otherwise the HTML body with its markup
@@ -1687,18 +1860,18 @@ class AppDatabase {
         'chat_handler': 'Gemma4ChatHandler',
         'enabled': 0,
       },
-      // Default embedding model (text + image) used for file/photo search.
+      // Default embedding model (text + image + audio + video) used for file/photo search.
       // Not chat-selectable (group isn't in AichatPage's dropdown groups) —
       // ModelDownloadManager downloads and enables it automatically at startup.
       {
         'id': const Uuid().v4(),
-        'alias': 'qwen3-vl-embedding:2b',
+        'alias': 'embeddinggemma-2',
         'group': 'embedding',
-        'name': 'Qwen 3 VL Embedding 2B',
+        'name': 'EmbeddingGemma 2',
         'type': 'transformers',
         'file': null,
         'mmproj': null,
-        'hf_repo': 'Qwen/Qwen3-VL-Embedding-2B',
+        'hf_repo': EmbeddingModel.modelName,
         'chat_handler': null,
         'enabled': 0,
       },
@@ -2031,9 +2204,16 @@ class AppDatabase {
       user_id TEXT,
       expiration INTEGER,
       last_scan_date INTEGER,
+      date_created INTEGER,
       needs_re_auth INTEGER NOT NULL DEFAULT 0,
       download_local_copy INTEGER NOT NULL DEFAULT 0,
-      local_copy_path TEXT
+      local_copy_path TEXT,
+      email_provider_id TEXT,
+      imap_settings TEXT,
+      email_delete_policy TEXT NOT NULL DEFAULT 'keep',
+      change_cursor TEXT,
+      keep_deleted_files INTEGER NOT NULL DEFAULT 0,
+      content_policy TEXT
     );
     ''',
     // emails
@@ -2076,6 +2256,11 @@ class AppDatabase {
       messages_total INTEGER NOT NULL,
       messages_unread INTEGER NOT NULL,
       parent_id TEXT,
+      path TEXT,
+      uid_validity INTEGER,
+      uid_next INTEGER,
+      highest_modseq INTEGER,
+      last_synced_uid INTEGER,
       PRIMARY KEY (id, collection_id),
       FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
     );
@@ -2103,7 +2288,9 @@ class AppDatabase {
       content_id TEXT,
       is_inline INTEGER NOT NULL DEFAULT 0,
       is_favorite INTEGER NOT NULL DEFAULT 0,
-      description TEXT
+      description TEXT,
+      content_hash TEXT,
+      source_deleted_date INTEGER
     );
     ''',
     // folders
@@ -2163,6 +2350,7 @@ class AppDatabase {
       type TEXT NOT NULL DEFAULT 'file',
       sequence INTEGER NOT NULL DEFAULT 0,
       qwen3_vl_embedding BLOB,
+      embeddinggemma2_embedding BLOB,
       model_version TEXT,
       PRIMARY KEY (file_id, type, sequence),
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
@@ -2198,6 +2386,7 @@ class AppDatabase {
       email_id TEXT NOT NULL,
       chunk_index INTEGER NOT NULL DEFAULT 0,
       qwen3_vl_embedding BLOB,
+      embeddinggemma2_embedding BLOB,
       model_version TEXT,
       PRIMARY KEY (email_id, chunk_index),
       FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE

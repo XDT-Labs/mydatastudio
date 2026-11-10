@@ -36,12 +36,15 @@ class CollectionScanner {
     return Future(() => -1);
   }
 
-  /// Provider-specific action to move items to trash.
-  Future<void> moveToTrash(
+  /// Moves [uids] in [folderId] to the server's trash, plus any further copies
+  /// of the same messages: [otherCopies] maps a folder to Message-IDs in it.
+  /// Returns whether everything moved; a scanner with no server returns false.
+  Future<bool> moveToTrash(
     Collection collection,
     String folderId,
-    List<int> uids,
-  ) async {}
+    List<int> uids, {
+    Map<String, List<String>> otherCopies = const {},
+  }) async => false;
 
   /// Immediately stops any active scanning isolates and cleans up resources.
   void stop() async {}

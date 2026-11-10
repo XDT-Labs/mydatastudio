@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MyData Studio
+Comment=Local-first personal data archive
+Exec=mydatastudio
+Icon=@APPLICATION_ID@
+Terminal=false
+Categories=Utility;Archiving;
+StartupWMClass=@APPLICATION_ID@

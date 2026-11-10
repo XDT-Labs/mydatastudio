@@ -203,7 +203,8 @@ class OutlookPstScannerIsolate {
 
     receivePort.listen((message) {
       if (relayIsolateLog(logger, message, '[PstScan]')) return;
-      // Queued rather than handled inline — see gmail_scanner_isolate.dart.
+      // Queued rather than handled inline: listen callbacks don't await each
+      // other, so writes could otherwise run out of order.
       // Matters even more here: PST streams many batched writes, so
       // out-of-order processing would be far more likely to bite.
       if (tryHandleScanWrite(message, writeQueue)) return;

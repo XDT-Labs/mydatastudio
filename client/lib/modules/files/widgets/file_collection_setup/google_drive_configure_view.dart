@@ -1,5 +1,7 @@
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/modules/files/widgets/file_collection_setup/cloud_account_branding.dart';
 import 'package:mydatastudio/services/credential_codec.dart';
 
 import 'package:url_launcher/url_launcher.dart';
@@ -7,7 +9,14 @@ import 'package:url_launcher/url_launcher.dart';
 class GoogleDriveConfigureView extends StatefulWidget {
   final VoidCallback onConfigured;
 
-  const GoogleDriveConfigureView({super.key, required this.onConfigured});
+  const GoogleDriveConfigureView({
+    super.key,
+    required this.onConfigured,
+    this.branding,
+  });
+
+  /// Defaults to Google Drive.
+  final CloudAccountBranding? branding;
 
   @override
   State<GoogleDriveConfigureView> createState() =>
@@ -30,13 +39,18 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
     final db = DatabaseManager.instance.database;
     if (db == null) return;
 
+    final b = widget.branding ?? CloudAccountBranding.googleDrive;
     final clientId = _clientIdController.text.trim();
     final clientSecret = _clientSecretController.text.trim();
 
-    if (clientId.isEmpty || clientSecret.isEmpty) {
+    if (clientId.isEmpty || (b.requiresSecret && clientSecret.isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Client ID and Client Secret are required'),
+        SnackBar(
+          content: Text(
+            b.requiresSecret
+                ? '${b.idLabel} and Client Secret are required'
+                : '${b.idLabel} is required',
+          ),
         ),
       );
       return;
@@ -54,7 +68,12 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
         'client_id = excluded.client_id, '
         'client_secret = excluded.client_secret, '
         'api_key = excluded.api_key',
-        ['google', clientId, CredentialCodec.encrypt(clientSecret), ''],
+        [
+          b.service,
+          clientId,
+          b.requiresSecret ? CredentialCodec.encrypt(clientSecret) : '',
+          '',
+        ],
       );
 
       widget.onConfigured();
@@ -75,20 +94,21 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
 
   @override
   Widget build(BuildContext context) {
+    final b = widget.branding ?? CloudAccountBranding.googleDrive;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Image.asset('assets/images/google-drive.png', height: 72),
+        b.logo,
         const SizedBox(height: 24),
-        const Text(
-          'Configure Google Drive',
+        Text(
+          'Configure ${b.name}',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         Text(
-          'To connect to Google Drive, you must provide your own OAuth Client ID and Secret.',
+          b.configureIntro,
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 14,
@@ -96,18 +116,26 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
             height: 1.5,
           ),
         ),
+        if (b.setupGuideRoute case final route?) ...[
+          const SizedBox(height: 12),
+          Center(
+            child: OutlinedButton.icon(
+              key: const ValueKey('setup-guide-link'),
+              // push, not go: Back returns to this form with what was
+              // already typed.
+              onPressed: () => GoRouter.of(context).push(route),
+              icon: const Icon(Icons.menu_book_outlined),
+              label: const Text('Show me how to create one'),
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         Semantics(
           link: true,
           child: InkWell(
-            onTap:
-                () => launchUrl(
-                  Uri.parse(
-                    'https://console.cloud.google.com/apis/credentials',
-                  ),
-                ),
-            child: const Text(
-              'Get Credentials from Google Cloud Console',
+            onTap: () => launchUrl(Uri.parse(b.credentialsUrl)),
+            child: Text(
+              b.credentialsLinkText,
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,
@@ -120,20 +148,22 @@ class _GoogleDriveConfigureViewState extends State<GoogleDriveConfigureView> {
         const SizedBox(height: 24),
         TextField(
           controller: _clientIdController,
-          decoration: const InputDecoration(
-            labelText: 'Client ID',
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            labelText: b.idLabel,
+            border: const OutlineInputBorder(),
           ),
         ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _clientSecretController,
-          decoration: const InputDecoration(
-            labelText: 'Client Secret',
-            border: OutlineInputBorder(),
+        if (b.requiresSecret) ...[
+          const SizedBox(height: 16),
+          TextField(
+            controller: _clientSecretController,
+            decoration: const InputDecoration(
+              labelText: 'Client Secret',
+              border: OutlineInputBorder(),
+            ),
+            obscureText: true,
           ),
-          obscureText: true,
-        ),
+        ],
         const SizedBox(height: 28),
         ElevatedButton(
           onPressed: _isSaving ? null : _save,

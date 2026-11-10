@@ -11,17 +11,32 @@ class AuthDialogManager {
   void init() {
     GetCollectionsService.instance.sink.listen((value) {
       for (var c in value) {
-        if (c.needsReAuth && c.oauthService == 'google') {
-          _showGoogleAuthDialog(c);
+        if (c.needsReAuth &&
+            c.type != 'email' &&
+            (c.oauthService == 'google' ||
+                c.oauthService == 'dropbox' ||
+                c.oauthService == 'onedrive')) {
+          _showAuthDialog(c);
         }
       }
     });
   }
 
-  void _showGoogleAuthDialog(Collection collection) {
-    final isEmail = collection.type == 'email';
-    final typeLabel = isEmail ? 'Gmail' : 'Google Drive';
-    final icon = isEmail ? Icons.email : Icons.cloud;
+  void _showAuthDialog(Collection collection) {
+    final isDropbox = collection.oauthService == 'dropbox';
+    final isOneDrive = collection.oauthService == 'onedrive';
+    final message =
+        isDropbox
+            ? "Your Dropbox sign-in has expired or been revoked.\nClick the button to sign in again."
+            : isOneDrive
+            ? "Your OneDrive sign-in has expired or been revoked.\nClick the button to sign in again."
+            : "Your Google OAuth token has expired or been revoked for 'Google Drive'.\nClick the button to re-authenticate.";
+    final buttonLabel =
+        isDropbox
+            ? 'Sign in to Dropbox'
+            : isOneDrive
+            ? 'Sign in to OneDrive'
+            : 'Login with Google (Google Drive)';
 
     showDialog<SimpleDialog>(
       context: _globalNavigationKey.currentState!.context,
@@ -29,34 +44,49 @@ class AuthDialogManager {
         return SimpleDialog(
           title: const Text('Authentication Expired'),
           children: <Widget>[
-            SimpleDialogOption(
-              onPressed: null,
-              child: Text(
-                "Your Google OAuth token has expired or been revoked for '$typeLabel'.\nClick the button to re-authenticate.",
-              ),
-            ),
+            SimpleDialogOption(onPressed: null, child: Text(message)),
             SimpleDialogOption(
               onPressed: null,
               child: SizedBox(
                 width: 225,
                 height: 48,
                 child: ElevatedButton.icon(
-                  icon: Icon(icon),
-                  label: Text("Login with Google ($typeLabel)"),
+                  icon: const Icon(Icons.cloud),
+                  label: Text(buttonLabel),
                   onPressed: () async {
-                    if (isEmail) {
-                      await LoginProviderExtension.handleGoogleMail(
-                        context,
-                        existing: collection,
+                    // Close first: sign-in happens in the browser, and the
+                    // dialog's context dies with it, so handlers get the
+                    // navigator's.
+                    final navContext =
+                        _globalNavigationKey.currentState!.context;
+                    Navigator.of(context).pop();
+                    try {
+                      if (isDropbox) {
+                        await LoginProviderExtension.handleDropbox(
+                          navContext,
+                          existing: collection,
+                        );
+                      } else if (isOneDrive) {
+                        await LoginProviderExtension.handleOneDrive(
+                          navContext,
+                          existing: collection,
+                        );
+                      } else {
+                        await LoginProviderExtension.handleGoogleDrive(
+                          navContext,
+                          existing: collection,
+                        );
+                      }
+                    } catch (e) {
+                      // e.g. OneDrive's "admin consent required" message.
+                      if (!navContext.mounted) return;
+                      ScaffoldMessenger.of(navContext).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            e.toString().replaceFirst('Exception: ', ''),
+                          ),
+                        ),
                       );
-                    } else {
-                      await LoginProviderExtension.handleGoogleDrive(
-                        context,
-                        existing: collection,
-                      );
-                    }
-                    if (context.mounted) {
-                      Navigator.of(context).pop();
                     }
                   },
                 ),

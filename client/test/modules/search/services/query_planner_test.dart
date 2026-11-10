@@ -8,6 +8,7 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/search/services/query_parser.dart';
 import 'package:mydatastudio/modules/search/services/query_planner.dart';
 import 'package:mydatastudio/modules/search/services/search_service.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -18,7 +19,7 @@ import 'package:path_provider/path_provider.dart';
 /// user; and every way it can fail has to end in the results the user already
 /// had. The model itself is stubbed, because what it answers is not what these
 /// tests are about — what the app does with the answer is.
-const _dim = 2048;
+const _dim = EmbeddingModel.dimension;
 final _createdDbs = <String>[];
 final _recent = DateTime.utc(2026, 1, 1).millisecondsSinceEpoch;
 
@@ -58,7 +59,7 @@ Future<AppDatabase> _archiveOfBoth(String dbName) async {
     [_recent],
   );
   await db.rawDb.execute(
-    'INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding) '
+    'INSERT INTO files_embeddings (file_id, type, embeddinggemma2_embedding) '
     "VALUES ('photo', 'file', vector_as_f32(?))",
     ['[${_vector(0, lean: 0.8).join(',')}]'],
   );
@@ -70,7 +71,7 @@ Future<AppDatabase> _archiveOfBoth(String dbName) async {
     [_recent],
   );
   await db.rawDb.execute(
-    'INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding) '
+    'INSERT INTO emails_embeddings (email_id, embeddinggemma2_embedding) '
     'VALUES (?, vector_as_f32(?))',
     ['m1', '[${_vector(0).join(',')}]'],
   );

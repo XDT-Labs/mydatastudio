@@ -1,0 +1,37 @@
+import 'package:material_ui/material_ui.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:mydatastudio/modules/email/widgets/email_setup/imap_success_view.dart';
+
+void main() {
+  group('ImapSuccessView', () {
+    testWidgets('shows connected heading', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: ImapSuccessView(connectedEmail: null)),
+        ),
+      );
+
+      expect(find.textContaining('Connected'), findsOneWidget);
+    });
+
+    testWidgets('shows email when provided', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: ImapSuccessView(connectedEmail: 'me@yahoo.com')),
+        ),
+      );
+
+      expect(find.text('me@yahoo.com'), findsOneWidget);
+    });
+
+    testWidgets('hides email when null', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: ImapSuccessView(connectedEmail: null)),
+        ),
+      );
+
+      expect(find.text('me@yahoo.com'), findsNothing);
+    });
+  });
+}

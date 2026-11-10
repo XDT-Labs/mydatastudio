@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
-import 'package:mydatastudio/modules/email/widgets/email_details.dart';
+import 'package:mydatastudio/modules/email/services/email_body_preparer.dart';
 
 /// An HTML mail body points at its embedded images with `cid:` tokens. Nothing
 /// resolves those on its own — the attachments were extracted to disk and the

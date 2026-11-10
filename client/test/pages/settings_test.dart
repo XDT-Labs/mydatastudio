@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mydatastudio/pages/google_oauth_setup_guide.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/pages/settings.dart';
@@ -163,21 +164,11 @@ void main() {
         // Google has API Key hidden, there should be 5 "API Key (Optional)" labels.
         expect(find.text('API Key (Optional)'), findsNWidgets(5));
 
-        // Verify Google specific instructions and link are visible
+        // Google's card carries the step-by-step OAuth client setup,
+        // collapsed until the user opens it.
+        expect(find.byType(GoogleOAuthSetupGuide), findsOneWidget);
         expect(
-          find.text(
-            'To connect to Google services, you must provide your own OAuth Client ID and Client Secret. Ensure your OAuth consent screen is configured with the following scopes:\n'
-            '• https://www.googleapis.com/auth/userinfo.email\n'
-            '• https://www.googleapis.com/auth/userinfo.profile\n'
-            '• https://www.googleapis.com/auth/drive\n'
-            '• https://www.googleapis.com/auth/user.emails.read\n'
-            '• https://www.googleapis.com/auth/gmail.readonly\n\n'
-            'Note: Ensure that the Google People API, Google Drive API, and Gmail API are enabled in your Google Cloud Console project.',
-          ),
-          findsOneWidget,
-        );
-        expect(
-          find.text('Get Credentials from Google Cloud Console'),
+          find.text('How to create your own Google OAuth client'),
           findsOneWidget,
         );
 

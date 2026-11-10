@@ -7,10 +7,11 @@ import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/search/models/search_result.dart';
 import 'package:mydatastudio/modules/search/services/query_parser.dart';
 import 'package:mydatastudio/modules/search/services/retrievers/vector_retriever.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-const _dim = 2048;
+const _dim = EmbeddingModel.dimension;
 
 /// A date comfortably inside every date filter these tests use. Epoch-adjacent
 /// values look convenient but sit *before* `after:1970` once the parser
@@ -66,7 +67,7 @@ Future<void> _addFileVector(
   String type = 'file',
 }) {
   return db.rawDb.execute(
-    'INSERT INTO files_embeddings (file_id, type, qwen3_vl_embedding) '
+    'INSERT INTO files_embeddings (file_id, type, embeddinggemma2_embedding) '
     'VALUES (?, ?, vector_as_f32(?))',
     [fileId, type, '[${vector.join(',')}]'],
   );
@@ -87,7 +88,7 @@ Future<void> _addEmail(
   );
   if (vector != null) {
     await db.rawDb.execute(
-      'INSERT INTO emails_embeddings (email_id, qwen3_vl_embedding) '
+      'INSERT INTO emails_embeddings (email_id, embeddinggemma2_embedding) '
       'VALUES (?, vector_as_f32(?))',
       [id, '[${vector.join(',')}]'],
     );
@@ -102,7 +103,7 @@ Future<void> _addEmailChunk(
   List<double> vector,
 ) {
   return db.rawDb.execute(
-    'INSERT INTO emails_embeddings (email_id, chunk_index, qwen3_vl_embedding) '
+    'INSERT INTO emails_embeddings (email_id, chunk_index, embeddinggemma2_embedding) '
     'VALUES (?, ?, vector_as_f32(?))',
     [emailId, chunkIndex, '[${vector.join(',')}]'],
   );

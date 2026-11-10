@@ -1,0 +1,5 @@
+tags:
+  # Needs the Dovecot container: `make imap-test-up` (or `make test-imap`).
+  # These tests skip themselves when the server is unreachable.
+  imap:
+    timeout: 60s

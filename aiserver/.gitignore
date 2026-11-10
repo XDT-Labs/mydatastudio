@@ -12,5 +12,8 @@ __pypackages__
 .pdm-python
 aichat.egg-info
 
-# Vendored by `make pdfium` — a 3.4 MB binary, fetched not tracked.
+# Old `make pdfium` output, no longer used. Still ignored so a leftover copy isn't committed.
 vendor/
+
+# Tool-call eval reports (evals/run_tool_eval.py); summaries go in docs/plans/llm-tools.md.
+evals/results/

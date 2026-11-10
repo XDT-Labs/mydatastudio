@@ -181,6 +181,62 @@ Future<GetFilesResult> invoke(GetFilesCommand command) async {
 
 ---
 
+## Search Module
+
+**Unified cross-source search combining deterministic query parsing, BM25 full-text retrieval, vector similarity, and location-based ranking.**
+
+The Search module orchestrates queries across files, emails, photos, and documents through a sophisticated pipeline:
+
+1. **Query Parsing** (deterministic) → extract hard filters (`from:`, `tag:`, `near:`, etc.) and free-text remainder
+2. **Hard Filter Application** → SQL WHERE clauses define the candidate set (filters are constraints, not scores)
+3. **Multi-Retriever Fusion** → BM25 (lexical) + Vector (semantic) + Geo (location) → Reciprocal-Rank Fusion
+4. **Ranking** → Recency decay + tier boost + relevance score
+5. **Pagination** → Render results with optional result-set summarization for AI chat
+
+### Key Components
+
+| Component | Purpose |
+|-----------|---------|
+| `SearchPage` | Main search UI, global app-bar integration |
+| `SearchService` | Main orchestrator, coordinates parsing + retrieval + ranking |
+| `QueryParser` | Regex-based deterministic filter extraction (no LLM) |
+| `PersonResolver` | Name → email address resolution via contacts index |
+| `QueryPlanner` | Optional AI intent detection for modality (off critical path) |
+| `BM25Retriever` | FTS5 lexical search |
+| `VectorRetriever` | Brute-force cosine similarity over embeddings |
+| `HybridRanker` | Reciprocal-rank fusion (RRF) score combination |
+| `ResultRanking` | Apply recency decay + tier boost + pagination |
+| `ResultSetSummarizer` | Map-reduce over result set, generate coverage claims for aichat |
+
+### Query Parsing
+
+Supports deterministic filters (no inference):
+
+```
+from:bob@example.com  →  emails."from" = ?
+to:alice@example.com  →  emails."to" LIKE ?
+subject:invoice       →  FTS5 column filter
+tag:beach            →  file_tags join
+near:banff           →  gazetteer + haversine
+after:2026-01-01     →  date >= ?
+type:image|pdf|email →  content type predicate
+```
+
+Person names resolve via database lookup of email contacts, not embeddings (embeddings encode meaning, not identity).
+
+### Ranking & Fusion
+
+- **BM25** for lexical matching (email subject/body, file descriptions)
+- **Vector similarity** (image embeddings, description embeddings, email embeddings)
+- **Geo proximity** (haversine distance to geotagged files)
+- **RRF** combines all three, scale-free (harmonic mean of reciprocal ranks)
+- **Recency** decay `1/(1+ln(1+age_days/365))` floored at 0.75 to keep archives searchable
+- **Tier boost** for result type (e.g., email from known contact ranks higher)
+
+**See:** [Search Module Deep Dive](./modules/search.md) for full design, test coverage, and implementation patterns.
+
+---
+
 ## Email Module
 
 **Archive and search Gmail, Yahoo, Outlook (IMAP + PST import).**

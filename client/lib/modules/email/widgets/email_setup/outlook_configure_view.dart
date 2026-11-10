@@ -1,6 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:mydatastudio/database_manager.dart';
-import 'package:mydatastudio/services/credential_codec.dart';
+import 'package:mydatastudio/oauth/microsoft_auth.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
@@ -15,13 +15,11 @@ class OutlookConfigureView extends StatefulWidget {
 
 class _OutlookConfigureViewState extends State<OutlookConfigureView> {
   final _clientIdController = TextEditingController();
-  final _clientSecretController = TextEditingController();
   bool _isSaving = false;
 
   @override
   void dispose() {
     _clientIdController.dispose();
-    _clientSecretController.dispose();
     super.dispose();
   }
 
@@ -30,13 +28,10 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
     if (db == null) return;
 
     final clientId = _clientIdController.text.trim();
-    final clientSecret = _clientSecretController.text.trim();
 
-    if (clientId.isEmpty || clientSecret.isEmpty) {
+    if (clientId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Client ID and Client Secret are required'),
-        ),
+        const SnackBar(content: Text('Client ID is required')),
       );
       return;
     }
@@ -53,7 +48,7 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
         'client_id = excluded.client_id, '
         'client_secret = excluded.client_secret, '
         'api_key = excluded.api_key',
-        ['azure', clientId, CredentialCodec.encrypt(clientSecret), ''],
+        ['azure', clientId, '', ''],
       );
 
       widget.onConfigured();
@@ -87,7 +82,15 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
         ),
         const SizedBox(height: 8),
         Text(
-          'To connect to Outlook, you must provide your own OAuth Client ID and Secret.',
+          kBundledOutlookClientId.isEmpty
+              ? "Microsoft sign-in isn't configured in this build. To connect "
+                  'to Outlook, register your own app in Microsoft Entra (a '
+                  'public client with redirect URI http://localhost) and '
+                  'enter its Application (client) ID. No client secret is '
+                  'needed.'
+              : 'Enter the Application (client) ID of your own Microsoft '
+                  'Entra app to use it instead of the built-in one. No client '
+                  'secret is needed.',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 14,
@@ -106,7 +109,7 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
                   ),
                 ),
             child: const Text(
-              'Get Credentials from Microsoft Azure Portal',
+              'Register an app in the Microsoft Azure Portal',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,
@@ -123,15 +126,6 @@ class _OutlookConfigureViewState extends State<OutlookConfigureView> {
             labelText: 'Client ID',
             border: OutlineInputBorder(),
           ),
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _clientSecretController,
-          decoration: const InputDecoration(
-            labelText: 'Client Secret',
-            border: OutlineInputBorder(),
-          ),
-          obscureText: true,
         ),
         const SizedBox(height: 28),
         ElevatedButton(

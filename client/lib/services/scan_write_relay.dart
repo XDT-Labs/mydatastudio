@@ -7,10 +7,12 @@ import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
 import 'package:mydatastudio/modules/email/services/email_folder_upsert_service.dart';
 import 'package:mydatastudio/modules/email/services/email_upsert_service.dart';
+import 'package:mydatastudio/modules/email/services/imap/imap_sync_writer.dart';
 import 'package:mydatastudio/modules/files/services/batch_file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/cleanup_deleted_files_service.dart';
 import 'package:mydatastudio/modules/files/services/file_upsert_service.dart';
 import 'package:mydatastudio/modules/files/services/folder_upsert_service.dart';
+import 'package:mydatastudio/modules/files/services/repositories/file_repository.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/services/sequential_write_queue.dart';
 import 'package:mydatastudio/services/sqlite_retry.dart';
@@ -66,6 +68,18 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       );
       return const {};
 
+    case 'cloudFileBatch':
+      // Cloud sync rows: a file whose content changed at the provider also
+      // loses its stale local copy and index entries.
+      await BatchFileUpsertService.instance.invoke(
+        BatchFileUpsertServiceCommand(
+          List<File>.from(payload as List),
+          db,
+          replaceChangedContent: true,
+        ),
+      );
+      return const {};
+
     case 'folder':
       await FolderUpsertService.instance.invoke(
         FolderUpsertServiceCommand(payload as Folder, db),
@@ -90,6 +104,12 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       );
       return const {};
 
+    case 'emailSync':
+      // IMAP incremental-sync bookkeeping (folder state, membership, flags,
+      // remote removals) — see ImapSyncWriter.
+      await ImapSyncWriter.handle(db, payload as Map);
+      return const {};
+
     case 'fileThumbnail':
       final map = payload as Map;
       final result = await retryOnLock(
@@ -112,7 +132,30 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
           recursive: map['recursive'] as bool? ?? true,
           isCloud: map['isCloud'] as bool? ?? false,
           isFullScan: map['isFullScan'] as bool? ?? false,
+          keepDeleted: map['keepDeleted'] as bool? ?? false,
         ),
+      );
+      return const {};
+
+    case 'cloudRemovals':
+      final map = payload as Map;
+      await retryOnLock(
+        () => FileDesktopRepository(db).applyCloudRemovals(
+          map['collectionId'] as String,
+          itemIds: List<String>.from(map['itemIds'] as List),
+          parentIds: List<String>.from(map['parentIds'] as List),
+          keepDeleted: map['keepDeleted'] as bool? ?? false,
+          at: map['at'] as DateTime,
+        ),
+        label: 'scanWriteRelay.cloudRemovals',
+      );
+      return const {};
+
+    case 'collectionChangeCursor':
+      final map = payload as Map;
+      await CollectionRepository(db).setChangeCursor(
+        map['collectionId'] as String,
+        map['cursor'] as String?,
       );
       return const {};
 
@@ -134,6 +177,17 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       );
       return const {};
 
+    case 'collectionTokens':
+      // Refreshed OAuth tokens (access, refresh, expiration only).
+      final map = payload as Map;
+      await CollectionRepository(db).updateOAuthTokens(
+        map['collectionId'] as String,
+        accessToken: map['accessToken'] as String,
+        refreshToken: map['refreshToken'] as String,
+        expiration: map['expiration'] as DateTime,
+      );
+      return const {};
+
     case 'collectionStatus':
       // A targeted update (scan_status, last_scan_date only) — not the full
       // Collection object the isolate read at scan start, which would
@@ -142,7 +196,7 @@ Future<Map<String, dynamic>> handleScanWriteMessage(
       await CollectionRepository(db).updateScanStatus(
         map['collectionId'] as String,
         map['scanStatus'] as String,
-        map['lastScanDate'] as DateTime,
+        map['lastScanDate'] as DateTime?,
       );
       return const {};
 

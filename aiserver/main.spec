@@ -28,7 +28,10 @@ hiddenimports = [
 ]
 
 # Collect all for complex packages
-for pkg in ['llama_cpp', 'uvicorn', 'fastapi', 'langchain', 'langchain_community', 'langchain_core', 'langchain_google_genai', 'langchain_openai', 'langchain_anthropic', 'rawpy', 'pillow_heif']:
+# torchvision is here for its native ops (_C_stable): the contrib hook still asks
+# for the pre-0.29 name `_C`, so without this they are silently left out and
+# importing transformers fails in the frozen app.
+for pkg in ['llama_cpp', 'uvicorn', 'fastapi', 'langchain', 'langchain_community', 'langchain_core', 'langchain_google_genai', 'langchain_openai', 'langchain_anthropic', 'rawpy', 'pillow_heif', 'sentence_transformers', 'torchvision']:
     try:
         print(f"Collecting {pkg}...")
         tmp_ret = collect_all(pkg)
@@ -45,19 +48,26 @@ for pkg in ['langchain_google_genai', 'langchain_openai', 'langchain_anthropic']
     except Exception as e:
         print(f"Warning: Failed to copy metadata for {pkg}: {e}")
 
-# pdfium IS bundled, unlike the models below, and the asymmetry is the point.
-# It is 3.4 MB, and it cannot be a runtime download the way models are: the
-# only downloader available is docling's, which serves a Linux x86-64 build on
-# macOS and reports success (search plan §18d-1). `make pdfium` vendors it and
-# verifies the Mach-O header; this copies it in. The Makefile's signing pass
-# picks it up with every other Mach-O file in dist/.
-_pdfium = os.path.join(os.path.dirname(os.path.abspath(SPEC)), 'vendor', 'pdfium', 'lib', 'libpdfium.dylib')
-if os.path.exists(_pdfium):
-    binaries += [(_pdfium, 'vendor/pdfium/lib')]
-    print(f"  - Bundling pdfium from {_pdfium}")
-else:
-    print("Warning: vendor/pdfium/lib/libpdfium.dylib missing — PDF extraction "
-          "will be disabled in this build. Run `make pdfium`.")
+# When llama.cpp is built with Vulkan (Windows, Linux x64), bundle the Vulkan
+# loader next to ggml-vulkan. Without it, a machine with no GPU driver can't
+# load llama.cpp at all; with it, llama.cpp finds no device and uses the CPU.
+# GPU drivers are found by the loader, so they are never bundled.
+import sys
+# macOS uses Metal; a Mac with LunarG's SDK installed sets VULKAN_SDK too.
+vulkan_sdk = os.environ.get('VULKAN_SDK') if sys.platform != 'darwin' else None
+if vulkan_sdk:
+    if sys.platform == 'win32':
+        candidates = [os.path.join(vulkan_sdk, 'Bin', 'vulkan-1.dll'),
+                      os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'vulkan-1.dll')]
+    else:
+        # LunarG's Linux SDK keeps the loader under lib/VulkanLoader/lib.
+        candidates = [os.path.join(vulkan_sdk, 'lib', 'VulkanLoader', 'lib', 'libvulkan.so.1'),
+                      os.path.join(vulkan_sdk, 'lib', 'libvulkan.so.1')]
+    loader = next((c for c in candidates if os.path.isfile(c)), None)
+    if loader is None:
+        raise SystemExit(f"VULKAN_SDK is set but no Vulkan loader was found in {candidates}")
+    print(f"Bundling the Vulkan loader: {loader}")
+    binaries.append((loader, os.path.join('llama_cpp', 'lib')))
 
 # Models are deliberately NOT bundled. They live beside the extracted server
 # (Application Support/models, via AICHAT_MODELS_DIR) so that re-extracting

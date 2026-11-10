@@ -11,9 +11,11 @@ import 'package:mydatastudio/modules/email/notifications/email_sort_changed_noti
 import 'package:mydatastudio/modules/email/pages/new_email_page.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/modules/email/services/email_repository.dart';
+import 'package:mydatastudio/modules/email/services/email_server_delete.dart';
 import 'package:mydatastudio/modules/email/services/get_email_folders_service.dart';
 import 'package:mydatastudio/modules/email/services/get_emails_service.dart';
 import 'package:mydatastudio/modules/email/services/scanners/outlook_pst_scanner_isolate.dart';
+import 'package:mydatastudio/modules/email/widgets/email_account_settings_dialog.dart';
 import 'package:mydatastudio/modules/email/widgets/email_details.dart';
 import 'package:mydatastudio/modules/email/widgets/email_table.dart';
 import 'package:mydatastudio/modules/email/widgets/scanning_placeholder_widget.dart';
@@ -732,7 +734,12 @@ class _EmailPage extends State<EmailPage> {
           disabledColor: theme.colorScheme.error.withValues(alpha: 0.3),
           tooltip: 'Delete Selected Messages',
           onPressed:
-              hasSelected ? () => _showBulkDeleteConfirmation(context) : null,
+              hasSelected
+                  ? () => _showDeleteConfirmation(
+                    context,
+                    emails.where((e) => e.isSelected == true).toList(),
+                  )
+                  : null,
         ),
       ],
     );
@@ -818,10 +825,7 @@ class _EmailPage extends State<EmailPage> {
           icon: const Icon(Icons.delete_outline, size: 20),
           color: theme.colorScheme.error,
           tooltip: 'Delete Message',
-          onPressed: () {
-            setState(() => selectedEmail = null);
-            _deleteSelectedEmails([email]);
-          },
+          onPressed: () => _showDeleteConfirmation(context, [email]),
         ),
       ],
     );
@@ -965,15 +969,21 @@ class _EmailPage extends State<EmailPage> {
     return isToday ? moment.format('h:mm A') : moment.format('M/DD/YYYY');
   }
 
-  void _showBulkDeleteConfirmation(BuildContext context) {
-    final selectedItems = emails.where((e) => e.isSelected == true).toList();
+  void _showDeleteConfirmation(BuildContext context, List<Email> items) {
+    final count =
+        items.length == 1
+            ? 'this message'
+            : '${items.length} selected messages';
+    final hasServer =
+        collection != null && supportsEmailDeletePolicy(collection!.scanner);
     showDialog(
       context: context,
       builder:
           (context) => AlertDialog(
             title: const Text('Delete Emails'),
             content: Text(
-              'Are you sure you want to delete ${selectedItems.length} selected messages?\nThese will be deleted locally and on the server.',
+              'Are you sure you want to delete $count?\n'
+              '${hasServer ? 'They will be permanently deleted from this app and moved to Trash on the server.' : 'They will be permanently deleted from this app.'}',
             ),
             actions: [
               TextButton(
@@ -983,7 +993,7 @@ class _EmailPage extends State<EmailPage> {
               TextButton(
                 onPressed: () {
                   Navigator.pop(context);
-                  _deleteSelectedEmails(selectedItems);
+                  _deleteEmails(items);
                 },
                 child: const Text(
                   'Delete',
@@ -995,42 +1005,43 @@ class _EmailPage extends State<EmailPage> {
     );
   }
 
-  Future<void> _deleteSelectedEmails(List<Email> items) async {
+  /// Deletes locally only what has left the server, so a failed move can't look
+  /// like a delete and then come back on the next sync.
+  Future<void> _deleteEmails(List<Email> items) async {
     try {
-      final ids = items.map((e) => e.id).toList();
-
-      if (collection != null) {
-        final scanner = ScannerManager.getInstance().getScanner(collection!);
-        if (scanner != null) {
-          final groupedByFolder = <String, List<int>>{};
-
-          for (var item in items) {
-            if (item.uid != null) {
-              final fId =
-                  item.folderId ?? EmailPage.selectedFolder.value ?? 'INBOX';
-              groupedByFolder.putIfAbsent(fId, () => []).add(item.uid!);
-            }
-          }
-
-          for (var entry in groupedByFolder.entries) {
-            scanner.moveToTrash(collection!, entry.key, entry.value);
-          }
-        }
+      var removable = items;
+      final account = collection;
+      if (account != null && supportsEmailDeletePolicy(account.scanner)) {
+        final manager = ScannerManager.getInstance();
+        final scanner =
+            manager.getScanner(account) ??
+            await manager.registerScanner(account);
+        removable = await moveToServerTrash(
+          items,
+          account,
+          scanner,
+          fallbackFolder: EmailPage.selectedFolder.value,
+        );
       }
 
       await EmailRepository(
         DatabaseManager.instance.database!,
-      ).deleteEmails(ids, collection: collection);
+      ).deleteEmails(removable.map((e) => e.id).toList(), collection: account);
 
       _refreshEmails();
       if (mounted) {
+        final kept = items.length - removable.length;
         setState(() {
-          selectedEmail = null;
+          if (removable.any((e) => e.id == selectedEmail?.id)) {
+            selectedEmail = null;
+          }
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '${items.length} message${items.length == 1 ? '' : 's'} deleted',
+              kept == 0
+                  ? '${items.length} message${items.length == 1 ? '' : 's'} deleted'
+                  : "Couldn't move $kept of ${items.length} to Trash on the server, so they weren't deleted.",
             ),
           ),
         );

@@ -1,29 +1,49 @@
 name: Build and Release
 
+# Releases are cut by pushing a version tag, e.g.:
+#   git tag v1.2.3 && git push origin v1.2.3
+# The tag is the version: the app is built as 1.2.3 and published to the
+# GitHub release named after the tag. A tag with a pre-release suffix
+# (v1.2.3-beta.1) is published as a pre-release, which the in-app update
+# checker ignores. Pre-release tags work on any branch, so a branch's builds
+# can be tested before it merges; production tags must be on main, and
+# verify-tag fails the run otherwise. Every platform must succeed before
+# anything is published.
 on:
   push:
-    branches: ["main", "feature/actions"]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (e.g. 1.2.3). Reads from pubspec.yaml if empty.'
-        required: false
-        type: string
-      prerelease:
-        description: 'Mark as pre-release'
-        required: false
-        type: boolean
-        default: false
+    tags: ["v*"]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Also publish a .tar.gz of the Linux bundle (the AppImage's contents), e.g.
+  # for machines without FUSE. Off: `--appimage-extract` gives the same tree.
+  LINUX_TARBALL: "false"
 
 jobs:
+  # Validate the tag first so a bad one fails in seconds, not after a full build.
+  verify-tag:
+    name: Verify Tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve Version from Tag
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: .github/scripts/verify_tag.sh
+
   build:
     name: Build macOS Release
+    needs: verify-tag
     runs-on: macos-latest
-    outputs:
-      version_tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - name: Checkout Code
@@ -86,42 +106,20 @@ jobs:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
 
+      # Build number is the workflow run number: always increasing, so each
+      # release gets a fresh CFBundleVersion and PythonManager's
+      # `<version>+<build>` stamp re-extracts the bundled aiserver.
       - name: Update Version in pubspec.prod.yaml
         env:
-          INPUT_VERSION: ${{ inputs.version }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          python3 -c "
-          import re, os
-          input_version = os.environ.get('INPUT_VERSION')
-          run_number = os.environ.get('GITHUB_RUN_NUMBER', '1')
-          with open('client/pubspec.prod.yaml', 'r') as f:
-              content = f.read()
-          pattern = r'^version:\s*(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?'
-          match = re.search(pattern, content, re.MULTILINE)
-          if not match:
-              print('Error: Could not find version line in pubspec.prod.yaml')
-              exit(1)
-          if input_version:
-              input_match = re.match(r'^(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$', input_version)
-              if input_match:
-                  major = input_match.group(1)
-                  minor = input_match.group(2)
-                  patch = input_match.group(3)
-                  build = input_match.group(4) or run_number
-                  new_version = f'version: {major}.{minor}.{patch}+{build}'
-              else:
-                  print(f'Error: Invalid input version format: {input_version}')
-                  exit(1)
-          else:
-              major = match.group(1)
-              minor = match.group(2)
-              new_version = f'version: {major}.{minor}.{run_number}+{run_number}'
-          new_content = re.sub(pattern, new_version, content, flags=re.MULTILINE)
-          with open('client/pubspec.prod.yaml', 'w') as f:
-              f.write(new_content)
-          print(f'Updated pubspec.prod.yaml version to: {new_version}')
-          "
+          if ! grep -qE '^version:' client/pubspec.prod.yaml; then
+            echo "Error: Could not find version line in pubspec.prod.yaml"
+            exit 1
+          fi
+          sed -i '' -E "s/^version:.*/version: ${VERSION}+${BUILD_NUMBER}/" client/pubspec.prod.yaml
+          grep '^version:' client/pubspec.prod.yaml
 
       # ------------------------------------------
       # 1. Set up Python + PDM (shared by models and Python service build)
@@ -241,7 +239,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: latest
+          # Not "latest": newer npm blocks the install scripts that build
+          # appdmg's native modules, so appdmg fails when it starts.
+          node-version: "22"
 
       - name: Install appdmg
         run: npm install -g appdmg
@@ -249,21 +249,6 @@ jobs:
       - name: Create DMG
         working-directory: client
         run: appdmg installers/dmg_creator/config.json build/macos/Build/Products/Release/MyDataStudio.dmg
-
-      # ------------------------------------------
-      # 7. Resolve version tag
-      # ------------------------------------------
-      - name: Resolve Version Tag
-        id: version
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          if [ -n "$INPUT_VERSION" ]; then
-            echo "tag=v${INPUT_VERSION}" >> $GITHUB_OUTPUT
-          else
-            VERSION=$(grep '^version:' client/pubspec.yaml | sed 's/version: //' | cut -d'+' -f1 | tr -d '[:space:]')
-            echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
-          fi
 
       # ------------------------------------------
       # 8. Upload artifacts
@@ -274,21 +259,261 @@ jobs:
           name: macos-dmg
           path: client/build/macos/Build/Products/Release/MyDataStudio.dmg
 
-      - name: Upload Python Service Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aiserver-macos
-          path: client/app/aiserver-macos.zip
-
       - name: Clean up keychain and provisioning profile
         if: always()
         run: |
           security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
           rm -f ~/Library/MobileDevice/Provisioning\ Profiles/build_pp.mobileprovision 2>/dev/null || true
 
+  build-linux:
+    name: Build Linux Release (${{ matrix.arch }})
+    needs: verify-tag
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # Nothing is published unless every platform builds, so stop early.
+      fail-fast: true
+      matrix:
+        include:
+          # 22.04 on both, because the binary only runs on this glibc or newer.
+          # Vulkan (GPU) on x64 only: LunarG publishes no arm64 Linux SDK and
+          # 22.04 has no glslc package, so arm64 stays CPU.
+          - arch: x64
+            runner: ubuntu-22.04
+            vulkan: true
+            cmake_args: "-DGGML_NATIVE=off -DGGML_VULKAN=on"
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+            vulkan: false
+            cmake_args: "-DGGML_NATIVE=off"
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Update Version in pubspec.prod.yaml
+        env:
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          if ! grep -qE '^version:' client/pubspec.prod.yaml; then
+            echo "Error: Could not find version line in pubspec.prod.yaml"
+            exit 1
+          fi
+          sed -i -E "s/^version:.*/version: ${VERSION}+${BUILD_NUMBER}/" client/pubspec.prod.yaml
+          grep '^version:' client/pubspec.prod.yaml
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PDM
+        uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Build Tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev libmpv-dev mpv zip unzip file curl xvfb \
+            patchelf desktop-file-utils
+
+      - name: Install Vulkan SDK
+        if: matrix.vulkan
+        run: .github/scripts/install_vulkan_sdk.sh
+
+      - name: Build Python Service
+        run: make build-python
+        env:
+          CMAKE_ARGS: ${{ matrix.cmake_args }}
+
+      - name: Clean up Python build to free space
+        run: |
+          df -h
+          rm -rf aiserver/build aiserver/dist aiserver/.venv
+          df -h
+
+      # From git because Flutter publishes no arm64 Linux SDK. Same version as
+      # the macOS job above.
+      - name: Set up Flutter
+        run: |
+          git clone --depth 1 --branch 3.47.0 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter/bin/flutter" precache --linux
+
+      - name: Build Flutter Client
+        run: make build-client
+
+      - name: Build AppImage
+        env:
+          APPIMAGE: MyDataStudio-${{ needs.verify-tag.outputs.tag }}-linux-${{ matrix.arch }}.AppImage
+        run: |
+          .github/scripts/build_appimage.sh "client/build/linux/${{ matrix.arch }}/release/bundle" AppDir "$APPIMAGE"
+
+      - name: Fetch Smoke-Test Model
+        run: .github/scripts/fetch_smoke_model.sh smoke/tiny.gguf
+
+      - name: Smoke Test
+        timeout-minutes: 10
+        env:
+          SMOKE_GGUF: smoke/tiny.gguf
+        run: .github/scripts/linux_smoke_test.sh AppDir
+
+      # A newer distro than the build machine, with only what the app leaves to
+      # the system. This is what catches a library that should have been bundled
+      # (the Vulkan loader too: nothing installs one here).
+      - name: Smoke Test on Clean Ubuntu 24.04
+        timeout-minutes: 15
+        run: |
+          docker run --rm -e SMOKE_GGUF=smoke/tiny.gguf -v "$PWD:/repo:ro" -w /repo ubuntu:24.04 bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq libgtk-3-0t64 libegl1 libgles2 libgbm1 xvfb curl unzip > /dev/null
+            .github/scripts/linux_smoke_test.sh AppDir'
+
+      - name: Package Tarball
+        if: env.LINUX_TARBALL == 'true'
+        env:
+          ARCHIVE: MyDataStudio-${{ needs.verify-tag.outputs.tag }}-linux-${{ matrix.arch }}.tar.gz
+        run: |
+          tar --transform 's,^AppDir,MyDataStudio,' -czf "$ARCHIVE" AppDir
+          ls -la "$ARCHIVE"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: |
+            MyDataStudio-*.AppImage
+            MyDataStudio-*.tar.gz
+          compression-level: 0
+
+  build-windows:
+    name: Build Windows Release (x64)
+    needs: verify-tag
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Update Version in pubspec.prod.yaml
+        env:
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          if ! grep -qE '^version:' client/pubspec.prod.yaml; then
+            echo "Error: Could not find version line in pubspec.prod.yaml"
+            exit 1
+          fi
+          sed -i -E "s/^version:.*/version: ${VERSION}+${BUILD_NUMBER}/" client/pubspec.prod.yaml
+          grep '^version:' client/pubspec.prod.yaml
+
+      - name: Resolve Realm
+        id: realm
+        run: |
+          realm=$(cut -d= -f2 .realm_name 2>/dev/null || true)
+          echo "realm=${realm:-com.xdtlabs.mydatastudio}" >> "$GITHUB_OUTPUT"
+
+      # pdfrx needs symlink support, which Developer Mode turns on.
+      - name: Enable Developer Mode
+        shell: pwsh
+        run: reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
+
+      - name: Ensure make
+        run: command -v make || choco install make -y --no-progress
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PDM
+        uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Vulkan SDK
+        run: .github/scripts/install_vulkan_sdk.sh
+
+      - name: Build Python Service
+        run: make build-python
+        env:
+          CMAKE_ARGS: "-DGGML_NATIVE=off -DGGML_VULKAN=on"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          channel: 'stable'
+
+      - name: Build Flutter Client
+        run: make build-client
+
+      # Flutter doesn't bundle the MSVC runtime the app and its plugins link
+      # against, and not every Windows install has it.
+      - name: Bundle the VC++ Runtime
+        run: |
+          bundle=client/build/windows/x64/runner/Release
+          for dll in msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do
+            cp "/c/Windows/System32/$dll" "$bundle/"
+          done
+          ls "$bundle"
+
+      - name: Build Installer
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+          OUTPUT_NAME: MyDataStudio-${{ needs.verify-tag.outputs.tag }}-windows-x64-setup
+        run: |
+          $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          } else { $iscc = $iscc.Source }
+          & $iscc "/DAppVersion=$env:VERSION" `
+            "/DSourceDir=$env:GITHUB_WORKSPACE\client\build\windows\x64\runner\Release" `
+            "/DOutputDir=$env:GITHUB_WORKSPACE" "/DOutputName=$env:OUTPUT_NAME" `
+            client\windows\installer\mydatastudio.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Item "$env:OUTPUT_NAME.exe"
+
+      # Tests the installer too: the smoke test runs against what it installed.
+      - name: Install Silently
+        shell: pwsh
+        run: |
+          $setup = Get-Item MyDataStudio-*-setup.exe
+          $proc = Start-Process -FilePath $setup.FullName -Wait -PassThru -ArgumentList `
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=$env:RUNNER_TEMP\install"
+          if ($proc.ExitCode -ne 0) { throw "installer exited with $($proc.ExitCode)" }
+          if (-not (Test-Path "$env:RUNNER_TEMP\install\mydatastudio.exe")) { throw 'mydatastudio.exe was not installed' }
+
+      - name: Fetch Smoke-Test Model
+        run: .github/scripts/fetch_smoke_model.sh smoke/tiny.gguf
+
+      - name: Smoke Test
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          REALM: ${{ steps.realm.outputs.realm }}
+          SMOKE_GGUF: smoke/tiny.gguf
+        run: .github/scripts/windows_smoke_test.ps1 "$env:RUNNER_TEMP\install" "$env:REALM"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: MyDataStudio-*-setup.exe
+          compression-level: 0
+
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [verify-tag, build, build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -301,12 +526,15 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.build.outputs.version_tag }}
-          name: MyDataStudio ${{ needs.build.outputs.version_tag }}
+          tag_name: ${{ github.ref_name }}
+          name: MyDataStudio ${{ github.ref_name }}
           files: |
             artifacts/macos-dmg/*.dmg
-            artifacts/aiserver-macos/*.zip
-          prerelease: ${{ inputs.prerelease || false }}
+            artifacts/linux-x64/*
+            artifacts/linux-arm64/*
+            artifacts/windows-x64/*.exe
+          fail_on_unmatched_files: true
+          prerelease: ${{ needs.verify-tag.outputs.prerelease == 'true' }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

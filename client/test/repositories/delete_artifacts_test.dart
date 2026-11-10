@@ -1,10 +1,14 @@
 import 'dart:io' as io;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mydatastudio/app_constants.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/main.dart';
+import 'package:mydatastudio/models/tables/email.dart';
+import 'package:mydatastudio/modules/search/services/email_contact_repository.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/modules/email/services/email_repository.dart';
@@ -12,6 +16,7 @@ import 'package:mydatastudio/modules/files/services/repositories/file_repository
 import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/services/embedding_model.dart';
 
 /// Deletion has to take every artifact with it, or the archive accumulates
 /// ghosts: cached thumbnails for files that are gone, attachment bytes with no
@@ -111,7 +116,7 @@ void main() {
       await FileDesktopRepository(db).create(file);
       await DatabaseRepository(db).upsertFileEmbedding(
         id,
-        List<double>.filled(2048, 0.5),
+        List<double>.filled(EmbeddingModel.dimension, 0.5),
       );
 
       return (file, onDisk, cache.fileForKey(key));
@@ -219,7 +224,7 @@ void main() {
         ],
       );
       await DatabaseRepository(db).replaceEmailEmbeddings(emailId, [
-        List<double>.filled(2048, 0.25),
+        List<double>.filled(EmbeddingModel.dimension, 0.25),
       ]);
 
       final (attachment, attachmentBytes, attachmentThumb) =
@@ -292,7 +297,7 @@ void main() {
         ],
       );
       await DatabaseRepository(db).replaceEmailEmbeddings(emailId, [
-        List<double>.filled(2048, 0.75),
+        List<double>.filled(EmbeddingModel.dimension, 0.75),
       ]);
 
       await CollectionRepository(db).deleteCollection(col.id);
@@ -334,7 +339,7 @@ void main() {
       await FileDesktopRepository(db).delete(file, collection: col);
       await DatabaseRepository(db).upsertFileEmbedding(
         file.id,
-        List<double>.filled(2048, 0.9),
+        List<double>.filled(EmbeddingModel.dimension, 0.9),
       );
 
       expect(
@@ -370,6 +375,165 @@ void main() {
         0,
       );
       expect(await thumb.exists(), isFalse);
+    });
+  });
+
+  group('Deleted collection cleanup', () {
+    late io.Directory tempDir;
+    late DatabaseManager manager;
+    late AppDatabase db;
+
+    setUp(() async {
+      tempDir = await io.Directory.systemTemp.createTemp('mds_del_pending_');
+      const channel = MethodChannel('plugins.flutter.io/path_provider');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async => tempDir.path);
+      manager = DatabaseManager.instance;
+      await manager.initializeDatabase();
+      db = manager.database!;
+    });
+
+    tearDown(() async {
+      manager.dispose();
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    Future<Collection> emailCollection(String id) async {
+      final col = Collection(
+        id: id,
+        name: id,
+        path: '',
+        type: 'email',
+        scanner: 'email.imap',
+        scanStatus: 'idle',
+        needsReAuth: false,
+      );
+      await CollectionRepository(db).addCollection(col);
+      return col;
+    }
+
+    test('a database created before the retry table can delete a collection', () async {
+      // schemaDDL only runs when a database is first created, so a table
+      // declared there alone is missing from every existing archive, and
+      // deleting a collection throws.
+      final col = await emailCollection('c-upgraded');
+      await db.execute('DROP TABLE pending_disk_deletes');
+
+      await db.initSchema();
+      await CollectionRepository(db).deleteCollection(col.id);
+
+      expect(
+        await db.select('SELECT id FROM collections WHERE id = ?', [col.id]),
+        isEmpty,
+      );
+    });
+
+    test('a sync folder takes its archive copies, never the folder itself', () async {
+      // The archive is the app's own copy, under the storage root; the synced
+      // folder belongs to the user and the sync app.
+      final root = MainApp.appDataDirectory.value!;
+      final synced = io.Directory(p.join(tempDir.path, 'Dropbox'))
+        ..createSync(recursive: true);
+      io.File(p.join(synced.path, 'keep.txt')).writeAsStringSync('mine');
+      final col = Collection(
+        id: 'c-sync',
+        name: 'Dropbox',
+        path: synced.path,
+        localCopyPath: synced.path,
+        type: 'file',
+        scanner: AppConstants.scannerFileLocal,
+        scanStatus: 'idle',
+        needsReAuth: false,
+      );
+      await CollectionRepository(db).addCollection(col);
+      final archive = io.Directory(p.join(root, 'files', 'sync', col.id))
+        ..createSync(recursive: true);
+      io.File(p.join(archive.path, 'keep.txt')).writeAsStringSync('copy');
+
+      await CollectionRepository(db).deleteCollection(col.id);
+
+      expect(archive.existsSync(), isFalse);
+      expect(io.File(p.join(synced.path, 'keep.txt')).existsSync(), isTrue);
+    });
+
+    test('attachments survive unreachable storage and go on the next run', () async {
+      // The rows are gone by the time disk cleanup runs. Without a retry, one
+      // failure leaves the mail's bytes on disk with nothing pointing at them.
+      final col = await emailCollection('c-pending');
+      final root = MainApp.appDataDirectory.value!;
+      final dir = io.Directory(p.join(root, 'files', 'email', col.id))
+        ..createSync(recursive: true);
+
+      MainApp.appDataDirectory.add(null);
+      await CollectionRepository(db).deleteCollection(col.id);
+      expect(dir.existsSync(), isTrue);
+      expect(await db.select('SELECT * FROM pending_disk_deletes'), isNotEmpty);
+
+      MainApp.appDataDirectory.add(root);
+      await CollectionRepository(db).deletePendingDiskPaths();
+      expect(dir.existsSync(), isFalse);
+      expect(await db.select('SELECT * FROM pending_disk_deletes'), isEmpty);
+    });
+
+    test('deleting an account removes addresses only it had seen', () async {
+      // They feed search suggestions, so they'd outlive the deleted account.
+      await emailCollection('c-gone');
+      await emailCollection('c-kept');
+      Email mail(String id, String col, String from) => Email(
+        id: id,
+        collectionId: col,
+        date: DateTime(2026),
+        from: from,
+        to: const ['shared@example.com'],
+        subject: 's',
+        isDeleted: false,
+      );
+      final emails = [
+        mail('e1', 'c-gone', 'only-gone@example.com'),
+        mail('e2', 'c-kept', 'kept@example.com'),
+      ];
+      await EmailRepository(db).addEmails(emails);
+      await EmailContactRepository(db).indexEmails(emails);
+
+      await CollectionRepository(db).deleteCollection('c-gone');
+
+      final rows = await db.select(
+        'SELECT address, message_count FROM emails_contacts ORDER BY address',
+      );
+      expect(rows.map((r) => r['address']), [
+        'kept@example.com',
+        'shared@example.com',
+      ]);
+      expect(rows.last['message_count'], 1);
+    });
+
+    test('deleting emails takes them out of the contacts index', () async {
+      await emailCollection('c-mail');
+      Email mail(String id, String from) => Email(
+        id: id,
+        collectionId: 'c-mail',
+        date: DateTime(2026),
+        from: from,
+        to: const ['me@example.com'],
+        subject: 's',
+        isDeleted: false,
+      );
+      final emails = [mail('a', 'one@example.com'), mail('b', 'two@example.com')];
+      await EmailRepository(db).addEmails(emails);
+      await EmailContactRepository(db).indexEmails(emails);
+
+      await EmailRepository(db).deleteEmails(['a']);
+
+      final rows = await db.select(
+        'SELECT address, message_count FROM emails_contacts ORDER BY address',
+      );
+      expect(rows.map((r) => r['address']), [
+        'me@example.com',
+        'two@example.com',
+      ]);
+      expect(rows.first['message_count'], 1);
     });
   });
 }
