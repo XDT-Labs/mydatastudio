@@ -1,6 +1,7 @@
 // [ignoring loop detection]
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/helpers/file_path_resolver.dart';
 import 'package:mydatastudio/helpers/sql_chunks.dart';
 import 'package:mydatastudio/models/tables/email.dart';
 import 'package:mydatastudio/models/tables/file.dart' as model;
@@ -40,12 +41,38 @@ class EmailRepository {
 
   EmailRepository(this.database);
 
+  /// The message's attachments, with each `path` made absolute.
+  ///
+  /// The IMAP scanner stores attachment paths relative to the collection's
+  /// extraction folder (`local_copy_path`); the PST importer stores absolute
+  /// ones. The email view reads the bytes straight from `path` (to inline
+  /// `cid:` images, draw thumbnails, open and save), so it needs the absolute
+  /// form either way. [FilePathResolver] leaves absolute paths unchanged.
   Future<List<model.File>> getAttachments(String emailId) async {
     final rows = await database.select(
-      "SELECT * FROM files WHERE email_id = ?",
+      "SELECT f.*, c.path AS col_path, c.local_copy_path AS col_local_copy_path, "
+      "c.scanner AS col_scanner "
+      "FROM files f LEFT JOIN collections c ON c.id = f.collection_id "
+      "WHERE f.email_id = ?",
       [emailId],
     );
-    return rows.map((r) => model.File.fromDbMap(r)).toList();
+    return rows.map((r) {
+      final file = model.File.fromDbMap(r);
+      file.path = FilePathResolver.absoluteFromPath(
+        file.path,
+        Collection(
+          id: file.collectionId,
+          name: '',
+          path: (r['col_path'] as String?) ?? '',
+          type: '',
+          scanner: (r['col_scanner'] as String?) ?? '',
+          scanStatus: '',
+          needsReAuth: false,
+          localCopyPath: r['col_local_copy_path'] as String?,
+        ),
+      );
+      return file;
+    }).toList();
   }
 
   Future<List<Email>> emails(
