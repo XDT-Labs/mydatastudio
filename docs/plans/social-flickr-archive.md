@@ -6,6 +6,9 @@ remaining: [api-key-setup, oauth1-signing, backfill, incremental, albums, export
 
 # Plan: Archive Flickr
 
+**Collection type:** a `photos` collection (`photos.flickr`), not a social one; see
+[photos-collection-type.md](photos-collection-type.md). Built in Wave 5 of the release plan.
+
 **Release order: 3** (with Snapchat). Flickr holds **original-quality photos with EXIF and
 geotags**, often a decade or more of them, which makes it a high-value Photos source. Two paths:
 the user's own API key (true sync, like X but free), and the account data export.

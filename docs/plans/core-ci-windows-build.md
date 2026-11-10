@@ -1,8 +1,13 @@
 ---
-status: in-progress
+status: done
 adr: none
-remaining: [system-trash, gpu-default, signing, desktop-check]
+remaining: []
 ---
+
+**Done 2026-11-09.** Tagged releases build and publish the Windows x64 installer and portable zip
+(#45), and the first tag run passed. Two decisions are left outside this plan: **code signing**
+(tracked in [PRODUCTION-TODO.md](../../PRODUCTION-TODO.md)) and whether the aiserver should
+default to a GPU build (it's CPU-only today).
 
 ## Progress (2026-11-07)
 

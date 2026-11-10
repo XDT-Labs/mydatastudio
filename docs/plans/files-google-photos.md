@@ -6,6 +6,9 @@ remaining: [takeout-steps, takeout-photos-parser, json-sidecar-merge, scheduled-
 
 # Plan: Google Photos (via Takeout)
 
+**Collection type:** a `photos` collection (`photos.google_takeout`), not a file collection; see
+[photos-collection-type.md](photos-collection-type.md).
+
 **The API route is closed.** Since **31 March 2025** the Google Photos **Library API** can only
 list, search and read **media the app itself created**. The `photoslibrary.readonly` scope was
 removed. The replacement **Picker API** makes the user pick items by hand each session, which

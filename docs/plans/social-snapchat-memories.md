@@ -1,7 +1,7 @@
 ---
 status: proposed
 adr: none
-remaining: [sample-export, memories-parser, link-download, overlay-handling, import-ui, dedupe]
+remaining: [sample-export, memories-parser, link-download, overlay-handling, import-ui, dedupe, reexport-reminder]
 ---
 
 # Plan: Import Snapchat Memories
@@ -46,9 +46,16 @@ export only.
 5. **Dedupe:** many Memories are also in the phone's camera roll. Use the same perceptual-hash
    approach as Instagram's camera-roll dedupe (link, don't delete). Re-importing the same export
    is a no-op (`imported_exports` + the file hash).
+6. **"Keep it up to date":** Snapchat can't schedule exports, so offer a **re-export reminder**
+   (quarterly by default, since most people save Memories occasionally; off, monthly or
+   quarterly), like LinkedIn's ([social-linkedin-archive.md](social-linkedin-archive.md)). The
+   reminder reopens step 1 and tells the user which start date to pick on Snapchat's My Data page
+   (the newest imported Memory), so the new export is small. The sync status shows the last export imported, the Memories
+   added, and "next reminder on <date>".
 
 ## Done when
 
 A user imports a multi-zip Memories export. Every Memory appears in Photos at its real date,
 with location on the map. Expired links are listed, with a clear "request a new export" path.
-Nothing is duplicated on re-import.
+Nothing is duplicated on re-import. The re-export reminder fires on its schedule, opens the
+setup panel showing the start date to request, and importing that export adds only the new Memories.

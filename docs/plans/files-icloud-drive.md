@@ -26,7 +26,7 @@ route is the folder macOS already syncs: the
   (a folder picker grant, or Full Disk Access if sandboxed) **(verify for our entitlements)**.
   Detect a denial and show the steps.
 - **Photos:** iCloud **Photos** is a different service (the Photos library, not iCloud Drive).
-  It's out of scope here. Users can point a local collection at an exported folder.
+  It's out of scope here; it has its own plan, [photos-apple-library.md](photos-apple-library.md).
 - **Card copy:** "iCloud Drive syncs through macOS. Online-only files are downloaded briefly to
   index and archive them, then returned to online-only."
 

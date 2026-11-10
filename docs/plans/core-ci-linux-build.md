@@ -1,10 +1,14 @@
 ---
-status: in-progress
+status: done
 adr: none
-remaining: [desktop-check]
+remaining: []
 ---
 
 # Plan: Build the Linux desktop app in GitHub Actions
+
+**Done 2026-11-09.** Tagged releases build and publish Linux x86_64 and arm64 AppImages (#44), and
+the hand check on a real Ubuntu desktop (`desktop-check`) is done, confirmed by the project owner.
+The "Not checked" notes below record what was open while the work was in progress.
 
 **Today:** no `client/linux/` folder, and Linux is commented out in `build_python.yml`.
 `python_manager.dart` already expects `aiserver-linux.zip`. This plan is also the
@@ -26,7 +30,7 @@ bundle.
    - Build dependencies found so far: `build-essential` (native-asset hooks and media_kit's
      mimalloc call `make`), `clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
      libstdc++-12-dev libmpv-dev`.
-2. **Plugin audit** (Linux support):
+2. [x] **Plugin audit** (Linux support):
    - **Email HTML (decided 2026-10-26).** `webview_flutter` has **no Linux support**. The
      Linux implementation of the shared **`EmailBodyView`** interface (defined in
      [core-ci-windows-build.md](core-ci-windows-build.md)) is **`flutter_widget_from_html`**:
@@ -109,7 +113,7 @@ bundle.
      `window_manager`, `window_to_front`. `webview_flutter` and `pdfx` have no Linux
      implementation and are handled by the next tasks. Runtime needs: `libmpv` (media_kit),
      `zenity` or `kdialog` (file_picker).
-3. **macOS-only code:**
+3. [x] **macOS-only code:**
    - [x] **System trash, done 2026-11-03:** implemented in the runner
      (`linux/runner/system_trash_channel.cc`) with GIO's `g_file_trash`, on the same
      `mydatastudio/system_trash` channel as macOS, so the Dart side is unchanged. Chosen over
