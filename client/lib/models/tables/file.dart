@@ -55,6 +55,11 @@ class File implements FileAsset {
   /// rows came from.
   String? contentHash;
 
+  /// The file lives in a sync folder but its bytes are only in the cloud
+  /// (an `SF_DATALESS` file or a legacy `.icloud` stub). Reading it would make
+  /// macOS download it, so the embedding queues skip it until it is on disk.
+  bool isOnlineOnly;
+
   /// When the source deleted this file while the collection keeps deleted
   /// files; null while the source still has it.
   DateTime? sourceDeletedDate;
@@ -84,6 +89,7 @@ class File implements FileAsset {
     this.isFavorite = false,
     this.description,
     this.contentHash,
+    this.isOnlineOnly = false,
     this.sourceDeletedDate,
   });
 
@@ -126,6 +132,7 @@ class File implements FileAsset {
       isFavorite: (map['is_favorite'] as int? ?? 0) != 0,
       description: map['description'] as String?,
       contentHash: map['content_hash'] as String?,
+      isOnlineOnly: (map['is_online_only'] as int? ?? 0) != 0,
       sourceDeletedDate:
           map['source_deleted_date'] != null
               ? DateTime.fromMillisecondsSinceEpoch(
@@ -161,6 +168,7 @@ class File implements FileAsset {
       'is_favorite': isFavorite ? 1 : 0,
       'description': description,
       'content_hash': contentHash,
+      'is_online_only': isOnlineOnly ? 1 : 0,
       'source_deleted_date': sourceDeletedDate?.millisecondsSinceEpoch,
     };
   }

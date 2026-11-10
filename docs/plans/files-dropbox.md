@@ -1,7 +1,7 @@
 ---
 status: in-progress
 adr: none
-remaining: [app-registration, thumbnails, production-approval, provider-ui-actions]
+remaining: [app-registration, production-approval, provider-ui-actions]
 ---
 
 # Plan: Dropbox

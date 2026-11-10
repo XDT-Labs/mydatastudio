@@ -800,6 +800,12 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_files_content_hash '
       'ON files (content_hash);',
     );
+    // Scanners, sync and the per-collection queues all select a collection's
+    // files; without this each of those is a full scan of `files`.
+    await _db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_files_collection '
+      'ON files (collection_id);',
+    );
 
     // Message-ID dedupe lookups for IMAP sync. Here rather than in schemaDDL
     // for the same reason as the index above: schemaDDL reaches fresh installs
@@ -1615,6 +1621,11 @@ class AppDatabase {
         // DatabaseRepository.maxEmbeddingAttempts — because an unreadable
         // file says nothing about whether the model could embed it.
         'embedding_attempts': 'INTEGER NOT NULL DEFAULT 0',
+        // The file is in a sync folder but its bytes are only in the cloud.
+        // Reading it downloads it, so the embedding, chunk and description
+        // queues leave it out. Written by the local scanner on every scan, so
+        // it clears once the file is on disk.
+        'is_online_only': 'INTEGER NOT NULL DEFAULT 0',
         // The user deleted this file from the app. Distinct from both
         // `is_deleted`, which the scanner owns and resets to 0 whenever the
         // source still has the file, and `is_hidden`, which only takes a photo

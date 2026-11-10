@@ -11,6 +11,7 @@ import 'package:mydatastudio/modules/files/widgets/file_collection_setup/cloud_a
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/file_source_catalog.dart';
 import 'package:mydatastudio/modules/files/widgets/file_collection_setup/local_files_tab_view.dart';
 import 'package:mydatastudio/database_manager.dart';
+import 'package:mydatastudio/scanners/cloud/content_policy.dart';
 import 'package:mydatastudio/scanners/scanner_manager.dart';
 import 'package:mydatastudio/services/get_collections_service.dart';
 import 'package:file_picker/file_picker.dart';
@@ -46,6 +47,10 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _path = TextEditingController();
+
+  /// What a sync folder keeps in the archive. Everything by default: a sync
+  /// folder alone is not a backup.
+  ContentPolicy _policy = ContentPolicy.everything;
 
   late final Future<List<FileSource>> _found = _findFolders();
 
@@ -101,7 +106,10 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
   void _open(FileSource source) {
     _name.text = source.detected?.displayName ?? '';
     _path.text = source.detected?.path ?? '';
-    setState(() => _selected = source);
+    setState(() {
+      _selected = source;
+      _policy = ContentPolicy.everything;
+    });
   }
 
   void _backToCatalog() => setState(() => _selected = null);
@@ -164,7 +172,9 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
             pathController: _path,
             intro: source.folderPrompt,
             onBrowse: _browse,
-            onSave: () => _save(context),
+            policy: source.detected != null ? _policy : null,
+            onPolicyChanged: (v) => setState(() => _policy = v),
+            onSave: () => _save(context, source),
             onCancel: _backToCatalog,
           ),
           FileSourceForm.googleDrive => CloudAccountForm.googleDrive(),
@@ -186,7 +196,14 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
 
   /// Single creation path for a local file collection, shared by every
   /// folder-based source (manual pick, detected sync folder, drives).
-  void _createLocalCollection(String name, String selectedPath) {
+  ///
+  /// [policy] is set for cloud sync folders, whose files are copied into the
+  /// archive; a plain folder has none and is never copied.
+  void _createLocalCollection(
+    String name,
+    String selectedPath, {
+    ContentPolicy? policy,
+  }) {
     final fc = Collection(
       id: const Uuid().v4().toString(),
       name: name,
@@ -196,6 +213,7 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
       scanner: AppConstants.scannerFileLocal,
       scanStatus: 'pending',
       needsReAuth: false,
+      contentPolicy: policy?.encode(),
     );
 
     CollectionRepository(
@@ -207,11 +225,15 @@ class _NewFileCollectionPage extends State<NewFileCollectionPage> {
     });
   }
 
-  void _save(BuildContext context) {
+  void _save(BuildContext context, FileSource source) {
     // validate() both answers the question and paints the errors, which is
     // what the old markAllAsTouched() branch existed to do.
     if (_formKey.currentState?.validate() ?? false) {
-      _createLocalCollection(_name.text, _path.text);
+      _createLocalCollection(
+        _name.text,
+        _path.text,
+        policy: source.detected != null ? _policy : null,
+      );
       GoRouter.of(context).go('/files');
     }
   }

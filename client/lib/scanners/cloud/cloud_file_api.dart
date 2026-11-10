@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:mydatastudio/database_manager.dart';
 
 /// Provider-neutral description of one item (file or folder) in a cloud drive.
@@ -86,6 +88,17 @@ class CloudCursorExpiredException implements Exception {
   String toString() => 'CloudCursorExpiredException: $message';
 }
 
+/// The item no longer exists at the provider. Retrying can't help, unlike a
+/// network or auth failure.
+class CloudFileNotFoundException implements Exception {
+  final String id;
+
+  const CloudFileNotFoundException(this.id);
+
+  @override
+  String toString() => 'CloudFileNotFoundException: $id';
+}
+
 /// Thrown by a [CloudFileApiFactory] when credentials can't be refreshed.
 /// [needsReAuth] true means the refresh token is dead and the user must
 /// reconnect (the scanner flags the collection); false is a transient failure.
@@ -127,6 +140,13 @@ typedef CloudFileApiFactory =
 
 /// The small surface a cloud provider (Drive, Dropbox, OneDrive, Box...) has to
 /// implement for the generic `CloudFileScanner`.
+/// A [CloudFileApi] that holds network clients its owner must release.
+/// Short-lived users (one download, then done) close it; a scan isolate's
+/// clients go with the isolate.
+abstract class ClosableCloudFileApi {
+  void close();
+}
+
 abstract class CloudFileApi {
   /// URI scheme used for `files.path` (`<scheme>://<id>`) and the local copy
   /// directory (`files/<scheme>/...`), e.g. `gdrive`.
@@ -152,5 +172,22 @@ abstract class CloudFileApi {
   bool isDownloadableMimeType(String mimeType);
 
   /// Streams the item's bytes to [destPath] (parent directory already exists).
+  /// Throws [CloudFileNotFoundException] when the item is gone.
   Future<void> download(String id, String destPath);
+}
+
+/// Optional capability: a provider that renders thumbnails server-side, so
+/// images get one without downloading the full file. Providers whose listings
+/// carry a public thumbnail URL (Drive's `thumbnailLink`) don't need this.
+abstract class ServerThumbnails {
+  /// Most ids [thumbnails] accepts in one call.
+  int get thumbnailBatchSize;
+
+  /// Whether the provider can render a thumbnail for this file at all, so
+  /// files it never will aren't asked for again on every sync.
+  bool offersThumbnail(String name, String? mimeType);
+
+  /// JPEG thumbnail bytes keyed by item id. Ids the provider couldn't render
+  /// are absent; a failure of the whole call throws.
+  Future<Map<String, Uint8List>> thumbnails(List<String> ids);
 }

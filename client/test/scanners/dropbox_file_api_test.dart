@@ -355,6 +355,68 @@ void main() {
       await a.download('id:a', dest);
       expect(await io.File(dest).readAsBytes(), [1, 2, 3, 4]);
     });
+
+    test('a file that is gone is CloudFileNotFoundException', () {
+      final a = api(
+        (r) async => _json({
+          'error_summary': 'path/not_found/..',
+          'error': {
+            '.tag': 'path',
+            'path': {'.tag': 'not_found'},
+          },
+        }, 409),
+      );
+      expect(
+        a.download('id:a', '/tmp/never'),
+        throwsA(isA<CloudFileNotFoundException>()),
+      );
+    });
+  });
+
+  group('thumbnails', () {
+    test(
+      'asks get_thumbnail_batch for small JPEGs and keys them by id',
+      () async {
+        final a = api((r) async {
+          expect(
+            r.url.toString(),
+            'https://content.dropboxapi.com/2/files/get_thumbnail_batch',
+          );
+          final entries = body(r)['entries'] as List;
+          expect(entries.map((e) => e['path']), ['id:a', 'id:b']);
+          expect(entries.first['format'], 'jpeg');
+          expect(entries.first['size'], 'w256h256');
+          return _json({
+            'entries': [
+              {
+                '.tag': 'success',
+                'metadata': _file('id:a', '/a.jpg'),
+                'thumbnail': base64Encode([9, 8, 7]),
+              },
+              {
+                '.tag': 'failure',
+                'failure': {'.tag': 'unsupported_image'},
+              },
+            ],
+          });
+        });
+        final out = await a.thumbnails(['id:a', 'id:b']);
+        // One failed entry must not cost the rest of the batch.
+        expect(out.keys, ['id:a']);
+        expect(out['id:a'], [9, 8, 7]);
+      },
+    );
+
+    test('only image types Dropbox renders are asked for', () {
+      final a = api((r) async => _json({}));
+      expect(a.offersThumbnail('IMG_1.JPG', null), isTrue);
+      expect(a.offersThumbnail('scan.png', null), isTrue);
+      // HEIC and RAW fail per entry; asking would repeat on every sync.
+      expect(a.offersThumbnail('IMG_2.HEIC', null), isFalse);
+      expect(a.offersThumbnail('notes.txt', null), isFalse);
+      expect(a.offersThumbnail('README', null), isFalse);
+      expect(a.thumbnailBatchSize, 25);
+    });
   });
 
   group('token refresh', () {

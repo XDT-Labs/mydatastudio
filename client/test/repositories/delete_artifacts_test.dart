@@ -1,6 +1,7 @@
 import 'dart:io' as io;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mydatastudio/app_constants.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
@@ -427,6 +428,34 @@ void main() {
         await db.select('SELECT id FROM collections WHERE id = ?', [col.id]),
         isEmpty,
       );
+    });
+
+    test('a sync folder takes its archive copies, never the folder itself', () async {
+      // The archive is the app's own copy, under the storage root; the synced
+      // folder belongs to the user and the sync app.
+      final root = MainApp.appDataDirectory.value!;
+      final synced = io.Directory(p.join(tempDir.path, 'Dropbox'))
+        ..createSync(recursive: true);
+      io.File(p.join(synced.path, 'keep.txt')).writeAsStringSync('mine');
+      final col = Collection(
+        id: 'c-sync',
+        name: 'Dropbox',
+        path: synced.path,
+        localCopyPath: synced.path,
+        type: 'file',
+        scanner: AppConstants.scannerFileLocal,
+        scanStatus: 'idle',
+        needsReAuth: false,
+      );
+      await CollectionRepository(db).addCollection(col);
+      final archive = io.Directory(p.join(root, 'files', 'sync', col.id))
+        ..createSync(recursive: true);
+      io.File(p.join(archive.path, 'keep.txt')).writeAsStringSync('copy');
+
+      await CollectionRepository(db).deleteCollection(col.id);
+
+      expect(archive.existsSync(), isFalse);
+      expect(io.File(p.join(synced.path, 'keep.txt')).existsSync(), isTrue);
     });
 
     test('attachments survive unreachable storage and go on the next run', () async {

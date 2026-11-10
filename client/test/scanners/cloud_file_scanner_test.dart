@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:io' as io;
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/models/tables/folder.dart';
+import 'package:mydatastudio/modules/files/services/utilities/thumbnail_cache.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 import 'package:mydatastudio/scanners/cloud/cloud_file_scanner.dart';
 import 'package:mydatastudio/scanners/cloud/content_policy.dart';
@@ -97,6 +99,54 @@ class FakeCloudFileApi implements CloudFileApi {
   }
 }
 
+/// A provider that renders thumbnails server-side (Dropbox, OneDrive).
+class FakeThumbnailApi extends FakeCloudFileApi implements ServerThumbnails {
+  final List<List<String>> thumbnailCalls = [];
+
+  /// Ids the provider can't render; they are absent from the result.
+  final Set<String> missing;
+
+  /// Thrown by every thumbnail call, when set.
+  final Object? error;
+
+  FakeThumbnailApi(
+    super.tree, {
+    super.changePages,
+    this.missing = const {},
+    this.error,
+  });
+
+  @override
+  int get thumbnailBatchSize => 2;
+
+  @override
+  bool offersThumbnail(String name, String? mimeType) => name.endsWith('.jpg');
+
+  @override
+  Future<Map<String, Uint8List>> thumbnails(List<String> ids) async {
+    thumbnailCalls.add(ids);
+    if (error case final e?) throw e;
+    return {
+      for (final id in ids)
+        if (!missing.contains(id)) id: Uint8List.fromList(id.codeUnits),
+    };
+  }
+}
+
+File _row(String id, String name) => File(
+  id: 'c1:$id',
+  collectionId: 'c1',
+  name: name,
+  path: 'fake://$id',
+  parent: '',
+  dateCreated: DateTime(2024),
+  dateLastModified: DateTime(2024),
+  lastScannedDate: DateTime(2024),
+  isDeleted: false,
+  size: 5,
+  contentType: 'image/jpeg',
+);
+
 CloudFileEntry _file(String id, {String mime = 'text/plain'}) =>
     CloudFileEntry(id: id, name: '$id.txt', mimeType: mime, size: 5);
 CloudFileEntry _folder(String id) =>
@@ -162,6 +212,7 @@ void main() {
 
   CloudFileScannerWorker worker({
     List<File> toDownload = const [],
+    List<File> withoutThumbnail = const [],
     Map<String, String> knownFolders = const {},
   }) => CloudFileScannerWorker(
     _MockDb(),
@@ -169,6 +220,7 @@ void main() {
     port.sendPort,
     collectionExists: (_) async => true,
     filesToDownload: (_) async => toDownload,
+    filesWithoutThumbnail: (_) async => withoutThumbnail,
     knownFolders: (_) async => knownFolders,
   );
 
@@ -196,7 +248,9 @@ void main() {
       ],
     });
     await run(worker(), api, args());
-    final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+    final files = of(
+      'cloudFileBatch',
+    ).expand((w) => w['payload'] as List<File>);
     expect(files.single.contentHash, 'abc123');
   });
 
@@ -213,7 +267,9 @@ void main() {
     expect(folders.map((f) => f.path), ['a', 'b']);
     // Top-level folder has an empty parent (collection root); nested keeps id.
     expect(folders.map((f) => f.parent), ['', 'a']);
-    final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+    final files = of(
+      'cloudFileBatch',
+    ).expand((w) => w['payload'] as List<File>);
     expect(
       files.map((f) => f.path),
       unorderedEquals(['fake://f1', 'fake://f2', 'fake://f3']),
@@ -239,7 +295,9 @@ void main() {
       'root': [for (var i = 0; i < 5; i++) _file('f$i')],
     }, pageSize: 2);
     await run(worker(), api, args());
-    final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+    final files = of(
+      'cloudFileBatch',
+    ).expand((w) => w['payload'] as List<File>);
     expect(files.length, 5);
   });
 
@@ -250,7 +308,7 @@ void main() {
         'root': [for (var i = 0; i < 250; i++) _file('f$i')],
       });
       await run(worker(), api, args());
-      expect(of('batchFile').map((w) => (w['payload'] as List).length), [
+      expect(of('cloudFileBatch').map((w) => (w['payload'] as List).length), [
         100,
         100,
         50,
@@ -267,7 +325,7 @@ void main() {
       await run(worker(), api, args());
       final services = writes.map((w) => w['service']).toList();
       expect(services, [
-        'batchFile',
+        'cloudFileBatch',
         'cleanupDeletedFiles',
         'collectionChangeCursor',
         'collectionStatus',
@@ -296,13 +354,13 @@ void main() {
         final services = writes.map((w) => w['service']).toList();
         expect(
           services.indexOf('collectionChangeCursor'),
-          greaterThan(services.indexOf('batchFile')),
+          greaterThan(services.indexOf('cloudFileBatch')),
         );
       },
     );
 
     test('a failed batch leaves the cursor unwritten', () async {
-      failService = 'batchFile';
+      failService = 'cloudFileBatch';
       final api = FakeCloudFileApi({
         'root': [_file('f1')],
       });
@@ -344,7 +402,7 @@ void main() {
         await run(worker(), api, args(force: false, cursor: 'old'));
         expect(api.listedFolders, isEmpty);
         expect(of('cleanupDeletedFiles'), isEmpty);
-        final f = (of('batchFile').single['payload'] as List<File>).single;
+        final f = (of('cloudFileBatch').single['payload'] as List<File>).single;
         expect(
           f.parent,
           '',
@@ -381,7 +439,9 @@ void main() {
         ],
       );
       await run(worker(), api, args(force: false, cursor: 'old'));
-      final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+      final files = of(
+        'cloudFileBatch',
+      ).expand((w) => w['payload'] as List<File>);
       expect(files.map((f) => f.path), ['fake://a', 'fake://b']);
       expect(cursorWrites(), ['c-new']);
     });
@@ -396,7 +456,7 @@ void main() {
       await run(worker(), api, args(force: false, cursor: 'old'));
       expect(removal()['itemIds'], ['c1:gone']);
       expect(removal()['keepDeleted'], false);
-      expect(of('batchFile'), isEmpty);
+      expect(of('cloudFileBatch'), isEmpty);
     });
 
     test(
@@ -438,7 +498,7 @@ void main() {
         api,
         args(force: false, cursor: 'old'),
       );
-      final f = (of('batchFile').single['payload'] as List<File>).single;
+      final f = (of('cloudFileBatch').single['payload'] as List<File>).single;
       expect(f.parent, 'a');
     });
 
@@ -490,7 +550,7 @@ void main() {
         api,
         args(force: false, cursor: 'old', root: 'a'),
       );
-      expect(of('batchFile'), isEmpty);
+      expect(of('cloudFileBatch'), isEmpty);
       expect(of('folder'), isEmpty);
     });
 
@@ -524,7 +584,7 @@ void main() {
         api,
         args(force: false, cursor: 'old'),
       );
-      expect(of('batchFile'), isEmpty);
+      expect(of('cloudFileBatch'), isEmpty);
       final r = removal();
       expect(r['itemIds'], containsAll(['c1:f', 'c1:a', 'c1:b']));
       expect(
@@ -579,7 +639,9 @@ void main() {
         args(force: false, cursor: 'old'),
       );
       expect(api.listedFolders, ['n']);
-      final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+      final files = of(
+        'cloudFileBatch',
+      ).expand((w) => w['payload'] as List<File>);
       expect(files.map((f) => f.path), ['fake://x']);
     });
 
@@ -611,7 +673,9 @@ void main() {
           ],
         );
         await run(worker(), api, args(force: false, cursor: 'old'));
-        final files = of('batchFile').expand((w) => w['payload'] as List<File>);
+        final files = of(
+          'cloudFileBatch',
+        ).expand((w) => w['payload'] as List<File>);
         expect(files.single.parent, 'n');
       },
     );
@@ -619,7 +683,7 @@ void main() {
     test(
       'a failed write keeps the old cursor so the next run replays',
       () async {
-        failService = 'batchFile';
+        failService = 'cloudFileBatch';
         final api = FakeCloudFileApi(
           {},
           changePages: [
@@ -675,7 +739,7 @@ void main() {
   });
 
   test('a failed batch write skips the deleted-file sweep', () async {
-    failService = 'batchFile';
+    failService = 'cloudFileBatch';
     final api = FakeCloudFileApi({
       'root': [_file('f1')],
     });
@@ -809,4 +873,210 @@ void main() {
       expect(of('fileLocalPath'), hasLength(1));
     },
   );
+
+  test(
+    'a queued file whose old copy is on disk is downloaded over it',
+    () async {
+      // The main isolate clears local_path when the provider reports new
+      // content, so a queued file with a copy already in place is a file that
+      // changed. Keeping that copy would archive and index the old bytes.
+      final api = FakeCloudFileApi({});
+      final row = File(
+        id: 'c1:x',
+        name: 'x.txt',
+        path: 'fake://x',
+        parent: '',
+        dateCreated: DateTime(2024),
+        dateLastModified: DateTime(2025),
+        collectionId: 'c1',
+        contentType: 'text/plain',
+        isDeleted: false,
+        size: 1,
+      );
+      final dest = p.join(tmp, 'files', 'fake', 'My Drive', 'x.txt');
+      io.File(dest)
+        ..createSync(recursive: true)
+        ..writeAsStringSync('old bytes');
+
+      await run(worker(toDownload: [row]), api, args(download: true));
+
+      expect(api.downloaded, ['x']);
+      expect(io.File(dest).readAsStringSync(), 'bytes of x');
+      expect(io.File('$dest.part').existsSync(), isFalse);
+      expect((of('fileLocalPath').single['payload'] as Map)['localPath'], dest);
+    },
+  );
+
+  test('a failed re-download keeps the old copy and records nothing', () async {
+    final api = FakeCloudFileApi({})..failDownloadsLeft = 3;
+    final row = File(
+      id: 'c1:x',
+      name: 'x.txt',
+      path: 'fake://x',
+      parent: '',
+      dateCreated: DateTime(2024),
+      dateLastModified: DateTime(2025),
+      collectionId: 'c1',
+      contentType: 'text/plain',
+      isDeleted: false,
+      size: 1,
+    );
+    final dest = p.join(tmp, 'files', 'fake', 'My Drive', 'x.txt');
+    io.File(dest)
+      ..createSync(recursive: true)
+      ..writeAsStringSync('old bytes');
+
+    await run(worker(toDownload: [row]), api, args(download: true));
+
+    // local_path stays null, so the next sync retries the download.
+    expect(of('fileLocalPath'), isEmpty);
+    expect(io.File(dest).readAsStringSync(), 'old bytes');
+    expect(io.File('$dest.part').existsSync(), isFalse);
+  });
+
+  test(
+    'file rows go through the cloud batch write on full and incremental syncs',
+    () async {
+      // Only that write compares against the stored row and drops a stale
+      // local copy and index; the plain batchFile write keeps them.
+      await run(
+        worker(),
+        FakeCloudFileApi({
+          'root': [_file('f1')],
+        }),
+        args(),
+      );
+      await run(
+        worker(),
+        FakeCloudFileApi(
+          {},
+          changePages: [
+            [
+              CloudChange(
+                'f2',
+                entry: CloudFileEntry(
+                  id: 'f2',
+                  name: 'f2.txt',
+                  parentIds: const ['root'],
+                  size: 5,
+                ),
+              ),
+            ],
+          ],
+        ),
+        args(cursor: 'c-old'),
+      );
+      final ids = of(
+        'cloudFileBatch',
+      ).expand((w) => w['payload'] as List<File>).map((f) => f.id);
+      expect(ids, ['c1:f1', 'c1:f2']);
+      expect(of('batchFile'), isEmpty);
+    },
+  );
+
+  group('server-side thumbnails', () {
+    Map<String, String> thumbnailWrites() => {
+      for (final w in of('fileThumbnail'))
+        (w['payload'] as Map)['fileId'] as String:
+            (w['payload'] as Map)['thumbnailKey'] as String,
+    };
+
+    test(
+      'images without a thumbnail are cached on disk and keyed on the row',
+      () async {
+        final api = FakeThumbnailApi({});
+        await run(
+          worker(
+            withoutThumbnail: [
+              _row('a', 'a.jpg'),
+              _row('b', 'b.jpg'),
+              _row('c', 'c.jpg'),
+              _row('t', 'notes.txt'),
+            ],
+          ),
+          api,
+          args(),
+        );
+
+        // Batched at the provider's size; files it can't render aren't asked.
+        expect(api.thumbnailCalls, [
+          ['a', 'b'],
+          ['c'],
+        ]);
+        final cache = ThumbnailCache(tmp);
+        final writes = thumbnailWrites();
+        expect(writes.keys, unorderedEquals(['c1:a', 'c1:b', 'c1:c']));
+        // The row stores the cache key the UI resolves, and the bytes are there.
+        expect(writes['c1:a'], cache.keyFor('c1', 'c1:a'));
+        expect(cache.fileForKey(writes['c1:a']!).readAsStringSync(), 'a');
+      },
+    );
+
+    test(
+      'an expired sign-in during thumbnails asks the user to reconnect',
+      () async {
+        // Otherwise thumbnails stop silently and nothing prompts a reconnect.
+        final api = FakeThumbnailApi(
+          {},
+          error: const CloudAuthException('revoked', needsReAuth: true),
+        );
+        await run(
+          worker(withoutThumbnail: [_row('a', 'a.jpg'), _row('b', 'b.jpg')]),
+          api,
+          args(),
+        );
+        expect(api.thumbnailCalls, hasLength(1), reason: 'stops at the first');
+        expect(
+          of('needsReAuth').map((w) => (w['payload'] as Map)['collectionId']),
+          ['c1'],
+        );
+      },
+    );
+
+    test('an item the provider could not render gets no row write', () async {
+      final api = FakeThumbnailApi({}, missing: {'b'});
+      await run(
+        worker(withoutThumbnail: [_row('a', 'a.jpg'), _row('b', 'b.jpg')]),
+        api,
+        args(),
+      );
+      expect(thumbnailWrites().keys, ['c1:a']);
+    });
+
+    test(
+      'a changed image is fetched again even though it has a thumbnail',
+      () async {
+        // The stored thumbnail shows the old content. Only the change feed
+        // knows the file changed: it isn't in the "no thumbnail" query.
+        final api = FakeThumbnailApi(
+          {},
+          changePages: [
+            [
+              CloudChange(
+                'p1',
+                entry: const CloudFileEntry(
+                  id: 'p1',
+                  name: 'p1.jpg',
+                  parentIds: ['REALROOT'],
+                ),
+              ),
+            ],
+          ],
+        );
+        await run(worker(), api, args(force: false, cursor: 'old'));
+        expect(api.thumbnailCalls, [
+          ['p1'],
+        ]);
+        expect(thumbnailWrites().keys, ['c1:p1']);
+      },
+    );
+
+    test('a provider without server thumbnails is never asked', () async {
+      final api = FakeCloudFileApi({
+        'root': [_file('a')],
+      });
+      await run(worker(withoutThumbnail: [_row('a', 'a.jpg')]), api, args());
+      expect(of('fileThumbnail'), isEmpty);
+    });
+  });
 }

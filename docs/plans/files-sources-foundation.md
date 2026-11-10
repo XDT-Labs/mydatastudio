@@ -1,7 +1,7 @@
 ---
 status: in-progress
 adr: none
-remaining: [provider-hint, download-for-indexing]
+remaining: [provider-hint]
 ---
 
 # Plan: File sharing sources: shared foundation
@@ -100,10 +100,17 @@ download about 41 GB of photos and documents."
     (or a Swift method channel) in `scanner_path_helper.dart`.
   - Legacy iCloud stubs (`.Name.ext.icloud`) are handled too: show them as the real filename,
     online-only.
-  - For dataless files: **index metadata only**. Never open them for thumbnails or text.
-  - Optional **"Download online-only files for indexing"** per collection, with a size budget.
-    It explicitly triggers materialisation (and can tell the provider to evict them afterwards,
-    where supported).
+  - The scan never opens a dataless file: no EXIF, hash or thumbnail.
+  - **Indexing reads them anyway, then evicts them.** Search has to cover the whole folder, so
+    the embedding, chunk and description queues read online-only files like any other;
+    `FileBytesLoader` evicts each one again once its bytes are read
+    (`NSFileManager.evictUbiquitousItem(at:)`, which covers iCloud and every File Provider
+    app). A file the user downloaded themselves is never evicted.
+  - **Archive copies.** Sync-folder cards show "Save a local copy of" (all categories ticked by
+    default), stored as the collection's content policy. After each full scan the files it
+    covers are copied into `<storage>/files/sync/<collection id>/`, and any that were online-only
+    are evicted again. Indexing then reads the copy.
+  - Legacy `.icloud` stubs can't be downloaded on macOS 15+, so they stay metadata-only.
   - The local scanner stops following symlinks out of the sync root.
 - **What sync folders can't give us:** sharing info, version history, server-side thumbnails,
   and anything the user excluded with the provider's selective sync. Say so on the card.

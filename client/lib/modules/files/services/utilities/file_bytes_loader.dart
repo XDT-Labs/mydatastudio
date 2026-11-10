@@ -2,12 +2,18 @@ import 'dart:io' as io;
 
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 import 'package:mydatastudio/app_logger.dart';
+import 'package:mydatastudio/file_sources/sync_folder/file_evictor.dart';
+import 'package:mydatastudio/file_sources/sync_folder/online_only_checker.dart';
 import 'package:mydatastudio/file_sources/google_drive/google_auth_service.dart';
 import 'package:mydatastudio/models/tables/collection.dart';
 import 'package:mydatastudio/models/tables/file.dart';
 import 'package:mydatastudio/repositories/collection_repository.dart';
+import 'package:mydatastudio/modules/files/services/scanners/dropbox_file_api.dart';
+import 'package:mydatastudio/modules/files/services/scanners/onedrive_file_api.dart';
 import 'package:mydatastudio/repositories/database_repository.dart';
+import 'package:mydatastudio/scanners/cloud/cloud_file_api.dart';
 
 /// The outcome of a byte load, which is not the same question as "did I get
 /// bytes".
@@ -53,7 +59,8 @@ class FileBytes {
   bool get ok => bytes != null;
 }
 
-/// Loads the raw bytes of [file] from local disk or Google Drive.
+/// Loads the raw bytes of [file]: its downloaded local copy when there is one,
+/// otherwise local disk, Google Drive, Dropbox or OneDrive.
 ///
 /// Shared by the embedding and description isolates so both read a file's
 /// contents the same way instead of duplicating GDrive token-refresh and
@@ -70,11 +77,38 @@ class FileBytesLoader {
     AppLogger logger,
   ) async => (await loadDetailed(file, repo, logger)).bytes;
 
+  /// Adapters for the cloud schemes whose bytes come through [CloudFileApi],
+  /// keyed by `files.path` scheme.
+  static final Map<String, CloudFileApiFactory> defaultCloudApis = {
+    'dropbox': DropboxFileApi.create,
+    'onedrive': OneDriveFileApi.create,
+  };
+
+  static final OnlineOnlyChecker _defaultOnlineOnly = FfiOnlineOnlyChecker();
+  static final FileEvictor _defaultEvictor = OsascriptFileEvictor();
+
+  /// [cloudApis] replaces [defaultCloudApis], and [onlineOnly] and [evictor]
+  /// replace the macOS sync-folder defaults, for tests.
   static Future<FileBytes> loadDetailed(
     File file,
     DatabaseRepository repo,
-    AppLogger logger,
-  ) async {
+    AppLogger logger, {
+    Map<String, CloudFileApiFactory>? cloudApis,
+    OnlineOnlyChecker? onlineOnly,
+    FileEvictor? evictor,
+  }) async {
+    // A cloud file the user chose to keep a copy of is read from that copy:
+    // no network, no token, and the same bytes the provider would send.
+    final localPath = file.localPath;
+    if (localPath != null && io.File(localPath).existsSync()) {
+      try {
+        return FileBytes.ok(await io.File(localPath).readAsBytes());
+      } on io.FileSystemException catch (e) {
+        // An unreadable copy is not the file: carry on to the source.
+        logger.w('Could not read local copy $localPath, using the source: $e');
+      }
+    }
+
     // Decided before any network call, because this is a property of the
     // format rather than of the request. Google Docs, Sheets and Slides are
     // not stored as files at all; Drive's media endpoint refuses them by
@@ -92,8 +126,19 @@ class FileBytesLoader {
     if (file.path.startsWith('gdrive://')) {
       return _loadFromGDrive(file, repo, logger, export: export);
     }
-    final bytes = await _loadFromDisk(file, logger);
-    return bytes == null ? const FileBytes.transient() : FileBytes.ok(bytes);
+    final scheme = file.path.split('://');
+    if (scheme.length == 2) {
+      final factory = (cloudApis ?? defaultCloudApis)[scheme.first];
+      if (factory != null) {
+        return _loadFromCloudApi(file, scheme.last, factory, repo, logger);
+      }
+    }
+    return _loadFromDisk(
+      file,
+      logger,
+      onlineOnly ?? _defaultOnlineOnly,
+      evictor ?? _defaultEvictor,
+    );
   }
 
   /// What a Google Workspace file should be exported as, or null if nothing
@@ -139,13 +184,50 @@ class FileBytesLoader {
       mimeType.startsWith('application/vnd.google-apps.') &&
       mimeType != 'application/vnd.google-apps.folder';
 
-  static Future<List<int>?> _loadFromDisk(File file, AppLogger logger) async {
+  /// Reads a file on disk, including an online-only file in a cloud sync
+  /// folder: reading it makes macOS download it, so once the bytes are in
+  /// hand it is evicted again. Search covers the whole sync folder while the
+  /// user's disk holds only what it held before.
+  static Future<FileBytes> _loadFromDisk(
+    File file,
+    AppLogger logger,
+    OnlineOnlyChecker onlineOnly,
+    FileEvictor evictor,
+  ) async {
     final ioFile = io.File(file.path);
     if (!ioFile.existsSync()) {
+      // A legacy iCloud placeholder (`.foo.pdf.icloud`) stands in for a file
+      // that is not on disk. macOS 15+, the oldest this app runs on, no longer
+      // downloads those, so no later pass can read it either.
+      final stub = io.File(
+        p.join(p.dirname(file.path), '.${p.basename(file.path)}.icloud'),
+      );
+      if (stub.existsSync()) {
+        logger.w('Legacy iCloud placeholder, cannot download: ${file.path}');
+        return const FileBytes.permanent();
+      }
       logger.w("File not found: ${file.path}");
-      return null;
+      return const FileBytes.transient();
     }
-    return ioFile.readAsBytes();
+
+    // Checked at read time rather than taken from the scan: the provider may
+    // have evicted or downloaded the file since. Only a file that was
+    // online-only is evicted afterwards; one the user downloaded stays put.
+    if (!onlineOnly.isOnlineOnly(file.path)) {
+      return FileBytes.ok(await ioFile.readAsBytes());
+    }
+    final List<int> bytes;
+    try {
+      bytes = await ioFile.readAsBytes();
+    } on io.FileSystemException catch (e) {
+      // The provider could not download it (offline, signed out): try later.
+      logger.w('Could not download online-only file ${file.path}: $e');
+      return const FileBytes.transient();
+    }
+    if (!await evictor.evict(file.path)) {
+      logger.w('Could not return ${file.path} to online-only');
+    }
+    return FileBytes.ok(bytes);
   }
 
   static Future<FileBytes> _loadFromGDrive(
@@ -253,6 +335,63 @@ class FileBytesLoader {
       }
       logger.e("Error downloading GDrive file: $e");
       return const FileBytes.transient();
+    }
+  }
+
+  /// Fetches a Dropbox or OneDrive file through its [CloudFileApi] into a
+  /// temporary file and reads it back. The access token is refreshed in
+  /// memory by the factory, as the scanner does.
+  static Future<FileBytes> _loadFromCloudApi(
+    File file,
+    String remoteId,
+    CloudFileApiFactory factory,
+    DatabaseRepository repo,
+    AppLogger logger,
+  ) async {
+    final collection = await repo.getCollection(file.collectionId);
+    final accessToken = collection?.accessToken;
+    final refreshToken = collection?.refreshToken;
+    if (collection == null || accessToken == null || refreshToken == null) {
+      logger.w('No credentials for ${file.path}; skipping for now');
+      return const FileBytes.transient();
+    }
+
+    io.Directory? tmp;
+    CloudFileApi? api;
+    try {
+      api = await factory(
+        CloudFileApiCredentials(
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+          expiry: collection.expiration,
+          db: repo.db,
+        ),
+      );
+      tmp = await io.Directory.systemTemp.createTemp('mds_fetch_');
+      final dest = io.File('${tmp.path}/content');
+      await api
+          .download(remoteId, dest.path)
+          .timeout(const Duration(minutes: 5));
+      return FileBytes.ok(await dest.readAsBytes());
+    } on CloudFileNotFoundException {
+      // Gone at the source; the next sync marks the row deleted. Retrying
+      // can't help, and a transient result would back the collection off.
+      logger.w('${file.name} no longer exists at the provider');
+      return const FileBytes.permanent();
+    } on CloudAuthException catch (e) {
+      logger.e('Token refresh failed for ${file.path}: $e');
+      if (e.needsReAuth) await _flagNeedsReAuth(collection, repo, logger);
+      return const FileBytes.transient();
+    } catch (e) {
+      logger.e('Error downloading ${file.path}: $e');
+      return const FileBytes.transient();
+    } finally {
+      // Closing also aborts a download the timeout gave up on, so a stalled
+      // transfer doesn't keep its socket open in this long-lived isolate.
+      if (api case final ClosableCloudFileApi closable) closable.close();
+      try {
+        await tmp?.delete(recursive: true);
+      } catch (_) {}
     }
   }
 
