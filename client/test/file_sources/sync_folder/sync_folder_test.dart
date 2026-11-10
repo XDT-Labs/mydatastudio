@@ -89,6 +89,19 @@ void main() {
       expect(found.single.provider, SyncProvider.proton);
     });
 
+    // Windows sets USERPROFILE, not HOME. Without the fallback the detector
+    // looked for Dropbox relative to the app's working directory instead.
+    test('finds the home folder from USERPROFILE when HOME is unset', () {
+      mk('Dropbox');
+      final found =
+          SyncFolderDetector(environment: {'USERPROFILE': home.path}).detect();
+      expect(found.single.path, p.join(home.path, 'Dropbox'));
+    });
+
+    test('with no home folder at all, reports nothing', () {
+      expect(SyncFolderDetector(environment: const {}).detect(), isEmpty);
+    });
+
     test('legacy ~/Dropbox, ~/MEGA and ~/Sync are reported if directories', () {
       mk('Dropbox');
       mk('MEGA');

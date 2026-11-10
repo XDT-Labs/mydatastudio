@@ -24,7 +24,7 @@ parts lists each wave (`1, 4`). Within each section, rows are ordered by wave.
 | Glassmorphism elevation model | `ready` | — | [glassmorphism-elevation.md](plans/glassmorphism-elevation.md) | — | Decision made 2026-08-01 to build out `DESIGN.md`'s spec. |
 | Tier 2 auto-update (Sparkle) | `proposed` | — | [sparkle-auto-update.md](plans/sparkle-auto-update.md) | — | Probably needs an ADR (EdDSA key custody, appcast hosting). |
 | Fix hanging `TagsAndLandmarksSection` widget test | `proposed` | — | [fix-tags-landmarks-widget-test.md](plans/fix-tags-landmarks-widget-test.md) | — | Test is `skip: true`; investigation notes in the plan. |
-| Windows desktop build in GitHub Actions | `proposed` | any | [core-ci-windows-build.md](plans/core-ci-windows-build.md) | — | No `client/windows/` yet; Windows commented out in `build_python.yml`. Replace `webview_flutter` for email HTML, Recycle Bin (unparks the row below), aiserver CPU/GPU builds, MSIX or Inno installer, code signing. |
+| Windows desktop build in GitHub Actions | `in-progress` | any | [core-ci-windows-build.md](plans/core-ci-windows-build.md) | — | First tag run (`v1.2.3-beta.4`) passed: Inno Setup installer and portable zip published, smoke test passed on the installed copy (CPU aiserver). Email HTML uses the pure-Dart renderer (`webview_flutter_windows` isn't a drop-in). Left: GPU aiserver default, code signing, a check on real Windows 11. |
 | Linux desktop build in GitHub Actions | `in-progress` | any (before 7) | [core-ci-linux-build.md](plans/core-ci-linux-build.md) | — | Runner scaffolded and plugin audit done 2026-11-03: builds on Ubuntu 22.04 arm64 and starts under Xvfb; `flutter_angle`'s Linux plugin is skipped at build time and the STL preview is off on Linux. Linux email view done (`flutter_widget_from_html_core` plus Open in browser; `<style>` rules, floats and flex don't render, and it hasn't been tried on real mail). PDF preview moved to `pdfrx` on every platform. Freedesktop Trash done. aiserver CPU build done (document extraction needs Ubuntu 24.04+). CI job, x86_64 + arm64 matrix, AppImage, tar.gz and Xvfb smoke test written and checked on five clean arm64 distros. Passed its first tag run on GitHub 2026-11-07 (`v1.2.3-beta.3`, x64 and arm64). Left: trying it on a real Ubuntu desktop. Prerequisite for the NAS container. |
 | Synology NAS container (Linux desktop in the browser) | `proposed` | 7 | [core-nas-docker.md](plans/core-nas-docker.md) | — | The Linux bundle on a maintained GUI-in-browser base image (jlesage or LinuxServer); NAS shares bind-mounted read-only. Web auth + TLS, in-container browser for OAuth, the AI workload (local CPU vs remote aiserver), Synology `@eaDir`/`#recycle` excludes, multi-arch GHCR image. |
 
@@ -110,7 +110,7 @@ Built-in application modules (rail group `app`), ported from the React prototype
 
 | Feature | Status | Wave | Plan | ADR | Notes |
 |---|---|---|---|---|---|
-| Windows Recycle Bin for photo delete | `parked` | any | [windows-recycle-bin.md](plans/windows-recycle-bin.md) | — | Waiting on Windows becoming a build target. Unparks with [core-ci-windows-build.md](plans/core-ci-windows-build.md). |
+| Windows Recycle Bin for photo delete | `in-progress` | any | [windows-recycle-bin.md](plans/windows-recycle-bin.md) | — | `IFileOperation` channel in the Windows runner; refuses rather than deleting permanently. Left: trying it on real Windows. |
 
 ## Done
 

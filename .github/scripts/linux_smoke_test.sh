@@ -24,6 +24,13 @@ zip="$bundle/data/flutter_assets/app/aiserver-linux.zip"
 [ -f "$zip" ] || { echo "Error: $zip is not in the bundle"; exit 1; }
 unzip -q "$zip" -d "$work/aiserver"
 
+# Placed as the default model, so the server loads it at startup with
+# n_gpu_layers=-1: with no GPU here, that proves the GPU build falls back.
+if [ -n "${SMOKE_GGUF:-}" ]; then
+  mkdir -p "$work/models/ggml-org-gemma-4-12B-it-GGUF-local"
+  cp "$SMOKE_GGUF" "$work/models/ggml-org-gemma-4-12B-it-GGUF-local/gemma-4-12B-it-Q4_0.gguf"
+fi
+
 AISERVER_TOKEN=smoke APP_SUPPORT_DIR="$work" AICHAT_MODELS_DIR="$work/models" \
   timeout 180 "$work/aiserver/aiserver" > "$work/aiserver.log" 2>&1 &
 server=$!
@@ -42,6 +49,15 @@ if [ -z "$url" ]; then
   exit 1
 fi
 echo "aiserver at $url"
+
+if [ -n "${SMOKE_GGUF:-}" ]; then
+  grep -iE "ggml_vulkan|loaded successfully|Failed to load|retrying on the CPU" "$work/aiserver.log" || true
+  if ! grep -q "Model 'gemma4:12b' loaded successfully" "$work/aiserver.log"; then
+    echo "Error: the aiserver didn't load the test model"
+    tail -40 "$work/aiserver.log"
+    exit 1
+  fi
+fi
 
 status=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$url/skills")
 [ "$status" = 401 ] || { echo "Error: /skills without a token returned $status, expected 401"; exit 1; }

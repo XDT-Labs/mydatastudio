@@ -12,6 +12,7 @@ from PIL import Image
 from aichat.model_manager import (
     _root_cause,
     select_embedding_dtype,
+    select_embedding_device,
     is_transformers_embedding_model,
     load_transformers_embedding_model,
     generate_transformers_multimodal_embedding,
@@ -53,6 +54,28 @@ class TestSelectEmbeddingDtype:
             assert dtype != torch.float16
 
 
+class TestSelectEmbeddingDevice:
+    """The embedding model runs on the GPU when there is one: CUDA, else Metal
+    (MPS) on Apple Silicon, else the CPU. MPS was checked against the CPU on
+    EmbeddingGemma 2 (float32): the same vectors to six decimal places, so
+    embeddings already stored stay comparable with new ones."""
+
+    def test_prefers_cuda(self):
+        with patch("torch.cuda.is_available", return_value=True), \
+             patch("torch.backends.mps.is_available", return_value=True):
+            assert select_embedding_device() == "cuda"
+
+    def test_uses_metal_on_apple_silicon(self):
+        with patch("torch.cuda.is_available", return_value=False), \
+             patch("torch.backends.mps.is_available", return_value=True):
+            assert select_embedding_device() == "mps"
+
+    def test_falls_back_to_cpu(self):
+        with patch("torch.cuda.is_available", return_value=False), \
+             patch("torch.backends.mps.is_available", return_value=False):
+            assert select_embedding_device() == "cpu"
+
+
 class TestIsTransformersEmbeddingModel:
     """Routing helper identifying EmbeddingGemma Transformers models vs GGUF models."""
 
@@ -78,6 +101,7 @@ class TestLoadTransformersEmbeddingModel:
         mock_st_cls = Mock(return_value=mock_model)
 
         with patch("torch.cuda.is_available", return_value=False), \
+             patch("torch.backends.mps.is_available", return_value=False), \
              patch("aichat.model_manager.SentenceTransformer", mock_st_cls):
 
             model, processor = load_transformers_embedding_model("google/embeddinggemma-2", str(tmp_path))
@@ -97,6 +121,7 @@ class TestLoadTransformersEmbeddingModel:
         mock_st_cls = Mock(return_value=mock_model)
 
         with patch("torch.cuda.is_available", return_value=False), \
+             patch("torch.backends.mps.is_available", return_value=False), \
              patch("aichat.model_manager.SentenceTransformer", mock_st_cls):
 
             model, processor = load_transformers_embedding_model("google/embeddinggemma-2", "/nonexistent/path")
@@ -109,12 +134,41 @@ class TestLoadTransformersEmbeddingModel:
                 model_kwargs={"torch_dtype": torch.float32}
             )
 
+    def test_retries_on_cpu_when_the_gpu_load_fails(self, tmp_path):
+        # A GPU that can't take the model (out of memory, a missing MPS op)
+        # must cost speed, not the whole search feature.
+        mock_model = Mock()
+        mock_model.get_sentence_embedding_dimension.return_value = 768
+
+        def build(path, device, model_kwargs):
+            if device != "cpu":
+                raise RuntimeError("MPS backend out of memory")
+            return mock_model
+
+        mock_st_cls = Mock(side_effect=build)
+        with patch("aichat.model_manager.select_embedding_device", return_value="mps"), \
+             patch("aichat.model_manager.SentenceTransformer", mock_st_cls):
+            model, _ = load_transformers_embedding_model("google/embeddinggemma-2", str(tmp_path))
+
+        assert model == mock_model
+        assert [c.kwargs["device"] for c in mock_st_cls.call_args_list] == ["mps", "cpu"]
+        assert mock_st_cls.call_args.kwargs["model_kwargs"] == {"torch_dtype": torch.float32}
+
+    def test_a_cpu_failure_is_not_retried(self, tmp_path):
+        mock_st_cls = Mock(side_effect=RuntimeError("corrupt weights"))
+        with patch("aichat.model_manager.select_embedding_device", return_value="cpu"), \
+             patch("aichat.model_manager.SentenceTransformer", mock_st_cls):
+            with pytest.raises(RuntimeError, match="corrupt weights"):
+                load_transformers_embedding_model("google/embeddinggemma-2", str(tmp_path))
+        assert mock_st_cls.call_count == 1
+
     def test_raises_runtime_error_on_unexpected_dimension(self):
         mock_model = Mock()
         mock_model.get_sentence_embedding_dimension.return_value = 1024
         mock_st_cls = Mock(return_value=mock_model)
 
         with patch("torch.cuda.is_available", return_value=False), \
+             patch("torch.backends.mps.is_available", return_value=False), \
              patch("aichat.model_manager.SentenceTransformer", mock_st_cls):
 
             with pytest.raises(RuntimeError) as exc_info:
@@ -142,6 +196,7 @@ class TestLoadTransformersEmbeddingModel:
             return real_import(name, *args, **kwargs)
 
         with patch("torch.cuda.is_available", return_value=False), \
+             patch("torch.backends.mps.is_available", return_value=False), \
              patch("aichat.model_manager.SentenceTransformer", None), \
              patch("builtins.__import__", side_effect=failing_import):
 

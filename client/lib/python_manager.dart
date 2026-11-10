@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:mydatastudio/app_logger.dart';
 import 'package:mydatastudio/database_manager.dart';
 import 'package:mydatastudio/main.dart';
@@ -304,15 +305,54 @@ class PythonManager {
     return completer.future;
   }
 
+  /// Asks the aiserver at [url] to stop itself (`POST /shutdown`). Returns
+  /// whether it agreed; on false the caller should kill the process.
+  static Future<bool> requestShutdown({
+    required String url,
+    required String token,
+    http.Client? client,
+  }) async {
+    final c = client ?? http.Client();
+    try {
+      final response = await c
+          .post(
+            Uri.parse('$url/shutdown'),
+            headers: {'Authorization': 'Bearer $token'},
+          )
+          .timeout(const Duration(seconds: 3));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    } finally {
+      if (client == null) c.close();
+    }
+  }
+
   Future<void> stopAiServerService() async {
     // stop python proc first
     if (_pythonProc != null) {
+      final proc = _pythonProc!;
       try {
-        _pythonProc!.kill(ProcessSignal.sigterm);
-        await _pythonProc!.exitCode.timeout(
-          const Duration(seconds: 5),
-          onTimeout: () => -1,
-        );
+        // Windows has no SIGTERM: kill() is TerminateProcess there, which
+        // stops the server mid-write. Ask it to stop itself first.
+        var exited = false;
+        final url = MainApp.llmServiceUrl.valueOrNull;
+        final token = MainApp.llmServiceToken.valueOrNull;
+        if (Platform.isWindows &&
+            url != null &&
+            token != null &&
+            await requestShutdown(url: url, token: token)) {
+          exited = await proc.exitCode
+              .then((_) => true)
+              .timeout(const Duration(seconds: 5), onTimeout: () => false);
+        }
+        if (!exited) {
+          proc.kill(ProcessSignal.sigterm);
+          await proc.exitCode.timeout(
+            const Duration(seconds: 5),
+            onTimeout: () => -1,
+          );
+        }
       } catch (_) {}
       _pythonProc = null;
     }

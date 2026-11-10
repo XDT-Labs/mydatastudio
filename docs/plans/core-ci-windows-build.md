@@ -1,7 +1,59 @@
 ---
-status: proposed
+status: in-progress
 adr: none
-remaining: [windows-runner-scaffold, plugin-audit, email-body-view, webview-flutter-windows-spike, pdfrx-migration, system-trash, aiserver-windows, ci-job, installer, signing]
+remaining: [system-trash, gpu-default, signing, desktop-check]
+---
+
+## Progress (2026-11-07)
+
+First tag run (`v1.2.3-beta.4`, run 42409161560) passed every job and published the
+pre-release with `MyDataStudio-v1.2.3-beta.4-windows-x64-setup.exe` (410 MB) and the portable
+zip (416 MB) next to the macOS and Linux assets. Windows job: 24 min (aiserver ~16 min). The
+smoke test passed on the silently installed copy. Left: a real Windows 11 desktop, signing,
+and the GPU default.
+
+- [x] **windows-runner-scaffold:** `client/windows/` generated with Flutter 3.47.0. Window
+  title "My Data Studio", icon from `linux/packaging/app_icon.png`. `Runner.rc` has **no
+  CompanyName** and **ProductName = realm** (`APP_REALM` from `REALM_NAME`, as on Linux), so
+  `path_provider` puts the support directory at `%APPDATA%\<realm>`. The JNI find is
+  disabled, as on Linux.
+- [x] **plugin-audit:** `open_filex` 4.7 opens files on Windows in Dart (`cmd /c start`);
+  `fluttertoast` has no desktop plugin (same as Linux); `flutter_angle` has a Windows plugin.
+  The rest are as listed below. Every plugin built on the runner.
+- [x] **webview-flutter-windows-spike:** `webview_flutter_windows` (1.3.1) is a standalone
+  WebView2 package with **its own API**. It doesn't implement `webview_flutter`'s platform
+  interface, so the plan's premise ("EmailDetails barely changes") doesn't hold. Took the
+  fallback below.
+- [x] **email-body-view:** Windows uses `HtmlEmailBodyView` like Linux;
+  `EmailBodyView.forPlatform` now gives the WebView to macOS only. "Open in browser" writes
+  to `%TEMP%` (already private to the user) and opens it with `url_launcher`. Tested.
+- [x] **pdfrx-migration:** landed with Linux; the CI job enables Developer Mode.
+- [ ] **system-trash:** `windows/runner/system_trash_channel.cpp` compiles in CI; not tried on real Windows
+  ([windows-recycle-bin.md](windows-recycle-bin.md)).
+- [x] **aiserver-windows:** CPU build; the GPU default (Vulkan or CUDA) is tracked as **gpu-default**. Makefile has
+  `Windows_NT` branches; PyPI torch is CPU-only on Windows, so the lock installs as is, and
+  only `llama-cpp-python` compiles (MSVC). `libpff-python` has a Windows wheel, so PST import
+  stays on. `build_python.yml` re-enabled. **Shutdown:** new authenticated `POST /shutdown`
+  (sets uvicorn's `should_exit`); on Windows `stopAiServerService` calls it before falling
+  back to the kill. Tested locally (pytest and a live server).
+- [x] **ci-job:** `build-windows` in `build_and_release.yml` bundles the VC++ runtime, builds
+  the installer, installs it silently, and runs `windows_smoke_test.ps1` against the
+  installed copy (aiserver auth, `/shutdown`, the app starts and creates `%APPDATA%\<realm>`).
+- [x] **installer:** **Inno Setup** (decided 2026-11-07): an unsigned MSIX won't install at
+  all, an unsigned `.exe` installs after a SmartScreen warning. Per-user install, no admin.
+  The portable zip was dropped on 2026-11-08: the installer is the only download.
+- [ ] **gpu-default:** **Vulkan** (decided 2026-11-08), one build for every GPU vendor and
+  the CPU. CI installs LunarG's SDK 1.4.363.1 (`install_vulkan_sdk.sh`) and builds
+  llama.cpp with `-DGGML_VULKAN=on`; `main.spec` bundles `vulkan-1.dll` next to ggml-vulkan so
+  a PC with no GPU driver still loads it and falls back to the CPU. Chat loads with
+  `n_gpu_layers=-1` and retries on the CPU if that fails. Embeddings stay on CPU torch
+  (PyPI torch has no GPU build for Windows). The smoke test now loads a 1 MB GGUF on the
+  GPU-less runner. Open until a tag run passes; not tried on a real GPU.
+- [ ] **signing:** not started; needs a decision and secrets from the owner.
+- [ ] **desktop-check:** the "Done when" checks on Windows 11.
+- Sync folders: `SyncFolderDetector` falls back to `USERPROFILE` (Windows has no `HOME`), so
+  `%USERPROFILE%\Dropbox` and friends are found. Cloud Files placeholder detection is still
+  macOS-only (`OnlineOnlyChecker` is off elsewhere).
 ---
 
 # Plan: Build the Windows desktop app in GitHub Actions

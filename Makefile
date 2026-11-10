@@ -24,7 +24,9 @@ PYTHON_DIR = aiserver
 
 UNAME_S := $(shell uname -s)
 APP_DIR = client/app
-ifeq ($(UNAME_S),Linux)
+ifeq ($(OS),Windows_NT)
+APP_ZIP_NAME = aiserver-windows.zip
+else ifeq ($(UNAME_S),Linux)
 APP_ZIP_NAME = aiserver-linux.zip
 else
 APP_ZIP_NAME = aiserver-macos.zip
@@ -89,7 +91,23 @@ models:
 
 # 2. Build Python Service
 .PHONY: build-python
-ifeq ($(UNAME_S),Linux)
+ifeq ($(OS),Windows_NT)
+# Windows (Git Bash): PyPI's torch is CPU-only there, so the lock installs as
+# is. llama-cpp-python has no Windows wheel and compiles with MSVC: CPU by
+# default, Vulkan (GPU) when CMAKE_ARGS adds -DGGML_VULKAN=on with the SDK
+# installed, as CI does (.github/scripts/install_vulkan_sdk.sh).
+# Zipped with Python because Git Bash has no zip; ZIP64 is handled.
+build-python:
+	@echo "--- 🐍 Building Python aiserver service (Windows, CPU) ---"
+	@cd $(PYTHON_DIR) && \
+		FORCE_CMAKE=1 CMAKE_ARGS="$${CMAKE_ARGS:--DGGML_NATIVE=off}" pdm install && \
+		pdm run pyinstaller -y main.spec
+	@mkdir -p client/app
+	@rm -f client/app/$(APP_ZIP_NAME)
+	@cd $(PYTHON_DIR)/dist/aiserver && \
+		python -c "import shutil, sys; shutil.make_archive(sys.argv[1], 'zip', '.')" ../../../client/app/aiserver-windows
+	@echo "--- ✅ Python build complete: $(APP_ZIP_PATH) ---"
+else ifeq ($(UNAME_S),Linux)
 # Linux installs from an export of the lock rather than `pdm install`: the lock
 # was resolved with PyPI's torch, which on Linux pulls ~5 GB of CUDA libraries
 # the CPU build can't use. Everything else stays at its locked version, and
@@ -163,7 +181,16 @@ endif
 
 # 3. Build Flutter Desktop Client
 .PHONY: build-client
-ifeq ($(UNAME_S),Linux)
+ifeq ($(OS),Windows_NT)
+build-client:
+	@echo "--- 🚀 Building Flutter Desktop client (Windows) ---"
+	@REALM=$$(cat .realm_name 2>/dev/null | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \
+	cd $(FLUTTER_DIR) && \
+		cp pubspec.prod.yaml pubspec.yaml && \
+		flutter pub get && \
+		REALM_NAME=$$REALM flutter build windows --release --no-tree-shake-icons --dart-define=REALM_NAME=$$REALM
+	@echo "--- ✅ Flutter build complete ---"
+else ifeq ($(UNAME_S),Linux)
 build-client:
 	@echo "--- 🚀 Building Flutter Desktop client (Linux) ---"
 	@REALM=$$(cat .realm_name 2>/dev/null | cut -d= -f2 || echo "com.xdtlabs.mydatastudio"); \

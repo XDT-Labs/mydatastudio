@@ -264,18 +264,28 @@ def load_local_model(
         quiet_mtmd_logging()
         chat_handler = handler_cls(clip_model_path=clip_model_path, verbose=False)
 
-    return llama_cpp.Llama(
-        model_path=model_path,
-        n_ctx=32768,
-        n_gpu_layers=-1,
-        verbose=False,
-        chat_handler=chat_handler,
-        # Size sliding-window layers' KV cache to their window, not to n_ctx.
-        # For Gemma 4 12B that is 480 MiB instead of 10,240 MiB, with the same
-        # answers and speed (measured; see test_model_manager). Models without
-        # sliding-window attention are unaffected.
-        swa_full=False,
-    )
+    def build(n_gpu_layers: int):
+        return llama_cpp.Llama(
+            model_path=model_path,
+            n_ctx=32768,
+            n_gpu_layers=n_gpu_layers,
+            verbose=False,
+            chat_handler=chat_handler,
+            # Size sliding-window layers' KV cache to their window, not to n_ctx.
+            # For Gemma 4 12B that is 480 MiB instead of 10,240 MiB, with the same
+            # answers and speed (measured; see test_model_manager). Models without
+            # sliding-window attention are unaffected.
+            swa_full=False,
+        )
+
+    # All layers on the GPU (Metal, or Vulkan on Windows and Linux). A GPU too
+    # small for the model, such as an integrated one, fails the load; the CPU
+    # can still run it, just slower. Without a GPU this offloads nothing.
+    try:
+        return build(-1)
+    except Exception as e:
+        print(f"[LOADER] Loading on the GPU failed ({e}); retrying on the CPU.")
+        return build(0)
 
 
 def is_transformers_embedding_model(model_id: str) -> bool:
@@ -283,6 +293,21 @@ def is_transformers_embedding_model(model_id: str) -> bool:
     if not model_id:
         return False
     return "embeddinggemma" in model_id.lower()
+
+
+def select_embedding_device() -> str:
+    """CUDA, else Metal (MPS) on Apple Silicon, else the CPU.
+
+    MPS was checked against the CPU on EmbeddingGemma 2 in float32: the vectors
+    match to six decimal places, so embeddings stored before this change stay
+    comparable with new ones. On Windows and Linux the bundled torch is
+    CPU-only, so this is the CPU there.
+    """
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def select_embedding_dtype(device: str) -> torch.dtype:
@@ -345,14 +370,7 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
     """
     print(f"[EMBEDDING] Loading Transformers model: {model_id} from {local_dir}")
     
-    # MPS (Metal Performance Shaders) on Apple Silicon is untested for this model
-    # and CPU is the safe default. Use CUDA if available, otherwise CPU.
-    if torch.cuda.is_available():
-        device = "cuda"
-    else:
-        device = "cpu"
-    print(f"[EMBEDDING] Using device: {device}")
-    dtype = select_embedding_dtype(device)
+    device = select_embedding_device()
 
     # The Makefile downloads the full repo into models/<org>/<model_name>/
     # so local_dir is already the parent, just use it directly.
@@ -375,7 +393,18 @@ def load_transformers_embedding_model(model_id: str, local_dir: str) -> Any:
                 f"sentence-transformers could not be imported: {type(root_cause).__name__}: {root_cause}"
             ) from e
 
-    model = st_cls(model_path, device=device, model_kwargs={"torch_dtype": dtype})
+    print(f"[EMBEDDING] Using device: {device}")
+    try:
+        model = st_cls(model_path, device=device,
+                       model_kwargs={"torch_dtype": select_embedding_dtype(device)})
+    except Exception as e:
+        if device == "cpu":
+            raise
+        # A GPU that can't take the model (out of memory, a missing MPS op)
+        # costs speed, not embeddings.
+        print(f"[EMBEDDING] Loading on {device} failed ({e}); using the CPU.")
+        model = st_cls(model_path, device="cpu",
+                       model_kwargs={"torch_dtype": select_embedding_dtype("cpu")})
 
     # Fail loudly rather than serve noise. Check the dimension immediately after loading.
     dim = model.get_sentence_embedding_dimension()

@@ -48,6 +48,27 @@ for pkg in ['langchain_google_genai', 'langchain_openai', 'langchain_anthropic']
     except Exception as e:
         print(f"Warning: Failed to copy metadata for {pkg}: {e}")
 
+# When llama.cpp is built with Vulkan (Windows, Linux x64), bundle the Vulkan
+# loader next to ggml-vulkan. Without it, a machine with no GPU driver can't
+# load llama.cpp at all; with it, llama.cpp finds no device and uses the CPU.
+# GPU drivers are found by the loader, so they are never bundled.
+import sys
+# macOS uses Metal; a Mac with LunarG's SDK installed sets VULKAN_SDK too.
+vulkan_sdk = os.environ.get('VULKAN_SDK') if sys.platform != 'darwin' else None
+if vulkan_sdk:
+    if sys.platform == 'win32':
+        candidates = [os.path.join(vulkan_sdk, 'Bin', 'vulkan-1.dll'),
+                      os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'vulkan-1.dll')]
+    else:
+        # LunarG's Linux SDK keeps the loader under lib/VulkanLoader/lib.
+        candidates = [os.path.join(vulkan_sdk, 'lib', 'VulkanLoader', 'lib', 'libvulkan.so.1'),
+                      os.path.join(vulkan_sdk, 'lib', 'libvulkan.so.1')]
+    loader = next((c for c in candidates if os.path.isfile(c)), None)
+    if loader is None:
+        raise SystemExit(f"VULKAN_SDK is set but no Vulkan loader was found in {candidates}")
+    print(f"Bundling the Vulkan loader: {loader}")
+    binaries.append((loader, os.path.join('llama_cpp', 'lib')))
+
 # Models are deliberately NOT bundled. They live beside the extracted server
 # (Application Support/models, via AICHAT_MODELS_DIR) so that re-extracting
 # aiserver/ on an app upgrade leaves the multi-gigabyte downloads untouched.

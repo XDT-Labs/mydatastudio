@@ -11,16 +11,19 @@ import 'package:webview_flutter/webview_flutter.dart';
 abstract interface class EmailBodyView implements Widget {
   PreparedEmailBody get body;
 
+  /// `webview_flutter` only implements macOS among the desktops. Windows uses
+  /// the HTML widget too: `webview_flutter_windows` has its own API rather
+  /// than implementing `webview_flutter`'s, so it isn't a drop-in.
   factory EmailBodyView.forPlatform(
     PreparedEmailBody body, {
-    @visibleForTesting bool? isLinux,
+    @visibleForTesting bool? isMacOS,
   }) =>
-      (isLinux ?? io.Platform.isLinux)
-          ? HtmlEmailBodyView(body: body)
-          : WebViewEmailBodyView(body: body);
+      (isMacOS ?? io.Platform.isMacOS)
+          ? WebViewEmailBodyView(body: body)
+          : HtmlEmailBodyView(body: body);
 }
 
-/// The system WebView, on the platforms `webview_flutter` supports.
+/// The system WebView (WKWebView), on macOS.
 class WebViewEmailBodyView extends StatefulWidget implements EmailBodyView {
   const WebViewEmailBodyView({super.key, required this.body});
 
@@ -72,7 +75,7 @@ class EmailHtmlWidgetFactory extends WidgetFactory {
   }
 }
 
-/// Pure-Dart rendering for Linux, which has no `webview_flutter`
+/// Pure-Dart rendering for Linux and Windows, which have no `webview_flutter`
 /// implementation. Scripts never run, and it needs no browser engine, so it
 /// also works in the NAS container. Newsletters lose their `<style>` rules
 /// here, which is what **Open in browser** is for.
@@ -80,7 +83,7 @@ class HtmlEmailBodyView extends StatelessWidget implements EmailBodyView {
   const HtmlEmailBodyView({
     super.key,
     required this.body,
-    @visibleForTesting this.openInBrowser = _xdgOpen,
+    @visibleForTesting this.openInBrowser = _openWithSystem,
     @visibleForTesting this.openLink = launchUrl,
   });
 
@@ -98,8 +101,13 @@ class HtmlEmailBodyView extends StatelessWidget implements EmailBodyView {
   static io.Directory? _browserCopyDir;
 
   /// `mktemp` because `Directory.createTemp` honours the umask on Linux, which
-  /// would leave the user's mail readable by everyone on the machine.
+  /// would leave the user's mail readable by everyone on the machine. On
+  /// Windows the temp folder is already under the user's profile, which only
+  /// that user can read, and there is no `mktemp`.
   static Future<io.Directory> _createPrivateDir() async {
+    if (io.Platform.isWindows) {
+      return io.Directory.systemTemp.createTemp('mydatastudio_email_');
+    }
     final template = p.join(
       io.Directory.systemTemp.path,
       'mydatastudio_email_XXXXXXXX',
@@ -111,8 +119,10 @@ class HtmlEmailBodyView extends StatelessWidget implements EmailBodyView {
     return io.Directory((result.stdout as String).trim());
   }
 
-  static Future<bool> _xdgOpen(String path) async =>
-      (await io.Process.run('xdg-open', [path])).exitCode == 0;
+  static Future<bool> _openWithSystem(String path) async =>
+      io.Platform.isWindows
+          ? launchUrl(Uri.file(path))
+          : (await io.Process.run('xdg-open', [path])).exitCode == 0;
 
   Future<bool> _handleLink(String url) async {
     final uri = Uri.tryParse(url);
